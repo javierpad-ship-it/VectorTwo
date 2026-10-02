@@ -74,7 +74,7 @@ Toda tabla lleva `id uuid`, `activo`, `created_at`, `updated_at` con trigger, y 
 |---|---|---|---|
 | **M0 Cimientos** | 🔧 código listo, falta proyecto Supabase | Scaffold; migración base; login; guards; menú por rol; `/usuarios`; agentes; docs; Railway | Login como admin, crear planner y comprador, verificar qué ve cada uno, build limpio |
 | **M1 Árbol de producto** | ⏳ | Géneros, Mundos, Líneas, nodos Género-Mundo-Línea, Equivalencias, Agrupaciones talla; pantalla Árbol navegable; carga CSV inicial | Cargar el árbol real completo y recorrerlo; misma Línea en dos Género-Mundo con equivalencias distintas |
-| **M2 Marcas** | ⏳ | Agrupaciones de marca, marcas, asignación Marca ↔ Equivalencia; CSV inicial | Una marca en varias equivalencias; cambiar su agrupación y verlo reflejado |
+| **M2 Marcas** | ⏳ | Agrupaciones de marca (seed confirmado por Javier, en este orden: 1 Ultra Low · 2 Mid Value · 3 Valor · 4 Reconocido · 5 Premium), marcas, asignación Marca ↔ Equivalencia; CSV inicial | Una marca en varias equivalencias; cambiar su agrupación y verlo reflejado |
 | **M3 Agrupaciones de estacionalidad** | ⏳ | Catálogo y asignación de cada Equivalencia a una curva; reporte de faltantes | Toda equivalencia activa tiene curva |
 | **M4 Tiendas y aperturas** | ⏳ | Tiendas y CD con fechas de apertura y cierre, venta esperada, zona, razón social; estado derivado | Tienda futura aparece Planificada y pasa a Activa al llegar la fecha |
 
@@ -120,6 +120,6 @@ Definition of Done: migración aplicada e idempotente · tipos regenerados · to
 - Proyecto Supabase `vector-two` creado en el dashboard (la creación desde la sesión expiró) → M0.
 - Lista del árbol real: Géneros, Mundos, Líneas por Género-Mundo y sus Equivalencias → M1.
 - Qué tallas caen en Centrales / Extremas y si el corte depende de la Equivalencia o de la Marca → M1.
-- Agrupaciones de marca y marcas con sus equivalencias → M2.
+- Agrupaciones de marca: recibidas (Ultra Low, Mid Value, Valor, Reconocido, Premium). Falta la lista de marcas con su agrupación y sus equivalencias → M2.
 - Lista de tiendas actuales (sirve el archivo CODIGOS DE TIENDAS LUKERS de V1) → M4.
 - Conectar el servicio Railway al repo cuando M0 esté pusheado.
