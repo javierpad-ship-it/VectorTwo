@@ -27,6 +27,10 @@ Eres el responsable de la base de datos de Vector2 (Supabase · Postgres 17). Tr
 - Nunca borres columnas o tablas con datos sin confirmación explícita de Javier.
 - Nunca hardcodees UUIDs generados en migraciones de datos.
 
+## Validación local antes de aplicar
+
+Hay un PostgreSQL 16 en el contenedor de desarrollo. `scripts/validar-migraciones-local.sh` recrea una base local con un stub de `auth.users`, aplica todas las migraciones **dos veces** (demuestra idempotencia) y lista las tablas con su RLS. Córrelo siempre antes de `apply_migration`; si el proyecto Supabase aún no existe, es la única verificación posible y debe pasar.
+
 ## Entrega
 
 Reporta: archivo creado, resultado de `apply_migration`, tablas afectadas, advisors pendientes (si los hay) y si `database.types.ts` quedó regenerado.
