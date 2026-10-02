@@ -19,16 +19,6 @@ export const EQUIVALENCIA_GENERICA = {
   codigo: "SIN_EQUIVALENCIA",
 } as const;
 
-/**
- * @deprecated No existen líneas sin mundo: el importador omite las filas con
- * mundo vacío (`mundo_vacio`) y el seed ya no trae este mundo. Se conserva solo
- * mientras el frontend termina de retirar sus referencias; no usar en código nuevo.
- */
-export const MUNDO_SIN_ASIGNAR = {
-  nombre: "SIN ASIGNAR",
-  codigo: "SIN_ASIGNAR",
-} as const;
-
 export const MAX_NOMBRE = 120;
 export const MAX_CODIGO = 40;
 
