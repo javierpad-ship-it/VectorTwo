@@ -17,7 +17,7 @@ const generos: GeneroEntrada[] = [
 ];
 
 const mundos: MundoEntrada[] = [
-  { id: "m-sa", codigo: "SIN_ASIGNAR", nombre: "SIN ASIGNAR", orden: 999, activo: true },
+  { id: "m-de", codigo: "DEPORTIVO", nombre: "DEPORTIVO", orden: 30, activo: true },
   { id: "m-ur", codigo: "URBANO", nombre: "URBANO", orden: 20, activo: true },
   { id: "m-ca", codigo: "CASUAL", nombre: "CASUAL", orden: 10, activo: true },
   { id: "m-fo", codigo: "FORMAL", nombre: "FORMAL", orden: 40, activo: false },
@@ -37,7 +37,7 @@ const nodos: NodoEntrada[] = [
   { id: "n5", genero_id: "g-h", mundo_id: "m-fo", linea_id: "l-pant", activo: true }, // mundo inactivo
   { id: "n6", genero_id: "g-h", mundo_id: "m-ca", linea_id: "l-blu", activo: false }, // nodo inactivo
   { id: "n7", genero_id: "g-x", mundo_id: "m-ur", linea_id: "l-pant", activo: true }, // género inactivo
-  { id: "n8", genero_id: "g-m", mundo_id: "m-sa", linea_id: "l-blu", activo: true }, // SIN ASIGNAR
+  { id: "n8", genero_id: "g-m", mundo_id: "m-de", linea_id: "l-blu", activo: true },
 ];
 
 const equivalencias: EquivalenciaEntrada[] = [
@@ -70,14 +70,14 @@ describe("armarArbol · regla 12: todos los mundos bajo cada género", () => {
   it("devuelve los mundos activos en cada género aunque no tengan líneas", () => {
     const arbol = activos();
     for (const g of arbol.generos) {
-      expect(g.mundos.map((m) => m.codigo)).toEqual(["CASUAL", "URBANO", "SIN_ASIGNAR"]);
+      expect(g.mundos.map((m) => m.codigo)).toEqual(["CASUAL", "URBANO", "DEPORTIVO"]);
     }
     expect(buscar(arbol, "H", "CASUAL")?.lineas).toEqual([]);
-    expect(buscar(arbol, "H", "SIN_ASIGNAR")?.lineas).toEqual([]);
+    expect(buscar(arbol, "H", "DEPORTIVO")?.lineas).toEqual([]);
   });
   it("con incluirInactivos agrega también los mundos inactivos", () => {
     const arbol = todos();
-    expect(arbol.generos[0].mundos.map((m) => m.codigo)).toEqual(["CASUAL", "URBANO", "FORMAL", "SIN_ASIGNAR"]);
+    expect(arbol.generos[0].mundos.map((m) => m.codigo)).toEqual(["CASUAL", "URBANO", "DEPORTIVO", "FORMAL"]);
   });
 });
 
@@ -137,7 +137,7 @@ describe("armarArbol · regla 14: orden", () => {
   it("géneros y mundos por orden, nombre; líneas por nombre; genérica al final", () => {
     const arbol = todos();
     expect(arbol.generos.map((g) => g.orden)).toEqual([10, 20, 80]);
-    expect(arbol.generos[0].mundos.map((m) => m.orden)).toEqual([10, 20, 40, 999]);
+    expect(arbol.generos[0].mundos.map((m) => m.orden)).toEqual([10, 20, 30, 40]);
     expect(buscar(arbol, "M", "URBANO")?.lineas.map((l) => l.nombre)).toEqual(["ABRIGO", "BLUSA", "PANTALON"]);
   });
   it("desempata por nombre con el mismo orden", () => {
@@ -166,7 +166,6 @@ describe("armarArbol · regla 15: resumen cuenta lo devuelto", () => {
       lineas: 2, // PANTALON y BLUSA
       nodos: 4, // n1, n2, n3, n8
       equivalencias: 4, // e1, e2, e3, e5
-      nodos_sin_asignar: 1,
     });
   });
   it("con inactivos", () => {
@@ -176,8 +175,10 @@ describe("armarArbol · regla 15: resumen cuenta lo devuelto", () => {
       lineas: 3,
       nodos: 8,
       equivalencias: 5,
-      nodos_sin_asignar: 1,
     });
+  });
+  it("el resumen no trae claves de mundos especiales", () => {
+    expect(Object.keys(activos().resumen).sort()).toEqual(["equivalencias", "generos", "lineas", "mundos", "nodos"]);
   });
   it("no muta las entradas", () => {
     const copia = JSON.parse(JSON.stringify({ generos, mundos, lineas, nodos, equivalencias }));

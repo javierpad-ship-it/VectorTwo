@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { puedeEditarMaestros, type Rol } from "@/lib/auth/roles";
-import { MUNDO_SIN_ASIGNAR } from "@/lib/arbol/normalizar";
 import { useArbol } from "@/lib/arbol/use-arbol";
 import type { GeneroArbol, MundoArbol } from "@/lib/arbol/tipos-api";
 import { Button } from "@/components/ui/button";
@@ -40,15 +39,6 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
 
   const nodosVigentesPorGenero = (g: GeneroArbol) =>
     g.mundos.reduce((acc, m) => acc + m.lineas.filter((l) => l.vigente).length, 0);
-
-  function irASinAsignar() {
-    const candidato =
-      generos.find((g) => g.mundos.some((m) => m.codigo === MUNDO_SIN_ASIGNAR.codigo && m.lineas.length > 0)) ?? generoSel;
-    const mundo = candidato?.mundos.find((m) => m.codigo === MUNDO_SIN_ASIGNAR.codigo);
-    if (!candidato || !mundo) return;
-    setSel({ generoId: candidato.id, mundoId: mundo.id, nodoId: null });
-    setPestana("arbol");
-  }
 
   async function recargarSilencioso() {
     await recargar();
@@ -118,15 +108,7 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
           {r && (
             <p className="text-sm text-tinta-suave">
               {formatearNumero(r.generos)} géneros · {formatearNumero(r.mundos)} mundos · {formatearNumero(r.lineas)} líneas ·{" "}
-              {formatearNumero(r.nodos)} nodos · {formatearNumero(r.equivalencias)} equivalencias ·{" "}
-              <button
-                type="button"
-                onClick={irASinAsignar}
-                disabled={r.nodos_sin_asignar === 0}
-                className={`underline-offset-2 ${r.nodos_sin_asignar > 0 ? "font-medium text-alerta underline hover:text-alerta/80" : ""}`}
-              >
-                {formatearNumero(r.nodos_sin_asignar)} en SIN ASIGNAR
-              </button>
+              {formatearNumero(r.nodos)} nodos · {formatearNumero(r.equivalencias)} equivalencias
               {cargando && <span className="ml-2 italic">Actualizando…</span>}
             </p>
           )}
@@ -166,7 +148,6 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
                   <Columna titulo="Mundos" subtitulo={generoSel.nombre}>
                     <ul className="space-y-0.5">
                       {generoSel.mundos.map((m) => {
-                        const esSinAsignar = m.codigo === MUNDO_SIN_ASIGNAR.codigo;
                         const n = m.lineas.length;
                         return (
                           <li key={m.id}>
@@ -177,12 +158,9 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
                             >
                               <span className="min-w-0">
                                 <span className="block truncate font-medium">{m.nombre}</span>
-                                <span className="flex flex-wrap gap-1">
-                                  {!m.activo && <Badge tono="alerta">Inactivo</Badge>}
-                                  {esSinAsignar && n > 0 && <Badge tono="alerta">Pendiente</Badge>}
-                                </span>
+                                {!m.activo && <Badge tono="alerta">Inactivo</Badge>}
                               </span>
-                              <span className={`shrink-0 text-xs ${esSinAsignar && n > 0 ? "font-semibold text-alerta" : "text-tinta-suave"}`}>
+                              <span className="shrink-0 text-xs text-tinta-suave">
                                 {n} línea{n === 1 ? "" : "s"}
                               </span>
                             </FilaColumna>
@@ -207,7 +185,6 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
                     nodoSelId={nodoSel?.nodo_id ?? null}
                     onSeleccionar={(nodoId) => setSel({ ...sel, generoId: generoSel.id, mundoId: mundoSel.id, nodoId })}
                     puedeEditar={puedeEditar}
-                    mostrarInactivos={mostrarInactivos}
                     onCambio={recargarSilencioso}
                     onError={setError}
                     onMovido={(mundoId, nodoId) => setSel({ generoId: generoSel.id, mundoId, nodoId })}

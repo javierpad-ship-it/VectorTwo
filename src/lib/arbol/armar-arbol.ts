@@ -1,5 +1,5 @@
 import type { Tables } from "@/lib/supabase/database.types";
-import { MUNDO_SIN_ASIGNAR, esTemporada, type Temporada } from "./normalizar";
+import { esTemporada, type Temporada } from "./normalizar";
 import type {
   ArbolRespuesta,
   EquivalenciaArbol,
@@ -94,13 +94,11 @@ export function armarArbol(
     lineas: 0,
     nodos: 0,
     equivalencias: 0,
-    nodos_sin_asignar: 0,
   };
   const lineasDevueltas = new Set<string>();
 
   const salida: GeneroArbol[] = generosOrdenados.map((g) => {
     const mundosDelGenero: MundoArbol[] = mundosOrdenados.map((m) => {
-      const esSinAsignar = m.codigo.toUpperCase() === MUNDO_SIN_ASIGNAR.codigo;
       const lineasDelMundo: LineaArbol[] = [];
 
       for (const n of nodosPorGeneroMundo.get(`${g.id}|${m.id}`) ?? []) {
@@ -125,7 +123,6 @@ export function armarArbol(
         resumen.nodos += 1;
         resumen.equivalencias += eqs.length;
         lineasDevueltas.add(linea.id);
-        if (esSinAsignar) resumen.nodos_sin_asignar += 1;
       }
 
       lineasDelMundo.sort((a, b) => compararNombre(a.nombre, b.nombre));

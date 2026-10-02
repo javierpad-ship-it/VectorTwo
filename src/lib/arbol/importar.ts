@@ -1,13 +1,6 @@
 import type { Tables } from "@/lib/supabase/database.types";
-import {
-  EQUIVALENCIA_GENERICA,
-  MAX_CODIGO,
-  MUNDO_SIN_ASIGNAR,
-  aCodigo,
-  esEquivalenciaGenerica,
-  normalizarNombre,
-} from "./normalizar";
-import type { ConteosCrear, ConteosExistentes, FilaImportacion, FilaOmitida, FilaSinMundo, ReporteBase } from "./tipos";
+import { EQUIVALENCIA_GENERICA, MAX_CODIGO, aCodigo, esEquivalenciaGenerica, normalizarNombre } from "./normalizar";
+import type { ConteosCrear, ConteosExistentes, FilaImportacion, FilaOmitida, ReporteBase } from "./tipos";
 
 /**
  * Importador del árbol (docs/modulos/01-arbol-producto.md, "Importador" y
@@ -54,19 +47,6 @@ export type PlanImportacion = {
   equivalencias: EquivalenciaNueva[];
 };
 
-/** Error de precondición del importador (la base no está como se espera). */
-export class ErrorImportacion extends Error {
-  constructor(
-    mensaje: string,
-    readonly status = 409
-  ) {
-    super(mensaje);
-    this.name = "ErrorImportacion";
-  }
-}
-
-export const MENSAJE_FALTA_SIN_ASIGNAR = "Falta el mundo SIN ASIGNAR; reaplica la migración.";
-
 type Catalogo = { id: string; codigo: string; nombre: string; activo: boolean };
 
 /**
@@ -92,11 +72,6 @@ export function resolverCatalogo<T extends Catalogo>(catalogo: T[], valor: strin
   );
 }
 
-/** El mundo SIN ASIGNAR, esté activo o no (quien llama decide qué hacer si está inactivo). */
-export function buscarMundoSinAsignar<T extends Catalogo>(mundos: T[]): T | undefined {
-  return buscarEnCatalogo(mundos, MUNDO_SIN_ASIGNAR.codigo);
-}
-
 /** Código único dentro de un conjunto: si choca, agrega `_2`, `_3`, … sin pasar de MAX_CODIGO. */
 export function codigoUnico(base: string, usados: Set<string>, respaldo = "SIN_CODIGO"): string {
   const inicial = base || respaldo;
@@ -116,7 +91,6 @@ export function planificarImportacion(filas: FilaImportacion[], estado: EstadoIm
   const existentes: ConteosExistentes = { lineas: 0, nodos: 0, equivalencias: 0 };
   const existentesInactivos: ConteosExistentes = { lineas: 0, nodos: 0, equivalencias: 0 };
   const omitidas: FilaOmitida[] = [];
-  const sinMundo: FilaSinMundo[] = [];
   const muestra = { lineas: [] as string[], nodos: [] as string[] };
   const plan = { lineas: [] as LineaNueva[], nodos: [] as NodoNuevo[], equivalencias: [] as EquivalenciaNueva[] };
 
@@ -135,13 +109,13 @@ export function planificarImportacion(filas: FilaImportacion[], estado: EstadoIm
   }
   const codigosLinea = new Set(estado.lineas.map((l) => l.codigo.toUpperCase()));
 
-  // Lo visto dentro del archivo (para contar cada entidad una vez).
-  const clavesFila = new Set<string>();
+  // Lo visto dentro del archivo (para contar cada entidad una vez). Las filas
+  // guardan el número de su primera aparición para informar los duplicados.
+  const clavesFila = new Map<string, number>();
   const lineasVistas = new Set<string>();
   const nodosVistos = new Set<string>();
   const codigosEqNuevosPorNodo = new Map<string, Set<string>>();
 
-  let mundoSinAsignar: MundoEstado | undefined | null = null;
   let procesadas = 0;
 
   filas.forEach((cruda, i) => {
@@ -151,43 +125,46 @@ export function planificarImportacion(filas: FilaImportacion[], estado: EstadoIm
     const lineaTxt = normalizarNombre(cruda.linea);
     const equivalenciaTxt = normalizarNombre(cruda.equivalencia);
 
-    if (!lineaTxt) return void omitidas.push({ fila, motivo: "linea_vacia" });
-    if (generoTxt === "TOTAL") return void omitidas.push({ fila, motivo: "fila_total" });
+    /** Anota la omisión con la fila completa, para que se pueda corregir el archivo. */
+    const omitir = (motivo: FilaOmitida["motivo"], extra: Pick<FilaOmitida, "detalle" | "fila_original"> = {}) => {
+      omitidas.push({
+        fila,
+        motivo,
+        ...extra,
+        genero: generoTxt,
+        mundo: mundoTxt,
+        linea: lineaTxt,
+        equivalencia: equivalenciaTxt,
+      });
+    };
+
+    if (!lineaTxt) return omitir("linea_vacia");
+    if (generoTxt === "TOTAL") return omitir("fila_total");
 
     // Género y mundo se resuelven solo entre los activos; si el valor existe
     // pero está inactivo, la fila se omite con su propio motivo.
     const genero = resolverCatalogo(estado.generos, generoTxt);
     if (!genero) {
       const motivo = buscarEnCatalogo(estado.generos, generoTxt) ? "genero_inactivo" : "genero_desconocido";
-      return void omitidas.push({ fila, motivo, detalle: generoTxt });
+      return omitir(motivo, { detalle: generoTxt });
     }
 
-    let mundo: MundoEstado | undefined;
-    const esSinMundo = mundoTxt === "";
-    if (esSinMundo) {
-      if (mundoSinAsignar === null) mundoSinAsignar = buscarMundoSinAsignar(estado.mundos);
-      if (!mundoSinAsignar) throw new ErrorImportacion(MENSAJE_FALTA_SIN_ASIGNAR);
-      if (!mundoSinAsignar.activo) {
-        return void omitidas.push({ fila, motivo: "mundo_inactivo", detalle: MUNDO_SIN_ASIGNAR.nombre });
-      }
-      mundo = mundoSinAsignar;
-    } else {
-      mundo = resolverCatalogo(estado.mundos, mundoTxt);
-      if (!mundo) {
-        const motivo = buscarEnCatalogo(estado.mundos, mundoTxt) ? "mundo_inactivo" : "mundo_desconocido";
-        return void omitidas.push({ fila, motivo, detalle: mundoTxt });
-      }
+    // No existen líneas sin mundo: una fila con mundo en blanco es un error del archivo.
+    if (!mundoTxt) return omitir("mundo_vacio");
+    const mundo = resolverCatalogo(estado.mundos, mundoTxt);
+    if (!mundo) {
+      const motivo = buscarEnCatalogo(estado.mundos, mundoTxt) ? "mundo_inactivo" : "mundo_desconocido";
+      return omitir(motivo, { detalle: mundoTxt });
     }
 
     const esGenerica = esEquivalenciaGenerica(equivalenciaTxt);
     const equivalenciaNombre = esGenerica ? EQUIVALENCIA_GENERICA.nombre : equivalenciaTxt;
 
     const claveFila = `${genero.id}|${mundo.id}|${lineaTxt}|${equivalenciaNombre}`;
-    if (clavesFila.has(claveFila)) return void omitidas.push({ fila, motivo: "duplicada_en_archivo" });
-    clavesFila.add(claveFila);
+    const filaOriginal = clavesFila.get(claveFila);
+    if (filaOriginal !== undefined) return omitir("duplicada_en_archivo", { fila_original: filaOriginal });
+    clavesFila.set(claveFila, fila);
     procesadas += 1;
-
-    if (esSinMundo) sinMundo.push({ fila, genero: genero.nombre, linea: lineaTxt, equivalencia: equivalenciaNombre });
 
     // Línea (catálogo, por nombre).
     const lineaExistente = lineasPorNombre.get(lineaTxt);
@@ -269,7 +246,6 @@ export function planificarImportacion(filas: FilaImportacion[], estado: EstadoIm
     crear,
     existentes,
     existentes_inactivos: existentesInactivos,
-    sin_mundo: sinMundo,
     omitidas,
     muestra,
   };

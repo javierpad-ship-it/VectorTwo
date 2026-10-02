@@ -114,8 +114,6 @@ export type ResumenArbol = {
   lineas: number;
   nodos: number;
   equivalencias: number;
-  /** Nodos devueltos cuyo mundo es SIN ASIGNAR. */
-  nodos_sin_asignar: number;
 };
 
 export type ArbolRespuesta = {
@@ -135,28 +133,36 @@ export type FilaImportacion = {
   equivalencia: string;
 };
 
+/**
+ * Por qué una fila del archivo no se procesa. `mundo_vacio`: no existen líneas
+ * sin mundo, así que una fila con mundo en blanco es un error del archivo.
+ */
 export type MotivoOmision =
   | "linea_vacia"
   | "fila_total"
   | "genero_desconocido"
   | "genero_inactivo"
+  | "mundo_vacio"
   | "mundo_desconocido"
   | "mundo_inactivo"
   | "duplicada_en_archivo";
 
-/** Fila cuyo mundo venía vacío y se planifica bajo SIN ASIGNAR. `fila` es 1-based sobre `filas` enviadas. */
-export type FilaSinMundo = {
-  fila: number;
-  genero: string;
-  linea: string;
-  equivalencia: string;
-};
-
+/**
+ * Una fila que no se procesó, con su contenido tal como llegó (normalizado:
+ * mayúsculas, espacios colapsados) para que se pueda corregir el archivo antes
+ * de cargar. `fila` y `fila_original` son 1-based sobre las `filas` enviadas.
+ */
 export type FilaOmitida = {
   fila: number;
   motivo: MotivoOmision;
   /** Detalle opcional (p. ej. el valor que no se reconoció). */
   detalle?: string;
+  genero: string;
+  mundo: string;
+  linea: string;
+  equivalencia: string;
+  /** Solo en `duplicada_en_archivo`: la primera aparición de la misma fila. */
+  fila_original?: number;
 };
 
 export type ConteosCrear = {
@@ -178,7 +184,6 @@ export type ReporteBase = {
   crear: ConteosCrear;
   existentes: ConteosExistentes;
   existentes_inactivos: ConteosExistentes;
-  sin_mundo: FilaSinMundo[];
   omitidas: FilaOmitida[];
   /** Primeros 20 de cada tipo. */
   muestra: { lineas: string[]; nodos: string[] };

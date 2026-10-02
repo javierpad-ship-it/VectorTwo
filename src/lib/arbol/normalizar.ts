@@ -19,7 +19,11 @@ export const EQUIVALENCIA_GENERICA = {
   codigo: "SIN_EQUIVALENCIA",
 } as const;
 
-/** Mundo que recibe las líneas cuyo mundo viene vacío en el archivo. */
+/**
+ * @deprecated No existen líneas sin mundo: el importador omite las filas con
+ * mundo vacío (`mundo_vacio`) y el seed ya no trae este mundo. Se conserva solo
+ * mientras el frontend termina de retirar sus referencias; no usar en código nuevo.
+ */
 export const MUNDO_SIN_ASIGNAR = {
   nombre: "SIN ASIGNAR",
   codigo: "SIN_ASIGNAR",

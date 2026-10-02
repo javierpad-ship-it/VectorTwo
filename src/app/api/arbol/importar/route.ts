@@ -8,12 +8,7 @@ import type { TablesInsert } from "@/lib/supabase/database.types";
 import { importarSchema } from "@/lib/arbol/esquemas";
 import { cargarEstadoArbol, leerLineas, leerNodos } from "@/lib/arbol/consultas";
 import { normalizarNombre } from "@/lib/arbol/normalizar";
-import {
-  ErrorImportacion,
-  enTandas,
-  planificarImportacion,
-  type PlanImportacion,
-} from "@/lib/arbol/importar";
+import { enTandas, planificarImportacion } from "@/lib/arbol/importar";
 import type { ConteosCrear, ReporteImportacion } from "@/lib/arbol/tipos";
 
 /**
@@ -34,13 +29,7 @@ export async function POST(request: NextRequest) {
   const { estado, error: errEstado } = await cargarEstadoArbol(db);
   if (errEstado) return traducirErrorDb(errEstado);
 
-  let plan: PlanImportacion;
-  try {
-    plan = planificarImportacion(datos.filas, estado);
-  } catch (e) {
-    if (e instanceof ErrorImportacion) return error(e.message, e.status);
-    throw e;
-  }
+  const plan = planificarImportacion(datos.filas, estado);
 
   if (datos.modo === "previsualizar") {
     const reporte: ReporteImportacion = { modo: "previsualizar", ...plan.reporte };

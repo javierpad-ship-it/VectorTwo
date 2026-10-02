@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api-client";
 import { useColeccion } from "@/lib/use-coleccion";
-import { MUNDO_SIN_ASIGNAR, TEMPORADAS, aCodigo, normalizarNombre, type Temporada } from "@/lib/arbol/normalizar";
+import { TEMPORADAS, aCodigo, normalizarNombre, type Temporada } from "@/lib/arbol/normalizar";
 import type { GeneroArbol, LineaArbol, LineaFila, MundoArbol, NodoFila } from "@/lib/arbol/tipos-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,6 @@ type Props = {
   nodoSelId: string | null;
   onSeleccionar: (nodoId: string | null) => void;
   puedeEditar: boolean;
-  mostrarInactivos: boolean;
   /** Recarga el árbol tras una escritura. */
   onCambio: () => Promise<void>;
   onError: (mensaje: string | null) => void;
@@ -32,7 +31,6 @@ export function ColumnaLineas({
   nodoSelId,
   onSeleccionar,
   puedeEditar,
-  mostrarInactivos,
   onCambio,
   onError,
   onMovido,
@@ -43,8 +41,11 @@ export function ColumnaLineas({
 
   const consulta = normalizarNombre(filtro);
   const lineas = consulta ? mundo.lineas.filter((l) => l.nombre.includes(consulta)) : mundo.lineas;
-  const esSinAsignar = mundo.codigo === MUNDO_SIN_ASIGNAR.codigo;
-  const puedeMover = puedeEditar && (esSinAsignar || mostrarInactivos);
+  // Mover a otro mundo del mismo género: disponible para quien puede editar
+  // (admin y planner), en cualquier nodo. El 409 del backend (la línea ya
+  // existe en el destino) llega por `onError` como cualquier otro fallo.
+  const mundosDestino = genero.mundos.filter((m) => m.id !== mundo.id && m.activo);
+  const puedeMover = puedeEditar && mundosDestino.length > 0;
 
   async function ejecutar(accion: () => Promise<unknown>) {
     setOcupado(true);
@@ -169,13 +170,11 @@ export function ColumnaLineas({
                       onChange={(e) => e.target.value && mover(l, e.target.value)}
                     >
                       <option value="">Mover a…</option>
-                      {genero.mundos
-                        .filter((m) => m.id !== mundo.id && m.activo)
-                        .map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.nombre}
-                          </option>
-                        ))}
+                      {mundosDestino.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nombre}
+                        </option>
+                      ))}
                     </Select>
                   )}
                 </div>

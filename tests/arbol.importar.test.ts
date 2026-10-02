@@ -2,8 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  ErrorImportacion,
-  MENSAJE_FALTA_SIN_ASIGNAR,
   aplicarPlan,
   buscarEnCatalogo,
   codigoUnico,
@@ -12,10 +10,10 @@ import {
   resolverCatalogo,
   type EstadoImportacion,
 } from "@/lib/arbol/importar";
-import { aCodigo, esEquivalenciaGenerica, normalizarNombre } from "@/lib/arbol/normalizar";
-import type { FilaImportacion } from "@/lib/arbol/tipos";
+import { EQUIVALENCIA_GENERICA, aCodigo, esEquivalenciaGenerica, normalizarNombre } from "@/lib/arbol/normalizar";
+import type { FilaImportacion, FilaOmitida, MotivoOmision } from "@/lib/arbol/tipos";
 
-// ─── Estado de seed (8 géneros, 6 mundos, sin líneas) ───
+// ─── Estado de seed (8 géneros, 5 mundos, sin líneas) ───
 
 const SEED_GENEROS = [
   ["H", "HOMBRE"],
@@ -34,7 +32,6 @@ const SEED_MUNDOS = [
   ["DEPORTIVO", "DEPORTIVO"],
   ["FORMAL", "FORMAL"],
   ["RI", "RI"],
-  ["SIN_ASIGNAR", "SIN ASIGNAR"],
 ] as const;
 
 function estadoSeed(): EstadoImportacion {
@@ -54,24 +51,38 @@ const fila = (genero: string, mundo: string, linea: string, equivalencia: string
   equivalencia,
 });
 
+/** Entrada esperada en `omitidas`: la fila normalizada completa más motivo, detalle y fila_original. */
+const omitida = (
+  f: FilaImportacion,
+  numero: number,
+  motivo: MotivoOmision,
+  extra: Pick<FilaOmitida, "detalle" | "fila_original"> = {}
+): FilaOmitida => ({
+  fila: numero,
+  motivo,
+  ...extra,
+  genero: normalizarNombre(f.genero),
+  mundo: normalizarNombre(f.mundo),
+  linea: normalizarNombre(f.linea),
+  equivalencia: normalizarNombre(f.equivalencia),
+});
+
 // ─── Reglas 5–11 y 19 ───
 
 describe("planificarImportacion · omisiones (regla 5)", () => {
   it("omite línea vacía, fila TOTAL, género desconocido y mundo desconocido, sin generar nada", () => {
-    const plan = planificarImportacion(
-      [
-        fila("H", "URBANO", "", "X"),
-        fila("TOTAL", "", "PANTALON", ""),
-        fila("MARCIANOS", "URBANO", "PANTALON", "VARIOS"),
-        fila("H", "ESPACIAL", "PANTALON", "VARIOS"),
-      ],
-      estadoSeed()
-    );
+    const filas = [
+      fila("H", "URBANO", "", "X"),
+      fila("TOTAL", "", "PANTALON", ""),
+      fila("MARCIANOS", "URBANO", "PANTALON", "VARIOS"),
+      fila("H", "ESPACIAL", "PANTALON", "VARIOS"),
+    ];
+    const plan = planificarImportacion(filas, estadoSeed());
     expect(plan.reporte.omitidas).toEqual([
-      { fila: 1, motivo: "linea_vacia" },
-      { fila: 2, motivo: "fila_total" },
-      { fila: 3, motivo: "genero_desconocido", detalle: "MARCIANOS" },
-      { fila: 4, motivo: "mundo_desconocido", detalle: "ESPACIAL" },
+      omitida(filas[0], 1, "linea_vacia"),
+      omitida(filas[1], 2, "fila_total"),
+      omitida(filas[2], 3, "genero_desconocido", { detalle: "MARCIANOS" }),
+      omitida(filas[3], 4, "mundo_desconocido", { detalle: "ESPACIAL" }),
     ]);
     expect(plan.reporte.totales).toEqual({ recibidas: 4, procesadas: 0, omitidas: 4 });
     expect(plan.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0 });
@@ -81,41 +92,40 @@ describe("planificarImportacion · omisiones (regla 5)", () => {
   });
   it("resuelve géneros y mundos por código o por nombre, con cualquier caja y acentos", () => {
     const plan = planificarImportacion(
-      [fila("niñas", "urbano", "BLUSA", "A"), fila("HOMBRE", "Sin Asignar", "BLUSA", "A"), fila("ninas", "URBANO", "BLUSA", "B")],
+      [fila("niñas", "urbano", "BLUSA", "A"), fila("HOMBRE", "Deportivo", "BLUSA", "A"), fila("ninas", "URBANO", "BLUSA", "B")],
       estadoSeed()
     );
     expect(plan.reporte.omitidas).toEqual([]);
     expect(plan.nodos).toEqual([
       { genero_id: "g-NINAS", mundo_id: "m-URBANO", linea_nombre: "BLUSA" },
-      { genero_id: "g-H", mundo_id: "m-SIN_ASIGNAR", linea_nombre: "BLUSA" },
+      { genero_id: "g-H", mundo_id: "m-DEPORTIVO", linea_nombre: "BLUSA" },
     ]);
-    // "Sin Asignar" escrito explícitamente no es "mundo vacío": no va a sin_mundo.
-    expect(plan.reporte.sin_mundo).toEqual([]);
   });
 });
 
-describe("planificarImportacion · mundo vacío (regla 6)", () => {
-  it("planifica bajo SIN_ASIGNAR y anota la fila en sin_mundo", () => {
-    const plan = planificarImportacion([fila("H", "URBANO", "PANTALON", "VARIOS"), fila("BEBE", "  ", "BODY", "")], estadoSeed());
-    expect(plan.reporte.sin_mundo).toEqual([{ fila: 2, genero: "BEBE", linea: "BODY", equivalencia: "SIN EQUIVALENCIA" }]);
-    expect(plan.nodos[1]).toEqual({ genero_id: "g-BEBE", mundo_id: "m-SIN_ASIGNAR", linea_nombre: "BODY" });
-    expect(plan.reporte.omitidas).toEqual([]);
+describe("planificarImportacion · mundo vacío (regla 6: no existen líneas sin mundo)", () => {
+  it("omite la fila con motivo mundo_vacio y no crea nada con ella", () => {
+    const filas = [fila("H", "URBANO", "PANTALON", "VARIOS"), fila("bebe", "  ", " body ", ""), fila("NIÑAS", "", "BLUSA", "A")];
+    const plan = planificarImportacion(filas, estadoSeed());
+    // La fila viaja completa y normalizada para poder corregir el archivo.
+    expect(plan.reporte.omitidas).toEqual([
+      { fila: 2, motivo: "mundo_vacio", genero: "BEBE", mundo: "", linea: "BODY", equivalencia: "" },
+      omitida(filas[2], 3, "mundo_vacio"),
+    ]);
+    expect(plan.reporte.totales).toEqual({ recibidas: 3, procesadas: 1, omitidas: 2 });
+    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 1, equivalencias_genericas: 0 });
+    expect(plan.lineas.map((l) => l.nombre)).toEqual(["PANTALON"]);
+    expect(plan.nodos).toEqual([{ genero_id: "g-H", mundo_id: "m-URBANO", linea_nombre: "PANTALON" }]);
   });
-  it("si falta el mundo SIN ASIGNAR y hace falta, lanza ErrorImportacion 409", () => {
-    const estado = estadoSeed();
-    estado.mundos = estado.mundos.filter((m) => m.codigo !== "SIN_ASIGNAR");
-    expect(() => planificarImportacion([fila("H", "", "PANTALON", "")], estado)).toThrow(ErrorImportacion);
-    try {
-      planificarImportacion([fila("H", "", "PANTALON", "")], estado);
-    } catch (e) {
-      expect(e).toBeInstanceOf(ErrorImportacion);
-      if (e instanceof ErrorImportacion) {
-        expect(e.message).toBe(MENSAJE_FALTA_SIN_ASIGNAR);
-        expect(e.status).toBe(409);
-      }
-    }
-    // Sin filas con mundo vacío no hace falta y no falla.
-    expect(() => planificarImportacion([fila("H", "URBANO", "PANTALON", "")], estado)).not.toThrow();
+  it("el reporte ya no trae sin_mundo y el género se valida antes que el mundo", () => {
+    const f = fila("MARCIANOS", "", "PANTALON", "");
+    const plan = planificarImportacion([f], estadoSeed());
+    expect(plan.reporte).not.toHaveProperty("sin_mundo");
+    expect(plan.reporte.omitidas).toEqual([omitida(f, 1, "genero_desconocido", { detalle: "MARCIANOS" })]);
+  });
+  it("una fila con mundo vacío no cuenta como duplicada de otra igual", () => {
+    const plan = planificarImportacion([fila("H", "", "PANTALON", "A"), fila("H", "", "PANTALON", "A")], estadoSeed());
+    expect(plan.reporte.omitidas.map((o) => o.motivo)).toEqual(["mundo_vacio", "mundo_vacio"]);
   });
 });
 
@@ -194,50 +204,64 @@ describe("planificarImportacion · géneros y mundos inactivos", () => {
     const estado = estadoSeed();
     estado.generos = estado.generos.map((g) => (g.codigo === "OTROS" ? { ...g, activo: false } : g));
     estado.mundos = estado.mundos.map((m) => (m.codigo === "RI" ? { ...m, activo: false } : m));
-    const plan = planificarImportacion(
-      [
-        fila("OTROS", "URBANO", "PANTALON", "A"),
-        fila("otros", "URBANO", "PANTALON", "B"),
-        fila("H", "RI", "PANTALON", "A"),
-        fila("H", "ri", "PANTALON", "B"),
-        fila("H", "URBANO", "PANTALON", "A"),
-        fila("MARCIANOS", "URBANO", "PANTALON", "A"),
-      ],
-      estado
-    );
+    const filas = [
+      fila("OTROS", "URBANO", "PANTALON", "A"),
+      fila("otros", "URBANO", "PANTALON", "B"),
+      fila("H", "RI", "PANTALON", "A"),
+      fila("H", "ri", "PANTALON", "B"),
+      fila("H", "URBANO", "PANTALON", "A"),
+      fila("MARCIANOS", "URBANO", "PANTALON", "A"),
+    ];
+    const plan = planificarImportacion(filas, estado);
     expect(plan.reporte.omitidas).toEqual([
-      { fila: 1, motivo: "genero_inactivo", detalle: "OTROS" },
-      { fila: 2, motivo: "genero_inactivo", detalle: "OTROS" },
-      { fila: 3, motivo: "mundo_inactivo", detalle: "RI" },
-      { fila: 4, motivo: "mundo_inactivo", detalle: "RI" },
-      { fila: 6, motivo: "genero_desconocido", detalle: "MARCIANOS" },
+      omitida(filas[0], 1, "genero_inactivo", { detalle: "OTROS" }),
+      omitida(filas[1], 2, "genero_inactivo", { detalle: "OTROS" }),
+      omitida(filas[2], 3, "mundo_inactivo", { detalle: "RI" }),
+      omitida(filas[3], 4, "mundo_inactivo", { detalle: "RI" }),
+      omitida(filas[5], 6, "genero_desconocido", { detalle: "MARCIANOS" }),
     ]);
     expect(plan.reporte.totales).toEqual({ recibidas: 6, procesadas: 1, omitidas: 5 });
     expect(plan.nodos).toEqual([{ genero_id: "g-H", mundo_id: "m-URBANO", linea_nombre: "PANTALON" }]);
     expect(plan.nodos.some((n) => n.genero_id === "g-OTROS" || n.mundo_id === "m-RI")).toBe(false);
   });
-  it("con SIN ASIGNAR inactivo, las filas sin mundo se omiten como mundo_inactivo (no es un 409)", () => {
-    const estado = estadoSeed();
-    estado.mundos = estado.mundos.map((m) => (m.codigo === "SIN_ASIGNAR" ? { ...m, activo: false } : m));
-    const plan = planificarImportacion([fila("H", "", "PANTALON", ""), fila("H", "URBANO", "PANTALON", "")], estado);
-    expect(plan.reporte.omitidas).toEqual([{ fila: 1, motivo: "mundo_inactivo", detalle: "SIN ASIGNAR" }]);
-    expect(plan.reporte.sin_mundo).toEqual([]);
-    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 0, equivalencias_genericas: 1 });
-    // Escrito explícitamente también se rechaza: está inactivo, no desconocido.
-    const plan2 = planificarImportacion([fila("H", "Sin Asignar", "PANTALON", "")], estado);
-    expect(plan2.reporte.omitidas).toEqual([{ fila: 1, motivo: "mundo_inactivo", detalle: "SIN ASIGNAR" }]);
-  });
 });
 
 describe("planificarImportacion · duplicados (regla 8)", () => {
-  it("filas iguales tras normalizar cuentan una vez", () => {
-    const plan = planificarImportacion(
-      [fila("H", "URBANO", "Pantalón", "jogger"), fila(" h ", "urbano", "PANTALÓN", "JOGGER "), fila("H", "URBANO", "PANTALÓN", "CARGO")],
-      estadoSeed()
-    );
-    expect(plan.reporte.omitidas).toEqual([{ fila: 2, motivo: "duplicada_en_archivo" }]);
+  it("filas iguales tras normalizar cuentan una vez y el duplicado señala su primera aparición", () => {
+    const filas = [
+      fila("H", "URBANO", "Pantalón", "jogger"),
+      fila(" h ", "urbano", "PANTALÓN", "JOGGER "),
+      fila("H", "URBANO", "PANTALÓN", "CARGO"),
+    ];
+    const plan = planificarImportacion(filas, estadoSeed());
+    expect(plan.reporte.omitidas).toEqual([
+      { fila: 2, motivo: "duplicada_en_archivo", fila_original: 1, genero: "H", mundo: "URBANO", linea: "PANTALÓN", equivalencia: "JOGGER" },
+    ]);
     expect(plan.reporte.totales).toEqual({ recibidas: 3, procesadas: 2, omitidas: 1 });
     expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 2, equivalencias_genericas: 0 });
+  });
+  it("fila_original apunta siempre a la primera aparición, también para '' y '-' (misma genérica)", () => {
+    const filas = [
+      fila("H", "URBANO", "PANTALON", "A"),
+      fila("H", "URBANO", "PANTALON", ""),
+      fila("H", "URBANO", "PANTALON", "-"),
+      fila("H", "URBANO", "PANTALON", "A"),
+      fila("H", "URBANO", "PANTALON", "A"),
+      fila("H", "URBANO", "PANTALON", "sin equivalencia"),
+    ];
+    const plan = planificarImportacion(filas, estadoSeed());
+    expect(plan.reporte.omitidas).toEqual([
+      omitida(filas[2], 3, "duplicada_en_archivo", { fila_original: 2 }),
+      omitida(filas[3], 4, "duplicada_en_archivo", { fila_original: 1 }),
+      omitida(filas[4], 5, "duplicada_en_archivo", { fila_original: 1 }),
+      omitida(filas[5], 6, "duplicada_en_archivo", { fila_original: 2 }),
+    ]);
+    // La equivalencia se muestra como vino ('-'), no como la genérica a la que cae.
+    expect(plan.reporte.omitidas[0].equivalencia).toBe("-");
+    expect(plan.reporte.omitidas[3].equivalencia).toBe(EQUIVALENCIA_GENERICA.nombre);
+    // Las omisiones que no son duplicados no llevan fila_original.
+    const otra = planificarImportacion([fila("H", "", "PANTALON", "A")], estadoSeed());
+    expect(otra.reporte.omitidas[0]).not.toHaveProperty("fila_original");
   });
   it("la misma línea en dos mundos es un catálogo y dos nodos", () => {
     const plan = planificarImportacion([fila("H", "URBANO", "PANTALON", "A"), fila("M", "CASUAL", "PANTALON", "A")], estadoSeed());
@@ -251,7 +275,7 @@ const ARCHIVO_CHICO: FilaImportacion[] = [
   fila("H", "URBANO", "PANTALON", "VARIOS"),
   fila("M", "URBANO", "PANTALON", "VARIOS"),
   fila("M", "CASUAL", "BLUSA", ""),
-  fila("BEBE", "", "BODY", "VARIOS"),
+  fila("BEBE", "", "BODY", "VARIOS"), // mundo vacío: se omite
   fila("H", "URBANO", "PANTALON", "JOGGER"), // duplicada
   fila("TOTAL", "", "", ""), // línea vacía
 ];
@@ -260,12 +284,17 @@ describe("planificarImportacion · idempotencia (regla 9)", () => {
   it("tras aplicarPlan, el mismo archivo no crea nada y lo cuenta como existente", () => {
     const estado = estadoSeed();
     const plan1 = planificarImportacion(ARCHIVO_CHICO, estado);
-    expect(plan1.reporte.crear).toEqual({ lineas: 3, nodos: 4, equivalencias: 4, equivalencias_genericas: 2 });
+    expect(plan1.reporte.crear).toEqual({ lineas: 2, nodos: 3, equivalencias: 3, equivalencias_genericas: 2 });
+    expect(plan1.reporte.omitidas).toEqual([
+      omitida(ARCHIVO_CHICO[5], 6, "mundo_vacio"),
+      omitida(ARCHIVO_CHICO[6], 7, "duplicada_en_archivo", { fila_original: 1 }),
+      omitida(ARCHIVO_CHICO[7], 8, "linea_vacia"),
+    ]);
 
     const estado2 = aplicarPlan(estado, plan1);
-    expect(estado2.lineas).toHaveLength(3);
-    expect(estado2.nodos).toHaveLength(4);
-    expect(estado2.equivalencias).toHaveLength(6);
+    expect(estado2.lineas).toHaveLength(2);
+    expect(estado2.nodos).toHaveLength(3);
+    expect(estado2.equivalencias).toHaveLength(5);
 
     const plan2 = planificarImportacion(ARCHIVO_CHICO, estado2);
     expect(plan2.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0 });
@@ -275,7 +304,6 @@ describe("planificarImportacion · idempotencia (regla 9)", () => {
       equivalencias: plan1.reporte.crear.equivalencias + plan1.reporte.crear.equivalencias_genericas,
     });
     expect(plan2.reporte.totales).toEqual(plan1.reporte.totales);
-    expect(plan2.reporte.sin_mundo).toEqual(plan1.reporte.sin_mundo);
     expect(plan2.reporte.omitidas).toEqual(plan1.reporte.omitidas);
     expect(plan2.lineas).toEqual([]);
     expect(plan2.nodos).toEqual([]);
@@ -459,37 +487,68 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
     const plan = planificarImportacion(filas, estado);
     const { reporte } = plan;
 
-    // Nodos con alguna fila vacía o '-' (calculado aquí, independiente del importador).
+    // Conteos calculados aquí, independientes del importador, solo sobre las filas
+    // con mundo: no existen líneas sin mundo, así que las 14 filas con mundo vacío
+    // son errores del archivo y quedan fuera de todo.
     const nodosConGenerica = new Set<string>();
     const nodosDistintos = new Set<string>();
     const lineasDistintas = new Set<string>();
+    const lineasSoloSinMundo = new Set<string>();
+    const equivalenciasReales = new Set<string>();
+    const sinMundoPorGenero: Record<string, number> = {};
+    let conMundo = 0;
     for (const f of filas) {
       const linea = normalizarNombre(f.linea);
       const genero = normalizarNombre(f.genero);
       if (!linea || genero === "TOTAL") continue;
-      const mundo = normalizarNombre(f.mundo) || "SIN ASIGNAR";
+      const mundo = normalizarNombre(f.mundo);
+      if (!mundo) {
+        sinMundoPorGenero[genero] = (sinMundoPorGenero[genero] ?? 0) + 1;
+        lineasSoloSinMundo.add(linea);
+        continue;
+      }
+      conMundo += 1;
       const clave = `${aCodigo(genero)}|${mundo}|${linea}`;
       nodosDistintos.add(clave);
       lineasDistintas.add(linea);
       if (esEquivalenciaGenerica(f.equivalencia)) nodosConGenerica.add(clave);
+      else equivalenciasReales.add(`${clave}|${normalizarNombre(f.equivalencia)}`);
     }
+    for (const l of lineasDistintas) lineasSoloSinMundo.delete(l);
+    const filasSinMundo = Object.values(sinMundoPorGenero).reduce((a, b) => a + b, 0);
+    const duplicadasEsperadas = conMundo - equivalenciasReales.size - nodosConGenerica.size;
 
     const porMotivo = reporte.omitidas.reduce<Record<string, number>>((acc, o) => {
       acc[o.motivo] = (acc[o.motivo] ?? 0) + 1;
       return acc;
     }, {});
-    const sinMundoPorGenero = reporte.sin_mundo.reduce<Record<string, number>>((acc, s) => {
-      acc[s.genero] = (acc[s.genero] ?? 0) + 1;
-      return acc;
-    }, {});
+    const mundoVacioPorGenero = reporte.omitidas
+      .filter((o) => o.motivo === "mundo_vacio")
+      .reduce<Record<string, number>>((acc, o) => {
+        acc[o.genero] = (acc[o.genero] ?? 0) + 1;
+        return acc;
+      }, {});
 
     console.info("[CSV real] totales:", reporte.totales);
     console.info("[CSV real] crear:", reporte.crear);
     console.info("[CSV real] existentes:", reporte.existentes, "inactivos:", reporte.existentes_inactivos);
     console.info("[CSV real] omitidas por motivo:", porMotivo);
-    console.info("[CSV real] sin_mundo:", reporte.sin_mundo.length, sinMundoPorGenero);
-    console.info("[CSV real] nodos con genérica (calculado en el test):", nodosConGenerica.size);
-    console.info("[CSV real] líneas distintas:", lineasDistintas.size, "nodos distintos:", nodosDistintos.size);
+    console.info("[CSV real] mundo_vacio por género:", mundoVacioPorGenero);
+    console.info("[CSV real] líneas que solo aparecían sin mundo:", [...lineasSoloSinMundo]);
+    console.info(
+      "[CSV real] calculado en el test · filas con mundo:",
+      conMundo,
+      "líneas:",
+      lineasDistintas.size,
+      "nodos:",
+      nodosDistintos.size,
+      "equivalencias reales:",
+      equivalenciasReales.size,
+      "genéricas:",
+      nodosConGenerica.size,
+      "duplicadas:",
+      duplicadasEsperadas
+    );
 
     expect(porMotivo.genero_desconocido ?? 0).toBe(0);
     expect(porMotivo.genero_inactivo ?? 0).toBe(0);
@@ -497,22 +556,41 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
     expect(porMotivo.mundo_inactivo ?? 0).toBe(0);
     // El archivo no trae filas de totales: el único "excedente" respecto a la spec es la cabecera.
     expect(porMotivo.fila_total ?? 0).toBe(0);
-    expect(reporte.sin_mundo).toHaveLength(14);
-    expect(sinMundoPorGenero).toEqual({ BEBE: 2, JOVENCITAS: 3, NIÑAS: 4, NIÑOS: 5 });
-    // Referencia del hito: la especificación habla de 87 líneas, 571 nodos y 389 genéricas,
-    // pero el archivo tiene 86 líneas y 570 tripletas distintas (crudas y normalizadas por
-    // igual; `sort -u` sobre el CSV da lo mismo). La diferencia de uno es la fila de
-    // cabecera (GENERO_LK / MUNDO / LINEA / EQUIVALENCIA), que la spec contó como si fuera
-    // una fila de datos: una "línea" más, un "nodo" más y una "genérica" más. Se fija aquí
-    // lo que el archivo realmente contiene, calculado aparte en este mismo test.
+    expect(porMotivo.linea_vacia ?? 0).toBe(0);
+    // Las 14 filas con mundo vacío (BEBE 2, JOVENCITAS 3, NIÑAS 4, NIÑOS 5) se omiten.
+    expect(porMotivo.mundo_vacio).toBe(filasSinMundo);
+    expect(porMotivo.mundo_vacio).toBe(14);
+    expect(mundoVacioPorGenero).toEqual({ BEBE: 2, JOVENCITAS: 3, NIÑAS: 4, NIÑOS: 5 });
+    expect(mundoVacioPorGenero).toEqual(sinMundoPorGenero);
+    expect(porMotivo.duplicada_en_archivo).toBe(duplicadasEsperadas);
+    expect(porMotivo.duplicada_en_archivo).toBe(198);
+    expect(reporte.totales).toEqual({ recibidas: 2002, procesadas: 1790, omitidas: 212 });
+    // Cada duplicado señala una fila anterior que sí se procesó, con el mismo contenido.
+    for (const o of reporte.omitidas) {
+      if (o.motivo !== "duplicada_en_archivo") {
+        expect(o.fila_original).toBeUndefined();
+        continue;
+      }
+      expect(o.fila_original).toBeGreaterThan(0);
+      expect(o.fila_original).toBeLessThan(o.fila);
+      const original = filas[(o.fila_original ?? 0) - 1];
+      expect(normalizarNombre(original.genero)).toBe(o.genero);
+      expect(normalizarNombre(original.mundo)).toBe(o.mundo);
+      expect(normalizarNombre(original.linea)).toBe(o.linea);
+      expect(reporte.omitidas.some((x) => x.fila === o.fila_original)).toBe(false);
+    }
+    // Lo que se crea es exactamente lo distinto entre las filas con mundo. El archivo
+    // tiene 86 líneas distintas en total; las que solo aparecían en filas sin mundo
+    // ya no se crean (ver `lineasSoloSinMundo` en la salida).
     expect(reporte.crear.lineas).toBe(lineasDistintas.size);
-    expect(reporte.crear.lineas).toBe(86);
+    expect(reporte.crear.lineas).toBe(86 - lineasSoloSinMundo.size);
     expect(reporte.crear.nodos).toBe(nodosDistintos.size);
-    expect(reporte.crear.nodos).toBe(570);
-    expect(reporte.crear.nodos).toBeLessThanOrEqual(585);
-    expect(reporte.crear.equivalencias).toBe(1416);
+    expect(reporte.crear.nodos).toBe(556);
+    expect(reporte.crear.equivalencias).toBe(equivalenciasReales.size);
+    expect(reporte.crear.equivalencias).toBe(1414);
     expect(reporte.crear.equivalencias_genericas).toBe(nodosConGenerica.size);
-    expect(reporte.crear.equivalencias_genericas).toBe(388);
+    expect(reporte.crear.equivalencias_genericas).toBe(376);
+    expect(reporte.crear.equivalencias + reporte.crear.equivalencias_genericas).toBe(reporte.totales.procesadas);
     expect(reporte.totales.recibidas).toBe(filas.length);
     expect(reporte.totales.recibidas).toBe(reporte.totales.procesadas + reporte.totales.omitidas);
     expect(reporte.existentes).toEqual({ lineas: 0, nodos: 0, equivalencias: 0 });
@@ -542,10 +620,12 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
     expect(plan2.reporte.totales).toEqual(reporte.totales);
     expect(aplicarPlan(despues, plan)).toEqual(despues);
 
-    // PANTALON está en 26 nodos (hito de prueba).
+    // PANTALON está en 25 nodos (hito de prueba): el archivo trae 26 tripletas con
+    // PANTALON, pero una tiene el mundo vacío y se omite.
     const pantalon = despues.lineas.find((l) => l.nombre === "PANTALON");
     const nodosPantalon = despues.nodos.filter((n) => n.linea_id === pantalon?.id).length;
     console.info("[CSV real] nodos de PANTALON:", nodosPantalon);
-    expect(nodosPantalon).toBe(26);
+    expect(nodosPantalon).toBe(25);
+    expect(reporte.omitidas.some((o) => o.motivo === "mundo_vacio" && o.linea === "PANTALON")).toBe(true);
   });
 });

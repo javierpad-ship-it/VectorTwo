@@ -8,8 +8,8 @@ import {
   ETIQUETA_MOTIVO_OMISION,
   type FilaImportacion,
   type FilaOmitida,
-  type FilaSinMundo,
   type ImportarCuerpo,
+  type MotivoOmision,
   type ReporteImportacion,
 } from "@/lib/arbol/tipos-api";
 import { Card } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/form";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Chips, type ChipItem } from "@/components/ui/chips";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import { formatearNumero, mensajeError } from "./comunes";
 
@@ -34,6 +35,16 @@ const CAMPOS: { campo: Campo; etiqueta: string; alias: string[] }[] = [
 
 const MAPEO_VACIO: Mapeo = { genero: "", mundo: "", linea: "", equivalencia: "" };
 
+/** Repetida dentro del archivo: se procesa una sola vez, no es un error del dato. */
+const MOTIVO_DUPLICADA: MotivoOmision = "duplicada_en_archivo";
+
+/** Motivos que se arreglan en el archivo (falta el mundo o el género/mundo no existe en el catálogo). */
+const MOTIVOS_CORREGIBLES: ReadonlySet<MotivoOmision> = new Set<MotivoOmision>([
+  "mundo_vacio",
+  "genero_desconocido",
+  "mundo_desconocido",
+]);
+
 /** Autodetecta la columna de cada campo por nombre (sin acentos ni caja: "género" → GENERO). */
 function detectarMapeo(columnas: string[]): Mapeo {
   const mapeo = { ...MAPEO_VACIO };
@@ -49,6 +60,47 @@ function detectarMapeo(columnas: string[]): Mapeo {
     }
   }
   return mapeo;
+}
+
+function plural(n: number, singular: string, pluralTxt: string) {
+  return `${formatearNumero(n)} ${n === 1 ? singular : pluralTxt}`;
+}
+
+/** Separa las omitidas en errores (hay que mirarlas) y repetidas en el archivo (informativas). */
+function separarOmitidas(omitidas: FilaOmitida[]) {
+  return {
+    errores: omitidas.filter((o) => o.motivo !== MOTIVO_DUPLICADA),
+    duplicadas: omitidas.filter((o) => o.motivo === MOTIVO_DUPLICADA),
+  };
+}
+
+function detalleOmitida(o: FilaOmitida): string {
+  if (o.detalle) return o.detalle;
+  if (o.fila_original !== undefined) return `Repite la fila ${o.fila_original}`;
+  return "";
+}
+
+/** Genera el CSV de omitidas en el navegador y lo descarga; con BOM para que Excel respete los acentos. */
+function descargarOmitidasCsv(omitidas: FilaOmitida[], nombreArchivo: string) {
+  const csv = Papa.unparse({
+    fields: ["fila", "genero", "mundo", "linea", "equivalencia", "motivo", "detalle"],
+    data: omitidas.map((o) => [
+      o.fila,
+      o.genero,
+      o.mundo,
+      o.linea,
+      o.equivalencia,
+      ETIQUETA_MOTIVO_OMISION[o.motivo] ?? o.motivo,
+      detalleOmitida(o),
+    ]),
+  });
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+  enlace.href = url;
+  enlace.download = nombreArchivo;
+  enlace.click();
+  URL.revokeObjectURL(url);
 }
 
 type Archivo = {
@@ -108,13 +160,25 @@ export function ImportarCsv({ onAplicado }: { onAplicado: () => void }) {
     }));
   }
 
+  function mensajeConfirmarAplicar(nombre: string, reporte: ReporteImportacion): string {
+    const c = reporte.crear;
+    const total = c.lineas + c.nodos + c.equivalencias + c.equivalencias_genericas;
+    const { errores, duplicadas } = separarOmitidas(reporte.omitidas);
+    const partes = [`¿Aplicar la importación de ${nombre}? Se crearán ${plural(total, "registro nuevo", "registros nuevos")}.`];
+    if (errores.length > 0) {
+      partes.push(`Quedarán fuera ${plural(errores.length, "fila con errores", "filas con errores")}: no se cargarán.`);
+    }
+    if (duplicadas.length > 0) {
+      partes.push(`${plural(duplicadas.length, "fila repetida", "filas repetidas")} en el archivo se cargan una sola vez.`);
+    }
+    return partes.join("\n");
+  }
+
   async function enviar(modo: "previsualizar" | "aplicar") {
     if (!archivo || !mapeoCompleto) return;
     if (modo === "aplicar") {
       if (!previaVigente) return;
-      const c = previa.reporte.crear;
-      const total = c.lineas + c.nodos + c.equivalencias + c.equivalencias_genericas;
-      if (!confirm(`¿Aplicar la importación de ${archivo.nombre}? Se crearán ${formatearNumero(total)} registros nuevos.`)) return;
+      if (!confirm(mensajeConfirmarAplicar(archivo.nombre, previa.reporte))) return;
     }
     setEnviando(modo);
     setError(null);
@@ -166,7 +230,7 @@ export function ImportarCsv({ onAplicado }: { onAplicado: () => void }) {
         >
           <div className="grid gap-4 md:grid-cols-4">
             {CAMPOS.map(({ campo, etiqueta }) => (
-              <Field key={campo} label={etiqueta} hint={mapeo[campo] ? undefined : "Sin asignar"}>
+              <Field key={campo} label={etiqueta} hint={mapeo[campo] ? undefined : "Elige una columna"}>
                 <Select value={mapeo[campo]} onChange={(e) => setMapeo({ ...mapeo, [campo]: e.target.value })}>
                   <option value="">—</option>
                   {archivo.columnas.map((c) => (
@@ -197,9 +261,11 @@ export function ImportarCsv({ onAplicado }: { onAplicado: () => void }) {
         </Card>
       )}
 
-      {previaVigente && !final && <Reporte titulo="3. Previsualización" reporte={previa.reporte} />}
+      {previaVigente && !final && archivo && (
+        <Reporte key={previa.firma} titulo="3. Previsualización" reporte={previa.reporte} nombreArchivo={archivo.nombre} />
+      )}
 
-      {final && (
+      {final && archivo && (
         <>
           <Alert tono="exito">
             Importación aplicada. {resumenCrear(final)}
@@ -209,7 +275,7 @@ export function ImportarCsv({ onAplicado }: { onAplicado: () => void }) {
               </Button>
             </span>
           </Alert>
-          <Reporte titulo="4. Resultado" reporte={final} />
+          <Reporte titulo="4. Resultado" reporte={final} nombreArchivo={archivo.nombre} />
         </>
       )}
     </div>
@@ -222,30 +288,11 @@ function resumenCrear(r: ReporteImportacion): string {
   return `${verbo} ${formatearNumero(c.lineas)} líneas, ${formatearNumero(c.nodos)} nodos, ${formatearNumero(c.equivalencias)} equivalencias y ${formatearNumero(c.equivalencias_genericas)} genéricas.`;
 }
 
-function Reporte({ titulo, reporte }: { titulo: string; reporte: ReporteImportacion }) {
+function Reporte({ titulo, reporte, nombreArchivo }: { titulo: string; reporte: ReporteImportacion; nombreArchivo: string }) {
   const c = reporte.crear;
   const nadaNuevo = c.lineas + c.nodos + c.equivalencias + c.equivalencias_genericas === 0;
   const aplicado = reporte.modo === "aplicar";
-
-  const colSinMundo: Columna<FilaSinMundo>[] = [
-    { clave: "fila", titulo: "Fila", render: (f) => <span className="font-mono text-xs">{f.fila}</span> },
-    { clave: "genero", titulo: "Género", render: (f) => f.genero },
-    { clave: "linea", titulo: "Línea", render: (f) => f.linea },
-    { clave: "equivalencia", titulo: "Equivalencia", render: (f) => f.equivalencia },
-  ];
-  const colOmitidas: Columna<FilaOmitida>[] = [
-    { clave: "fila", titulo: "Fila", render: (f) => <span className="font-mono text-xs">{f.fila}</span> },
-    {
-      clave: "motivo",
-      titulo: "Motivo",
-      render: (f) => (
-        <span>
-          <Badge tono="alerta">{ETIQUETA_MOTIVO_OMISION[f.motivo] ?? f.motivo}</Badge>
-          {f.detalle && <span className="ml-2 text-xs text-tinta-suave">{f.detalle}</span>}
-        </span>
-      ),
-    },
-  ];
+  const { errores, duplicadas } = separarOmitidas(reporte.omitidas);
 
   return (
     <Card
@@ -290,32 +337,19 @@ function Reporte({ titulo, reporte }: { titulo: string; reporte: ReporteImportac
           />
           <Tarjeta
             titulo="Omitidas"
-            tono={reporte.totales.omitidas > 0 ? "alerta" : "neutro"}
+            tono={errores.length > 0 ? "alerta" : "neutro"}
             filas={[
-              ["Filas", reporte.totales.omitidas],
-              ["Sin mundo (a SIN ASIGNAR)", reporte.sin_mundo.length],
+              ["Con errores", errores.length],
+              ["Repetidas en el archivo", duplicadas.length],
             ]}
           />
         </div>
 
-        {reporte.sin_mundo.length > 0 && (
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">
-              Sin mundo: {reporte.sin_mundo.length} fila{reporte.sin_mundo.length === 1 ? "" : "s"}
-            </h3>
-            <p className="mb-2 text-xs text-tinta-suave">
-              Estas líneas {aplicado ? "quedaron" : "irán"} en el mundo SIN ASIGNAR; podrás moverlas después desde el árbol.
-            </p>
-            <DataTable columnas={colSinMundo} filas={reporte.sin_mundo} claveFila={(f) => String(f.fila)} />
-          </div>
+        {errores.length > 0 && (
+          <TablaErrores errores={errores} todas={reporte.omitidas} aplicado={aplicado} nombreArchivo={nombreArchivo} />
         )}
 
-        {reporte.omitidas.length > 0 && (
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">Filas omitidas</h3>
-            <DataTable columnas={colOmitidas} filas={reporte.omitidas} claveFila={(f) => `${f.fila}-${f.motivo}`} />
-          </div>
-        )}
+        {duplicadas.length > 0 && <TablaDuplicadas duplicadas={duplicadas} />}
 
         {(reporte.muestra.lineas.length > 0 || reporte.muestra.nodos.length > 0) && (
           <div className="grid gap-4 md:grid-cols-2">
@@ -325,6 +359,122 @@ function Reporte({ titulo, reporte }: { titulo: string; reporte: ReporteImportac
         )}
       </div>
     </Card>
+  );
+}
+
+function Celda({ valor }: { valor: string }) {
+  return valor ? <>{valor}</> : <span className="text-tinta-suave">—</span>;
+}
+
+/** Columnas comunes a ambas tablas de omitidas: la fila completa normalizada. */
+const COLUMNAS_FILA: Columna<FilaOmitida>[] = [
+  { clave: "fila", titulo: "Fila", render: (f) => <span className="font-mono text-xs">{f.fila}</span> },
+  { clave: "genero", titulo: "Género", render: (f) => <Celda valor={f.genero} /> },
+  { clave: "mundo", titulo: "Mundo", render: (f) => <Celda valor={f.mundo} /> },
+  { clave: "linea", titulo: "Línea", render: (f) => <Celda valor={f.linea} /> },
+  { clave: "equivalencia", titulo: "Equivalencia", render: (f) => <Celda valor={f.equivalencia} /> },
+];
+
+type FiltroMotivo = MotivoOmision | "todas";
+
+/** Omitidas con error: filtro por motivo, aviso de corrección y descarga de todas las omitidas en CSV. */
+function TablaErrores({
+  errores,
+  todas,
+  aplicado,
+  nombreArchivo,
+}: {
+  errores: FilaOmitida[];
+  /** Todas las omitidas (errores y repetidas), para la descarga. */
+  todas: FilaOmitida[];
+  aplicado: boolean;
+  nombreArchivo: string;
+}) {
+  const [filtro, setFiltro] = useState<FiltroMotivo>("todas");
+
+  const porMotivo = new Map<MotivoOmision, number>();
+  for (const o of errores) porMotivo.set(o.motivo, (porMotivo.get(o.motivo) ?? 0) + 1);
+  const chips: ChipItem<FiltroMotivo>[] = [
+    { id: "todas", label: "Todas", conteo: errores.length },
+    ...(Object.keys(ETIQUETA_MOTIVO_OMISION) as MotivoOmision[])
+      .filter((m) => porMotivo.has(m))
+      .map((m): ChipItem<FiltroMotivo> => ({ id: m, label: ETIQUETA_MOTIVO_OMISION[m], conteo: porMotivo.get(m) })),
+  ];
+  // Si el motivo filtrado dejó de existir (otro reporte), se vuelve a "todas" sin efectos.
+  const filtroVigente: FiltroMotivo = filtro !== "todas" && !porMotivo.has(filtro) ? "todas" : filtro;
+  const visibles = filtroVigente === "todas" ? errores : errores.filter((o) => o.motivo === filtroVigente);
+
+  const hayCorregibles = errores.some((o) => MOTIVOS_CORREGIBLES.has(o.motivo));
+
+  const columnas: Columna<FilaOmitida>[] = [
+    ...COLUMNAS_FILA,
+    {
+      clave: "motivo",
+      titulo: "Motivo",
+      render: (f) => <Badge tono="alerta">{ETIQUETA_MOTIVO_OMISION[f.motivo] ?? f.motivo}</Badge>,
+    },
+    { clave: "detalle", titulo: "Detalle", render: (f) => <Celda valor={detalleOmitida(f)} /> },
+  ];
+
+  const nombreCsv = `omitidas-${nombreArchivo.replace(/\.csv$/i, "")}.csv`;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Filas con errores ({formatearNumero(errores.length)})</h3>
+        <Button variante="secundario" tamano="sm" onClick={() => descargarOmitidasCsv(todas, nombreCsv)}>
+          Descargar omitidas (CSV)
+        </Button>
+      </div>
+
+      {hayCorregibles && (
+        <Alert>
+          {aplicado ? (
+            <>
+              <strong>Estas filas NO se cargaron.</strong> Corrige el archivo y vuelve a importarlo: lo que ya entró se reconocerá
+              como existente.
+            </>
+          ) : (
+            <>
+              <strong>Estas filas NO se cargarán.</strong> Corrige el archivo y vuelve a previsualizar, o aplica para cargar solo
+              las válidas.
+            </>
+          )}
+        </Alert>
+      )}
+
+      <Chips items={chips} activo={filtroVigente} onCambiar={setFiltro} etiqueta="Filtrar por motivo" />
+
+      <DataTable
+        columnas={columnas}
+        filas={visibles}
+        claveFila={(f) => `${f.fila}-${f.motivo}`}
+        vacio="Ninguna fila con ese motivo."
+      />
+    </div>
+  );
+}
+
+/** Repetidas dentro del archivo: informativas, no hay nada que corregir. */
+function TablaDuplicadas({ duplicadas }: { duplicadas: FilaOmitida[] }) {
+  const columnas: Columna<FilaOmitida>[] = [
+    ...COLUMNAS_FILA,
+    {
+      clave: "fila_original",
+      titulo: "Repite la fila",
+      render: (f) => (f.fila_original !== undefined ? <span className="font-mono text-xs">{f.fila_original}</span> : <Celda valor="" />),
+    },
+  ];
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">Repetidas en el archivo ({formatearNumero(duplicadas.length)})</h3>
+      <p className="text-xs text-tinta-suave">
+        Misma combinación género · mundo · línea · equivalencia que una fila anterior. Se procesan una sola vez; no son errores
+        y no hay que corregirlas.
+      </p>
+      <DataTable columnas={columnas} filas={duplicadas} claveFila={(f) => `${f.fila}-${f.motivo}`} />
+    </div>
   );
 }
 
