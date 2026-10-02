@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 
 /** Respuesta de éxito: `{ data }`. */
 export function ok<T>(data: T, status = 200) {
@@ -33,4 +33,21 @@ export async function leerCuerpo<T>(request: Request, esquema: ZodType<T>): Prom
   }
 
   return { datos: resultado.data, respuesta: null };
+}
+
+const uuidDeRuta = z.uuid();
+
+type IdDeRuta = { id: string; respuesta: null } | { id: null; respuesta: NextResponse };
+
+/**
+ * Lee el `id` de un segmento dinámico (`params` es una Promise en esta versión
+ * de Next) y exige que sea un UUID. Si no lo es, responde `404` con el mismo
+ * mensaje que usaría el recurso inexistente: para el cliente da igual que el
+ * id esté mal formado o que no haya fila, y así Postgres nunca ve un
+ * `invalid input syntax for type uuid` (que acabaría en 500).
+ */
+export async function idDeRuta(params: Promise<{ id: string }>, noEncontrado: string): Promise<IdDeRuta> {
+  const { id } = await params;
+  if (!uuidDeRuta.safeParse(id).success) return { id: null, respuesta: error(noEncontrado, 404) };
+  return { id, respuesta: null };
 }

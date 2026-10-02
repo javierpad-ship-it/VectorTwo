@@ -1,11 +1,13 @@
 import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/guard";
-import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
+import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { editarUsuarioSchema } from "@/lib/usuarios/esquemas";
 import { motivoRechazo } from "@/lib/usuarios/reglas";
 
 type Params = { params: Promise<{ id: string }> };
+
+const NO_ENCONTRADO = "Usuario no encontrado.";
 
 async function cargar(id: string) {
   const db = supabaseAdmin();
@@ -21,12 +23,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const { perfil: actor, response } = await requireAdmin();
   if (response) return response;
 
-  const { id } = await params;
+  const { id, respuesta: respuestaId } = await idDeRuta(params, NO_ENCONTRADO);
+  if (respuestaId) return respuestaId;
   const { datos, respuesta } = await leerCuerpo(request, editarUsuarioSchema);
   if (respuesta) return respuesta;
 
   const { objetivo, todos } = await cargar(id);
-  if (!objetivo) return error("Usuario no encontrado.", 404);
+  if (!objetivo) return error(NO_ENCONTRADO, 404);
 
   const motivo = motivoRechazo(actor, objetivo, todos, datos);
   if (motivo) return error(motivo, 409);
@@ -69,9 +72,10 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   const { perfil: actor, response } = await requireAdmin();
   if (response) return response;
 
-  const { id } = await params;
+  const { id, respuesta } = await idDeRuta(params, NO_ENCONTRADO);
+  if (respuesta) return respuesta;
   const { objetivo, todos } = await cargar(id);
-  if (!objetivo) return error("Usuario no encontrado.", 404);
+  if (!objetivo) return error(NO_ENCONTRADO, 404);
 
   const motivo = motivoRechazo(actor, objetivo, todos, { eliminar: true });
   if (motivo) return error(motivo, 409);
