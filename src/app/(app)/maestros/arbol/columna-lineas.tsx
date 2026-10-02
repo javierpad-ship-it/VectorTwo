@@ -7,6 +7,7 @@ import { MUNDO_SIN_ASIGNAR, TEMPORADAS, aCodigo, normalizarNombre, type Temporad
 import type { GeneroArbol, LineaArbol, LineaFila, MundoArbol, NodoFila } from "@/lib/arbol/tipos-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/alert";
 import { Field, Input, Select } from "@/components/ui/form";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BadgeTemporada, Columna, FilaColumna, VistaPreviaNombre, estadoNodo, mensajeError } from "./comunes";
@@ -202,7 +203,7 @@ function FormAgregarLinea({
   onCreado: (nodoId: string) => Promise<void>;
   onError: (mensaje: string | null) => void;
 }) {
-  const { datos: catalogo, cargando } = useColeccion<LineaFila>("/api/lineas");
+  const { datos: catalogo, cargando, error: errorCatalogo, recargar: recargarCatalogo } = useColeccion<LineaFila>("/api/lineas");
   const [modo, setModo] = useState<"existente" | "nueva">("existente");
   const [lineaId, setLineaId] = useState("");
   const [nombre, setNombre] = useState("");
@@ -260,16 +261,25 @@ function FormAgregarLinea({
       </div>
 
       {modo === "existente" ? (
-        <Field label="Línea" hint={cargando ? "Cargando catálogo…" : `${disponibles.length} disponibles para ${genero.nombre} / ${mundo.nombre}.`}>
-          <Select value={lineaId} onChange={(e) => setLineaId(e.target.value)} disabled={cargando}>
-            <option value="">Elige una línea…</option>
-            {disponibles.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.nombre} · {l.temporada}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        errorCatalogo ? (
+          <Alert>
+            No se pudo cargar el catálogo de líneas: {errorCatalogo}{" "}
+            <button type="button" onClick={() => void recargarCatalogo()} className="font-medium underline underline-offset-2">
+              Reintentar
+            </button>
+          </Alert>
+        ) : (
+          <Field label="Línea" hint={cargando ? "Cargando catálogo…" : `${disponibles.length} disponibles para ${genero.nombre} / ${mundo.nombre}.`}>
+            <Select value={lineaId} onChange={(e) => setLineaId(e.target.value)} disabled={cargando}>
+              <option value="">Elige una línea…</option>
+              {disponibles.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.nombre} · {l.temporada}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )
       ) : (
         <div className="space-y-3">
           <Field label="Nombre">

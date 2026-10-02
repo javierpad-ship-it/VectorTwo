@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 
 const MODULOS = [
   { id: "M0", nombre: "Cimientos", detalle: "Login, roles y administración de usuarios.", estado: "listo" },
-  { id: "M1", nombre: "Árbol de producto", detalle: "Género · Mundo · Línea · Equivalencia · Agrupación talla.", estado: "pendiente" },
+  { id: "M1", nombre: "Árbol de producto", detalle: "Género · Mundo · Línea · Equivalencia · Agrupación talla.", estado: "listo" },
   { id: "M2", nombre: "Agrupaciones y marcas", detalle: "Agrupación de marca administrable y marcas por equivalencia.", estado: "pendiente" },
   { id: "M3", nombre: "Agrupaciones de estacionalidad", detalle: "Qué equivalencias comparten curva.", estado: "pendiente" },
   { id: "M4", nombre: "Tiendas y aperturas", detalle: "Tiendas, CD y fechas de apertura.", estado: "pendiente" },

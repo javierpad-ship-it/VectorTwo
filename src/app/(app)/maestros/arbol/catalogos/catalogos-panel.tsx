@@ -19,11 +19,16 @@ import { BadgeTemporada, VistaPreviaNombre, mensajeError } from "../comunes";
 
 type Pestana = "generos" | "mundos" | "lineas" | "tallas";
 
+function capitalizar(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 export function CatalogosPanel({ rol }: { rol: Rol }) {
   const [pestana, setPestana] = useState<Pestana>("generos");
-  // El árbol (con inactivos) da los conteos de nodos por género y mundo para
-  // las columnas y para avisar cuántos quedarán ocultos al desactivar.
-  const { arbol, recargar: recargarArbol } = useArbol(true);
+  // El árbol (con inactivos) solo sirve para avisar cuántos nodos vigentes
+  // quedarán ocultos al desactivar un género o mundo; los conteos de las
+  // tablas vienen de la propia API de cada catálogo.
+  const { arbol, error: errorArbol, setError: setErrorArbol, recargar: recargarArbol } = useArbol(true);
   const conteos = useMemo(() => contarNodosVigentes(arbol), [arbol]);
   const admin = esAdmin(rol);
 
@@ -55,6 +60,12 @@ export function CatalogosPanel({ rol }: { rol: Rol }) {
         onCambiar={setPestana}
       />
 
+      {errorArbol && (
+        <Alert onCerrar={() => setErrorArbol(null)}>
+          No se pudo cargar el árbol para calcular los avisos de desactivación: {errorArbol}
+        </Alert>
+      )}
+
       {pestana === "generos" && (
         <CatalogoPlano
           key="generos"
@@ -62,7 +73,7 @@ export function CatalogosPanel({ rol }: { rol: Rol }) {
           singular="género"
           plural="géneros"
           puedeEditar={admin}
-          conteo={conteos.porGenero}
+          vigentes={conteos.porGenero}
           onCambio={recargarArbol}
         />
       )}
@@ -73,7 +84,7 @@ export function CatalogosPanel({ rol }: { rol: Rol }) {
           singular="mundo"
           plural="mundos"
           puedeEditar={admin}
-          conteo={conteos.porMundo}
+          vigentes={conteos.porMundo}
           onCambio={recargarArbol}
         />
       )}
@@ -87,43 +98,48 @@ export function CatalogosPanel({ rol }: { rol: Rol }) {
 
 type EdicionCatalogo = { id: string; nombre: string; codigo: string; orden: string };
 
+/**
+ * Mantenimiento de géneros y mundos. La columna "Nodos" y el bloqueo de
+ * Eliminar usan `fila.nodos` (todos los nodos, según la API); `vigentes`
+ * solo alimenta el aviso del `confirm` de desactivar.
+ */
 function CatalogoPlano({
   recurso,
   singular,
   plural,
   puedeEditar,
-  conteo,
+  vigentes,
   onCambio,
 }: {
   recurso: "generos" | "mundos";
   singular: string;
   plural: string;
   puedeEditar: boolean;
-  conteo: Map<string, number>;
+  vigentes: Map<string, number>;
   onCambio: () => Promise<void>;
 }) {
   const { datos, cargando, error, setError, recargar } = useColeccion<CatalogoFila>(`/api/${recurso}?incluir_inactivos=1`);
   const [form, setForm] = useState({ nombre: "", codigo: "", codigoTocado: false, orden: "" });
   const [guardando, setGuardando] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [edicion, setEdicion] = useState<EdicionCatalogo | null>(null);
 
   const nombreNormalizado = normalizarNombre(form.nombre);
   const codigoPropuesto = form.codigoTocado ? aCodigo(form.codigo) : aCodigo(nombreNormalizado);
 
-  async function refrescar() {
-    await Promise.all([recargar(), onCambio()]);
-  }
-
   async function ejecutar(accion: () => Promise<unknown>) {
+    setOcupado(true);
     setError(null);
     try {
       await accion();
-      await refrescar();
+      await Promise.all([recargar(), onCambio()]);
       return true;
     } catch (e) {
       setError(mensajeError(e));
       return false;
+    } finally {
+      setOcupado(false);
     }
   }
 
@@ -139,7 +155,7 @@ function CatalogoPlano({
       })
     );
     if (ok) {
-      setAviso(`${singular.charAt(0).toUpperCase() + singular.slice(1)} ${nombreNormalizado} creado.`);
+      setAviso(`${capitalizar(singular)} ${nombreNormalizado} creado.`);
       setForm({ nombre: "", codigo: "", codigoTocado: false, orden: "" });
     }
     setGuardando(false);
@@ -161,7 +177,8 @@ function CatalogoPlano({
 
   function alternarActivo(f: CatalogoFila) {
     if (f.activo) {
-      const n = conteo.get(f.id) ?? 0;
+      // El aviso habla de nodos vigentes (los que de verdad se verán desaparecer del árbol).
+      const n = vigentes.get(f.id) ?? 0;
       const detalle = n > 0 ? ` Quedarán ocultos ${n} nodo${n === 1 ? "" : "s"} del árbol hasta que lo reactives.` : "";
       if (!confirm(`¿Desactivar el ${singular} ${f.nombre}?${detalle}`)) return;
     }
@@ -208,7 +225,7 @@ function CatalogoPlano({
     {
       clave: "nodos",
       titulo: "Nodos",
-      render: (f) => <span className="text-tinta-suave">{conteo.get(f.id) ?? 0}</span>,
+      render: (f) => <span className="text-tinta-suave">{f.nodos}</span>,
     },
     {
       clave: "estado",
@@ -222,13 +239,14 @@ function CatalogoPlano({
       clave: "acciones",
       titulo: "",
       className: "text-right",
-      render: (f) =>
-        edicion?.id === f.id ? (
+      render: (f) => {
+        const tieneNodos = f.nodos > 0;
+        return edicion?.id === f.id ? (
           <div className="flex justify-end gap-1">
-            <Button tamano="sm" onClick={guardarEdicion}>
-              Guardar
+            <Button tamano="sm" disabled={ocupado} onClick={guardarEdicion}>
+              {ocupado ? "Guardando…" : "Guardar"}
             </Button>
-            <Button variante="fantasma" tamano="sm" onClick={() => setEdicion(null)}>
+            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => setEdicion(null)}>
               Cancelar
             </Button>
           </div>
@@ -237,24 +255,26 @@ function CatalogoPlano({
             <Button
               variante="fantasma"
               tamano="sm"
+              disabled={ocupado}
               onClick={() => setEdicion({ id: f.id, nombre: f.nombre, codigo: f.codigo, orden: String(f.orden) })}
             >
               Editar
             </Button>
-            <Button variante="fantasma" tamano="sm" onClick={() => alternarActivo(f)}>
+            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(f)}>
               {f.activo ? "Desactivar" : "Reactivar"}
             </Button>
             <Button
               variante="peligro"
               tamano="sm"
-              disabled={(conteo.get(f.id) ?? 0) > 0}
-              title={(conteo.get(f.id) ?? 0) > 0 ? "Tiene nodos: desactívalo en vez de eliminarlo." : undefined}
+              disabled={ocupado || tieneNodos}
+              title={tieneNodos ? "Tiene nodos: desactívalo en vez de eliminarlo." : undefined}
               onClick={() => eliminar(f)}
             >
               Eliminar
             </Button>
           </div>
-        ),
+        );
+      },
     });
   }
 
@@ -284,7 +304,7 @@ function CatalogoPlano({
               <Input type="number" min={0} value={form.orden} onChange={(e) => setForm({ ...form, orden: e.target.value })} />
             </Field>
             <div className="flex flex-wrap items-center gap-4 md:col-span-4">
-              <Button type="submit" disabled={guardando || !nombreNormalizado || !codigoPropuesto}>
+              <Button type="submit" disabled={guardando || ocupado || !nombreNormalizado || !codigoPropuesto}>
                 {guardando ? "Creando…" : `Crear ${singular}`}
               </Button>
               <VistaPreviaNombre nombre={nombreNormalizado} codigo={codigoPropuesto} />
@@ -295,7 +315,7 @@ function CatalogoPlano({
         <Alert tono="info">Los {plural} los gestiona un administrador. Acá puedes consultarlos.</Alert>
       )}
 
-      <Card titulo={plural.charAt(0).toUpperCase() + plural.slice(1)}>
+      <Card titulo={capitalizar(plural)}>
         <DataTable columnas={columnas} filas={datos} claveFila={(f) => f.id} cargando={cargando} />
         <p className="mt-3 text-xs text-tinta-suave">
           Desactivar oculta sus nodos del árbol sin perderlos; eliminar solo es posible sin nodos asociados.
@@ -313,6 +333,7 @@ function Lineas({ puedeEditar, onCambio }: { puedeEditar: boolean; onCambio: () 
   const { datos, cargando, error, setError, recargar } = useColeccion<LineaFila>("/api/lineas?incluir_inactivos=1");
   const [form, setForm] = useState({ nombre: "", codigo: "", codigoTocado: false, temporada: "Todo el año" as Temporada });
   const [guardando, setGuardando] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [edicion, setEdicion] = useState<EdicionLinea | null>(null);
   const [filtro, setFiltro] = useState("");
@@ -323,6 +344,7 @@ function Lineas({ puedeEditar, onCambio }: { puedeEditar: boolean; onCambio: () 
   const filas = consulta ? datos.filter((l) => l.nombre.includes(consulta) || l.codigo.includes(aCodigo(consulta))) : datos;
 
   async function ejecutar(accion: () => Promise<unknown>) {
+    setOcupado(true);
     setError(null);
     try {
       await accion();
@@ -331,6 +353,8 @@ function Lineas({ puedeEditar, onCambio }: { puedeEditar: boolean; onCambio: () 
     } catch (e) {
       setError(mensajeError(e));
       return false;
+    } finally {
+      setOcupado(false);
     }
   }
 
@@ -406,6 +430,7 @@ function Lineas({ puedeEditar, onCambio }: { puedeEditar: boolean; onCambio: () 
           <Select
             value={l.temporada}
             onChange={(e) => cambiarTemporada(l, e.target.value as Temporada)}
+            disabled={ocupado}
             className="h-8 w-36"
             aria-label={`Temporada de ${l.nombre}`}
           >
@@ -439,25 +464,30 @@ function Lineas({ puedeEditar, onCambio }: { puedeEditar: boolean; onCambio: () 
       render: (l) =>
         edicion?.id === l.id ? (
           <div className="flex justify-end gap-1">
-            <Button tamano="sm" onClick={guardarEdicion}>
-              Guardar
+            <Button tamano="sm" disabled={ocupado} onClick={guardarEdicion}>
+              {ocupado ? "Guardando…" : "Guardar"}
             </Button>
-            <Button variante="fantasma" tamano="sm" onClick={() => setEdicion(null)}>
+            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => setEdicion(null)}>
               Cancelar
             </Button>
           </div>
         ) : (
           <div className="flex justify-end gap-1">
-            <Button variante="fantasma" tamano="sm" onClick={() => setEdicion({ id: l.id, nombre: l.nombre, codigo: l.codigo })}>
+            <Button
+              variante="fantasma"
+              tamano="sm"
+              disabled={ocupado}
+              onClick={() => setEdicion({ id: l.id, nombre: l.nombre, codigo: l.codigo })}
+            >
               Editar
             </Button>
-            <Button variante="fantasma" tamano="sm" onClick={() => alternarActivo(l)}>
+            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(l)}>
               {l.activo ? "Desactivar" : "Reactivar"}
             </Button>
             <Button
               variante="peligro"
               tamano="sm"
-              disabled={l.nodos > 0}
+              disabled={ocupado || l.nodos > 0}
               title={l.nodos > 0 ? "Está en nodos del árbol: desactívala en vez de eliminarla." : undefined}
               onClick={() => eliminar(l)}
             >
@@ -500,7 +530,7 @@ function Lineas({ puedeEditar, onCambio }: { puedeEditar: boolean; onCambio: () 
               </Select>
             </Field>
             <div className="flex flex-wrap items-center gap-4 md:col-span-4">
-              <Button type="submit" disabled={guardando || !nombreNormalizado || !codigoPropuesto}>
+              <Button type="submit" disabled={guardando || ocupado || !nombreNormalizado || !codigoPropuesto}>
                 {guardando ? "Creando…" : "Crear línea"}
               </Button>
               <VistaPreviaNombre nombre={nombreNormalizado} codigo={codigoPropuesto} />
