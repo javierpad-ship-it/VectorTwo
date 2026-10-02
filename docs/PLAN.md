@@ -38,7 +38,8 @@ Reglas confirmadas con Javier:
 - La **Equivalencia cuelga del nodo Género-Mundo-Línea** (Denim-Hombre-Urbano y Denim-Mujer-Urbano tienen equivalencias distintas).
 - Una **Marca está en más de una Equivalencia** → relación muchos a muchos.
 - **Agrupación Talla**: dos valores, *Tallas centrales* y *Tallas extremas*, como catálogo cerrado. No hay tallas individuales: la venta y el stock llegan ya consolidados por agrupación, que en Fase 2 será una columna de esas filas.
-- Las filas sin equivalencia definida (vacío o `-` en el archivo) caen en una equivalencia genérica `SIN EQUIVALENCIA` por nodo (`es_generica`); las líneas sin mundo caen en el mundo `SIN ASIGNAR`.
+- Las filas sin equivalencia definida (vacío o `-` en el archivo) caen en una equivalencia genérica `SIN EQUIVALENCIA` por nodo (`es_generica`).
+- **Toda línea tiene mundo.** No existe un mundo comodín: una fila de archivo con el mundo vacío es un error del archivo, el importador la omite (`mundo_vacio`) y la previsualización la lista para corregirla.
 
 ```
 generos ──┐
@@ -53,7 +54,7 @@ perfiles (admin · planner · comprador)
 |---|---|---|
 | `perfiles` | `id → auth.users`, `email`, `nombre`, `rol`, `activo` | M0 |
 | `generos` | `codigo` (H, M, I…), `nombre`, `orden` | M1 |
-| `mundos` | `codigo`, `nombre`, `orden` | M1 |
+| `mundos` | `codigo`, `nombre`, `orden`; seed de 5 (CASUAL, URBANO, DEPORTIVO, FORMAL, RI) | M1 |
 | `lineas` | `codigo`, `nombre`, `temporada` (Verano / Invierno / Todo el año) | M1 |
 | `genero_mundo_linea` | `genero_id`, `mundo_id`, `linea_id`, unique de la tripleta | M1 |
 | `equivalencias` | `genero_mundo_linea_id`, `codigo`, `nombre`, `es_generica`; unique(nodo, nombre), unique(nodo, codigo), una genérica por nodo; `agrupacion_estacionalidad_id` la añade M3 | M1 (FK en M3) |
@@ -118,7 +119,7 @@ Definition of Done: migración aplicada e idempotente · tipos regenerados · to
 ## 7. Pendientes que entrega Javier
 
 - Proyecto Supabase `vector-two` creado en el dashboard (la creación desde la sesión expiró). Bloquea los hitos de M0 y M1 contra la base real.
-- Árbol real: recibido (`datos/arbol-lineas.csv`) y verificado con el importador. Faltan las respuestas a las preguntas abiertas de `docs/modulos/01-arbol-producto.md` (qué hacer con SIN ASIGNAR, agrupar géneros, temporadas de las líneas, significado de RI y OTROS, códigos ASCII, visibilidad para el comprador) → M1.
+- Árbol real: recibido (`datos/arbol-lineas.csv`) y verificado con el importador. Resuelto: las 14 filas con mundo vacío son errores del archivo (no existe un mundo SIN ASIGNAR; se omiten y se listan en la previsualización) y vacío y `-` en equivalencia significan lo mismo. Faltan las respuestas al resto de preguntas abiertas de `docs/modulos/01-arbol-producto.md` (agrupar géneros, temporadas de las líneas, significado de RI y OTROS, códigos ASCII, visibilidad para el comprador) → M1.
 - Tallas: resuelto, no hay tallas individuales; la venta y el stock llegan consolidados por agrupación.
 - Agrupaciones de marca: recibidas (Ultra Low, Mid Value, Valor, Reconocido, Premium). Falta la lista de marcas con su agrupación y sus equivalencias → M2.
 - Lista de tiendas actuales (sirve el archivo CODIGOS DE TIENDAS LUKERS de V1) → M4.

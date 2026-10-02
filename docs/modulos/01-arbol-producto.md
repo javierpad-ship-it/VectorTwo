@@ -1,6 +1,6 @@
 # M1 · Árbol de producto
 
-> Estado: **construido, pendiente de recorrer el hito contra la base real** (el proyecto Supabase aún no existe). Lint, typecheck, 110 tests, build y `scripts/validar-migraciones-local.sh` en verde. Módulo anterior: [00-cimientos](00-cimientos.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final.
+> Estado: **construido, pendiente de recorrer el hito contra la base real** (el proyecto Supabase aún no existe). Lint, typecheck, 112 tests, build y `scripts/validar-migraciones-local.sh` en verde. Módulo anterior: [00-cimientos](00-cimientos.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final; las dos últimas entradas de esa sección (toda línea tiene mundo; revisión previa detallada) son ajustes que Javier confirmó después del cierre del módulo.
 
 ## Objetivo
 
@@ -13,7 +13,7 @@ Migración `supabase/migrations/0001_arbol_producto.sql`, idempotente, sin bloqu
 ### Convenciones comunes a los nombres y códigos
 
 - `nombre` se guarda **normalizado**: Unicode NFC, `trim`, espacios internos colapsados a uno, mayúsculas con reglas de español (`toLocaleUpperCase("es")`, así `ñ → Ñ`). Lo garantiza zod en todos los endpoints de escritura y el importador; la base solo exige longitud 1–120.
-- `codigo` es un identificador corto estable, ASCII: se deriva del nombre quitando acentos, `Ñ → N`, cualquier otro carácter no alfanumérico pasa a `_`, se colapsan `_` repetidos y se recortan los de los bordes. Máximo 40 caracteres. Ejemplos: `NIÑAS → NINAS`, `SIN ASIGNAR → SIN_ASIGNAR`, `POLO M/C → POLO_M_C`, `H → H`. Se propone al crear y el usuario puede cambiarlo; una vez creado, cambiarlo es raro (lo usarán futuros códigos PIVOT y abreviaturas, como en V1, donde las abreviaturas eran ASCII).
+- `codigo` es un identificador corto estable, ASCII: se deriva del nombre quitando acentos, `Ñ → N`, cualquier otro carácter no alfanumérico pasa a `_`, se colapsan `_` repetidos y se recortan los de los bordes. Máximo 40 caracteres. Ejemplos: `NIÑAS → NINAS`, `SIN EQUIVALENCIA → SIN_EQUIVALENCIA`, `POLO M/C → POLO_M_C`, `H → H`. Se propone al crear y el usuario puede cambiarlo; una vez creado, cambiarlo es raro (lo usarán futuros códigos PIVOT y abreviaturas, como en V1, donde las abreviaturas eran ASCII).
 - Un campo `orden integer not null default 0` en los catálogos que se muestran como lista fija (géneros, mundos, agrupaciones de talla). Las líneas y equivalencias se ordenan alfabéticamente.
 
 ### `generos`
@@ -50,9 +50,8 @@ Misma estructura que `generos` (`codigo`, `nombre`, `orden`, mismos únicos). Se
 | `DEPORTIVO` | DEPORTIVO | 30 |
 | `FORMAL` | FORMAL | 40 |
 | `RI` | RI | 50 |
-| `SIN_ASIGNAR` | SIN ASIGNAR | 999 |
 
-`SIN ASIGNAR` es un mundo normal (activo) con un significado especial para el importador: ahí caen las líneas cuyo mundo viene vacío. No hay tabla género-mundo: **todo mundo existe en todo género** (decisión registrada); la pantalla y `/api/arbol` lo reflejan devolviendo los 6 mundos bajo cada género aunque no tengan líneas.
+No existe un mundo "sin asignar": Javier confirmó que **toda línea tiene mundo**, así que una fila de archivo con el mundo en blanco es un error del archivo y el importador la omite (motivo `mundo_vacio`) en vez de inventarle un destino. No hay tabla género-mundo: **todo mundo existe en todo género** (decisión registrada); la pantalla y `/api/arbol` lo reflejan devolviendo los 5 mundos bajo cada género aunque no tengan líneas.
 
 ### `lineas`
 
@@ -72,7 +71,7 @@ La Línea es **catálogo**: PANTALON existe una sola vez aquí aunque esté en 2
 | `mundo_id` | `uuid not null references mundos(id) on delete restrict` | |
 | `linea_id` | `uuid not null references lineas(id) on delete restrict` | |
 
-Índices: `unique (genero_id, mundo_id, linea_id)` (cubre las búsquedas por género y género-mundo), `index (linea_id)` ("¿en qué nodos está PANTALON?"), `index (mundo_id)` (listar lo que quedó en SIN ASIGNAR).
+Índices: `unique (genero_id, mundo_id, linea_id)` (cubre las búsquedas por género y género-mundo), `index (linea_id)` ("¿en qué nodos está PANTALON?"), `index (mundo_id)` ("¿qué líneas tiene este mundo en toda la red?").
 
 `activo = false` en el nodo significa "esta línea ya no se trabaja en este género-mundo"; no toca la línea del catálogo ni sus otros nodos.
 
@@ -145,7 +144,7 @@ editarLineaSchema = z.object({ nombre, codigo, temporada: z.enum(TEMPORADAS), ac
 | Ruta | Método | Guard | Cuerpo | Respuesta |
 |---|---|---|---|---|
 | `/api/arbol/nodos` | POST | `requirePlanner` | `{ genero_id: uuid, mundo_id: uuid, linea_id: uuid }` | nodo creado, `201`. `404` si alguno de los tres no existe · `409` si la tripleta ya existe (el mensaje dice si está inactiva, para que la reactiven en vez de duplicar) |
-| `/api/arbol/nodos/[id]` | PATCH | `requirePlanner` | `{ activo?: boolean, mundo_id?: uuid }` (al menos uno) | nodo actualizado. `mundo_id` sirve para sacar una línea de SIN ASIGNAR; `409` si en el mundo destino ya existe esa línea para ese género |
+| `/api/arbol/nodos/[id]` | PATCH | `requirePlanner` | `{ activo?: boolean, mundo_id?: uuid }` (al menos uno) | nodo actualizado. `mundo_id` mueve la línea a otro mundo del mismo género (se lleva sus equivalencias); `409` si en el mundo destino ya existe esa línea para ese género |
 | `/api/arbol/nodos/[id]` | DELETE | `requirePlanner` | — | `{ id }`; `409` si tiene equivalencias |
 
 No hay GET de nodos: la pantalla y el buscador trabajan sobre `/api/arbol`.
@@ -163,13 +162,13 @@ No se mueve una equivalencia de un nodo a otro en M1 (fuera de alcance; se crea 
 
 ### Árbol completo
 
-`GET /api/arbol?incluir_inactivos=1` · `requireUser`. Una sola llamada para la pantalla; el handler hace cinco `select` (géneros, mundos, líneas, nodos, equivalencias) y arma la estructura con la función pura `armarArbol()` (`src/lib/arbol/armar-arbol.ts`, probada con vitest). Con el árbol real son 570 nodos y 1 804 equivalencias, del orden de 250 KB sin comprimir: aceptable para una pantalla de maestro, sin paginación hacia el cliente (hacia la base sí se lee paginado con `leerTodo`).
+`GET /api/arbol?incluir_inactivos=1` · `requireUser`. Una sola llamada para la pantalla; el handler hace cinco `select` (géneros, mundos, líneas, nodos, equivalencias) y arma la estructura con la función pura `armarArbol()` (`src/lib/arbol/armar-arbol.ts`, probada con vitest). Con el árbol real son 556 nodos y 1 790 equivalencias, del orden de 250 KB sin comprimir: aceptable para una pantalla de maestro, sin paginación hacia el cliente (hacia la base sí se lee paginado con `leerTodo`).
 
 ```jsonc
 { "data": {
   "generos": [
     { "id": "…", "codigo": "H", "nombre": "HOMBRE", "orden": 10, "activo": true,
-      "mundos": [                                 // SIEMPRE los 6 mundos, aunque lineas esté vacío
+      "mundos": [                                 // SIEMPRE los 5 mundos, aunque lineas esté vacío
         { "id": "…", "codigo": "URBANO", "nombre": "URBANO", "orden": 20, "activo": true,
           "lineas": [
             { "nodo_id": "…", "linea_id": "…", "codigo": "PANTALON", "nombre": "PANTALON",
@@ -181,7 +180,7 @@ No se mueve una equivalencia de un nodo a otro en M1 (fuera de alcance; se crea 
           ] }
       ] }
   ],
-  "resumen": { "generos": 8, "mundos": 6, "lineas": 86, "nodos": 570, "equivalencias": 1804, "nodos_sin_asignar": 14 }
+  "resumen": { "generos": 8, "mundos": 5, "lineas": 86, "nodos": 556, "equivalencias": 1790 }
 } }
 ```
 
@@ -205,12 +204,12 @@ El cliente parsea el CSV con **papaparse** en el navegador (dependencia nueva: `
 Algoritmo, idéntico en los dos modos hasta el último paso (función pura `planificarImportacion(filas, estadoActual)` en `src/lib/arbol/importar.ts`):
 
 1. Normalizar cada fila (`normalizarNombre` en los cuatro campos). Descartar filas con `linea` vacía o cuyo género sea `TOTAL` (fila de totales de Excel) → `omitidas` con motivo.
-2. Resolver **género** contra los existentes **activos** por `aCodigo(valor) = codigo` o `nombre`. Si no existe → `omitida` (`genero_desconocido`); si existe pero está inactivo → `omitida` (`genero_inactivo`). En ambos casos `omitidas[].detalle` trae el valor que no se reconoció. El importador **no crea géneros ni mundos**: son raíz, con 8 y 6 valores fijos, y su escritura es de admin; un error de tipeo en el archivo no debe crear una raíz nueva ni revivir una desactivada.
-3. Resolver **mundo** igual (`mundo_desconocido` / `mundo_inactivo`). Vacío → mundo `SIN_ASIGNAR` y la fila se anota en `sin_mundo`; si `SIN_ASIGNAR` está inactivo la fila se omite con `mundo_inactivo`. Si el mundo `SIN_ASIGNAR` no existiera en la base → `409 "Falta el mundo SIN ASIGNAR; reaplica la migración."`.
+2. Resolver **género** contra los existentes **activos** por `aCodigo(valor) = codigo` o `nombre`. Si no existe → `omitida` (`genero_desconocido`); si existe pero está inactivo → `omitida` (`genero_inactivo`). En ambos casos `omitidas[].detalle` trae el valor que no se reconoció. El importador **no crea géneros ni mundos**: son raíz, con 8 y 5 valores fijos, y su escritura es de admin; un error de tipeo en el archivo no debe crear una raíz nueva ni revivir una desactivada.
+3. Resolver **mundo**. Vacío → `omitida` (`mundo_vacio`): no existen líneas sin mundo, así que la fila es un error del archivo y no genera nada. Si no está vacío, se resuelve igual que el género (`mundo_desconocido` / `mundo_inactivo`).
 4. **Línea** por `nombre`: existe → `existentes.lineas++`; no → `crear.lineas` con `codigo = codigoUnico(aCodigo(nombre))` y `temporada` por defecto. `codigoUnico` agrega `_2`, `_3`… si otra línea (de la base o del mismo archivo) ya usa ese código ASCII.
 5. **Nodo** por tripleta: existe → `existentes.nodos++`; no → `crear.nodos`.
 6. **Equivalencia**: si el valor es vacío o `-` → la genérica del nodo (una sola aunque haya varias filas así). Si no → por `(nodo, nombre)`. Existe → `existentes.equivalencias++`; no → `crear.equivalencias` o `crear.equivalencias_genericas`. El código se resuelve con `codigoUnico` dentro del nodo y `SIN_EQUIVALENCIA` queda reservado para la genérica: una equivalencia real llamada `SIN-EQUIVALENCIA` recibiría `SIN_EQUIVALENCIA_2`.
-7. Duplicados dentro del archivo (misma tripleta + misma equivalencia tras normalizar) se cuentan una vez y se anotan en `omitidas` (`duplicada_en_archivo`). Filas que apuntan a algo existente pero inactivo se cuentan en `existentes_inactivos` y **no se reactivan**: el importador nunca cambia `activo`.
+7. Duplicados dentro del archivo (misma tripleta + misma equivalencia tras normalizar) se cuentan una vez y se anotan en `omitidas` (`duplicada_en_archivo`, con `fila_original` apuntando a la primera aparición). Una fila con mundo vacío se omite antes de esta comprobación, así que dos filas iguales sin mundo salen las dos como `mundo_vacio`, no una como duplicada. Filas que apuntan a algo existente pero inactivo se cuentan en `existentes_inactivos` y **no se reactivan**: el importador nunca cambia `activo`.
 8. `previsualizar`: devuelve el reporte sin escribir. `aplicar`: inserta en orden líneas → nodos → equivalencias, en tandas de 500, con `insert … on conflict do nothing` apoyado en los índices únicos. No hay transacción (supabase-js no las expone y no queremos lógica en una función SQL); si una tanda falla a mitad, la respuesta es `500` con lo que alcanzó a crear y **reimportar completa el resto sin duplicar**: la idempotencia es la red de seguridad.
 
 Reporte (igual en ambos modos; en `aplicar`, `creados` es lo realmente insertado):
@@ -218,17 +217,22 @@ Reporte (igual en ambos modos; en `aplicar`, `creados` es lo realmente insertado
 ```jsonc
 { "data": {
   "modo": "previsualizar",
-  "totales": { "recibidas": 2002, "procesadas": 1804, "omitidas": 198 },
-  "crear":   { "lineas": 86, "nodos": 570, "equivalencias": 1416, "equivalencias_genericas": 388 },
+  "totales": { "recibidas": 2002, "procesadas": 1790, "omitidas": 212 },
+  "crear":   { "lineas": 86, "nodos": 556, "equivalencias": 1414, "equivalencias_genericas": 376 },
   "existentes": { "lineas": 0, "nodos": 0, "equivalencias": 0 },
   "existentes_inactivos": { "lineas": 0, "nodos": 0, "equivalencias": 0 },
-  "sin_mundo": [ { "fila": 213, "genero": "BEBE", "linea": "BODY", "equivalencia": "SIN EQUIVALENCIA" } ],
-  "omitidas": [ { "fila": 57, "motivo": "duplicada_en_archivo" }, { "fila": 900, "motivo": "mundo_desconocido", "detalle": "URBANOO" } ],
+  "omitidas": [
+    { "fila": 213, "motivo": "mundo_vacio", "genero": "BEBE", "mundo": "", "linea": "BODY", "equivalencia": "" },
+    { "fila": 57,  "motivo": "duplicada_en_archivo", "fila_original": 12, "genero": "H", "mundo": "URBANO", "linea": "PANTALON", "equivalencia": "JOGGER" },
+    { "fila": 900, "motivo": "mundo_desconocido", "detalle": "URBANOO", "genero": "M", "mundo": "URBANOO", "linea": "BLUSA", "equivalencia": "VARIOS" }
+  ],
   "muestra": { "lineas": ["BERMUDA", "BLUSA", "…"], "nodos": ["H / URBANO / PANTALON", "…"] }   // primeros 20 de cada tipo
 } }
 ```
 
-Los números del ejemplo son los del archivo actual (verificados por el test `tests/arbol.importar.test.ts`, que planifica el CSV real si está en `datos/`): 2 002 filas de datos, de las que 198 son duplicadas dentro del archivo tras normalizar; las 1 804 procesadas producen exactamente 1 804 equivalencias (1 416 reales + 388 genéricas, una por cada nodo que tenía vacío o `-`). `fila` es el índice 1-based dentro de `filas` tal como las mandó el cliente, para que la pantalla pueda señalar la fila del CSV; `detalle` es opcional y trae el valor no reconocido.
+Los números del ejemplo son los del archivo actual (verificados por el test `tests/arbol.importar.test.ts`, que planifica el CSV real si está en `datos/`): 2 002 filas de datos, de las que 14 vienen con el mundo vacío y 198 son duplicadas dentro del archivo tras normalizar; las 1 790 procesadas producen exactamente 1 790 equivalencias (1 414 reales + 376 genéricas, una por cada nodo que tenía vacío o `-`).
+
+Cada entrada de `omitidas` lleva la **fila completa** ya normalizada (`genero`, `mundo`, `linea`, `equivalencia`) además de `fila` y `motivo`, para que quien revisa pueda corregir el archivo sin tener que ir a buscar la fila a mano. `fila` es el índice 1-based dentro de `filas` tal como las mandó el cliente; `detalle` es opcional y trae el valor no reconocido (género o mundo); `fila_original` solo aparece en `duplicada_en_archivo` y señala la primera aparición, que sí se procesó. Motivos posibles (`MotivoOmision` en `src/lib/arbol/tipos.ts`): `linea_vacia`, `fila_total`, `genero_desconocido`, `genero_inactivo`, `mundo_vacio`, `mundo_desconocido`, `mundo_inactivo`, `duplicada_en_archivo`; la etiqueta legible de cada uno está en `ETIQUETA_MOTIVO_OMISION` (`tipos-api.ts`).
 
 ## Pantallas
 
@@ -243,15 +247,15 @@ Disposición en columnas (estilo Finder), de izquierda a derecha:
 | Columna | Contenido | Acciones admin | Acciones planner | Comprador |
 |---|---|---|---|---|
 | Géneros | Los 8, por `orden`; conteo de nodos vigentes | Gestionar en Catálogos (enlace) | — | ver |
-| Mundos del género elegido | Los 6 siempre; los que no tienen líneas en ese género, atenuados con "0 líneas"; SIN ASIGNAR resaltado si tiene nodos | Gestionar en Catálogos | — | ver |
-| Líneas del género-mundo | Lista con filtro por texto; badge de `temporada`; conteo de equivalencias | **Agregar línea** (combo con las líneas del catálogo que aún no están en este nodo + "crear línea nueva"), **Desactivar / Reactivar** nodo, **Mover a otro mundo** (solo visible si el mundo es SIN ASIGNAR o si activa "mostrar inactivos"), **Eliminar** (si no tiene equivalencias) | igual que admin | ver |
+| Mundos del género elegido | Los 5 siempre; los que no tienen líneas en ese género, atenuados con "0 líneas" | Gestionar en Catálogos | — | ver |
+| Líneas del género-mundo | Lista con filtro por texto; badge de `temporada`; conteo de equivalencias | **Agregar línea** (combo con las líneas del catálogo que aún no están en este nodo + "crear línea nueva"), **Desactivar / Reactivar** nodo, **Mover a otro mundo** (en cualquier nodo; el destino es otro mundo activo del mismo género y se lleva las equivalencias), **Eliminar** (si no tiene equivalencias) | igual que admin | ver |
 | Equivalencias del nodo | Tabla `nombre · codigo · estado`; la genérica al final con badge "Genérica" | **Nueva equivalencia** (nombre; código propuesto editable), **Renombrar**, **Desactivar / Reactivar**, **Eliminar**, **Agregar SIN EQUIVALENCIA** (si el nodo no la tiene) | igual | ver |
 
 Encima de las columnas:
 
-- **Buscador de línea** (global): al escribir ≥ 2 letras lista las líneas que coinciden y, bajo cada una, los nodos donde existe ("PANTALON · en 26 nodos: HOMBRE / URBANO (7 eq.), MUJER / CASUAL (4 eq.) …"). Clic → selecciona ese nodo en las columnas. Funciona sobre los datos ya cargados, sin llamadas.
+- **Buscador de línea** (global): al escribir ≥ 2 letras lista las líneas que coinciden y, bajo cada una, los nodos donde existe ("PANTALON · en 25 nodos: HOMBRE / URBANO (7 eq.), MUJER / CASUAL (4 eq.) …"). Clic → selecciona ese nodo en las columnas. Funciona sobre los datos ya cargados, sin llamadas.
 - Interruptor **Mostrar inactivos**: recarga `/api/arbol?incluir_inactivos=1`; lo inactivo se muestra atenuado con badge "Inactivo", y lo no vigente por un padre inactivo con "Oculto por {género|mundo|línea} inactivo".
-- Resumen: `8 géneros · 6 mundos · 86 líneas · 570 nodos · 1 804 equivalencias · 14 en SIN ASIGNAR` (del `resumen` de la API). "14 en SIN ASIGNAR" es un enlace que selecciona ese mundo.
+- Resumen: `8 géneros · 5 mundos · 86 líneas · 556 nodos · 1 790 equivalencias` (del `resumen` de la API).
 - Botón **Importar CSV** (admin y planner) que abre la pestaña de importación.
 
 Validaciones visibles: nombre obligatorio; se muestra el nombre normalizado antes de guardar ("se guardará como PANTALON CARGO"); el código se previsualiza; los errores `409` de la API se muestran con `Alert` tal cual llegan. Las acciones destructivas piden `confirm` como en `/usuarios`.
@@ -259,9 +263,12 @@ Validaciones visibles: nombre obligatorio; se muestra el nombre normalizado ante
 ### Pestaña Importar CSV
 
 1. Selector de archivo `.csv`. Se parsea en el navegador; se muestran nombre, número de filas y el mapeo de las cuatro columnas (autodetectado, editable con `Select`). Las cuatro son obligatorias para habilitar el siguiente paso.
-2. **Previsualizar** → `POST …/importar` con `modo: previsualizar`. Se pinta el reporte: tarjetas con `crear` / `existentes` / `omitidas`, tabla `sin_mundo` ("estas N líneas irán a SIN ASIGNAR; podrás moverlas después"), tabla `omitidas` con fila y motivo, muestra de lo que se creará.
-3. **Aplicar** se habilita solo después de una previsualización del mismo archivo (cambiar el archivo o el mapeo la invalida). Manda `modo: aplicar`, muestra el reporte final y un botón "Ver el árbol" que recarga.
-4. Reimportar el mismo archivo muestra `crear` en cero en la previsualización; la pantalla lo dice en claro ("Nada nuevo que crear").
+2. **Previsualizar** → `POST …/importar` con `modo: previsualizar`. Se pinta el reporte: cuatro tarjetas (`Se crearán` / `Ya existían` / `Existentes inactivos` / `Omitidas`, esta última desglosada en "Con errores" y "Repetidas en el archivo"), el bloque de revisión previa descrito abajo y la muestra de líneas y nodos que se crearán.
+3. **Revisión previa de lo omitido.** Javier quiere ver qué está mal **antes** de aplicar, así que las omitidas se separan en dos bloques con la fila completa (`fila · género · mundo · línea · equivalencia`):
+   - **Filas con errores**: mundo vacío, género o mundo desconocidos o inactivos, línea vacía, fila de totales. Columnas adicionales `Motivo` (badge) y `Detalle` (el valor no reconocido). Encima, chips para filtrar por motivo con su conteo, un aviso en rojo "Estas filas NO se cargarán. Corrige el archivo y vuelve a previsualizar, o aplica para cargar solo las válidas" (tras aplicar cambia a "NO se cargaron… lo que ya entró se reconocerá como existente") y el botón **Descargar omitidas (CSV)**, que genera en el navegador un CSV con todas las omitidas (errores y repetidas) con BOM para que Excel respete los acentos.
+   - **Repetidas en el archivo**: informativas; misma combinación que una fila anterior, se procesan una sola vez y no hay que corregirlas. Columna `Repite la fila` con `fila_original`.
+4. **Aplicar** se habilita solo después de una previsualización del mismo archivo (cambiar el archivo o el mapeo la invalida). El `confirm` dice cuántos registros se crearán y repite cuántas filas con errores quedarán fuera y cuántas repetidas se cargan una sola vez. Manda `modo: aplicar`, muestra el reporte final (mismo formato, con los mismos bloques de omitidas) y un botón "Ver el árbol" que recarga.
+5. Reimportar el mismo archivo muestra `crear` en cero en la previsualización; la pantalla lo dice en claro ("Nada nuevo que crear").
 
 ### `/maestros/arbol/catalogos` — Catálogos
 
@@ -285,16 +292,16 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 **`normalizar.ts`**
 
 1. `normalizarNombre(" pantalón   cargo ") === "PANTALÓN CARGO"`; NFC (la `ñ` descompuesta y la compuesta dan el mismo resultado); `null`/`undefined` → `""`.
-2. `aCodigo("Niñas") === "NINAS"`, `aCodigo("SIN ASIGNAR") === "SIN_ASIGNAR"`, `aCodigo("POLO M/C") === "POLO_M_C"`, `aCodigo("  --  ") === ""`, nunca supera 40 caracteres, solo `[A-Z0-9_]`.
+2. `aCodigo("Niñas") === "NINAS"`, `aCodigo("SIN EQUIVALENCIA") === "SIN_EQUIVALENCIA"`, `aCodigo("POLO M/C") === "POLO_M_C"`, `aCodigo("  --  ") === ""`, nunca supera 40 caracteres, solo `[A-Z0-9_]`.
 3. `esEquivalenciaGenerica(v)` es `true` para `""`, `"   "`, `"-"`, `"SIN EQUIVALENCIA"` (en cualquier caja) y `false` para `"VARIOS"`. Constantes `EQUIVALENCIA_GENERICA = { nombre: "SIN EQUIVALENCIA", codigo: "SIN_EQUIVALENCIA" }`.
 4. `TEMPORADAS = ["Verano", "Invierno", "Todo el año"]`; `esTemporada("Verano")`, no `esTemporada("verano")`.
 
 **`importar.ts` — `planificarImportacion(filas, estado)`** donde `estado` son los catálogos y nodos actuales en memoria:
 
-5. Una fila con género desconocido o mundo no vacío y desconocido va a `omitidas` con su motivo y no genera nada.
-6. Mundo vacío → se planifica bajo `SIN_ASIGNAR` y la fila aparece en `sin_mundo`.
+5. Una fila con género o mundo desconocido va a `omitidas` con su motivo y el valor en `detalle`, y no genera nada. Toda omitida lleva la fila completa normalizada.
+6. Mundo vacío → `omitida` con motivo `mundo_vacio`, sin `detalle` ni `fila_original`; el reporte no tiene propiedad `sin_mundo`. El género se valida antes que el mundo (una fila con género desconocido y mundo vacío sale como `genero_desconocido`). Dos filas iguales sin mundo salen las dos como `mundo_vacio`.
 7. Equivalencia `""` y `"-"` en el mismo nodo producen **una sola** genérica; un nodo con solo genéricas crea el nodo y una genérica; un nodo con reales y genéricas crea las reales más una genérica.
-8. Filas duplicadas tras normalizar cuentan una vez (`duplicada_en_archivo`).
+8. Filas duplicadas tras normalizar cuentan una vez (`duplicada_en_archivo`) y `fila_original` apunta siempre a la primera aparición, también cuando `""`, `-` y `SIN EQUIVALENCIA` caen en la misma genérica; la equivalencia se muestra como vino (`-`), no como la genérica a la que cae.
 9. **Idempotencia**: `planificarImportacion(filas, aplicarPlan(estado, plan))` devuelve `crear` todo en cero y `existentes` igual a lo que se creó antes. Y aplicar dos veces el mismo plan produce el mismo estado.
 10. Lo existente pero inactivo se cuenta en `existentes_inactivos` y el plan no lo toca.
 11. Los conteos del plan son consistentes: `recibidas = procesadas + omitidas`.
@@ -304,7 +311,7 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 12. Cada género devuelve **todos** los mundos, con `lineas: []` donde no haya nodos.
 13. `nodoVigente(nodo, genero, mundo, linea)` es la conjunción de los cuatro `activo`; sin `incluirInactivos` un nodo no vigente no aparece, con él aparece con `vigente: false`.
 14. Orden: géneros y mundos por `orden, nombre`; líneas por `nombre`; equivalencias reales por `nombre` y la genérica al final.
-15. `resumen` cuenta exactamente lo devuelto (y `nodos_sin_asignar` solo los del mundo `SIN_ASIGNAR`).
+15. `resumen` cuenta exactamente lo devuelto: `generos`, `mundos`, `lineas` (distintas entre los nodos devueltos), `nodos`, `equivalencias`.
 
 **`reglas.ts`**
 
@@ -315,17 +322,18 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 
 ## Hito de prueba
 
-- [x] Checks automáticos: `npm run lint`, `npm run typecheck`, `npm test` (110 pruebas en 9 archivos), `npm run build` y `scripts/validar-migraciones-local.sh` (todas las migraciones aplicadas dos veces contra un Postgres local) en verde; `APP_VERSION = 0.2.0 · M1`.
+- [x] Checks automáticos: `npm run lint`, `npm run typecheck`, `npm test` (112 pruebas en 9 archivos), `npm run build` y `scripts/validar-migraciones-local.sh` (todas las migraciones aplicadas dos veces contra un Postgres local) en verde.
 - [ ] Prerrequisito de base real: M0 recorrido; `0001_arbol_producto.sql` aplicada dos veces en el proyecto `vector-two` sin error; tipos regenerados.
-- [ ] Tras la migración: 8 géneros, 6 mundos y 2 agrupaciones de talla en el orden del seed; 0 líneas, nodos y equivalencias; `GET /api/agrupaciones-talla` devuelve CENTRALES y EXTREMAS y la pestaña Agrupaciones de talla las muestra sin botones.
+- [ ] Tras la migración: 8 géneros, 5 mundos (CASUAL, URBANO, DEPORTIVO, FORMAL, RI) y 2 agrupaciones de talla en el orden del seed; 0 líneas, nodos y equivalencias; `GET /api/agrupaciones-talla` devuelve CENTRALES y EXTREMAS y la pestaña Agrupaciones de talla las muestra sin botones.
 - [ ] Como comprador: entra a `/maestros/arbol`, navega, no ve ningún botón de edición; `/maestros/arbol/catalogos` le redirige a `/`; `POST /api/lineas` le devuelve `403`.
 - [ ] Como planner: `POST /api/generos` devuelve `403`; en Catálogos las pestañas Géneros y Mundos no tienen formulario ni botones.
-- [ ] Como admin, en Importar CSV, carga `datos/arbol-lineas.csv`: el mapeo se autodetecta; **Previsualizar** reporta `recibidas 2002 · procesadas 1804 · omitidas 198` (todas `duplicada_en_archivo`), crear 86 líneas, 570 nodos (556 con mundo + 14 en SIN ASIGNAR), 1 416 equivalencias reales y 388 genéricas, 14 filas en `sin_mundo` (BEBE 2, JOVENCITAS 3, NIÑAS 4, NIÑOS 5), 0 géneros/mundos nuevos. Son los conteos que fija el test del importador; si difieren, cambió el archivo.
-- [ ] **Aplicar**: el reporte final coincide con la previsualización; el resumen de `/maestros/arbol` muestra `8 · 6 · 86 · 570 · 1 804 · 14 en SIN ASIGNAR`.
-- [ ] Reimportar el mismo archivo: previsualización con `crear` en cero y `existentes` igual a los totales; aplicar no cambia ningún conteo (verificar con `select count(*)` en las tres tablas antes y después).
-- [ ] Buscar `PANTALON`: aparece en 26 nodos. Abrir HOMBRE / URBANO / PANTALON y MUJER / URBANO / PANTALON: listas de equivalencias distintas; `VARIOS` aparece en ambos como filas independientes.
+- [ ] Como admin, en Importar CSV, carga `datos/arbol-lineas.csv`: el mapeo se autodetecta; **Previsualizar** reporta `recibidas 2002 · procesadas 1790 · omitidas 212`; la tarjeta Omitidas dice `Con errores 14 · Repetidas en el archivo 198`; crear 86 líneas, 556 nodos, 1 414 equivalencias reales y 376 genéricas, 0 géneros/mundos nuevos. Son los conteos que fija el test del importador; si difieren, cambió el archivo.
+- [ ] En el bloque **Filas con errores** aparecen las 14 filas con motivo "Mundo vacío" y la fila completa (BEBE 2, JOVENCITAS 3, NIÑAS 4, NIÑOS 5), el aviso de que no se cargarán, el chip de filtro "Mundo vacío (14)" y el botón **Descargar omitidas (CSV)**, que baja un archivo con 212 filas que Excel abre con los acentos correctos. El bloque **Repetidas en el archivo** lista 198 filas, cada una con la fila a la que repite.
+- [ ] **Aplicar**: el `confirm` repite "Quedarán fuera 14 filas con errores" y "198 filas repetidas se cargan una sola vez"; el reporte final coincide con la previsualización; el resumen de `/maestros/arbol` muestra `8 · 5 · 86 · 556 · 1 790`.
+- [ ] Reimportar el mismo archivo: previsualización con `crear` en cero y `existentes` igual a los totales; las mismas 14 filas siguen saliendo como errores; aplicar no cambia ningún conteo (verificar con `select count(*)` en las tres tablas antes y después).
+- [ ] Buscar `PANTALON`: aparece en 25 nodos (el archivo trae 26 tripletas con PANTALON, pero una tiene el mundo vacío y se omite). Abrir HOMBRE / URBANO / PANTALON y MUJER / URBANO / PANTALON: listas de equivalencias distintas; `VARIOS` aparece en ambos como filas independientes.
 - [ ] Un nodo que en el archivo solo tenía `-` muestra únicamente `SIN EQUIVALENCIA` con badge Genérica; uno mixto muestra las reales y la genérica al final.
-- [ ] Mundo SIN ASIGNAR: seleccionar BEBE / SIN ASIGNAR, mover una línea a CASUAL → desaparece de SIN ASIGNAR y aparece en CASUAL con sus equivalencias; intentar moverla a un mundo donde esa línea ya exista para BEBE → `409` legible.
+- [ ] Mover de mundo: en cualquier nodo, como admin o planner, "Mover a otro mundo" ofrece los otros mundos activos del género; mover una línea de BEBE / CASUAL a BEBE / URBANO la hace desaparecer de CASUAL y aparecer en URBANO con sus equivalencias; intentar moverla a un mundo donde esa línea ya exista para BEBE → `409` legible.
 - [ ] Crear a mano una línea nueva en Catálogos con nombre `  camisa   manga larga ` → se guarda como `CAMISA MANGA LARGA`, código `CAMISA_MANGA_LARGA`, temporada `Todo el año`; agregarla a HOMBRE / FORMAL desde el árbol; crearle una equivalencia; intentar crear otra con el mismo nombre en minúsculas → `409`; intentar agregarle una segunda `SIN EQUIVALENCIA` → `409`.
 - [ ] Cambiar temporada de una línea a `Invierno` en Catálogos y verlo reflejado en el badge del árbol.
 - [ ] Desactivar el mundo FORMAL como admin: sus nodos desaparecen del árbol; con "Mostrar inactivos" aparecen como "Oculto por mundo inactivo"; reactivar FORMAL los devuelve; un nodo que se había desactivado a mano antes sigue inactivo.
@@ -339,7 +347,7 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 - Tiendas (M4).
 - Agrupar géneros (Hombre / Mujer / Infantil): se decide con la respuesta de Javier; sería una columna `grupo` en `generos`.
 - Tallas individuales y su mapeo a agrupaciones: **no existirán** (venta y stock llegan consolidados por agrupación de talla). La columna `agrupacion_talla_id` en venta/stock es de M5.
-- Mover equivalencias entre nodos y fusionar nodos (p. ej. al reasignar desde SIN ASIGNAR cuando el destino ya existe): se hace a mano creando en el destino y desactivando en el origen.
+- Mover equivalencias entre nodos y fusionar nodos (p. ej. al mover una línea de mundo cuando el destino ya la tiene): se hace a mano creando en el destino y desactivando en el origen.
 - Importar temporada de líneas o equivalencias desde archivo (el CSV no las trae).
 - Auditoría de quién cambió qué (pendiente desde M0).
 - Que el importador cree géneros o mundos nuevos.
@@ -348,29 +356,37 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 
 Lo que QA y el backend encontraron al construir y que la especificación original no decía o decía distinto. Las decisiones de fondo están en `docs/DECISIONES.md` (entradas del 2026-10-02).
 
-**Conteos del archivo.** La especificación hablaba de 87 líneas, 571 + N nodos, 389 genéricas y 278 filas vacías porque contó la fila de cabecera del CSV como si fuera de datos. Los números reales, verificados de forma independiente por QA con `awk` y por el test del importador, son: 2 002 filas de datos · 86 líneas · 570 nodos (556 con mundo + 14 en SIN ASIGNAR) · 1 416 equivalencias reales + 388 genéricas = 1 804 · 14 filas sin mundo (BEBE 2, JOVENCITAS 3, NIÑAS 4, NIÑOS 5) · 198 filas duplicadas dentro del archivo · 277 vacías y 308 con `-` · PANTALON en 26 nodos. La ficha ya está corregida con estos valores.
+**Conteos del archivo.** La especificación hablaba de 87 líneas, 571 + N nodos, 389 genéricas y 278 filas vacías porque contó la fila de cabecera del CSV como si fuera de datos. Los números reales, verificados de forma independiente por QA con `awk` y por el test del importador, y ya sin las 14 filas con mundo vacío (ver abajo), son: 2 002 filas de datos · 1 790 procesadas · 86 líneas · 556 nodos · 1 414 equivalencias reales + 376 genéricas = 1 790 · 212 omitidas (14 `mundo_vacio` + 198 duplicadas dentro del archivo) · 277 vacías y 308 con `-` en la columna de equivalencia · PANTALON en 25 nodos. Las 14 filas sin mundo no aportaban ninguna línea que no existiera ya con mundo: las 86 líneas se crean igual. La ficha ya está corregida con estos valores.
 
 **Implementación.**
 
 1. `codigoUnico` agrega sufijos `_2`, `_3`… cuando dos nombres distintos derivan al mismo código ASCII dentro del mismo ámbito (líneas; equivalencias de un nodo). El código `SIN_EQUIVALENCIA` queda reservado para la genérica. La especificación suponía que `aCodigo` nunca chocaba.
 2. `omitidas[]` lleva un `detalle` opcional con el valor no reconocido (el género o mundo tal como vino), para que la pantalla diga qué corregir en el archivo.
-3. Motivos de omisión nuevos `genero_inactivo` y `mundo_inactivo`: el importador resuelve géneros y mundos solo entre los activos; si el valor existe pero está desactivado (incluido SIN ASIGNAR), la fila se omite y se reporta en vez de escribir bajo una raíz apagada.
+3. Motivos de omisión nuevos `genero_inactivo` y `mundo_inactivo`: el importador resuelve géneros y mundos solo entre los activos; si el valor existe pero está desactivado, la fila se omite y se reporta en vez de escribir bajo una raíz apagada.
 4. `GET /api/generos` y `GET /api/mundos` devuelven `nodos` por fila (conteo de nodos, activos o no), igual que `GET /api/lineas`; la pantalla de Catálogos lo necesita para avisar cuántos nodos quedan ocultos al desactivar.
 5. Los ids de ruta que no son UUID responden `404` (`idDeRuta`) en vez de llegar a Postgres y acabar en `500`. Los errores de base no previstos devuelven el mensaje genérico "Error inesperado en la base de datos." y el detalle se registra solo en el servidor.
 6. Todas las lecturas que pueden crecer pasan por `leerTodo`, paginado de a 1 000 filas; sin eso el árbol habría salido incompleto en silencio al superar el límite de PostgREST.
 7. En `/maestros/arbol/catalogos` el comprador se redirige a `/` desde el servidor (`page.tsx`), no desde el cliente.
 8. `nav.ts`: la sección Maestros la ven los tres roles y el item "Árbol de producto" no tiene restricción; los items de M2 a M4 siguen siendo de admin y planner.
 
+**Ajustes confirmados por Javier después del cierre (versión 0.2.1).**
+
+9. **Toda línea tiene mundo; no existe SIN ASIGNAR.** La especificación creaba un sexto mundo `SIN ASIGNAR` para recibir las 14 filas del archivo con `GRUPO_PRODUCTO` vacío y dejaba que se reasignaran después desde la pantalla. Javier confirmó que esas 14 filas son errores del archivo, así que el mundo desapareció del seed (quedan 5), el importador las omite con motivo `mundo_vacio`, el reporte ya no tiene `sin_mundo` ni el resumen `nodos_sin_asignar`, el enlace "N en SIN ASIGNAR" se quitó de la pantalla y "Mover a otro mundo" está disponible en cualquier nodo para admin y planner (antes solo se mostraba desde SIN ASIGNAR o con inactivos visibles). Los conteos del hito bajaron de 570 nodos y 1 804 equivalencias a 556 y 1 790.
+10. **La previsualización muestra el detalle de lo que no se cargará.** Antes `omitidas[]` traía solo `fila`, `motivo` y `detalle`; ahora cada entrada lleva la fila completa normalizada y `fila_original` en las repetidas, y la pantalla separa "Filas con errores" (con filtro por motivo, aviso de que no se cargarán y descarga en CSV) de "Repetidas en el archivo" (informativas). El `confirm` de Aplicar repite cuántas quedan fuera.
+
 ## Decisiones nuevas
 
-Registradas en `docs/DECISIONES.md` (seis entradas del 2026-10-02, más una sobre ids no UUID, errores genéricos y paginación).
+Registradas en `docs/DECISIONES.md` (entradas del 2026-10-02: seis de la construcción, una sobre ids no UUID, errores genéricos y paginación, y dos de los ajustes posteriores al cierre: toda línea tiene mundo; revisión previa detallada).
+
+## Decidido con Javier tras el cierre
+
+- **Vacío y `-` en la columna de equivalencia significan lo mismo** ("sin equivalencia definida") y caen en una sola `SIN EQUIVALENCIA` por nodo. Javier lo confirmó implícitamente al explicar que algunas líneas no se abren a equivalencias; queda como decisión, no como pregunta.
+- **No existen líneas sin mundo.** Las 14 filas con mundo vacío son errores del archivo y se corrigen en el archivo, no en el sistema (ver cambio 9).
 
 ## Preguntas abiertas para Javier
 
-1. **Mundo SIN ASIGNAR.** Hay 14 filas sin mundo (BEBE 2, JOVENCITAS 3, NIÑAS 4, NIÑOS 5). ¿Las reasignas desde la pantalla después de importar, o prefieres corregir el archivo antes? ¿Debe quedar SIN ASIGNAR como mundo permanente (para futuras cargas) o desactivarse cuando quede vacío?
-2. **Agrupar géneros.** ¿Vas a necesitar ver o proyectar por Hombre / Mujer / Infantil además de los 8 géneros? Si sí, ¿cuál es el mapeo (¿JOVENCITOS va con Hombre o con Infantil? ¿OTROS?)?
-3. **Temporada de las líneas.** El archivo no la trae; todas quedarán en `Todo el año`. ¿Tienes la lista de líneas de Verano e Invierno para cargarla a mano, o la vas marcando?
-4. **Vacío y `-`.** Confirmar que en el archivo significan lo mismo ("sin equivalencia definida") y que te sirve que ambas caigan en una sola `SIN EQUIVALENCIA` por nodo.
-5. **Comprador.** ¿Está bien que vea el árbol completo en solo lectura desde ya, o lo ocultamos hasta la Fase 3?
-6. **Códigos.** ¿Te sirve que los códigos sean ASCII sin eñes ni acentos (`NINAS`, `SIN_ASIGNAR`) pensando en PIVOT y abreviaturas, o prefieres conservar el valor exacto del archivo como código?
-7. **RI y OTROS.** ¿Qué significan el mundo `RI` y el género `OTROS`? Solo para escribir el nombre legible correcto en el seed (hoy se dejan tal cual).
+1. **Agrupar géneros.** ¿Vas a necesitar ver o proyectar por Hombre / Mujer / Infantil además de los 8 géneros? Si sí, ¿cuál es el mapeo (¿JOVENCITOS va con Hombre o con Infantil? ¿OTROS?)?
+2. **Temporada de las líneas.** El archivo no la trae; todas quedarán en `Todo el año`. ¿Tienes la lista de líneas de Verano e Invierno para cargarla a mano, o la vas marcando?
+3. **Comprador.** ¿Está bien que vea el árbol completo en solo lectura desde ya, o lo ocultamos hasta la Fase 3?
+4. **Códigos.** ¿Te sirve que los códigos sean ASCII sin eñes ni acentos (`NINAS`, `SIN_EQUIVALENCIA`) pensando en PIVOT y abreviaturas, o prefieres conservar el valor exacto del archivo como código?
+5. **RI y OTROS.** ¿Qué significan el mundo `RI` y el género `OTROS`? Solo para escribir el nombre legible correcto en el seed (hoy se dejan tal cual).

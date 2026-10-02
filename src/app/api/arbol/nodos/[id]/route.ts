@@ -13,8 +13,8 @@ const NO_ENCONTRADO = "Nodo no encontrado.";
 
 /**
  * Activa/desactiva el nodo o lo mueve de mundo (`requirePlanner`).
- * `mundo_id` sirve para sacar una línea de SIN ASIGNAR; `409` si en el mundo
- * destino ya existe esa línea para ese género.
+ * `mundo_id` mueve la línea a otro mundo del mismo género (p. ej. corregir una
+ * clasificación); `409` si en el mundo destino ya existe esa línea para ese género.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
