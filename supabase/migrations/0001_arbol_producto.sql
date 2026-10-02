@@ -109,7 +109,7 @@ create table if not exists public.genero_mundo_linea (
 
 -- La tripleta única, con genero_id al frente, cubre también las búsquedas por
 -- género y por género-mundo. Los otros dos índices responden "¿en qué nodos
--- está PANTALON?" y "¿qué quedó en SIN ASIGNAR?".
+-- está PANTALON?" y "¿qué líneas tiene este mundo en toda la red?".
 create unique index if not exists genero_mundo_linea_tripleta_uniq
   on public.genero_mundo_linea (genero_id, mundo_id, linea_id);
 create index if not exists genero_mundo_linea_linea_id_idx on public.genero_mundo_linea (linea_id);
@@ -211,16 +211,15 @@ insert into public.generos (codigo, nombre, orden) values
   ('OTROS',      'OTROS',      80)
 on conflict ((upper(codigo))) do nothing;
 
--- SIN ASIGNAR es un mundo normal (activo) con significado especial para el
--- importador: ahí caen las líneas cuyo mundo viene vacío en el archivo. Va con
--- orden 999 para quedar siempre al final de la lista.
+-- No existe un mundo "sin asignar": toda línea tiene mundo (regla confirmada
+-- por Javier). Las filas de un archivo que vengan con mundo vacío se omiten y
+-- se reportan en la previsualización del importador para corregir el archivo.
 insert into public.mundos (codigo, nombre, orden) values
   ('CASUAL',      'CASUAL',      10),
   ('URBANO',      'URBANO',      20),
   ('DEPORTIVO',   'DEPORTIVO',   30),
   ('FORMAL',      'FORMAL',      40),
-  ('RI',          'RI',          50),
-  ('SIN_ASIGNAR', 'SIN ASIGNAR', 999)
+  ('RI',          'RI',          50)
 on conflict ((upper(codigo))) do nothing;
 
 insert into public.agrupaciones_talla (codigo, nombre, orden) values
