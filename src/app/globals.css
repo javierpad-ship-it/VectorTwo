@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/*
+ * Tema Vector2. Tokens primero, Tailwind los expone como utilidades
+ * (bg-marca, text-tinta, border-borde, …) vía @theme.
+ */
+:root {
+  --fondo: #f6f4ef;
+  --superficie: #ffffff;
+  --tinta: #1b1f24;
+  --tinta-suave: #5c6470;
+  --borde: #e3dfd6;
+  --marca: #008cff;
+  --marca-oscura: #0069c2;
+  --marca-suave: #e5f3ff;
+  --exito: #1f9d55;
+  --exito-suave: #e6f6ec;
+  --alerta: #c2410c;
+  --alerta-suave: #fdebe3;
+  --neutro-suave: #eef0f3;
+}
+
+@theme inline {
+  --color-fondo: var(--fondo);
+  --color-superficie: var(--superficie);
+  --color-tinta: var(--tinta);
+  --color-tinta-suave: var(--tinta-suave);
+  --color-borde: var(--borde);
+  --color-marca: var(--marca);
+  --color-marca-oscura: var(--marca-oscura);
+  --color-marca-suave: var(--marca-suave);
+  --color-exito: var(--exito);
+  --color-exito-suave: var(--exito-suave);
+  --color-alerta: var(--alerta);
+  --color-alerta-suave: var(--alerta-suave);
+  --color-neutro-suave: var(--neutro-suave);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--fondo);
+  color: var(--tinta);
+  font-family: var(--font-sans);
+}
