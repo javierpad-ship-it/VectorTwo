@@ -56,7 +56,7 @@ perfiles (admin · planner · comprador)
 | `lineas` | `codigo`, `nombre`, `temporada` (Verano / Invierno / Todo el año) | M1 |
 | `genero_mundo_linea` | `genero_id`, `mundo_id`, `linea_id`, unique de la tripleta | M1 |
 | `equivalencias` | `genero_mundo_linea_id`, `codigo`, `nombre`, unique(nodo, nombre), `agrupacion_estacionalidad_id` null | M1 (FK en M3) |
-| `agrupaciones_talla` | `nombre`, `orden`; seed Centrales / Extremas | M1 |
+| `agrupaciones_talla` | `codigo`, `nombre`, `orden`; seed Centrales / Extremas; catálogo fijo, solo lectura | M1 |
 | `tallas` | `nombre`, `agrupacion_talla_id`, alcance pendiente de definir | M1 (esqueleto) |
 | `agrupaciones_marca` | `nombre` | M2 |
 | `marcas` | `nombre`, `agrupacion_marca_id` | M2 |
