@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ETIQUETA_ROL, type PerfilCliente } from "@/lib/auth/roles";
@@ -34,14 +35,17 @@ export function Sidebar({
           abierto ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-14 items-center gap-2 border-b border-borde px-4">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-marca text-sm font-bold text-white">
-            V2
-          </span>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">Vector2</div>
-            <div className="text-[11px] text-tinta-suave">Lukers · Planificación</div>
-          </div>
+        <div className="flex h-14 items-center border-b border-borde px-4">
+          <Link href="/" className="flex items-center" aria-label="Vector Two, inicio">
+            <Image
+              src="/marca/logo-horizontal.png"
+              alt="Vector Two"
+              width={1200}
+              height={340}
+              priority
+              className="h-9 w-auto"
+            />
+          </Link>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-4">

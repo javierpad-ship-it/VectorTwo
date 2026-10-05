@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import type { PerfilCliente } from "@/lib/auth/roles";
 import { puedeVerRuta } from "@/lib/nav";
@@ -33,7 +34,7 @@ export function AppShell({ perfil, children }: { perfil: PerfilCliente; children
           >
             ☰
           </button>
-          <span className="font-semibold">Vector2</span>
+          <Image src="/marca/logo-horizontal.png" alt="Vector Two" width={1200} height={340} className="h-7 w-auto" />
         </header>
         <main className="flex-1 px-4 py-6 lg:px-8">
           <div className="mx-auto w-full max-w-6xl">{children}</div>

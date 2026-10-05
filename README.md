@@ -107,3 +107,7 @@ datos/               archivos fuente del negocio (ignorados por git)
 | M2 Marcas | Pendiente |
 | M3 Agrupaciones de estacionalidad | Pendiente |
 | M4 Tiendas y aperturas | Pendiente |
+
+## Marca
+
+Los logos de Vector Two están en `public/marca/` (`isotipo.png` con fondo transparente, `logo-horizontal.png`, `logo-vertical.png`), optimizados a partir de los originales que Javier subió a la rama `main`. El favicon y los iconos de la app (`src/app/favicon.ico`, `icon.png`, `apple-icon.png`) se generan del isotipo.

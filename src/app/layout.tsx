@@ -6,7 +6,7 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: { default: "Vector2 · Lukers", template: "%s · Vector2" },
+  title: { default: "Vector Two · Lukers", template: "%s · Vector Two" },
   description: "Sistema de planificación de producto de Lukers.",
 };
 
