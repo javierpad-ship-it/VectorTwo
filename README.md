@@ -57,7 +57,7 @@ Migraciones en `supabase/migrations/`, numeradas e idempotentes. Se aplican con 
 
 `scripts/validar-migraciones-local.sh` crea una base `vector_two_local` en un Postgres local, aplica todas las migraciones dos veces (la segunda pasada prueba que son idempotentes) y lista las tablas con RLS. No toca ningún proyecto Supabase; sirve para validar SQL antes de aplicarlo de verdad.
 
-Proyecto Supabase: `vector-two` (pendiente de crear en el dashboard; ver `docs/modulos/00-cimientos.md`).
+Proyecto Supabase: **Vector2** (ref `tzjsxzmsvvhxyiooihyq`, región ca-central-1). Las migraciones 0000 y 0001 están aplicadas. Nota operativa: desde Claude Code las sentencias `DROP` quedan esperando una confirmación que no llega; las migraciones se aplican por `execute_sql` sin `DROP` (por eso usan `create or replace trigger`), y cualquier borrado de tabla se hace desde el dashboard.
 
 ## Estructura funcional
 
@@ -102,8 +102,8 @@ datos/               archivos fuente del negocio (ignorados por git)
 
 | Módulo | Estado |
 |---|---|
-| M0 Cimientos | Construido; hito pendiente de recorrer contra la base real (falta el proyecto Supabase) |
-| M1 Árbol de producto | Construido; hito pendiente de recorrer contra la base real |
+| M0 Cimientos | Construido y desplegable; base aplicada en Supabase; hito pendiente de que Javier lo recorra en Railway |
+| M1 Árbol de producto | Construido y desplegable; hito pendiente de que Javier importe el árbol en Railway |
 | M2 Marcas | Pendiente |
 | M3 Agrupaciones de estacionalidad | Pendiente |
 | M4 Tiendas y aperturas | Pendiente |

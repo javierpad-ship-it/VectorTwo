@@ -1,10 +1,9 @@
 /**
  * Tipos de la base de datos.
  *
- * Se regeneran con el MCP de Supabase (`generate_typescript_types`) o con la
- * CLI (`supabase gen types typescript`) después de cada migración. Mientras el
- * proyecto `vector-two` no exista, este archivo se mantiene a mano con la
- * misma forma que produce el generador, para que el código compile igual.
+ * Verificados el 2026-10-05 contra `generate_typescript_types` del proyecto
+ * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
+ * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
  */
 export type Json =
   | string

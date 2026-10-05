@@ -65,4 +65,4 @@ Recuperación de contraseña por correo (hoy la resetea un admin). Auditoría de
 
 ## Estado
 
-Código completo y verificado con lint, tsc y tests. **Pendiente**: proyecto Supabase `vector-two` (la creación desde la sesión expiró; lo crea Javier), aplicar la migración, regenerar tipos y recorrer el hito contra la base real.
+Código completo y verificado con lint, tsc y tests. Base aplicada el 2026-10-05 en el proyecto Supabase `Vector2` (ref `tzjsxzmsvvhxyiooihyq`): `perfiles` con RLS, función `tg_set_updated_at` con `search_path` fijo, y el usuario admin de Javier creado por SQL (auth.users + auth.identities + perfiles) con contraseña temporal que debe cambiar desde `/usuarios`. **Pendiente**: recorrer el hito en Railway.
