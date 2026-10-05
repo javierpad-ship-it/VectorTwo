@@ -64,7 +64,7 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
               Catálogos
             </Link>
           )}
-          {puedeEditar && pestana === "arbol" && <Button onClick={() => setPestana("importar")}>Importar CSV</Button>}
+          {puedeEditar && pestana === "arbol" && <Button onClick={() => setPestana("importar")}>Importar archivo</Button>}
         </div>
       </div>
 
@@ -72,7 +72,7 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
         <Tabs<Pestana>
           items={[
             { id: "arbol", label: "Árbol" },
-            { id: "importar", label: "Importar CSV" },
+            { id: "importar", label: "Importar archivo" },
           ]}
           activa={pestana}
           onCambiar={setPestana}

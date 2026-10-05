@@ -8,7 +8,7 @@ El plan completo, el modelo de datos y la metodología están en [`docs/PLAN.md`
 
 - Next.js 16 (App Router) + TypeScript + Tailwind CSS 4
 - Supabase (Postgres + Auth). Los datos se leen y escriben solo desde el servidor con la llave `service_role`; la sesión del usuario viaja en cookies con `@supabase/ssr`
-- zod para validar la API, vitest para la lógica de negocio
+- zod para validar la API, vitest para la lógica de negocio; papaparse y SheetJS (xlsx) para leer CSV y Excel en el navegador
 - Despliegue en Railway
 
 ## Desarrollo local
@@ -69,7 +69,7 @@ Lo que existe hoy, por pantalla:
 | `/` | todos | Saludo, rol y estado de los módulos |
 | `/usuarios` | admin | Crear usuarios, cambiar rol, desactivar, resetear contraseña, eliminar. Siempre queda al menos un admin activo |
 | `/maestros/arbol` | todos (el comprador solo lee) | Árbol Género → Mundo → Línea → Equivalencia en columnas; buscador global de líneas; interruptor de inactivos; agregar o mover líneas entre mundos; crear, renombrar y desactivar equivalencias |
-| `/maestros/arbol` → pestaña Importar CSV | admin y planner | Carga el árbol desde un CSV: mapeo de columnas, previsualización con conteos y el detalle de lo que no se cargará (filas con errores, separadas de las repetidas, con filtro por motivo y descarga en CSV), aplicar. Reimportar el mismo archivo no duplica nada |
+| `/maestros/arbol` → pestaña Importar | admin y planner | Carga el árbol desde un CSV o un Excel (.xlsx, .xls; se elige la hoja si hay varias): mapeo de columnas, previsualización con conteos y el detalle de lo que no se cargará (filas con errores, separadas de las repetidas, con filtro por motivo y descarga en CSV), aplicar. Reimportar el mismo archivo no duplica nada |
 | `/maestros/arbol/catalogos` | admin y planner | Géneros y mundos (edita el admin), líneas con su temporada (edita el planner), agrupaciones de talla (solo lectura) |
 
 Reglas del árbol que conviene saber: los mundos existen en todos los géneros; una línea es catálogo y se activa por nodo género-mundo; la equivalencia cuelga del nodo; las filas sin equivalencia caen en una genérica `SIN EQUIVALENCIA` por nodo; toda línea tiene mundo, así que las filas de un CSV con el mundo vacío no se cargan y se listan en la previsualización para corregir el archivo; la acción normal es desactivar, y eliminar solo se permite sin hijos. El detalle está en `docs/modulos/01-arbol-producto.md`.
@@ -94,7 +94,7 @@ src/lib/supabase     clientes admin / server / browser y tipos
 src/lib/api          respuestas, validación, CRUD de catálogos y traducción de errores de base
 src/lib/arbol        lógica pura del árbol: normalizar, importar, armar-arbol, reglas, esquemas zod
 src/components/ui    kit de interfaz
-tests/               vitest (112 pruebas en 9 archivos)
+tests/               vitest (121 pruebas en 10 archivos)
 datos/               archivos fuente del negocio (ignorados por git)
 ```
 

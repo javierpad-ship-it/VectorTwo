@@ -19,6 +19,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Chips, type ChipItem } from "@/components/ui/chips";
 import { DataTable, type Columna } from "@/components/ui/data-table";
+import { leerArchivoTabular, nombreBase, type TablaLeida } from "@/lib/arbol/leer-archivo";
 import { formatearNumero, mensajeError } from "./comunes";
 
 const MAX_FILAS = 10_000;
@@ -108,10 +109,15 @@ type Archivo = {
   tamano: number;
   columnas: string[];
   filas: Record<string, string>[];
+  /** Hojas del libro Excel (vacío para CSV) y la hoja leída. */
+  hojas: string[];
+  hoja: string | null;
 };
 
 export function ImportarCsv({ onAplicado }: { onAplicado: () => void }) {
   const [archivo, setArchivo] = useState<Archivo | null>(null);
+  const [original, setOriginal] = useState<File | null>(null);
+  const [leyendo, setLeyendo] = useState(false);
   const [mapeo, setMapeo] = useState<Mapeo>(MAPEO_VACIO);
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState<"previsualizar" | "aplicar" | null>(null);
@@ -119,35 +125,49 @@ export function ImportarCsv({ onAplicado }: { onAplicado: () => void }) {
   const [final, setFinal] = useState<ReporteImportacion | null>(null);
 
   const mapeoCompleto = CAMPOS.every(({ campo }) => mapeo[campo] !== "");
-  const firmaActual = archivo ? `${archivo.nombre}|${archivo.tamano}|${archivo.filas.length}|${JSON.stringify(mapeo)}` : "";
+  const firmaActual = archivo
+    ? `${archivo.nombre}|${archivo.tamano}|${archivo.hoja ?? ""}|${archivo.filas.length}|${JSON.stringify(mapeo)}`
+    : "";
   const previaVigente = previa !== null && previa.firma === firmaActual;
 
   function elegirArchivo(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
+    setOriginal(f);
+    void cargar(f);
+  }
+
+  /** Lee (o relee, al cambiar de hoja) el archivo elegido. */
+  async function cargar(f: File, hoja?: string) {
     setError(null);
     setPrevia(null);
     setFinal(null);
-    Papa.parse<Record<string, string>>(f, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (h) => h.trim(),
-      complete: (r) => {
-        const columnas = (r.meta.fields ?? []).filter((c) => c !== "");
-        if (columnas.length === 0 || r.data.length === 0) {
-          setError("El archivo no tiene cabecera o está vacío.");
-          return;
-        }
-        if (r.data.length > MAX_FILAS) {
-          setError(`El archivo tiene ${formatearNumero(r.data.length)} filas; el máximo por importación es ${formatearNumero(MAX_FILAS)}.`);
-          return;
-        }
-        setArchivo({ nombre: f.name, tamano: f.size, columnas, filas: r.data });
-        setMapeo(detectarMapeo(columnas));
-      },
-      error: (err) => setError(`No se pudo leer el archivo: ${err.message}`),
-    });
+    setLeyendo(true);
+    try {
+      const tabla: TablaLeida = await leerArchivoTabular(f, hoja);
+      if (tabla.columnas.length === 0 || tabla.filas.length === 0) {
+        setArchivo(null);
+        setError(
+          tabla.hojas.length > 1
+            ? `La hoja "${tabla.hoja}" no tiene cabecera o está vacía. Prueba con otra hoja.`
+            : "El archivo no tiene cabecera o está vacío."
+        );
+        return;
+      }
+      if (tabla.filas.length > MAX_FILAS) {
+        setArchivo(null);
+        setError(`El archivo tiene ${formatearNumero(tabla.filas.length)} filas; el máximo por importación es ${formatearNumero(MAX_FILAS)}.`);
+        return;
+      }
+      setArchivo({ nombre: f.name, tamano: f.size, columnas: tabla.columnas, filas: tabla.filas, hojas: tabla.hojas, hoja: tabla.hoja });
+      setMapeo(detectarMapeo(tabla.columnas));
+    } catch (err) {
+      setArchivo(null);
+      setError(`No se pudo leer el archivo: ${mensajeError(err)}`);
+    } finally {
+      setLeyendo(false);
+    }
   }
 
   function filasMapeadas(): FilaImportacion[] {
@@ -204,21 +224,35 @@ export function ImportarCsv({ onAplicado }: { onAplicado: () => void }) {
 
       <Card
         titulo="1. Archivo"
-        descripcion="CSV con cabecera. Se lee en tu navegador; solo se envían las cuatro columnas del árbol ya mapeadas."
+        descripcion="CSV o Excel (.xlsx, .xls) con la cabecera en la primera fila. Se lee en tu navegador; solo se envían las cuatro columnas del árbol ya mapeadas."
       >
         <div className="space-y-4">
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,text/csv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={elegirArchivo}
-            aria-label="Archivo CSV"
+            disabled={leyendo}
+            aria-label="Archivo CSV o Excel"
             className="block text-sm text-tinta file:mr-3 file:rounded-md file:border file:border-borde file:bg-superficie file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-tinta hover:file:bg-neutro-suave"
           />
+          {leyendo && <p className="text-sm text-tinta-suave">Leyendo el archivo…</p>}
           {archivo && (
             <p className="text-sm text-tinta-suave">
-              <strong className="text-tinta">{archivo.nombre}</strong> · {formatearNumero(archivo.filas.length)} filas ·{" "}
-              {archivo.columnas.length} columnas
+              <strong className="text-tinta">{archivo.nombre}</strong>
+              {archivo.hoja && <> · hoja <strong className="text-tinta">{archivo.hoja}</strong></>} ·{" "}
+              {formatearNumero(archivo.filas.length)} filas · {archivo.columnas.length} columnas
             </p>
+          )}
+          {archivo && original && archivo.hojas.length > 1 && (
+            <Field label="Hoja del libro" hint="El libro tiene varias hojas; elige la que contiene el árbol." className="max-w-xs">
+              <Select value={archivo.hoja ?? ""} onChange={(e) => void cargar(original, e.target.value)} disabled={leyendo}>
+                {archivo.hojas.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </Field>
           )}
         </div>
       </Card>
@@ -416,7 +450,7 @@ function TablaErrores({
     { clave: "detalle", titulo: "Detalle", render: (f) => <Celda valor={detalleOmitida(f)} /> },
   ];
 
-  const nombreCsv = `omitidas-${nombreArchivo.replace(/\.csv$/i, "")}.csv`;
+  const nombreCsv = `omitidas-${nombreBase(nombreArchivo)}.csv`;
 
   return (
     <div className="space-y-3">

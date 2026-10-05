@@ -2,6 +2,14 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.2.2 · M1 — 2026-10-05
+
+- **Importar desde Excel.** La pestaña Importar acepta `.xlsx` y `.xls` además de CSV; la cabecera es la primera fila con datos, las columnas sin nombre y las filas vacías se descartan, y si el libro tiene varias hojas se elige cuál leer. Lector en `src/lib/arbol/leer-archivo.ts` (SheetJS cargado bajo demanda), probado con un `.xls` generado en memoria y con el archivo real de Javier.
+- Login: botón para mostrar u ocultar la contraseña y casilla "Recordarme en este equipo" (guarda el correo en el navegador).
+- Marca: logos de Vector Two en login, menú y favicon.
+- Build: lockfile compatible con `npm ci` (tipos de Node 24) para que Railway compile.
+- Tests: 121 en 10 archivos.
+
 ## 0.2.1 · M1 — 2026-10-02
 
 Dos ajustes confirmados por Javier después del cierre de M1 (detalle en `docs/DECISIONES.md`, entradas "Toda línea tiene mundo" y "La previsualización muestra el detalle completo").

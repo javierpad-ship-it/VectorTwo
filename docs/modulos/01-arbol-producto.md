@@ -199,7 +199,7 @@ importarSchema = z.object({
 });
 ```
 
-El cliente parsea el CSV con **papaparse** en el navegador (dependencia nueva: `papaparse` + `@types/papaparse`; en V1 funcionó bien y evita subir archivos al servidor), deja al usuario confirmar el mapeo de columnas (autodetección por nombre: `GENERO_LK`/`género`, `MUNDO`/`GRUPO_PRODUCTO`, `LINEA`, `EQUIVALENCIA`) y manda las filas ya mapeadas. Las filas se envían en un solo cuerpo (2 002 filas ≈ 150 KB).
+El cliente parsea el archivo en el navegador: CSV con **papaparse** y Excel (`.xlsx`, `.xls`) con **SheetJS**, cargado bajo demanda, con selector de hoja si el libro trae varias (0.2.2) (dependencia nueva: `papaparse` + `@types/papaparse`; en V1 funcionó bien y evita subir archivos al servidor), deja al usuario confirmar el mapeo de columnas (autodetección por nombre: `GENERO_LK`/`género`, `MUNDO`/`GRUPO_PRODUCTO`, `LINEA`, `EQUIVALENCIA`) y manda las filas ya mapeadas. Las filas se envían en un solo cuerpo (2 002 filas ≈ 150 KB).
 
 Algoritmo, idéntico en los dos modos hasta el último paso (función pura `planificarImportacion(filas, estadoActual)` en `src/lib/arbol/importar.ts`):
 
