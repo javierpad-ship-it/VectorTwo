@@ -9,3 +9,4 @@
 - Migraciones en `supabase/migrations/`, idempotentes, aplicadas con el MCP de Supabase al proyecto `vector-two` (nunca a `lukers-compras`, que es Vector-One).
 - `npm run lint`, `npx tsc --noEmit`, `npx vitest run` y `npm run build` deben pasar antes de cada commit.
 - Nada de datos reales de Lukers en el repo (`datos/` está ignorada).
+- Al terminar cualquier tanda de commits, decirle a Javier la versión vigente (`APP_VERSION` en `src/lib/version.ts`), que es la que verá al pie del menú.
