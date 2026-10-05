@@ -1,6 +1,6 @@
 # M1 · Árbol de producto
 
-> Estado: **construido, pendiente de recorrer el hito contra la base real** (el proyecto Supabase aún no existe). Lint, typecheck, 112 tests, build y `scripts/validar-migraciones-local.sh` en verde. Módulo anterior: [00-cimientos](00-cimientos.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final; las dos últimas entradas de esa sección (toda línea tiene mundo; revisión previa detallada) son ajustes que Javier confirmó después del cierre del módulo.
+> Estado: **hito recorrido en producción el 2026-10-05** (árbol real importado por Javier en Railway; ver "Verificación en producción"). Lint, typecheck, 131 tests, build y `scripts/validar-migraciones-local.sh` en verde. Módulo anterior: [00-cimientos](00-cimientos.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final; las dos últimas entradas de esa sección (toda línea tiene mundo; revisión previa detallada) son ajustes que Javier confirmó después del cierre del módulo.
 
 ## Objetivo
 
