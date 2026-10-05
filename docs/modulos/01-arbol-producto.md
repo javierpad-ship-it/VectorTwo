@@ -86,7 +86,7 @@ La Línea es **catálogo**: PANTALON existe una sola vez aquí aunque esté en 2
 
 Índices: `unique (genero_mundo_linea_id, nombre)`, `unique (genero_mundo_linea_id, codigo)`, y un único parcial `unique (genero_mundo_linea_id) where es_generica` que garantiza **a lo sumo una genérica por nodo**. El código es único **dentro del nodo**, no global: VARIOS aparece en 69 nodos y PACK o JOGGER en varios; un futuro código PIVOT concatenará género-mundo-línea-equivalencia, así que no necesita unicidad global.
 
-**`es_generica`.** En el archivo, 277 filas traen equivalencia vacía y 308 traen `-`; las dos significan "sin equivalencia definida". Como en la Fase 2 las ventas llegarán igual y tienen que caer en algún sitio, el importador crea en cada nodo que lo necesite **una** equivalencia `SIN EQUIVALENCIA` (`codigo = SIN_EQUIVALENCIA`, `es_generica = true`). La bandera distingue esa fila de una equivalencia real que alguien quisiera llamar parecido, y permite a M3 y a los reportes tratarla aparte (por ejemplo, no exigirle curva o listarla como "pendiente de clasificar").
+**`es_generica`.** En el archivo, 277 filas traen equivalencia vacía ("sin equivalencia definida") y 308 traen `-` (regla de Lukers: "la equivalencia se llama igual que la línea", y se crea como equivalencia real con ese nombre). Para las vacías, como en la Fase 2 las ventas llegarán igual y tienen que caer en algún sitio, el importador crea en cada nodo que lo necesite **una** equivalencia `SIN EQUIVALENCIA` (`codigo = SIN_EQUIVALENCIA`, `es_generica = true`). La bandera distingue esa fila de una equivalencia real que alguien quisiera llamar parecido, y permite a M3 y a los reportes tratarla aparte (por ejemplo, no exigirle curva o listarla como "pendiente de clasificar").
 
 `agrupacion_estacionalidad_id` **no** se agrega aquí: la añade M3.
 
@@ -154,7 +154,7 @@ No hay GET de nodos: la pantalla y el buscador trabajan sobre `/api/arbol`.
 | Ruta | Método | Guard | Cuerpo | Respuesta |
 |---|---|---|---|---|
 | `/api/equivalencias?nodo_id=` | GET | `requireUser` | — | `equivalencias[]` del nodo, reales por `nombre` y la genérica al final. `400` sin `nodo_id` |
-| `/api/equivalencias` | POST | `requirePlanner` | `{ genero_mundo_linea_id: uuid, nombre, codigo? }` | `201`. Si `nombre` normalizado es vacío, `-` o `SIN EQUIVALENCIA`, se crea como genérica (`es_generica = true`, nombre y código fijos); `409` si el nodo ya tiene genérica · `409` nombre o código repetido en el nodo · `404` nodo inexistente |
+| `/api/equivalencias` | POST | `requirePlanner` | `{ genero_mundo_linea_id: uuid, nombre, codigo? }` | `201`. Si `nombre` es `-`, se reemplaza por el nombre de la línea del nodo (equivalencia real). Si `nombre` normalizado es vacío o `SIN EQUIVALENCIA`, se crea como genérica (`es_generica = true`, nombre y código fijos); `409` si el nodo ya tiene genérica · `409` nombre o código repetido en el nodo · `404` nodo inexistente |
 | `/api/equivalencias/[id]` | PATCH | `requirePlanner` | `{ nombre?, codigo?, activo? }` | actualizada. Sobre una genérica solo se admite `activo` (`409` si intentan renombrarla). `es_generica` no es editable |
 | `/api/equivalencias/[id]` | DELETE | `requirePlanner` | — | `{ id }`; `409` si tiene hijos (a partir de M2) |
 
@@ -208,7 +208,7 @@ Algoritmo, idéntico en los dos modos hasta el último paso (función pura `plan
 3. Resolver **mundo**. Vacío → `omitida` (`mundo_vacio`): no existen líneas sin mundo, así que la fila es un error del archivo y no genera nada. Si no está vacío, se resuelve igual que el género (`mundo_desconocido` / `mundo_inactivo`).
 4. **Línea** por `nombre`: existe → `existentes.lineas++`; no → `crear.lineas` con `codigo = codigoUnico(aCodigo(nombre))` y `temporada` por defecto. `codigoUnico` agrega `_2`, `_3`… si otra línea (de la base o del mismo archivo) ya usa ese código ASCII.
 5. **Nodo** por tripleta: existe → `existentes.nodos++`; no → `crear.nodos`.
-6. **Equivalencia**: si el valor es vacío o `-` → la genérica del nodo (una sola aunque haya varias filas así). Si no → por `(nodo, nombre)`. Existe → `existentes.equivalencias++`; no → `crear.equivalencias` o `crear.equivalencias_genericas`. El código se resuelve con `codigoUnico` dentro del nodo y `SIN_EQUIVALENCIA` queda reservado para la genérica: una equivalencia real llamada `SIN-EQUIVALENCIA` recibiría `SIN_EQUIVALENCIA_2`.
+6. **Equivalencia**: si el valor es `-` → equivalencia real con el nombre de la línea del nodo (se cuenta en `crear.equivalencias_igual_a_linea`, informativo). Si es vacío → la genérica del nodo (una sola aunque haya varias filas así). Si no → por `(nodo, nombre)`. Existe → `existentes.equivalencias++`; no → `crear.equivalencias` o `crear.equivalencias_genericas`. El código se resuelve con `codigoUnico` dentro del nodo y `SIN_EQUIVALENCIA` queda reservado para la genérica: una equivalencia real llamada `SIN-EQUIVALENCIA` recibiría `SIN_EQUIVALENCIA_2`.
 7. Duplicados dentro del archivo (misma tripleta + misma equivalencia tras normalizar) se cuentan una vez y se anotan en `omitidas` (`duplicada_en_archivo`, con `fila_original` apuntando a la primera aparición). Una fila con mundo vacío se omite antes de esta comprobación, así que dos filas iguales sin mundo salen las dos como `mundo_vacio`, no una como duplicada. Filas que apuntan a algo existente pero inactivo se cuentan en `existentes_inactivos` y **no se reactivan**: el importador nunca cambia `activo`.
 8. `previsualizar`: devuelve el reporte sin escribir. `aplicar`: inserta en orden líneas → nodos → equivalencias, en tandas de 500, con `insert … on conflict do nothing` apoyado en los índices únicos. No hay transacción (supabase-js no las expone y no queremos lógica en una función SQL); si una tanda falla a mitad, la respuesta es `500` con lo que alcanzó a crear y **reimportar completa el resto sin duplicar**: la idempotencia es la red de seguridad.
 
@@ -230,7 +230,7 @@ Reporte (igual en ambos modos; en `aplicar`, `creados` es lo realmente insertado
 } }
 ```
 
-Los números del ejemplo son los del archivo actual (verificados por el test `tests/arbol.importar.test.ts`, que planifica el CSV real si está en `datos/`): 2 002 filas de datos, de las que 14 vienen con el mundo vacío y 198 son duplicadas dentro del archivo tras normalizar; las 1 790 procesadas producen exactamente 1 790 equivalencias (1 414 reales + 376 genéricas, una por cada nodo que tenía vacío o `-`).
+Los números del ejemplo son los del archivo actual (verificados por el test `tests/arbol.importar.test.ts`, que planifica el CSV real si está en `datos/`): 2 002 filas de datos, de las que 14 vienen con el mundo vacío y 198 son duplicadas dentro del archivo tras normalizar; con la regla del guion (0.2.3): 1 956 procesadas · 46 omitidas (14 con mundo vacío + 32 duplicadas) · 1 691 equivalencias reales (368 de ellas con el nombre de su línea por venir como `-`) + 265 genéricas (una por cada nodo que tenía alguna fila vacía).
 
 Cada entrada de `omitidas` lleva la **fila completa** ya normalizada (`genero`, `mundo`, `linea`, `equivalencia`) además de `fila` y `motivo`, para que quien revisa pueda corregir el archivo sin tener que ir a buscar la fila a mano. `fila` es el índice 1-based dentro de `filas` tal como las mandó el cliente; `detalle` es opcional y trae el valor no reconocido (género o mundo); `fila_original` solo aparece en `duplicada_en_archivo` y señala la primera aparición, que sí se procesó. Motivos posibles (`MotivoOmision` en `src/lib/arbol/tipos.ts`): `linea_vacia`, `fila_total`, `genero_desconocido`, `genero_inactivo`, `mundo_vacio`, `mundo_desconocido`, `mundo_inactivo`, `duplicada_en_archivo`; la etiqueta legible de cada uno está en `ETIQUETA_MOTIVO_OMISION` (`tipos-api.ts`).
 
@@ -301,7 +301,7 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 5. Una fila con género o mundo desconocido va a `omitidas` con su motivo y el valor en `detalle`, y no genera nada. Toda omitida lleva la fila completa normalizada.
 6. Mundo vacío → `omitida` con motivo `mundo_vacio`, sin `detalle` ni `fila_original`; el reporte no tiene propiedad `sin_mundo`. El género se valida antes que el mundo (una fila con género desconocido y mundo vacío sale como `genero_desconocido`). Dos filas iguales sin mundo salen las dos como `mundo_vacio`.
 7. Equivalencia `""` y `"-"` en el mismo nodo producen **una sola** genérica; un nodo con solo genéricas crea el nodo y una genérica; un nodo con reales y genéricas crea las reales más una genérica.
-8. Filas duplicadas tras normalizar cuentan una vez (`duplicada_en_archivo`) y `fila_original` apunta siempre a la primera aparición, también cuando `""`, `-` y `SIN EQUIVALENCIA` caen en la misma genérica; la equivalencia se muestra como vino (`-`), no como la genérica a la que cae.
+8. Filas duplicadas tras normalizar cuentan una vez (`duplicada_en_archivo`) y `fila_original` apunta siempre a la primera aparición, también cuando `""` y `SIN EQUIVALENCIA` caen en la misma genérica o cuando `-` y el nombre literal de la línea caen en la misma real; la equivalencia se muestra como vino (`-`), no como aquella en la que cae.
 9. **Idempotencia**: `planificarImportacion(filas, aplicarPlan(estado, plan))` devuelve `crear` todo en cero y `existentes` igual a lo que se creó antes. Y aplicar dos veces el mismo plan produce el mismo estado.
 10. Lo existente pero inactivo se cuenta en `existentes_inactivos` y el plan no lo toca.
 11. Los conteos del plan son consistentes: `recibidas = procesadas + omitidas`.
@@ -332,7 +332,7 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 - [ ] **Aplicar**: el `confirm` repite "Quedarán fuera 14 filas con errores" y "198 filas repetidas se cargan una sola vez"; el reporte final coincide con la previsualización; el resumen de `/maestros/arbol` muestra `8 · 5 · 86 · 556 · 1 790`.
 - [ ] Reimportar el mismo archivo: previsualización con `crear` en cero y `existentes` igual a los totales; las mismas 14 filas siguen saliendo como errores; aplicar no cambia ningún conteo (verificar con `select count(*)` en las tres tablas antes y después).
 - [ ] Buscar `PANTALON`: aparece en 25 nodos (el archivo trae 26 tripletas con PANTALON, pero una tiene el mundo vacío y se omite). Abrir HOMBRE / URBANO / PANTALON y MUJER / URBANO / PANTALON: listas de equivalencias distintas; `VARIOS` aparece en ambos como filas independientes.
-- [ ] Un nodo que en el archivo solo tenía `-` muestra únicamente `SIN EQUIVALENCIA` con badge Genérica; uno mixto muestra las reales y la genérica al final.
+- [ ] Un nodo que en el archivo solo tenía `-` muestra una única equivalencia real con el nombre de la línea; uno que solo tenía vacío muestra únicamente `SIN EQUIVALENCIA` con badge Genérica; uno mixto muestra las reales y la genérica al final.
 - [ ] Mover de mundo: en cualquier nodo, como admin o planner, "Mover a otro mundo" ofrece los otros mundos activos del género; mover una línea de BEBE / CASUAL a BEBE / URBANO la hace desaparecer de CASUAL y aparecer en URBANO con sus equivalencias; intentar moverla a un mundo donde esa línea ya exista para BEBE → `409` legible.
 - [ ] Crear a mano una línea nueva en Catálogos con nombre `  camisa   manga larga ` → se guarda como `CAMISA MANGA LARGA`, código `CAMISA_MANGA_LARGA`, temporada `Todo el año`; agregarla a HOMBRE / FORMAL desde el árbol; crearle una equivalencia; intentar crear otra con el mismo nombre en minúsculas → `409`; intentar agregarle una segunda `SIN EQUIVALENCIA` → `409`.
 - [ ] Cambiar temporada de una línea a `Invierno` en Catálogos y verlo reflejado en el badge del árbol.
@@ -380,7 +380,7 @@ Registradas en `docs/DECISIONES.md` (entradas del 2026-10-02: seis de la constru
 
 ## Decidido con Javier tras el cierre
 
-- **Vacío y `-` en la columna de equivalencia significan lo mismo** ("sin equivalencia definida") y caen en una sola `SIN EQUIVALENCIA` por nodo. Javier lo confirmó implícitamente al explicar que algunas líneas no se abren a equivalencias; queda como decisión, no como pregunta.
+- **`-` en la columna de equivalencia significa "igual a la línea"** (Javier, 2026-10-05): se crea una equivalencia real con el nombre de la línea; solo el vacío cae en la genérica `SIN EQUIVALENCIA`. La misma regla se aplicará a las cargas de venta y stock de la Fase 2 (ver DECISIONES).
 - **No existen líneas sin mundo.** Las 14 filas con mundo vacío son errores del archivo y se corrigen en el archivo, no en el sistema (ver cambio 9).
 
 ## Preguntas abiertas para Javier

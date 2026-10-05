@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api-client";
-import { EQUIVALENCIA_GENERICA, aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
+import { EQUIVALENCIA_GENERICA, aCodigo, esEquivalenciaIgualALinea, normalizarNombre } from "@/lib/arbol/normalizar";
 import type { EquivalenciaArbol, EquivalenciaFila, GeneroArbol, LineaArbol, MundoArbol } from "@/lib/arbol/tipos-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -215,7 +215,10 @@ function FormNuevaEquivalencia({
   const [codigoTocado, setCodigoTocado] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
-  const nombreNormalizado = normalizarNombre(nombre);
+  // Regla de Lukers: escribir "-" significa "igual a la línea", así que la
+  // equivalencia toma el nombre de la línea del nodo (igual que el importador).
+  const igualALinea = esEquivalenciaIgualALinea(nombre);
+  const nombreNormalizado = igualALinea ? nodo.nombre : normalizarNombre(nombre);
   const codigoPropuesto = codigoTocado ? aCodigo(codigo) : aCodigo(nombreNormalizado);
   const repetida = nodo.equivalencias.some((e) => e.nombre === nombreNormalizado);
   const listo = nombreNormalizado.length > 0 && codigoPropuesto.length > 0 && !repetida;
@@ -245,7 +248,16 @@ function FormNuevaEquivalencia({
   return (
     <form onSubmit={guardar} className="mb-3 space-y-3 rounded-lg border border-borde bg-fondo p-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Nombre" hint={repetida ? "Ya existe una equivalencia con ese nombre en este nodo." : undefined}>
+        <Field
+          label="Nombre"
+          hint={
+            repetida
+              ? "Ya existe una equivalencia con ese nombre en este nodo."
+              : igualALinea
+                ? "El guion significa igual a la línea: se usará su nombre."
+                : "Escribe - para que se llame igual que la línea."
+          }
+        >
           <Input value={nombre} onChange={(e) => setNombre(e.target.value)} required autoFocus />
         </Field>
         <Field label="Código" hint="Único dentro del nodo.">

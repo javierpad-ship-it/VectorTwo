@@ -76,17 +76,42 @@ describe("crearEquivalenciaSchema", () => {
       nombre: "POLO M/C",
       codigo: "POLO_M_C",
       es_generica: false,
+      igual_a_linea: false,
     });
   });
-  it("vacío, '-' o SIN EQUIVALENCIA crean la genérica con nombre y código fijos", () => {
-    for (const nombre of ["", "   ", "-", "sin equivalencia", "SIN EQUIVALENCIA"]) {
+  it("vacío o SIN EQUIVALENCIA crean la genérica con nombre y código fijos", () => {
+    for (const nombre of ["", "   ", "sin equivalencia", "SIN EQUIVALENCIA"]) {
       expect(crearEquivalenciaSchema.parse({ genero_mundo_linea_id: UUID, nombre, codigo: "LO_QUE_SEA" })).toEqual({
         genero_mundo_linea_id: UUID,
         nombre: "SIN EQUIVALENCIA",
         codigo: "SIN_EQUIVALENCIA",
         es_generica: true,
+        igual_a_linea: false,
       });
     }
+  });
+  it("'-' sale marcado como igual a la línea, real y sin código salvo que el cliente lo mande", () => {
+    // El esquema no conoce la línea del nodo: deja el `-` y el handler lo sustituye.
+    for (const nombre of ["-", "  -  "]) {
+      expect(crearEquivalenciaSchema.parse({ genero_mundo_linea_id: UUID, nombre })).toEqual({
+        genero_mundo_linea_id: UUID,
+        nombre: "-",
+        codigo: undefined,
+        es_generica: false,
+        igual_a_linea: true,
+      });
+    }
+    expect(crearEquivalenciaSchema.parse({ genero_mundo_linea_id: UUID, nombre: "-", codigo: "mi codigo" })).toEqual({
+      genero_mundo_linea_id: UUID,
+      nombre: "-",
+      codigo: "MI_CODIGO",
+      es_generica: false,
+      igual_a_linea: true,
+    });
+    // Con la marca, un código vacío equivale a no mandarlo (se derivará de la línea).
+    expect(crearEquivalenciaSchema.parse({ genero_mundo_linea_id: UUID, nombre: "-", codigo: "  " }).codigo).toBeUndefined();
+    // "--" no es la marca: es una real sin código posible.
+    expect(crearEquivalenciaSchema.safeParse({ genero_mundo_linea_id: UUID, nombre: "--" }).success).toBe(false);
   });
   it("rechaza nodo inválido y nombres sin código posible", () => {
     expect(crearEquivalenciaSchema.safeParse({ genero_mundo_linea_id: "x", nombre: "A" }).success).toBe(false);

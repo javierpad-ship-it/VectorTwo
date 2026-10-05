@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  MARCA_IGUAL_A_LINEA,
   aCodigo,
   esEquivalenciaGenerica,
+  esEquivalenciaIgualALinea,
   esTemporada,
   normalizarNombre,
 } from "@/lib/arbol/normalizar";
@@ -44,16 +46,36 @@ describe("aCodigo", () => {
 });
 
 describe("esEquivalenciaGenerica", () => {
-  it("reconoce vacío, guion y el nombre genérico", () => {
+  it("reconoce vacío y el nombre genérico", () => {
     expect(esEquivalenciaGenerica("")).toBe(true);
     expect(esEquivalenciaGenerica("   ")).toBe(true);
-    expect(esEquivalenciaGenerica("-")).toBe(true);
     expect(esEquivalenciaGenerica("sin equivalencia")).toBe(true);
+    expect(esEquivalenciaGenerica("SIN  EQUIVALENCIA ")).toBe(true);
     expect(esEquivalenciaGenerica(null)).toBe(true);
+  });
+  it("el guion ya no es genérica: significa 'igual a la línea'", () => {
+    expect(esEquivalenciaGenerica("-")).toBe(false);
+    expect(esEquivalenciaGenerica(" - ")).toBe(false);
   });
   it("una equivalencia real no es genérica", () => {
     expect(esEquivalenciaGenerica("VARIOS")).toBe(false);
     expect(esEquivalenciaGenerica("--x")).toBe(false);
+  });
+});
+
+describe("esEquivalenciaIgualALinea", () => {
+  it("solo el guion, con o sin espacios alrededor", () => {
+    expect(MARCA_IGUAL_A_LINEA).toBe("-");
+    expect(esEquivalenciaIgualALinea("-")).toBe(true);
+    expect(esEquivalenciaIgualALinea("  -  ")).toBe(true);
+  });
+  it("nada más cuenta como la marca", () => {
+    expect(esEquivalenciaIgualALinea("")).toBe(false);
+    expect(esEquivalenciaIgualALinea("--")).toBe(false);
+    expect(esEquivalenciaIgualALinea("-x")).toBe(false);
+    expect(esEquivalenciaIgualALinea("SIN EQUIVALENCIA")).toBe(false);
+    expect(esEquivalenciaIgualALinea(null)).toBe(false);
+    expect(esEquivalenciaIgualALinea(42)).toBe(false);
   });
 });
 

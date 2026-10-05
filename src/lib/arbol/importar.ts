@@ -1,5 +1,12 @@
 import type { Tables } from "@/lib/supabase/database.types";
-import { EQUIVALENCIA_GENERICA, MAX_CODIGO, aCodigo, esEquivalenciaGenerica, normalizarNombre } from "./normalizar";
+import {
+  EQUIVALENCIA_GENERICA,
+  MAX_CODIGO,
+  aCodigo,
+  esEquivalenciaGenerica,
+  esEquivalenciaIgualALinea,
+  normalizarNombre,
+} from "./normalizar";
 import type { ConteosCrear, ConteosExistentes, FilaImportacion, FilaOmitida, ReporteBase } from "./tipos";
 
 /**
@@ -87,7 +94,13 @@ const claveNodo = (generoId: string, mundoId: string, lineaId: string) => `${gen
 const claveEquivalencia = (nodoId: string, nombre: string) => `${nodoId}|${nombre}`;
 
 export function planificarImportacion(filas: FilaImportacion[], estado: EstadoImportacion): PlanImportacion {
-  const crear: ConteosCrear = { lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0 };
+  const crear: ConteosCrear = {
+    lineas: 0,
+    nodos: 0,
+    equivalencias: 0,
+    equivalencias_genericas: 0,
+    equivalencias_igual_a_linea: 0,
+  };
   const existentes: ConteosExistentes = { lineas: 0, nodos: 0, equivalencias: 0 };
   const existentesInactivos: ConteosExistentes = { lineas: 0, nodos: 0, equivalencias: 0 };
   const omitidas: FilaOmitida[] = [];
@@ -157,8 +170,17 @@ export function planificarImportacion(filas: FilaImportacion[], estado: EstadoIm
       return omitir(motivo, { detalle: mundoTxt });
     }
 
+    // Vacío o "SIN EQUIVALENCIA" → la genérica del nodo. "-" → equivalencia
+    // real que se llama igual que la línea: se resuelve aquí, antes de la
+    // clave de duplicados, para que "-" y el nombre literal de la línea en el
+    // mismo nodo sean la misma equivalencia (la segunda queda como duplicada).
     const esGenerica = esEquivalenciaGenerica(equivalenciaTxt);
-    const equivalenciaNombre = esGenerica ? EQUIVALENCIA_GENERICA.nombre : equivalenciaTxt;
+    const equivalenciaNombre = esGenerica
+      ? EQUIVALENCIA_GENERICA.nombre
+      : esEquivalenciaIgualALinea(equivalenciaTxt)
+        ? lineaTxt
+        : equivalenciaTxt;
+    const igualALinea = !esGenerica && equivalenciaNombre === lineaTxt;
 
     const claveFila = `${genero.id}|${mundo.id}|${lineaTxt}|${equivalenciaNombre}`;
     const filaOriginal = clavesFila.get(claveFila);
@@ -238,7 +260,10 @@ export function planificarImportacion(filas: FilaImportacion[], estado: EstadoIm
       es_generica: esGenerica,
     });
     if (esGenerica) crear.equivalencias_genericas += 1;
-    else crear.equivalencias += 1;
+    else {
+      crear.equivalencias += 1;
+      if (igualALinea) crear.equivalencias_igual_a_linea = (crear.equivalencias_igual_a_linea ?? 0) + 1;
+    }
   });
 
   const reporte: ReporteBase = {

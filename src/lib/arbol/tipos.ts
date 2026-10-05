@@ -168,8 +168,15 @@ export type FilaOmitida = {
 export type ConteosCrear = {
   lineas: number;
   nodos: number;
+  /** Equivalencias reales (incluye las que toman el nombre de la línea). */
   equivalencias: number;
   equivalencias_genericas: number;
+  /**
+   * Informativo: de las reales a crear, cuántas se llaman igual que la línea
+   * del nodo (filas con `-` o con el nombre de la línea escrito literal). Ya
+   * están contadas en `equivalencias`; no se suman.
+   */
+  equivalencias_igual_a_linea?: number;
 };
 
 export type ConteosExistentes = {

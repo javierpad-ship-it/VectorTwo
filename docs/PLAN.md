@@ -38,6 +38,7 @@ Reglas confirmadas con Javier:
 - La **Equivalencia cuelga del nodo Género-Mundo-Línea** (Denim-Hombre-Urbano y Denim-Mujer-Urbano tienen equivalencias distintas).
 - Una **Marca está en más de una Equivalencia** → relación muchos a muchos.
 - **Agrupación Talla**: dos valores, *Tallas centrales* y *Tallas extremas*, como catálogo cerrado. No hay tallas individuales: la venta y el stock llegan ya consolidados por agrupación, que en Fase 2 será una columna de esas filas.
+- **Equivalencia `-`** en el archivo = la equivalencia se llama igual que la línea (se crea como real). **Equivalencia vacía** = genérica `SIN EQUIVALENCIA` por nodo.
 - Las filas sin equivalencia definida (vacío o `-` en el archivo) caen en una equivalencia genérica `SIN EQUIVALENCIA` por nodo (`es_generica`).
 - **Toda línea tiene mundo.** No existe un mundo comodín: una fila de archivo con el mundo vacío es un error del archivo, el importador la omite (`mundo_vacio`) y la previsualización la lista para corregirla.
 
@@ -81,7 +82,7 @@ Toda tabla lleva `id uuid`, `activo`, `created_at`, `updated_at` con trigger, y 
 
 ### Fase 2 — Planificación (se especifica al cerrar la Fase 1)
 
-- **M5** Carga de histórico de ventas y stock mensual por tienda al grano del árbol.
+- **M5** Carga de histórico de ventas y stock mensual por tienda al grano del árbol. Resuelve la equivalencia de cada fila con la misma regla del árbol (`src/lib/arbol/normalizar.ts`): `-` = la equivalencia que se llama como la línea; vacío = la genérica `SIN EQUIVALENCIA` del nodo. Las filas cuya combinación no exista en el árbol se reportan antes de cargar, igual que en el importador de M1.
 - **M6** Curvas de estacionalidad por agrupación de estacionalidad.
 - **M7** Proyección anual de unidades por Género / Mundo / Línea / Equivalencia / Agrupación marca / Marca (5 principales por equivalencia) / Agrupación talla.
 - **M8** Flujo de mercadería y necesidad de compra → documento para compradores.

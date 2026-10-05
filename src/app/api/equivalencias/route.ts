@@ -5,7 +5,9 @@ import { requirePlanner, requireUser } from "@/lib/auth/guard";
 import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { incluirInactivos } from "@/lib/api/catalogo";
+import type { TablesInsert } from "@/lib/supabase/database.types";
 import { crearEquivalenciaSchema } from "@/lib/arbol/esquemas";
+import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
 import { motivoRechazoEquivalencia } from "@/lib/arbol/reglas";
 import { ordenarEquivalencias } from "@/lib/arbol/armar-arbol";
 
@@ -33,9 +35,14 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Crea una equivalencia en un nodo (`requirePlanner`), 201. Un nombre vacío,
- * `-` o `SIN EQUIVALENCIA` crea la genérica del nodo. `404` nodo inexistente ·
- * `409` segunda genérica o nombre/código repetido en el nodo.
+ * Crea una equivalencia en un nodo (`requirePlanner`), 201. Un nombre vacío o
+ * `SIN EQUIVALENCIA` crea la genérica del nodo. Un nombre `-` significa "igual
+ * a la línea": el handler lo sustituye por el nombre de la línea del nodo
+ * (`genero_mundo_linea.linea_id → lineas.nombre`) antes de comprobar
+ * unicidad, deriva el código si el cliente no lo mandó y la guarda como real
+ * (`es_generica = false`). Si el nodo ya tiene una real con ese nombre, es la
+ * misma equivalencia y responde `409` como cualquier repetida. `404` nodo
+ * inexistente · `409` segunda genérica o nombre/código repetido en el nodo.
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -46,7 +53,11 @@ export async function POST(request: NextRequest) {
 
   const db = supabaseAdmin();
   const [{ data: nodo, error: errNodo }, { data: hermanas, error: errHermanas }] = await Promise.all([
-    db.from("genero_mundo_linea").select("id").eq("id", datos.genero_mundo_linea_id).maybeSingle(),
+    db
+      .from("genero_mundo_linea")
+      .select("id, lineas(nombre)")
+      .eq("id", datos.genero_mundo_linea_id)
+      .maybeSingle(),
     db
       .from("equivalencias")
       .select("id, nombre, codigo, es_generica, activo")
@@ -56,10 +67,31 @@ export async function POST(request: NextRequest) {
   if (!nodo) return error("Nodo no encontrado.", 404);
   if (errHermanas) return traducirErrorDb(errHermanas);
 
-  const motivo = motivoRechazoEquivalencia(hermanas ?? [], datos);
+  let nueva: TablesInsert<"equivalencias">;
+  if (datos.igual_a_linea) {
+    const lineaNombre = normalizarNombre(nodo.lineas?.nombre);
+    if (!lineaNombre) return error("No se encontró la línea del nodo.", 404);
+    const codigo = datos.codigo ?? aCodigo(lineaNombre);
+    if (!codigo) return error("El código no puede quedar vacío (usa letras o números).", 400);
+    nueva = {
+      genero_mundo_linea_id: datos.genero_mundo_linea_id,
+      nombre: lineaNombre,
+      codigo,
+      es_generica: false,
+    };
+  } else {
+    nueva = {
+      genero_mundo_linea_id: datos.genero_mundo_linea_id,
+      nombre: datos.nombre,
+      codigo: datos.codigo,
+      es_generica: datos.es_generica,
+    };
+  }
+
+  const motivo = motivoRechazoEquivalencia(hermanas ?? [], nueva);
   if (motivo) return error(motivo, 409);
 
-  const { data, error: err } = await db.from("equivalencias").insert(datos).select("*").single();
+  const { data, error: err } = await db.from("equivalencias").insert(nueva).select("*").single();
   if (err) return traducirErrorDb(err);
   return ok(data, 201);
 }

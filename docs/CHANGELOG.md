@@ -2,6 +2,11 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.2.3 · M1 — 2026-10-05
+
+- **`-` en la equivalencia = igual a la línea.** Regla aclarada por Javier: una fila con equivalencia `-` crea una equivalencia real con el nombre de su línea (antes caía en la genérica). Vale en el importador, en la API al crear (`POST /api/equivalencias` traduce `-`) y en la pantalla (escribir `-` al crear muestra que tomará el nombre de la línea); al renombrar se rechaza. La misma regla queda registrada para las cargas de venta y stock de la Fase 2. Conteos con el archivo actual: 1 956 procesadas · 46 omitidas (14 mundo vacío + 32 duplicadas) · 86 líneas · 556 nodos · 1 691 reales (368 por `-`) + 265 genéricas.
+- Tests: 131 en 10 archivos.
+
 ## 0.2.2 · M1 — 2026-10-05
 
 - **Importar desde Excel.** La pestaña Importar acepta `.xlsx` y `.xls` además de CSV; la cabecera es la primera fila con datos, las columnas sin nombre y las filas vacías se descartan, y si el libro tiene varias hojas se elige cuál leer. Lector en `src/lib/arbol/leer-archivo.ts` (SheetJS cargado bajo demanda), probado con un `.xls` generado en memoria y con el archivo real de Javier.

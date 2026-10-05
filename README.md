@@ -72,7 +72,7 @@ Lo que existe hoy, por pantalla:
 | `/maestros/arbol` → pestaña Importar | admin y planner | Carga el árbol desde un CSV o un Excel (.xlsx, .xls; se elige la hoja si hay varias): mapeo de columnas, previsualización con conteos y el detalle de lo que no se cargará (filas con errores, separadas de las repetidas, con filtro por motivo y descarga en CSV), aplicar. Reimportar el mismo archivo no duplica nada |
 | `/maestros/arbol/catalogos` | admin y planner | Géneros y mundos (edita el admin), líneas con su temporada (edita el planner), agrupaciones de talla (solo lectura) |
 
-Reglas del árbol que conviene saber: los mundos existen en todos los géneros; una línea es catálogo y se activa por nodo género-mundo; la equivalencia cuelga del nodo; las filas sin equivalencia caen en una genérica `SIN EQUIVALENCIA` por nodo; toda línea tiene mundo, así que las filas de un CSV con el mundo vacío no se cargan y se listan en la previsualización para corregir el archivo; la acción normal es desactivar, y eliminar solo se permite sin hijos. El detalle está en `docs/modulos/01-arbol-producto.md`.
+Reglas del árbol que conviene saber: los mundos existen en todos los géneros; una línea es catálogo y se activa por nodo género-mundo; la equivalencia cuelga del nodo; las filas con equivalencia `-` crean una equivalencia con el nombre de la línea y las filas con equivalencia vacía caen en una genérica `SIN EQUIVALENCIA` por nodo; toda línea tiene mundo, así que las filas de un CSV con el mundo vacío no se cargan y se listan en la previsualización para corregir el archivo; la acción normal es desactivar, y eliminar solo se permite sin hijos. El detalle está en `docs/modulos/01-arbol-producto.md`.
 
 ## Desplegar en Railway
 
@@ -94,7 +94,7 @@ src/lib/supabase     clientes admin / server / browser y tipos
 src/lib/api          respuestas, validación, CRUD de catálogos y traducción de errores de base
 src/lib/arbol        lógica pura del árbol: normalizar, importar, armar-arbol, reglas, esquemas zod
 src/components/ui    kit de interfaz
-tests/               vitest (121 pruebas en 10 archivos)
+tests/               vitest (131 pruebas en 10 archivos)
 datos/               archivos fuente del negocio (ignorados por git)
 ```
 

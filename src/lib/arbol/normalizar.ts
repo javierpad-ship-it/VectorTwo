@@ -51,8 +51,29 @@ export function aCodigo(valor: unknown): string {
   return base.slice(0, MAX_CODIGO).replace(/_+$/g, "");
 }
 
-/** `""`, `"-"`, `"   "` y `"SIN EQUIVALENCIA"` (en cualquier caja) significan "sin equivalencia definida". */
+/**
+ * Marca que, como equivalencia, significa "igual a la línea": la equivalencia
+ * se llama exactamente como la línea del nodo (regla confirmada por Javier).
+ * No es la genérica: produce una equivalencia real con el nombre de la línea.
+ */
+export const MARCA_IGUAL_A_LINEA = "-";
+
+/**
+ * `""`, `"   "` y `"SIN EQUIVALENCIA"` (en cualquier caja) significan "sin
+ * equivalencia definida" y caen en la genérica del nodo. `"-"` ya no cuenta
+ * aquí: ver `esEquivalenciaIgualALinea`.
+ */
 export function esEquivalenciaGenerica(valor: unknown): boolean {
   const n = normalizarNombre(valor);
-  return n === "" || n === "-" || n === EQUIVALENCIA_GENERICA.nombre;
+  return n === "" || n === EQUIVALENCIA_GENERICA.nombre;
+}
+
+/**
+ * `true` solo para `"-"` (tras normalizar: espacios alrededor no importan).
+ * Quien lo reciba debe sustituirlo por el nombre normalizado de la línea del
+ * nodo y tratarlo como una equivalencia real (`es_generica = false`), con el
+ * código derivado de ese nombre. `"--"` o `"-x"` no son la marca.
+ */
+export function esEquivalenciaIgualALinea(valor: unknown): boolean {
+  return normalizarNombre(valor) === MARCA_IGUAL_A_LINEA;
 }

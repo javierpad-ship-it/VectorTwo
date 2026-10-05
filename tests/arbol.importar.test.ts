@@ -10,7 +10,13 @@ import {
   resolverCatalogo,
   type EstadoImportacion,
 } from "@/lib/arbol/importar";
-import { EQUIVALENCIA_GENERICA, aCodigo, esEquivalenciaGenerica, normalizarNombre } from "@/lib/arbol/normalizar";
+import {
+  EQUIVALENCIA_GENERICA,
+  aCodigo,
+  esEquivalenciaGenerica,
+  esEquivalenciaIgualALinea,
+  normalizarNombre,
+} from "@/lib/arbol/normalizar";
 import type { FilaImportacion, FilaOmitida, MotivoOmision } from "@/lib/arbol/tipos";
 
 // ─── Estado de seed (8 géneros, 5 mundos, sin líneas) ───
@@ -85,7 +91,7 @@ describe("planificarImportacion · omisiones (regla 5)", () => {
       omitida(filas[3], 4, "mundo_desconocido", { detalle: "ESPACIAL" }),
     ]);
     expect(plan.reporte.totales).toEqual({ recibidas: 4, procesadas: 0, omitidas: 4 });
-    expect(plan.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0 });
+    expect(plan.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0, equivalencias_igual_a_linea: 0 });
     expect(plan.lineas).toEqual([]);
     expect(plan.nodos).toEqual([]);
     expect(plan.equivalencias).toEqual([]);
@@ -113,7 +119,7 @@ describe("planificarImportacion · mundo vacío (regla 6: no existen líneas sin
       omitida(filas[2], 3, "mundo_vacio"),
     ]);
     expect(plan.reporte.totales).toEqual({ recibidas: 3, procesadas: 1, omitidas: 2 });
-    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 1, equivalencias_genericas: 0 });
+    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 1, equivalencias_genericas: 0, equivalencias_igual_a_linea: 0 });
     expect(plan.lineas.map((l) => l.nombre)).toEqual(["PANTALON"]);
     expect(plan.nodos).toEqual([{ genero_id: "g-H", mundo_id: "m-URBANO", linea_nombre: "PANTALON" }]);
   });
@@ -130,12 +136,22 @@ describe("planificarImportacion · mundo vacío (regla 6: no existen líneas sin
 });
 
 describe("planificarImportacion · genérica (regla 7)", () => {
-  it("'' y '-' en el mismo nodo producen una sola genérica", () => {
+  it("'', 'SIN EQUIVALENCIA' y espacios en el mismo nodo producen una sola genérica", () => {
     const plan = planificarImportacion(
-      [fila("H", "URBANO", "PANTALON", ""), fila("H", "URBANO", "PANTALON", "-"), fila("H", "URBANO", "PANTALON", "  ")],
+      [
+        fila("H", "URBANO", "PANTALON", ""),
+        fila("H", "URBANO", "PANTALON", "sin equivalencia"),
+        fila("H", "URBANO", "PANTALON", "  "),
+      ],
       estadoSeed()
     );
-    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 0, equivalencias_genericas: 1 });
+    expect(plan.reporte.crear).toEqual({
+      lineas: 1,
+      nodos: 1,
+      equivalencias: 0,
+      equivalencias_genericas: 1,
+      equivalencias_igual_a_linea: 0,
+    });
     expect(plan.equivalencias).toEqual([
       {
         genero_id: "g-H",
@@ -148,7 +164,7 @@ describe("planificarImportacion · genérica (regla 7)", () => {
     ]);
     expect(plan.reporte.omitidas.map((o) => o.motivo)).toEqual(["duplicada_en_archivo", "duplicada_en_archivo"]);
   });
-  it("un nodo con reales y genéricas crea las reales más una genérica", () => {
+  it("un nodo con reales y genéricas crea las reales más una genérica; '-' es una real más (la línea)", () => {
     const plan = planificarImportacion(
       [
         fila("H", "URBANO", "PANTALON", "JOGGER"),
@@ -158,8 +174,14 @@ describe("planificarImportacion · genérica (regla 7)", () => {
       ],
       estadoSeed()
     );
-    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 2, equivalencias_genericas: 1 });
-    expect(plan.equivalencias.map((e) => e.codigo)).toEqual(["JOGGER", "SIN_EQUIVALENCIA", "CARGO"]);
+    expect(plan.reporte.crear).toEqual({
+      lineas: 1,
+      nodos: 1,
+      equivalencias: 3,
+      equivalencias_genericas: 1,
+      equivalencias_igual_a_linea: 1,
+    });
+    expect(plan.equivalencias.map((e) => e.codigo)).toEqual(["JOGGER", "PANTALON", "CARGO", "SIN_EQUIVALENCIA"]);
   });
   it("una equivalencia escrita 'SIN EQUIVALENCIA' también es la genérica", () => {
     const plan = planificarImportacion([fila("H", "URBANO", "PANTALON", "sin equivalencia")], estadoSeed());
@@ -176,7 +198,13 @@ describe("planificarImportacion · genérica (regla 7)", () => {
     ]) {
       const plan = planificarImportacion(filas, estadoSeed());
       expect(plan.reporte.omitidas).toEqual([]);
-      expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 1, equivalencias_genericas: 1 });
+      expect(plan.reporte.crear).toEqual({
+        lineas: 1,
+        nodos: 1,
+        equivalencias: 1,
+        equivalencias_genericas: 1,
+        equivalencias_igual_a_linea: 0,
+      });
       const generica = plan.equivalencias.find((e) => e.es_generica);
       const real = plan.equivalencias.find((e) => !e.es_generica);
       expect(generica?.codigo).toBe("SIN_EQUIVALENCIA");
@@ -196,6 +224,95 @@ describe("planificarImportacion · genérica (regla 7)", () => {
     expect(plan.equivalencias).toEqual([
       { genero_id: "g-H", mundo_id: "m-URBANO", linea_nombre: "PANTALON", nombre: "SIN EQUIVALENCIA", codigo: "SIN_EQUIVALENCIA_2", es_generica: true },
     ]);
+  });
+});
+
+describe("planificarImportacion · '-' significa igual a la línea", () => {
+  const real = (nombre: string, codigo = nombre) => ({
+    genero_id: "g-H",
+    mundo_id: "m-URBANO",
+    linea_nombre: "CORREAS",
+    nombre,
+    codigo,
+    es_generica: false,
+  });
+
+  it("'-' crea una equivalencia real con el nombre normalizado de la línea y su código derivado", () => {
+    const plan = planificarImportacion([fila("H", "URBANO", " correas ", " - ")], estadoSeed());
+    expect(plan.reporte.omitidas).toEqual([]);
+    expect(plan.reporte.crear).toEqual({
+      lineas: 1,
+      nodos: 1,
+      equivalencias: 1,
+      equivalencias_genericas: 0,
+      equivalencias_igual_a_linea: 1,
+    });
+    expect(plan.equivalencias).toEqual([real("CORREAS")]);
+  });
+  it("'-' y el nombre literal de la línea en el mismo nodo son una sola equivalencia; la segunda es duplicada", () => {
+    for (const [filas, original] of [
+      [[fila("H", "URBANO", "CORREAS", "-"), fila("H", "URBANO", "CORREAS", "correas")], "-"],
+      [[fila("H", "URBANO", "CORREAS", "CORREAS"), fila("H", "URBANO", "CORREAS", "-")], "CORREAS"],
+    ] as const) {
+      const plan = planificarImportacion([...filas], estadoSeed());
+      expect(plan.reporte.crear).toEqual({
+        lineas: 1,
+        nodos: 1,
+        equivalencias: 1,
+        equivalencias_genericas: 0,
+        equivalencias_igual_a_linea: 1,
+      });
+      expect(plan.equivalencias).toEqual([real("CORREAS")]);
+      // La duplicada muestra la equivalencia como vino en el archivo.
+      expect(plan.reporte.omitidas).toEqual([omitida(filas[1], 2, "duplicada_en_archivo", { fila_original: 1 })]);
+      expect(plan.reporte.omitidas[0].equivalencia).toBe(original === "-" ? "CORREAS" : "-");
+      expect(plan.reporte.totales).toEqual({ recibidas: 2, procesadas: 1, omitidas: 1 });
+    }
+  });
+  it("'-' y vacío en el mismo nodo son dos equivalencias: la real (línea) y la genérica", () => {
+    const plan = planificarImportacion([fila("H", "URBANO", "CORREAS", "-"), fila("H", "URBANO", "CORREAS", "")], estadoSeed());
+    expect(plan.reporte.omitidas).toEqual([]);
+    expect(plan.reporte.crear).toEqual({
+      lineas: 1,
+      nodos: 1,
+      equivalencias: 1,
+      equivalencias_genericas: 1,
+      equivalencias_igual_a_linea: 1,
+    });
+    expect(plan.equivalencias).toEqual([
+      real("CORREAS"),
+      { ...real(EQUIVALENCIA_GENERICA.nombre, EQUIVALENCIA_GENERICA.codigo), es_generica: true },
+    ]);
+  });
+  it("el código de la real igual a la línea pasa por codigoUnico como cualquier otra", () => {
+    // "CORREAS." no es la línea, pero su código derivado también es CORREAS.
+    const plan = planificarImportacion([fila("H", "URBANO", "CORREAS", "CORREAS."), fila("H", "URBANO", "CORREAS", "-")], estadoSeed());
+    expect(plan.equivalencias).toEqual([real("CORREAS.", "CORREAS"), real("CORREAS", "CORREAS_2")]);
+    expect(plan.reporte.crear.equivalencias_igual_a_linea).toBe(1);
+  });
+  it("si la base ya tiene la real con el nombre de la línea, '-' la reconoce como existente", () => {
+    const estado = estadoSeed();
+    estado.lineas = [{ id: "l-corr", codigo: "CORREAS", nombre: "CORREAS", activo: true }];
+    estado.nodos = [{ id: "n1", genero_id: "g-H", mundo_id: "m-URBANO", linea_id: "l-corr", activo: true }];
+    estado.equivalencias = [
+      { id: "e1", genero_mundo_linea_id: "n1", nombre: "CORREAS", codigo: "CORREAS", es_generica: false, activo: true },
+    ];
+    const plan = planificarImportacion([fila("H", "URBANO", "CORREAS", "-")], estado);
+    expect(plan.reporte.existentes).toEqual({ lineas: 1, nodos: 1, equivalencias: 1 });
+    expect(plan.reporte.crear).toEqual({
+      lineas: 0,
+      nodos: 0,
+      equivalencias: 0,
+      equivalencias_genericas: 0,
+      equivalencias_igual_a_linea: 0,
+    });
+    expect(plan.equivalencias).toEqual([]);
+  });
+  it("'--' o '-x' no son la marca: son reales con ese nombre", () => {
+    const plan = planificarImportacion([fila("H", "URBANO", "CORREAS", "-x"), fila("H", "URBANO", "CORREAS", "--")], estadoSeed());
+    expect(plan.equivalencias.map((e) => e.nombre)).toEqual(["-X", "--"]);
+    expect(plan.equivalencias.every((e) => !e.es_generica)).toBe(true);
+    expect(plan.reporte.crear.equivalencias_igual_a_linea).toBe(0);
   });
 });
 
@@ -238,9 +355,9 @@ describe("planificarImportacion · duplicados (regla 8)", () => {
       { fila: 2, motivo: "duplicada_en_archivo", fila_original: 1, genero: "H", mundo: "URBANO", linea: "PANTALÓN", equivalencia: "JOGGER" },
     ]);
     expect(plan.reporte.totales).toEqual({ recibidas: 3, procesadas: 2, omitidas: 1 });
-    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 2, equivalencias_genericas: 0 });
+    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 1, equivalencias: 2, equivalencias_genericas: 0, equivalencias_igual_a_linea: 0 });
   });
-  it("fila_original apunta siempre a la primera aparición, también para '' y '-' (misma genérica)", () => {
+  it("fila_original apunta siempre a la primera aparición: '' y 'SIN EQUIVALENCIA' (misma genérica), '-' y la línea (misma real)", () => {
     const filas = [
       fila("H", "URBANO", "PANTALON", "A"),
       fila("H", "URBANO", "PANTALON", ""),
@@ -248,30 +365,38 @@ describe("planificarImportacion · duplicados (regla 8)", () => {
       fila("H", "URBANO", "PANTALON", "A"),
       fila("H", "URBANO", "PANTALON", "A"),
       fila("H", "URBANO", "PANTALON", "sin equivalencia"),
+      fila("H", "URBANO", "PANTALON", "pantalon"),
     ];
     const plan = planificarImportacion(filas, estadoSeed());
     expect(plan.reporte.omitidas).toEqual([
-      omitida(filas[2], 3, "duplicada_en_archivo", { fila_original: 2 }),
       omitida(filas[3], 4, "duplicada_en_archivo", { fila_original: 1 }),
       omitida(filas[4], 5, "duplicada_en_archivo", { fila_original: 1 }),
       omitida(filas[5], 6, "duplicada_en_archivo", { fila_original: 2 }),
+      omitida(filas[6], 7, "duplicada_en_archivo", { fila_original: 3 }),
     ]);
-    // La equivalencia se muestra como vino ('-'), no como la genérica a la que cae.
-    expect(plan.reporte.omitidas[0].equivalencia).toBe("-");
-    expect(plan.reporte.omitidas[3].equivalencia).toBe(EQUIVALENCIA_GENERICA.nombre);
+    // La equivalencia se muestra como vino, no como la genérica o la real a la que cae.
+    expect(plan.reporte.omitidas[2].equivalencia).toBe(EQUIVALENCIA_GENERICA.nombre);
+    expect(plan.reporte.omitidas[3].equivalencia).toBe("PANTALON");
+    expect(plan.reporte.crear).toEqual({
+      lineas: 1,
+      nodos: 1,
+      equivalencias: 2,
+      equivalencias_genericas: 1,
+      equivalencias_igual_a_linea: 1,
+    });
     // Las omisiones que no son duplicados no llevan fila_original.
     const otra = planificarImportacion([fila("H", "", "PANTALON", "A")], estadoSeed());
     expect(otra.reporte.omitidas[0]).not.toHaveProperty("fila_original");
   });
   it("la misma línea en dos mundos es un catálogo y dos nodos", () => {
     const plan = planificarImportacion([fila("H", "URBANO", "PANTALON", "A"), fila("M", "CASUAL", "PANTALON", "A")], estadoSeed());
-    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 2, equivalencias: 2, equivalencias_genericas: 0 });
+    expect(plan.reporte.crear).toEqual({ lineas: 1, nodos: 2, equivalencias: 2, equivalencias_genericas: 0, equivalencias_igual_a_linea: 0 });
   });
 });
 
 const ARCHIVO_CHICO: FilaImportacion[] = [
   fila("H", "URBANO", "PANTALON", "JOGGER"),
-  fila("H", "URBANO", "PANTALON", "-"),
+  fila("H", "URBANO", "PANTALON", "-"), // igual a la línea: real PANTALON
   fila("H", "URBANO", "PANTALON", "VARIOS"),
   fila("M", "URBANO", "PANTALON", "VARIOS"),
   fila("M", "CASUAL", "BLUSA", ""),
@@ -284,7 +409,13 @@ describe("planificarImportacion · idempotencia (regla 9)", () => {
   it("tras aplicarPlan, el mismo archivo no crea nada y lo cuenta como existente", () => {
     const estado = estadoSeed();
     const plan1 = planificarImportacion(ARCHIVO_CHICO, estado);
-    expect(plan1.reporte.crear).toEqual({ lineas: 2, nodos: 3, equivalencias: 3, equivalencias_genericas: 2 });
+    expect(plan1.reporte.crear).toEqual({
+      lineas: 2,
+      nodos: 3,
+      equivalencias: 4,
+      equivalencias_genericas: 1,
+      equivalencias_igual_a_linea: 1,
+    });
     expect(plan1.reporte.omitidas).toEqual([
       omitida(ARCHIVO_CHICO[5], 6, "mundo_vacio"),
       omitida(ARCHIVO_CHICO[6], 7, "duplicada_en_archivo", { fila_original: 1 }),
@@ -297,7 +428,7 @@ describe("planificarImportacion · idempotencia (regla 9)", () => {
     expect(estado2.equivalencias).toHaveLength(5);
 
     const plan2 = planificarImportacion(ARCHIVO_CHICO, estado2);
-    expect(plan2.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0 });
+    expect(plan2.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0, equivalencias_igual_a_linea: 0 });
     expect(plan2.reporte.existentes).toEqual({
       lineas: plan1.reporte.crear.lineas,
       nodos: plan1.reporte.crear.nodos,
@@ -330,12 +461,12 @@ describe("planificarImportacion · inactivos (regla 10)", () => {
       { id: "e2", genero_mundo_linea_id: "n1", nombre: "SIN EQUIVALENCIA", codigo: "SIN_EQUIVALENCIA", es_generica: true, activo: true },
     ];
     const plan = planificarImportacion(
-      [fila("H", "URBANO", "PANTALON", "JOGGER"), fila("H", "URBANO", "PANTALON", "-"), fila("H", "URBANO", "PANTALON", "CARGO")],
+      [fila("H", "URBANO", "PANTALON", "JOGGER"), fila("H", "URBANO", "PANTALON", ""), fila("H", "URBANO", "PANTALON", "CARGO")],
       estado
     );
     expect(plan.reporte.existentes_inactivos).toEqual({ lineas: 1, nodos: 1, equivalencias: 1 });
     expect(plan.reporte.existentes).toEqual({ lineas: 0, nodos: 0, equivalencias: 1 });
-    expect(plan.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 1, equivalencias_genericas: 0 });
+    expect(plan.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 1, equivalencias_genericas: 0, equivalencias_igual_a_linea: 0 });
     expect(plan.equivalencias).toEqual([
       { genero_id: "g-H", mundo_id: "m-URBANO", linea_nombre: "PANTALON", nombre: "CARGO", codigo: "CARGO", es_generica: false },
     ]);
@@ -374,7 +505,13 @@ describe("planificarImportacion · nunca toca géneros, mundos ni activo (regla 
     const plan = planificarImportacion(ARCHIVO_CHICO, estadoSeed());
     expect(plan.reporte.crear).not.toHaveProperty("generos");
     expect(plan.reporte.crear).not.toHaveProperty("mundos");
-    expect(Object.keys(plan.reporte.crear).sort()).toEqual(["equivalencias", "equivalencias_genericas", "lineas", "nodos"]);
+    expect(Object.keys(plan.reporte.crear).sort()).toEqual([
+      "equivalencias",
+      "equivalencias_genericas",
+      "equivalencias_igual_a_linea",
+      "lineas",
+      "nodos",
+    ]);
     expect(Object.keys(plan).sort()).toEqual(["equivalencias", "lineas", "nodos", "reporte"]);
   });
   it("aplicarPlan conserva géneros y mundos idénticos y todo lo creado nace activo", () => {
@@ -489,14 +626,19 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
 
     // Conteos calculados aquí, independientes del importador, solo sobre las filas
     // con mundo: no existen líneas sin mundo, así que las 14 filas con mundo vacío
-    // son errores del archivo y quedan fuera de todo.
+    // son errores del archivo y quedan fuera de todo. Genéricas = nodos con alguna
+    // fila vacía (o "SIN EQUIVALENCIA"); reales = nombres distintos por nodo tras
+    // sustituir `-` por el nombre de la línea; igual a línea = reales cuyo nombre
+    // es el de la línea (por `-` o escrito literal).
     const nodosConGenerica = new Set<string>();
     const nodosDistintos = new Set<string>();
     const lineasDistintas = new Set<string>();
     const lineasSoloSinMundo = new Set<string>();
     const equivalenciasReales = new Set<string>();
+    const equivalenciasIgualALinea = new Set<string>();
     const sinMundoPorGenero: Record<string, number> = {};
     let conMundo = 0;
+    let filasConGuion = 0;
     for (const f of filas) {
       const linea = normalizarNombre(f.linea);
       const genero = normalizarNombre(f.genero);
@@ -511,8 +653,15 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
       const clave = `${aCodigo(genero)}|${mundo}|${linea}`;
       nodosDistintos.add(clave);
       lineasDistintas.add(linea);
-      if (esEquivalenciaGenerica(f.equivalencia)) nodosConGenerica.add(clave);
-      else equivalenciasReales.add(`${clave}|${normalizarNombre(f.equivalencia)}`);
+      if (esEquivalenciaGenerica(f.equivalencia)) {
+        nodosConGenerica.add(clave);
+        continue;
+      }
+      const igualALinea = esEquivalenciaIgualALinea(f.equivalencia);
+      if (igualALinea) filasConGuion += 1;
+      const nombre = igualALinea ? linea : normalizarNombre(f.equivalencia);
+      equivalenciasReales.add(`${clave}|${nombre}`);
+      if (nombre === linea) equivalenciasIgualALinea.add(`${clave}|${nombre}`);
     }
     for (const l of lineasDistintas) lineasSoloSinMundo.delete(l);
     const filasSinMundo = Object.values(sinMundoPorGenero).reduce((a, b) => a + b, 0);
@@ -546,7 +695,11 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
       equivalenciasReales.size,
       "genéricas:",
       nodosConGenerica.size,
-      "duplicadas:",
+      "igual a línea:",
+      equivalenciasIgualALinea.size,
+      "(filas con '-':",
+      filasConGuion,
+      ") duplicadas:",
       duplicadasEsperadas
     );
 
@@ -562,9 +715,11 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
     expect(porMotivo.mundo_vacio).toBe(14);
     expect(mundoVacioPorGenero).toEqual({ BEBE: 2, JOVENCITAS: 3, NIÑAS: 4, NIÑOS: 5 });
     expect(mundoVacioPorGenero).toEqual(sinMundoPorGenero);
+    // Con `-` = igual a la línea, las filas con `-` ya no caen todas en la misma
+    // genérica del nodo: solo quedan 32 duplicadas (antes 198).
     expect(porMotivo.duplicada_en_archivo).toBe(duplicadasEsperadas);
-    expect(porMotivo.duplicada_en_archivo).toBe(198);
-    expect(reporte.totales).toEqual({ recibidas: 2002, procesadas: 1790, omitidas: 212 });
+    expect(porMotivo.duplicada_en_archivo).toBe(32);
+    expect(reporte.totales).toEqual({ recibidas: 2002, procesadas: 1956, omitidas: 46 });
     // Cada duplicado señala una fila anterior que sí se procesó, con el mismo contenido.
     for (const o of reporte.omitidas) {
       if (o.motivo !== "duplicada_en_archivo") {
@@ -586,11 +741,18 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
     expect(reporte.crear.lineas).toBe(86 - lineasSoloSinMundo.size);
     expect(reporte.crear.nodos).toBe(nodosDistintos.size);
     expect(reporte.crear.nodos).toBe(556);
+    // 1 691 reales (368 de ellas se llaman como su línea, por `-` o escrito
+    // literal) y 265 genéricas (nodos con alguna fila vacía).
     expect(reporte.crear.equivalencias).toBe(equivalenciasReales.size);
-    expect(reporte.crear.equivalencias).toBe(1414);
+    expect(reporte.crear.equivalencias).toBe(1691);
     expect(reporte.crear.equivalencias_genericas).toBe(nodosConGenerica.size);
-    expect(reporte.crear.equivalencias_genericas).toBe(376);
+    expect(reporte.crear.equivalencias_genericas).toBe(265);
+    expect(reporte.crear.equivalencias_igual_a_linea).toBe(equivalenciasIgualALinea.size);
+    expect(reporte.crear.equivalencias_igual_a_linea).toBe(368);
     expect(reporte.crear.equivalencias + reporte.crear.equivalencias_genericas).toBe(reporte.totales.procesadas);
+    // Toda real igual a la línea está en el plan con ese nombre y como real.
+    const igualALineaEnPlan = plan.equivalencias.filter((e) => !e.es_generica && e.nombre === e.linea_nombre);
+    expect(igualALineaEnPlan).toHaveLength(equivalenciasIgualALinea.size);
     expect(reporte.totales.recibidas).toBe(filas.length);
     expect(reporte.totales.recibidas).toBe(reporte.totales.procesadas + reporte.totales.omitidas);
     expect(reporte.existentes).toEqual({ lineas: 0, nodos: 0, equivalencias: 0 });
@@ -611,7 +773,7 @@ describe.skipIf(!hayCsv)("planificarImportacion · datos/arbol-lineas.csv (archi
     expect(despues.equivalencias).toHaveLength(reporte.crear.equivalencias + reporte.crear.equivalencias_genericas);
 
     const plan2 = planificarImportacion(filas, despues);
-    expect(plan2.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0 });
+    expect(plan2.reporte.crear).toEqual({ lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0, equivalencias_igual_a_linea: 0 });
     expect(plan2.reporte.existentes).toEqual({
       lineas: reporte.crear.lineas,
       nodos: reporte.crear.nodos,

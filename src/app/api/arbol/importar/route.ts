@@ -36,7 +36,13 @@ export async function POST(request: NextRequest) {
     return ok(reporte);
   }
 
-  const creados: ConteosCrear = { lineas: 0, nodos: 0, equivalencias: 0, equivalencias_genericas: 0 };
+  const creados: ConteosCrear = {
+    lineas: 0,
+    nodos: 0,
+    equivalencias: 0,
+    equivalencias_genericas: 0,
+    equivalencias_igual_a_linea: 0,
+  };
 
   const falloEn = (etapa: string, err: PostgrestError | string) => {
     let detalle: string;
@@ -90,7 +96,10 @@ export async function POST(request: NextRequest) {
   const nodoId = new Map(nodos.map((n) => [`${n.genero_id}|${n.mundo_id}|${n.linea_id}`, n.id]));
 
   // 3. Equivalencias (único por nodo + nombre; la genérica tiene nombre fijo, así que cae ahí también).
+  // `igualALinea` guarda las reales que se llaman como su línea (filas con `-` o
+  // con el nombre literal) para el conteo informativo `equivalencias_igual_a_linea`.
   const equivalenciasInsert: TablesInsert<"equivalencias">[] = [];
+  const igualALinea = new Set<string>();
   for (const e of plan.equivalencias) {
     const linea = lineaId.get(e.linea_nombre);
     const nodo = linea && nodoId.get(`${e.genero_id}|${e.mundo_id}|${linea}`);
@@ -101,16 +110,22 @@ export async function POST(request: NextRequest) {
       codigo: e.codigo,
       es_generica: e.es_generica,
     });
+    if (!e.es_generica && e.nombre === e.linea_nombre) igualALinea.add(`${nodo}|${e.nombre}`);
   }
   for (const tanda of enTandas(equivalenciasInsert)) {
     const { data, error: err } = await db
       .from("equivalencias")
       .upsert(tanda, { onConflict: "genero_mundo_linea_id,nombre", ignoreDuplicates: true })
-      .select("id, es_generica");
+      .select("id, genero_mundo_linea_id, nombre, es_generica");
     if (err) return falloEn("equivalencias", err);
     for (const fila of data ?? []) {
       if (fila.es_generica) creados.equivalencias_genericas += 1;
-      else creados.equivalencias += 1;
+      else {
+        creados.equivalencias += 1;
+        if (igualALinea.has(`${fila.genero_mundo_linea_id}|${fila.nombre}`)) {
+          creados.equivalencias_igual_a_linea = (creados.equivalencias_igual_a_linea ?? 0) + 1;
+        }
+      }
     }
   }
 
