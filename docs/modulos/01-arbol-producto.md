@@ -327,9 +327,9 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 - [ ] Tras la migración: 8 géneros, 5 mundos (CASUAL, URBANO, DEPORTIVO, FORMAL, RI) y 2 agrupaciones de talla en el orden del seed; 0 líneas, nodos y equivalencias; `GET /api/agrupaciones-talla` devuelve CENTRALES y EXTREMAS y la pestaña Agrupaciones de talla las muestra sin botones.
 - [ ] Como comprador: entra a `/maestros/arbol`, navega, no ve ningún botón de edición; `/maestros/arbol/catalogos` le redirige a `/`; `POST /api/lineas` le devuelve `403`.
 - [ ] Como planner: `POST /api/generos` devuelve `403`; en Catálogos las pestañas Géneros y Mundos no tienen formulario ni botones.
-- [ ] Como admin, en Importar CSV, carga `datos/arbol-lineas.csv`: el mapeo se autodetecta; **Previsualizar** reporta `recibidas 2002 · procesadas 1790 · omitidas 212`; la tarjeta Omitidas dice `Con errores 14 · Repetidas en el archivo 198`; crear 86 líneas, 556 nodos, 1 414 equivalencias reales y 376 genéricas, 0 géneros/mundos nuevos. Son los conteos que fija el test del importador; si difieren, cambió el archivo.
+- [x] Como admin, en Importar CSV, carga `datos/arbol-lineas.csv`: el mapeo se autodetecta; **Previsualizar** reporta `recibidas 2002 · procesadas 1790 · omitidas 212`; la tarjeta Omitidas dice `Con errores 14 · Repetidas en el archivo 198`; crear 86 líneas, 556 nodos, 1 414 equivalencias reales y 376 genéricas, 0 géneros/mundos nuevos. Son los conteos que fija el test del importador; si difieren, cambió el archivo.
 - [ ] En el bloque **Filas con errores** aparecen las 14 filas con motivo "Mundo vacío" y la fila completa (BEBE 2, JOVENCITAS 3, NIÑAS 4, NIÑOS 5), el aviso de que no se cargarán, el chip de filtro "Mundo vacío (14)" y el botón **Descargar omitidas (CSV)**, que baja un archivo con 212 filas que Excel abre con los acentos correctos. El bloque **Repetidas en el archivo** lista 198 filas, cada una con la fila a la que repite.
-- [ ] **Aplicar**: el `confirm` repite "Quedarán fuera 14 filas con errores" y "198 filas repetidas se cargan una sola vez"; el reporte final coincide con la previsualización; el resumen de `/maestros/arbol` muestra `8 · 5 · 86 · 556 · 1 790`.
+- [x] **Aplicar**: el `confirm` repite "Quedarán fuera 14 filas con errores" y "198 filas repetidas se cargan una sola vez"; el reporte final coincide con la previsualización; el resumen de `/maestros/arbol` muestra `8 · 5 · 86 · 556 · 1 790`.
 - [ ] Reimportar el mismo archivo: previsualización con `crear` en cero y `existentes` igual a los totales; las mismas 14 filas siguen saliendo como errores; aplicar no cambia ningún conteo (verificar con `select count(*)` en las tres tablas antes y después).
 - [ ] Buscar `PANTALON`: aparece en 25 nodos (el archivo trae 26 tripletas con PANTALON, pero una tiene el mundo vacío y se omite). Abrir HOMBRE / URBANO / PANTALON y MUJER / URBANO / PANTALON: listas de equivalencias distintas; `VARIOS` aparece en ambos como filas independientes.
 - [ ] Un nodo que en el archivo solo tenía `-` muestra una única equivalencia real con el nombre de la línea; uno que solo tenía vacío muestra únicamente `SIN EQUIVALENCIA` con badge Genérica; uno mixto muestra las reales y la genérica al final.
@@ -339,6 +339,10 @@ Funciones puras en `src/lib/arbol/` probadas en `tests/arbol.*.test.ts`:
 - [ ] Desactivar el mundo FORMAL como admin: sus nodos desaparecen del árbol; con "Mostrar inactivos" aparecen como "Oculto por mundo inactivo"; reactivar FORMAL los devuelve; un nodo que se había desactivado a mano antes sigue inactivo.
 - [ ] Intentar eliminar la línea PANTALON → `409` con el conteo de nodos; eliminar una equivalencia recién creada → funciona; eliminar un nodo sin equivalencias → funciona; con equivalencias → `409`.
 - [ ] `GET /api/arbol` responde en menos de 2 s con el árbol completo y `GET /api/arbol?incluir_inactivos=1` incluye lo desactivado con sus banderas.
+
+## Verificación en producción (2026-10-05)
+
+Javier importó el archivo real desde Railway. Conteo en la base `Vector2` tras la carga: 8 géneros · 5 mundos · 86 líneas · 556 nodos · 1 691 equivalencias reales (368 con el nombre de su línea) · 265 genéricas · PANTALON en 25 nodos. Coincide exactamente con lo que predice `tests/arbol.importar.test.ts` para el archivo.
 
 ## Fuera de alcance
 

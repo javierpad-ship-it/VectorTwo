@@ -49,15 +49,15 @@ Implementadas en `src/lib/usuarios/reglas.ts`, probadas en `tests/usuarios.regla
 
 ## Hito de prueba
 
-- [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` limpios.
-- [ ] Sin sesión, cualquier ruta redirige a `/login`; con sesión, `/login` redirige a `/`.
-- [ ] Javier entra como admin y ve Inicio, Maestros (deshabilitados) y Administración.
+- [x] `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` limpios.
+- [x] Sin sesión, cualquier ruta redirige a `/login`; con sesión, `/login` redirige a `/`.
+- [x] Javier entra como admin y ve Inicio, Maestros y Administración.
 - [ ] Crea un planner: al entrar ve Inicio y Maestros; `/usuarios` le redirige a `/`; `GET /api/usuarios` le devuelve 403.
 - [ ] Crea un comprador: solo ve Inicio.
 - [ ] Desactiva al planner: su siguiente navegación muestra "Tu usuario está desactivado".
 - [ ] Intenta desactivarse a sí mismo: botón deshabilitado y la API responde 409.
 - [ ] Intenta degradar al único admin: 409 "al menos un administrador activo".
-- [ ] `APP_VERSION` visible al pie del menú.
+- [x] `APP_VERSION` visible al pie del menú.
 
 ## Fuera de alcance
 
@@ -65,4 +65,4 @@ Recuperación de contraseña por correo (hoy la resetea un admin). Auditoría de
 
 ## Estado
 
-Código completo y verificado con lint, tsc y tests. Base aplicada el 2026-10-05 en el proyecto Supabase `Vector2` (ref `tzjsxzmsvvhxyiooihyq`): `perfiles` con RLS, función `tg_set_updated_at` con `search_path` fijo, y el usuario admin de Javier creado por SQL (auth.users + auth.identities + perfiles) con contraseña temporal que debe cambiar desde `/usuarios`. **Pendiente**: recorrer el hito en Railway.
+Código completo y verificado con lint, tsc y tests. Base aplicada el 2026-10-05 en el proyecto Supabase `Vector2` (ref `tzjsxzmsvvhxyiooihyq`): `perfiles` con RLS, función `tg_set_updated_at` con `search_path` fijo, y el usuario admin de Javier creado por SQL (auth.users + auth.identities + perfiles) con contraseña temporal que debe cambiar desde `/usuarios`. **Hito recorrido** el 2026-10-05: Javier entró en Railway con su usuario admin y operó el sistema contra la base real.

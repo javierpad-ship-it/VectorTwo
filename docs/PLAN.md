@@ -74,8 +74,8 @@ Toda tabla lleva `id uuid`, `activo`, `created_at`, `updated_at` con trigger, y 
 
 | Módulo | Estado | Qué se construye | Hito de prueba |
 |---|---|---|---|
-| **M0 Cimientos** | 🔧 código listo, falta proyecto Supabase | Scaffold; migración base; login; guards; menú por rol; `/usuarios`; agentes; docs; Railway | Login como admin, crear planner y comprador, verificar qué ve cada uno, build limpio |
-| **M1 Árbol de producto** | ✅ construido; hito pendiente de base real | Géneros, Mundos, Líneas, nodos Género-Mundo-Línea, Equivalencias, Agrupaciones talla; pantalla Árbol navegable; carga CSV inicial | Cargar el árbol real completo y recorrerlo; misma Línea en dos Género-Mundo con equivalencias distintas |
+| **M0 Cimientos** | ✅ hito recorrido en Railway el 2026-10-05 (login de Javier, base real) | Scaffold; migración base; login; guards; menú por rol; `/usuarios`; agentes; docs; Railway | Login como admin, crear planner y comprador, verificar qué ve cada uno, build limpio |
+| **M1 Árbol de producto** | ✅ hito recorrido en Railway el 2026-10-05: árbol real importado (8 · 5 · 86 · 556 · 1 691 + 265) | Géneros, Mundos, Líneas, nodos Género-Mundo-Línea, Equivalencias, Agrupaciones talla; pantalla Árbol navegable; carga CSV inicial | Cargar el árbol real completo y recorrerlo; misma Línea en dos Género-Mundo con equivalencias distintas |
 | **M2 Marcas** | ⏳ | Agrupaciones de marca (seed confirmado por Javier, en este orden: 1 Ultra Low · 2 Mid Value · 3 Valor · 4 Reconocido · 5 Premium), marcas, asignación Marca ↔ Equivalencia; CSV inicial | Una marca en varias equivalencias; cambiar su agrupación y verlo reflejado |
 | **M3 Agrupaciones de estacionalidad** | ⏳ | Catálogo y asignación de cada Equivalencia a una curva; reporte de faltantes | Toda equivalencia activa tiene curva |
 | **M4 Tiendas y aperturas** | ⏳ | Tiendas y CD con fechas de apertura y cierre, venta esperada, zona, razón social; estado derivado | Tienda futura aparece Planificada y pasa a Activa al llegar la fecha |

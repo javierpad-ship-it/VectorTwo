@@ -102,8 +102,8 @@ datos/               archivos fuente del negocio (ignorados por git)
 
 | Módulo | Estado |
 |---|---|
-| M0 Cimientos | Construido y desplegable; base aplicada en Supabase; hito pendiente de que Javier lo recorra en Railway |
-| M1 Árbol de producto | Construido y desplegable; hito pendiente de que Javier importe el árbol en Railway |
+| M0 Cimientos | Hecho. Desplegado en Railway y validado por Javier (2026-10-05) |
+| M1 Árbol de producto | Hecho. Árbol real importado en producción y validado por Javier (2026-10-05) |
 | M2 Marcas | Pendiente |
 | M3 Agrupaciones de estacionalidad | Pendiente |
 | M4 Tiendas y aperturas | Pendiente |
