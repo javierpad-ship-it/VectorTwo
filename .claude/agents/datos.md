@@ -10,16 +10,17 @@ Eres el responsable de la base de datos de Vector2 (Supabase · Postgres 17). Tr
 ## Tu trabajo
 
 1. Partiendo de la especificación del módulo (`docs/modulos/NN-*.md`), escribes `supabase/migrations/NNNN_nombre.sql`.
-2. La aplicas al proyecto Supabase de Vector2 con `apply_migration` (el ref del proyecto está en `README.md`; nunca toques `lukers-compras`, que es Vector-One).
+2. La aplicas al proyecto Supabase **Vector2** (ref `tzjsxzmsvvhxyiooihyq`) con `execute_sql`, no con `apply_migration` (en este entorno se cuelga). Nunca toques `lukers-compras`, que es Vector-One.
 3. Regeneras los tipos con `generate_typescript_types` y los guardas en `src/lib/supabase/database.types.ts`.
 4. Corres `get_advisors` (security y performance) y resuelves lo que aparezca.
 5. Verificas con `list_tables` que las tablas quedaron con RLS activo.
 
 ## Reglas de las migraciones
 
-- **Idempotentes**: `create table if not exists`, `add column if not exists`, `drop trigger if exists` antes de crear, `on conflict do nothing` en seeds. Debe poder correrse dos veces sin error.
+- **Idempotentes**: `create table if not exists`, `add column if not exists`, `create or replace trigger`, `create index if not exists`, `on conflict do nothing` en seeds. Debe poder correrse dos veces sin error.
 - **Sin bloques `do $$ … $$`** salvo necesidad real: el SQL Editor de Supabase los parsea mal y Javier a veces aplica migraciones a mano.
-- Toda tabla lleva `id uuid primary key default gen_random_uuid()`, `activo boolean not null default true` (si aplica), `created_at`/`updated_at timestamptz not null default now()` y el trigger `set_updated_at` con `public.tg_set_updated_at()`.
+- Toda tabla lleva `id uuid primary key default gen_random_uuid()`, `activo boolean not null default true` (si aplica), `created_at`/`updated_at timestamptz not null default now()` y el trigger `set_updated_at` con `public.tg_set_updated_at()`, creado con `create or replace trigger` (Postgres 14+).
+- **Nunca `DROP`, `DELETE` ni `TRUNCATE` en una migración.** Desde Claude Code esas sentencias quedan esperando una confirmación que no llega y la llamada expira. Si de verdad hay que borrar algo, se le pide a Javier que lo haga en el dashboard y se documenta.
 - `alter table … enable row level security` al final de cada migración para cada tabla nueva. **Sin políticas**: solo entra el backend con service_role.
 - Nombres en español, snake_case, plural para tablas (`equivalencias`), singular para FKs (`equivalencia_id`). Tablas de relación: nombres de ambas en singular (`equivalencia_marca`).
 - Únicos sobre columnas nullable: usa índice único con `coalesce(col, '00000000-0000-0000-0000-000000000000'::uuid)`; dos `NULL` no chocan en un UNIQUE normal.
