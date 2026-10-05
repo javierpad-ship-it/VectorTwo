@@ -60,9 +60,9 @@ perfiles (admin · planner · comprador)
 | `genero_mundo_linea` | `genero_id`, `mundo_id`, `linea_id`, unique de la tripleta | M1 |
 | `equivalencias` | `genero_mundo_linea_id`, `codigo`, `nombre`, `es_generica`; unique(nodo, nombre), unique(nodo, codigo), una genérica por nodo; `agrupacion_estacionalidad_id` la añade M3 | M1 (FK en M3) |
 | `agrupaciones_talla` | `codigo`, `nombre`, `orden`; seed Centrales / Extremas; catálogo fijo, solo lectura | M1 |
-| `agrupaciones_marca` | `nombre` | M2 |
-| `marcas` | `nombre`, `agrupacion_marca_id` | M2 |
-| `equivalencia_marca` | `equivalencia_id`, `marca_id`, unique | M2 |
+| `agrupaciones_marca` | `codigo`, `nombre`, `orden`; seed de 5 (ULTRA LOW, MID VALUE, VALOR, RECONOCIDO, PREMIUM), editable | M2 |
+| `marcas` | `codigo`, `nombre` (único global), `agrupacion_marca_id` (obligatoria), `tratamiento_especial`, `nota_tratamiento` (≤ 200, solo con la bandera) | M2 |
+| `equivalencia_marca` | `equivalencia_id`, `marca_id`, unique. **No construida en M2**: se propone derivar la relación de la venta y el stock de M5; si Javier la quiere a mano, se abre M2b | M5 o M2b |
 | `agrupaciones_estacionalidad` | `nombre`, `descripcion` | M3 |
 | `tiendas` | `codigo` unique, `nombre`, `tipo` (Tienda / CD), `zona`, `razon_social`, `fecha_apertura`, `fecha_cierre`, `venta_esperada_promedio` | M4 |
 
@@ -76,9 +76,9 @@ Toda tabla lleva `id uuid`, `activo`, `created_at`, `updated_at` con trigger, y 
 |---|---|---|---|
 | **M0 Cimientos** | ✅ hito recorrido en Railway el 2026-10-05 (login de Javier, base real) | Scaffold; migración base; login; guards; menú por rol; `/usuarios`; agentes; docs; Railway | Login como admin, crear planner y comprador, verificar qué ve cada uno, build limpio |
 | **M1 Árbol de producto** | ✅ hito recorrido en Railway el 2026-10-05: árbol real importado (8 · 5 · 86 · 556 · 1 691 + 265) | Géneros, Mundos, Líneas, nodos Género-Mundo-Línea, Equivalencias, Agrupaciones talla; pantalla Árbol navegable; carga CSV inicial | Cargar el árbol real completo y recorrerlo; misma Línea en dos Género-Mundo con equivalencias distintas |
-| **M2 Marcas** | 🔧 en especificación | Mantenimiento de agrupaciones de marca (seed: 1 Ultra Low · 2 Mid Value · 3 Valor · 4 Reconocido · 5 Premium; nombres editables) y mantenimiento de marcas (agrupación, bandera de tratamiento especial, nota); importador CSV/Excel de marcas. El vínculo Marca ↔ Equivalencia se deriva de la venta real en M5 salvo que Javier pida mantenerlo a mano | Renombrar una agrupación y verlo reflejado; crear marcas, moverlas de agrupación, marcar tratamiento especial; importar la lista real |
-| **M3 Agrupaciones de estacionalidad** | ⏳ | Catálogo y asignación de cada Equivalencia a una curva; reporte de faltantes | Toda equivalencia activa tiene curva |
-| **M4 Tiendas y aperturas** | ⏳ | Tiendas y CD con fechas de apertura y cierre, venta esperada, zona, razón social; estado derivado | Tienda futura aparece Planificada y pasa a Activa al llegar la fecha |
+| **M2 Marcas** | ✅ construido 2026-10-05 (`0.3.0 · M2`); hito pendiente de recorrer por Javier | Migración `0002_marcas.sql`: `agrupaciones_marca` (seed ULTRA LOW · MID VALUE · VALOR · RECONOCIDO · PREMIUM, orden 10..50, nombres editables) y `marcas` (agrupación obligatoria, bandera de tratamiento especial con nota ≤ 200 que exige la bandera). API de agrupaciones (escribe el admin) y de marcas (escribe el planner), importador CSV/Excel de marcas en modos previsualizar y aplicar, idempotente, con diferencias contra lo ya cargado. Pantalla `/maestros/marcas` con pestañas Marcas · Agrupaciones · Importar. El vínculo Marca ↔ Equivalencia no se construyó: se propone derivarlo de la venta real en M5 (pregunta abierta en la ficha) | Renombrar una agrupación y verlo reflejado; crear marcas, moverlas de agrupación, marcar tratamiento especial; importar un CSV de prueba y reimportarlo sin duplicar; luego la lista real |
+| **M3 Agrupaciones de estacionalidad** | 📝 especificado, pendiente de aprobación (`docs/modulos/03-agrupaciones-estacionalidad.md`) | Catálogo de agrupaciones (sin seed) y FK nullable en `equivalencias`; asignación individual, masiva y por archivo; lista plana y reporte de faltantes; columna Agrupación en el árbol. Solo depende de M1 | Toda equivalencia activa tiene agrupación: la pestaña Faltantes queda vacía |
+| **M4 Tiendas y aperturas** | 📝 especificado, pendiente de aprobación (`docs/modulos/04-tiendas.md`) | Tabla `tiendas` sin seed: código real de la tienda, tipo Tienda / Centro de Distribución, zona y razón social como texto normalizado, fechas de apertura y cierre, venta esperada; estado Planificada / Activa / Cerrada calculado con la fecha de Lima, no guardado; línea de tiempo de aperturas y cierres; importador del archivo de códigos de tiendas. Independiente de M2 y M3 | Tienda futura aparece Planificada y pasa a Activa al llegar la fecha (simulable con `?hoy=`) |
 
 ### Fase 2 — Planificación (se especifica al cerrar la Fase 1)
 
@@ -122,6 +122,6 @@ Definition of Done: migración aplicada e idempotente · tipos regenerados · to
 - Proyecto Supabase `vector-two` creado en el dashboard (la creación desde la sesión expiró). Bloquea los hitos de M0 y M1 contra la base real.
 - Árbol real: recibido (`datos/arbol-lineas.csv`) y verificado con el importador. Resuelto: las 14 filas con mundo vacío son errores del archivo (no existe un mundo SIN ASIGNAR; se omiten y se listan en la previsualización) y vacío y `-` en equivalencia significan lo mismo. Faltan las respuestas al resto de preguntas abiertas de `docs/modulos/01-arbol-producto.md` (agrupar géneros, temporadas de las líneas, significado de RI y OTROS, códigos ASCII, visibilidad para el comprador) → M1.
 - Tallas: resuelto, no hay tallas individuales; la venta y el stock llegan consolidados por agrupación.
-- Agrupaciones de marca: recibidas (Ultra Low, Mid Value, Valor, Reconocido, Premium). Falta la lista de marcas con su agrupación y sus equivalencias → M2.
+- Agrupaciones de marca: recibidas y ya cargadas como semilla de `0002_marcas.sql` (ULTRA LOW, MID VALUE, VALOR, RECONOCIDO, PREMIUM; renombrables desde la pantalla). Falta la lista real de marcas con su agrupación para importarla desde `/maestros/marcas` → Importar (columnas `MARCA`, `AGRUPACION` y, opcional, `TRATAMIENTO_ESPECIAL`), y las respuestas a las preguntas abiertas de `docs/modulos/02-marcas.md` (entre ellas si el vínculo marca ↔ equivalencia se deriva de la venta en M5 o se mantiene a mano).
 - Lista de tiendas actuales (sirve el archivo CODIGOS DE TIENDAS LUKERS de V1) → M4.
 - Conectar el servicio Railway al repo cuando M0 esté pusheado.

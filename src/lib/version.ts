@@ -3,4 +3,4 @@
  * menú: comparar con lo que muestra Railway confirma que el deploy tomó el
  * último commit y no una build vieja en caché.
  */
-export const APP_VERSION = "0.2.3 · M1";
+export const APP_VERSION = "0.3.0 · M2";

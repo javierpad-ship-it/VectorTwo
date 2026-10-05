@@ -6,13 +6,9 @@ import type { GeneroArbol, LineaArbol, MundoArbol, Temporada } from "@/lib/arbol
 
 /** Piezas compartidas por las columnas del árbol. */
 
-export function formatearNumero(n: number): string {
-  return n.toLocaleString("es-PE");
-}
-
-export function mensajeError(e: unknown): string {
-  return e instanceof Error ? e.message : "Error inesperado";
-}
+// Los helpers de formato viven en `@/lib/formato` (los usan también los
+// componentes compartidos); se re-exportan para no tocar los imports del árbol.
+export { formatearNumero, mensajeError } from "@/lib/formato";
 
 const TONO_TEMPORADA: Record<Temporada, "marca" | "neutro" | "exito"> = {
   Verano: "marca",
@@ -90,19 +86,4 @@ export function FilaColumna({
   );
 }
 
-/** Vista previa de cómo se guardará un nombre y su código. */
-export function VistaPreviaNombre({ nombre, codigo }: { nombre: string; codigo: string }) {
-  if (!nombre) return null;
-  return (
-    <p className="text-xs text-tinta-suave">
-      Se guardará como <strong className="text-tinta">{nombre}</strong>
-      {codigo && (
-        <>
-          {" "}
-          con código <code className="font-mono text-tinta">{codigo}</code>
-        </>
-      )}
-      .
-    </p>
-  );
-}
+export { VistaPreviaNombre } from "@/components/catalogo/vista-previa-nombre";

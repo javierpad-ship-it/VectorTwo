@@ -16,6 +16,36 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      agrupaciones_marca: {
+        Row: {
+          activo: boolean;
+          codigo: string;
+          created_at: string;
+          id: string;
+          nombre: string;
+          orden: number;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          codigo: string;
+          created_at?: string;
+          id?: string;
+          nombre: string;
+          orden?: number;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          codigo?: string;
+          created_at?: string;
+          id?: string;
+          nombre?: string;
+          orden?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       agrupaciones_talla: {
         Row: {
           activo: boolean;
@@ -198,6 +228,50 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      marcas: {
+        Row: {
+          activo: boolean;
+          agrupacion_marca_id: string;
+          codigo: string;
+          created_at: string;
+          id: string;
+          nombre: string;
+          nota_tratamiento: string | null;
+          tratamiento_especial: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          agrupacion_marca_id: string;
+          codigo: string;
+          created_at?: string;
+          id?: string;
+          nombre: string;
+          nota_tratamiento?: string | null;
+          tratamiento_especial?: boolean;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          agrupacion_marca_id?: string;
+          codigo?: string;
+          created_at?: string;
+          id?: string;
+          nombre?: string;
+          nota_tratamiento?: string | null;
+          tratamiento_especial?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "marcas_agrupacion_marca_id_fkey";
+            columns: ["agrupacion_marca_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_marca";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       mundos: {
         Row: {

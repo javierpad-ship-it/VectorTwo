@@ -1,6 +1,6 @@
 # M2 · Agrupaciones de marca y marcas
 
-> Estado: **especificación, pendiente de aprobación de Javier**. Módulo anterior: [01-arbol-producto](01-arbol-producto.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construya distinto de lo especificado irá en "Cambios respecto a la especificación", al final.
+> Estado: **construido (2026-10-05, `0.3.0 · M2`); hito pendiente de recorrer por Javier**. Módulo anterior: [01-arbol-producto](01-arbol-producto.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final; la ficha describe lo que hay en el código.
 
 ## Objetivo
 
@@ -200,11 +200,11 @@ Cada omitida lleva la fila completa normalizada (`marca`, `agrupacion`, `tratami
 
 Ruta `/maestros/marcas`. En `src/lib/nav.ts` se quita `pendiente: "M2"` del item "Agrupaciones y marcas"; conserva `roles: PLANIFICACION` (decisión registrada: los items M2–M4 son de admin y planner; si Javier quiere que el comprador vea las marcas, es una línea, pregunta abierta 7). `page.tsx` servidor redirige a `/` si `perfilActual()` no es `ok` o `!puedeEditarMaestros(rol)`, igual que `catalogos/page.tsx`, y pasa `rol` al panel cliente `marcas-panel.tsx`.
 
-Un solo panel con tres pestañas (`Tabs`): **Agrupaciones · Marcas · Importar**. Encima, resumen `5 agrupaciones · N marcas · M con tratamiento especial` (de las dos colecciones cargadas con `useColeccion`) y el interruptor **Mostrar inactivos** (`Switch`), compartido por las dos primeras pestañas.
+Un solo panel con tres pestañas (`Tabs`): **Agrupaciones · Marcas · Importar**, con **Marcas** abierta por defecto (es donde se trabaja a diario; las agrupaciones son cinco y rara vez cambian). Encima, resumen `5 agrupaciones · N marcas · M con tratamiento especial` (cuenta solo activas, de las dos colecciones cargadas con `useColeccion`) y el interruptor **Mostrar inactivos** (`Switch`), compartido por las dos primeras pestañas.
 
 ### Pestaña Agrupaciones (admin edita; planner solo ve)
 
-Reutiliza el componente `CatalogoPlano` de `catalogos-panel.tsx`, que para eso se extrae a `src/components/maestros/catalogo-plano.tsx` con props `recurso`, `singular`, `plural`, `puedeEditar`, `hijos: { clave: "nodos" | "marcas", titulo, avisoDesactivar, bloqueoEliminar }` y `vigentes` opcional. Catálogos de M1 lo sigue usando con `hijos.clave = "nodos"` sin cambio visible.
+Reutiliza el componente `CatalogoPlano` de `catalogos-panel.tsx`, que para eso se extrae a `src/components/catalogo/catalogo-plano.tsx` (junto a `vista-previa-nombre.tsx`) con props `recurso`, `singular`, `plural`, `puedeEditar`, `hijos: { clave: "nodos" | "marcas", titulo, avisoDesactivar, bloqueoEliminar }` y `vigentes?: (fila) => number` opcional. Catálogos de M1 lo sigue usando con `hijos.clave = "nodos"` sin cambio visible.
 
 | Columnas | Alta y edición | Quién edita |
 |---|---|---|
@@ -279,8 +279,10 @@ Funciones puras en `src/lib/marcas/` probadas en `tests/marcas.*.test.ts`. Norma
 
 ## Hito de prueba
 
-- [ ] Checks automáticos: `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (los 131 de M1 más los de `tests/marcas.*`), `npm run build` y `scripts/validar-migraciones-local.sh` (todas las migraciones dos veces) en verde.
-- [ ] `0002_marcas.sql` aplicada dos veces en `vector-two` sin error y sin ningún `DROP`; tipos regenerados; `APP_VERSION` = `0.3.0 · M2`.
+Cómo se recorre: en local (`INICIAR.cmd`) o en Railway una vez desplegado `0.3.0 · M2`, con tres sesiones (admin, planner y comprador) y un CSV de prueba inventado (sin datos reales de Lukers). Los dos primeros puntos los cubrió QA el 2026-10-05; el resto los recorre Javier en la pantalla `/maestros/marcas` y, donde dice `GET`/`POST`/`PATCH`, con el navegador o `curl` contra la API. Las consultas `select count(*)` se hacen en el SQL Editor de Supabase.
+
+- [x] Checks automáticos: `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (194 pruebas en 15 archivos: los 131 de M1 más 63 en `tests/marcas.*` y un caso nuevo en `tests/nav.test.ts`), `npm run build` y `scripts/validar-migraciones-local.sh` (todas las migraciones dos veces) en verde.
+- [x] `0002_marcas.sql` aplicada en `vector-two` sin error y sin ningún `DROP` (la idempotencia se validó con dos pasadas en Postgres local); tipos regenerados; `APP_VERSION` = `0.3.0 · M2`.
 - [ ] Tras la migración: `GET /api/agrupaciones-marca` devuelve exactamente 5 filas en el orden ULTRA LOW · MID VALUE · VALOR · RECONOCIDO · PREMIUM, todas con `marcas: 0`; `select count(*) from marcas` = 0.
 - [ ] El menú muestra "Agrupaciones y marcas" habilitado para admin y planner; el comprador no lo ve y `/maestros/marcas` le redirige a `/`; `GET /api/marcas` como comprador responde `200` (lectura) y `POST /api/marcas` `403`.
 - [ ] Como planner: `POST /api/agrupaciones-marca` → `403`; en la pestaña Agrupaciones no hay formulario ni botones, sí la tabla.
@@ -320,7 +322,18 @@ Para que el `documentador` las registre en `docs/DECISIONES.md` cuando Javier ap
 
 ## Cambios respecto a la especificación
 
-*(Se completa al construir: lo que QA, backend y frontend encontraron que la especificación no decía o decía distinto.)*
+Lo que backend, frontend y QA construyeron distinto de lo escrito arriba, o que la especificación no decía. Nada de esto cambia el hito; los dos últimos puntos abren preguntas para Javier.
+
+1. **`CatalogoPlano` vive en `src/components/catalogo/`, no en `src/components/maestros/`.** Junto a él va `vista-previa-nombre.tsx`. La carpeta se llama por lo que contiene (un catálogo plano reutilizable) y no por quién lo usa; `maestros` habría quedado ambiguo cuando M3 y M4 lo reutilicen. La prop `vigentes` es una función `(fila) => number` y no un `Map`: así cada pantalla decide de dónde sale el conteo (Catálogos lo calcula del árbol; Marcas lo lee de `marcas_activas` que ya trae la API) sin construir una estructura intermedia.
+2. **Pestaña por defecto: Marcas.** La ficha listaba Agrupaciones primero y no fijaba cuál abría. El orden de las pestañas se mantiene (Agrupaciones · Marcas · Importar) pero el panel abre en Marcas: es la pestaña de trabajo diario; las agrupaciones son cinco y las edita solo el admin.
+3. **La nota solo viaja en el `PATCH` si la marca tiene la bandera.** Al guardar una edición en línea, el cliente incluye `nota_tratamiento` únicamente cuando `tratamiento_especial` está encendido; con la bandera apagada, el campo de nota está deshabilitado y no se manda. Evita el `400` "Marca el tratamiento especial…" que el servidor devolvería por una nota vacía o residual, y deja la regla 6 como red de seguridad para llamadas a mano.
+4. **`tipos.ts` y `tipos-api.ts` son estructuralmente iguales.** `src/lib/marcas/tipos.ts` tipa lo que el backend construye y `tipos-api.ts` lo que el frontend lee; describen el mismo JSON pero no se importan entre sí. Es a propósito: `tipos-api.ts` importa `ModoImportacion` de `src/components/importador/tipos`, y si `tipos.ts` lo re-exportara, la lógica pura de `lib` dependería de un componente. TypeScript comprueba la compatibilidad en cada handler que devuelve una cosa tipada como la otra.
+5. **`motivoRechazoMarca` existe y está probada, pero los handlers no la llaman.** La regla 3 la preveía para dar el mensaje antes de escribir; en la práctica `POST` y `PATCH` confían en los índices únicos y `traducirErrorDb` convierte el `23505` en el `409` legible ("Ya existe una marca con ese nombre/código"). Leer todas las marcas en cada escritura solo para anticipar un conflicto no compensaba. La función queda disponible para el cliente o para una validación previa si hiciera falta.
+6. **`leerSiNo` es estricta.** Normaliza caja y acentos pero no pasa por `aCodigo`: `-`, `?` o `n/a` no se reducen a cadena vacía (que valdría `NO`) sino que caen en `tratamiento_invalido` con el valor en `detalle`. Un guion en la columna de tratamiento suele ser "no sé", no "no".
+7. **Columna de tratamiento no mapeada = `NO`, y eso aparece en `diferencias`.** Si el archivo no trae la columna, el cliente manda `""` y el importador lo lee como `false` (tal como decía la ficha). Consecuencia que la ficha no mencionaba: las marcas **ya existentes** con bandera encendida salen en "Diferencias con lo ya cargado" con `en_base: SI · en_archivo: NO`, aunque el archivo no opine sobre el tratamiento. Es informativo (el importador no modifica nada), pero puede confundir. Pregunta abierta 9.
+8. **El resumen de la pantalla cuenta solo activas.** `N agrupaciones · N marcas · N con tratamiento especial` se calcula sobre `activo = true`, con o sin "Mostrar inactivos". La ficha no decía qué contar. Pregunta abierta 10.
+9. **La comprobación "agrupación activa" y la escritura no son atómicas.** `POST /api/marcas` y `PATCH` con `agrupacion_marca_id` leen la agrupación, aplican `motivoRechazoAgrupacionDestino` y luego escriben, sin transacción (supabase-js no las expone). Si entre las dos lecturas alguien desactiva la agrupación, la marca se crea igual y queda como "Oculta por agrupación inactiva", que es un estado válido y visible. Es la misma ventana que tiene M1 al crear nodos bajo un mundo; se documenta para que nadie la tome por error.
+10. **Lo compartido que M1 absorbió sin cambiar de comportamiento.** `src/lib/api/catalogo.ts` pasa de `columnaHijos` + `conConteoNodos` a `hijos: { tabla, columna, clave, claveActivos? }` + `conConteoHijos`, y gracias a `claveActivos` el listado de agrupaciones trae `marcas_activas` sin una lectura aparte (la ficha preveía calcularlo en el handler). `errores-db.ts` distingue el sentido de la FK `marcas_agrupacion_marca_id_fkey` por el texto de Postgres: `insert or update` (crear o mover a una agrupación inexistente) → `404 "Agrupación de marca no encontrada."`; `update or delete` (borrar agrupación con marcas) → `409`. El importador del árbol (`importar-csv.tsx`) y `catalogos-panel.tsx` se reescribieron sobre `src/components/importador/*` (tipos, mapeo, hook `useImportador`, pasos y reporte), `src/components/catalogo/*` y `src/lib/formato.ts`; los 131 tests de M1 siguen en verde y el hito de M1 no cambia.
 
 ## Preguntas abiertas para Javier
 
@@ -332,3 +345,5 @@ Para que el `documentador` las registre en `docs/DECISIONES.md` cuando Javier ap
 6. **Qué es "tratamiento especial".** Hoy es una bandera y una nota de hasta 200 caracteres. ¿Hay más de un tipo de tratamiento (por ejemplo, "flujo propio", "sin proyección", "compra directa")? Si sí, conviene saberlo ahora para que sea un catálogo y no texto libre.
 7. **Comprador.** Hoy no ve marcas ni agrupaciones. ¿Se las mostramos en solo lectura como el árbol?
 8. **Marcas sin agrupación.** Toda marca exige agrupación; una fila sin ella se omite y se lista para corregir el archivo. ¿Puede haber marcas que de verdad no tengan agrupación todavía? Si sí, ¿qué prefieres: corregir el archivo (como con las líneas sin mundo) o una agrupación provisional que tú crees desde la pantalla?
+9. **Archivo sin columna de tratamiento.** Hoy, si el archivo no trae la columna, se toma como "NO" para todas, y las marcas que ya tienen la bandera aparecen en "Diferencias con lo ya cargado" (en la base SI, en el archivo NO). ¿Prefieres que "sin columna" signifique "sin dato" y esas diferencias no se muestren? Es un cambio pequeño en el importador.
+10. **Resumen de la pantalla.** Arriba de las pestañas se cuentan solo agrupaciones y marcas activas. ¿Quieres ver también el total (incluidas las desactivadas), por ejemplo "120 marcas (3 inactivas)"?

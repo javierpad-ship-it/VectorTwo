@@ -8,6 +8,7 @@ import { esAdmin, type Rol } from "@/lib/auth/roles";
 import { TEMPORADAS, aCodigo, normalizarNombre, type Temporada } from "@/lib/arbol/normalizar";
 import { contarNodosVigentes, useArbol } from "@/lib/arbol/use-arbol";
 import type { AgrupacionTallaFila, CatalogoFila, LineaFila } from "@/lib/arbol/tipos-api";
+import { CatalogoPlano, type HijosCatalogo } from "@/components/catalogo/catalogo-plano";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
@@ -19,9 +20,15 @@ import { BadgeTemporada, VistaPreviaNombre, mensajeError } from "../comunes";
 
 type Pestana = "generos" | "mundos" | "lineas" | "tallas";
 
-function capitalizar(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
+/** Géneros y mundos cuentan nodos del árbol; mismos textos para ambos (los dos son masculinos). */
+const HIJOS_NODOS: HijosCatalogo<CatalogoFila> = {
+  clave: "nodos",
+  titulo: "Nodos",
+  avisoDesactivar: (n) => `Quedarán ocultos ${n} nodo${n === 1 ? "" : "s"} del árbol hasta que lo reactives.`,
+  bloqueoEliminar: "Tiene nodos: desactívalo en vez de eliminarlo.",
+};
+
+const NOTA_PIE_NODOS = "Desactivar oculta sus nodos del árbol sin perderlos; eliminar solo es posible sin nodos asociados.";
 
 export function CatalogosPanel({ rol }: { rol: Rol }) {
   const [pestana, setPestana] = useState<Pestana>("generos");
@@ -67,260 +74,33 @@ export function CatalogosPanel({ rol }: { rol: Rol }) {
       )}
 
       {pestana === "generos" && (
-        <CatalogoPlano
+        <CatalogoPlano<CatalogoFila>
           key="generos"
           recurso="generos"
           singular="género"
           plural="géneros"
           puedeEditar={admin}
-          vigentes={conteos.porGenero}
+          hijos={HIJOS_NODOS}
+          vigentes={(f) => conteos.porGenero.get(f.id) ?? 0}
+          notaPie={NOTA_PIE_NODOS}
           onCambio={recargarArbol}
         />
       )}
       {pestana === "mundos" && (
-        <CatalogoPlano
+        <CatalogoPlano<CatalogoFila>
           key="mundos"
           recurso="mundos"
           singular="mundo"
           plural="mundos"
           puedeEditar={admin}
-          vigentes={conteos.porMundo}
+          hijos={HIJOS_NODOS}
+          vigentes={(f) => conteos.porMundo.get(f.id) ?? 0}
+          notaPie={NOTA_PIE_NODOS}
           onCambio={recargarArbol}
         />
       )}
       {pestana === "lineas" && <Lineas puedeEditar onCambio={recargarArbol} />}
       {pestana === "tallas" && <AgrupacionesTalla />}
-    </div>
-  );
-}
-
-// ─── Géneros y Mundos ───
-
-type EdicionCatalogo = { id: string; nombre: string; codigo: string; orden: string };
-
-/**
- * Mantenimiento de géneros y mundos. La columna "Nodos" y el bloqueo de
- * Eliminar usan `fila.nodos` (todos los nodos, según la API); `vigentes`
- * solo alimenta el aviso del `confirm` de desactivar.
- */
-function CatalogoPlano({
-  recurso,
-  singular,
-  plural,
-  puedeEditar,
-  vigentes,
-  onCambio,
-}: {
-  recurso: "generos" | "mundos";
-  singular: string;
-  plural: string;
-  puedeEditar: boolean;
-  vigentes: Map<string, number>;
-  onCambio: () => Promise<void>;
-}) {
-  const { datos, cargando, error, setError, recargar } = useColeccion<CatalogoFila>(`/api/${recurso}?incluir_inactivos=1`);
-  const [form, setForm] = useState({ nombre: "", codigo: "", codigoTocado: false, orden: "" });
-  const [guardando, setGuardando] = useState(false);
-  const [ocupado, setOcupado] = useState(false);
-  const [aviso, setAviso] = useState<string | null>(null);
-  const [edicion, setEdicion] = useState<EdicionCatalogo | null>(null);
-
-  const nombreNormalizado = normalizarNombre(form.nombre);
-  const codigoPropuesto = form.codigoTocado ? aCodigo(form.codigo) : aCodigo(nombreNormalizado);
-
-  async function ejecutar(accion: () => Promise<unknown>) {
-    setOcupado(true);
-    setError(null);
-    try {
-      await accion();
-      await Promise.all([recargar(), onCambio()]);
-      return true;
-    } catch (e) {
-      setError(mensajeError(e));
-      return false;
-    } finally {
-      setOcupado(false);
-    }
-  }
-
-  async function crear(e: React.FormEvent) {
-    e.preventDefault();
-    if (!nombreNormalizado || !codigoPropuesto) return;
-    setGuardando(true);
-    const ok = await ejecutar(() =>
-      api.post<CatalogoFila>(`/api/${recurso}`, {
-        nombre: nombreNormalizado,
-        codigo: codigoPropuesto,
-        ...(form.orden.trim() !== "" ? { orden: Number(form.orden) } : {}),
-      })
-    );
-    if (ok) {
-      setAviso(`${capitalizar(singular)} ${nombreNormalizado} creado.`);
-      setForm({ nombre: "", codigo: "", codigoTocado: false, orden: "" });
-    }
-    setGuardando(false);
-  }
-
-  async function guardarEdicion() {
-    if (!edicion) return;
-    const nombre = normalizarNombre(edicion.nombre);
-    const codigo = aCodigo(edicion.codigo);
-    if (!nombre || !codigo) {
-      setError("El nombre y el código no pueden quedar vacíos.");
-      return;
-    }
-    const ok = await ejecutar(() =>
-      api.patch<CatalogoFila>(`/api/${recurso}/${edicion.id}`, { nombre, codigo, orden: Number(edicion.orden) || 0 })
-    );
-    if (ok) setEdicion(null);
-  }
-
-  function alternarActivo(f: CatalogoFila) {
-    if (f.activo) {
-      // El aviso habla de nodos vigentes (los que de verdad se verán desaparecer del árbol).
-      const n = vigentes.get(f.id) ?? 0;
-      const detalle = n > 0 ? ` Quedarán ocultos ${n} nodo${n === 1 ? "" : "s"} del árbol hasta que lo reactives.` : "";
-      if (!confirm(`¿Desactivar el ${singular} ${f.nombre}?${detalle}`)) return;
-    }
-    void ejecutar(() => api.patch<CatalogoFila>(`/api/${recurso}/${f.id}`, { activo: !f.activo }));
-  }
-
-  function eliminar(f: CatalogoFila) {
-    if (!confirm(`¿Eliminar definitivamente el ${singular} ${f.nombre}? Esta acción no se puede deshacer.`)) return;
-    void ejecutar(() => api.delete(`/api/${recurso}/${f.id}`));
-  }
-
-  const columnas: Columna<CatalogoFila>[] = [
-    {
-      clave: "orden",
-      titulo: "Orden",
-      className: "w-20",
-      render: (f) =>
-        edicion?.id === f.id ? (
-          <Input type="number" min={0} value={edicion.orden} onChange={(e) => setEdicion({ ...edicion, orden: e.target.value })} className="h-8 w-20" aria-label="Orden" />
-        ) : (
-          <span className="font-mono text-xs text-tinta-suave">{f.orden}</span>
-        ),
-    },
-    {
-      clave: "codigo",
-      titulo: "Código",
-      render: (f) =>
-        edicion?.id === f.id ? (
-          <Input value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} className="h-8 w-40 font-mono" aria-label="Código" />
-        ) : (
-          <code className="font-mono text-xs">{f.codigo}</code>
-        ),
-    },
-    {
-      clave: "nombre",
-      titulo: "Nombre",
-      render: (f) =>
-        edicion?.id === f.id ? (
-          <Input value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} className="h-8" aria-label="Nombre" autoFocus />
-        ) : (
-          <span className="font-medium">{f.nombre}</span>
-        ),
-    },
-    {
-      clave: "nodos",
-      titulo: "Nodos",
-      render: (f) => <span className="text-tinta-suave">{f.nodos}</span>,
-    },
-    {
-      clave: "estado",
-      titulo: "Estado",
-      render: (f) => <Badge tono={f.activo ? "exito" : "alerta"}>{f.activo ? "Activo" : "Desactivado"}</Badge>,
-    },
-  ];
-
-  if (puedeEditar) {
-    columnas.push({
-      clave: "acciones",
-      titulo: "",
-      className: "text-right",
-      render: (f) => {
-        const tieneNodos = f.nodos > 0;
-        return edicion?.id === f.id ? (
-          <div className="flex justify-end gap-1">
-            <Button tamano="sm" disabled={ocupado} onClick={guardarEdicion}>
-              {ocupado ? "Guardando…" : "Guardar"}
-            </Button>
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => setEdicion(null)}>
-              Cancelar
-            </Button>
-          </div>
-        ) : (
-          <div className="flex justify-end gap-1">
-            <Button
-              variante="fantasma"
-              tamano="sm"
-              disabled={ocupado}
-              onClick={() => setEdicion({ id: f.id, nombre: f.nombre, codigo: f.codigo, orden: String(f.orden) })}
-            >
-              Editar
-            </Button>
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(f)}>
-              {f.activo ? "Desactivar" : "Reactivar"}
-            </Button>
-            <Button
-              variante="peligro"
-              tamano="sm"
-              disabled={ocupado || tieneNodos}
-              title={tieneNodos ? "Tiene nodos: desactívalo en vez de eliminarlo." : undefined}
-              onClick={() => eliminar(f)}
-            >
-              Eliminar
-            </Button>
-          </div>
-        );
-      },
-    });
-  }
-
-  return (
-    <div className="space-y-6">
-      {error && <Alert onCerrar={() => setError(null)}>{error}</Alert>}
-      {aviso && (
-        <Alert tono="exito" onCerrar={() => setAviso(null)}>
-          {aviso}
-        </Alert>
-      )}
-
-      {puedeEditar ? (
-        <Card titulo={`Nuevo ${singular}`} descripcion="El nombre se guarda normalizado en mayúsculas; el código se propone a partir del nombre.">
-          <form onSubmit={crear} className="grid gap-4 md:grid-cols-4">
-            <Field label="Nombre" className="md:col-span-2">
-              <Input required value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
-            </Field>
-            <Field label="Código" hint="Solo letras, números y _.">
-              <Input
-                value={form.codigoTocado ? form.codigo : codigoPropuesto}
-                onChange={(e) => setForm({ ...form, codigo: e.target.value, codigoTocado: true })}
-                className="font-mono"
-              />
-            </Field>
-            <Field label="Orden" hint="Posición en las listas.">
-              <Input type="number" min={0} value={form.orden} onChange={(e) => setForm({ ...form, orden: e.target.value })} />
-            </Field>
-            <div className="flex flex-wrap items-center gap-4 md:col-span-4">
-              <Button type="submit" disabled={guardando || ocupado || !nombreNormalizado || !codigoPropuesto}>
-                {guardando ? "Creando…" : `Crear ${singular}`}
-              </Button>
-              <VistaPreviaNombre nombre={nombreNormalizado} codigo={codigoPropuesto} />
-            </div>
-          </form>
-        </Card>
-      ) : (
-        <Alert tono="info">Los {plural} los gestiona un administrador. Acá puedes consultarlos.</Alert>
-      )}
-
-      <Card titulo={capitalizar(plural)}>
-        <DataTable columnas={columnas} filas={datos} claveFila={(f) => f.id} cargando={cargando} />
-        <p className="mt-3 text-xs text-tinta-suave">
-          Desactivar oculta sus nodos del árbol sin perderlos; eliminar solo es posible sin nodos asociados.
-        </p>
-      </Card>
     </div>
   );
 }

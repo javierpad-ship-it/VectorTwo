@@ -25,8 +25,8 @@ export const catalogoGeneros: ConfigCatalogo<"generos"> = {
     insertar: (db, datos) => db.from("generos").insert(datos).select("*").single(),
     actualizar: (db, id, datos) => db.from("generos").update(datos).eq("id", id).select("*").single(),
   },
-  columnaHijos: "genero_id",
-  conConteoNodos: true,
+  hijos: { tabla: "genero_mundo_linea", columna: "genero_id", clave: "nodos" },
+  conConteoHijos: true,
 };
 
 export const catalogoMundos: ConfigCatalogo<"mundos"> = {
@@ -42,8 +42,8 @@ export const catalogoMundos: ConfigCatalogo<"mundos"> = {
     insertar: (db, datos) => db.from("mundos").insert(datos).select("*").single(),
     actualizar: (db, id, datos) => db.from("mundos").update(datos).eq("id", id).select("*").single(),
   },
-  columnaHijos: "mundo_id",
-  conConteoNodos: true,
+  hijos: { tabla: "genero_mundo_linea", columna: "mundo_id", clave: "nodos" },
+  conConteoHijos: true,
 };
 
 export const catalogoLineas: ConfigCatalogo<"lineas"> = {
@@ -59,8 +59,8 @@ export const catalogoLineas: ConfigCatalogo<"lineas"> = {
     insertar: (db, datos) => db.from("lineas").insert(datos).select("*").single(),
     actualizar: (db, id, datos) => db.from("lineas").update(datos).eq("id", id).select("*").single(),
   },
-  columnaHijos: "linea_id",
-  conConteoNodos: true,
+  hijos: { tabla: "genero_mundo_linea", columna: "linea_id", clave: "nodos" },
+  conConteoHijos: true,
 };
 
 /** Catálogo cerrado: sin `escritura`, el helper responde 405 a POST/PATCH (y no hay rutas para ellos). */

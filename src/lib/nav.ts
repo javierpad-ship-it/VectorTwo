@@ -42,7 +42,7 @@ export const NAV_SECTIONS: NavSection[] = [
     roles: TODOS,
     links: [
       { href: "/maestros/arbol", label: "Árbol de producto" },
-      { href: "/maestros/marcas", label: "Agrupaciones y marcas", roles: PLANIFICACION, pendiente: "M2" },
+      { href: "/maestros/marcas", label: "Agrupaciones y marcas", roles: PLANIFICACION },
       { href: "/maestros/estacionalidad", label: "Agrup. de estacionalidad", roles: PLANIFICACION, pendiente: "M3" },
       { href: "/maestros/tiendas", label: "Tiendas y aperturas", roles: PLANIFICACION, pendiente: "M4" },
     ],

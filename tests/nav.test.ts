@@ -13,8 +13,13 @@ describe("puedeVerRuta", () => {
     expect(puedeVerRuta("comprador", "/maestros/arbol/catalogos")).toBe(true);
     expect(puedeVerRuta("planner", "/maestros/arbol/catalogos")).toBe(true);
   });
+  it("admin y planner entran a agrupaciones y marcas (M2); el comprador no", () => {
+    expect(puedeVerRuta("admin", "/maestros/marcas")).toBe(true);
+    expect(puedeVerRuta("planner", "/maestros/marcas")).toBe(true);
+    expect(puedeVerRuta("comprador", "/maestros/marcas")).toBe(false);
+  });
   it("los módulos pendientes no se pueden abrir aunque el rol los vea en el menú", () => {
-    expect(puedeVerRuta("admin", "/maestros/marcas")).toBe(false);
+    expect(puedeVerRuta("admin", "/maestros/tiendas")).toBe(false);
     expect(puedeVerRuta("planner", "/maestros/estacionalidad")).toBe(false);
   });
   it("solo el admin entra a usuarios", () => {

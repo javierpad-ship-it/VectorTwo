@@ -39,13 +39,39 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["equivalencias_nodo_codigo", "Ya existe una equivalencia con ese código en este nodo."],
   ["equivalencias_nodo_generica", "Este nodo ya tiene la equivalencia genérica SIN EQUIVALENCIA."],
   ["perfiles_email", "Ya existe un usuario con ese correo."],
+  // M2. `agrupaciones_marca_*` va antes que `marcas_*`: el nombre del índice
+  // de agrupaciones no contiene "marcas_", pero el orden deja claro el criterio.
+  ["agrupaciones_marca_codigo", "Ya existe una agrupación de marca con ese código."],
+  ["agrupaciones_marca_nombre", "Ya existe una agrupación de marca con ese nombre."],
+  ["marcas_codigo", "Ya existe una marca con ese código."],
+  ["marcas_nombre", "Ya existe una marca con ese nombre."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["lineas_temporada", "La temporada debe ser Verano, Invierno o Todo el año."],
+  ["marcas_nota_len", "La nota no puede superar 200 caracteres."],
+  ["marcas_nota_sin_tratamiento", "La nota solo se guarda si la marca tiene tratamiento especial."],
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
 ];
+
+/**
+ * FKs con mensaje propio. Postgres distingue en el texto quién violó la FK:
+ * `update or delete on table "<padre>"` (se intentó borrar el padre con hijos)
+ * frente a `insert or update on table "<hijo>"` (el hijo apunta a un padre que
+ * no existe). El handler ya anticipa los dos casos; esto es la red de seguridad.
+ */
+const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: DescripcionErrorDb }]> = [
+  [
+    "marcas_agrupacion_marca_id_fkey",
+    {
+      eliminar: "No se puede eliminar la agrupación de marca: tiene marcas. Desactívala.",
+      asignar: { status: 404, mensaje: "Agrupación de marca no encontrada." },
+    },
+  ],
+];
+
+const FK_GENERICA = "No se puede eliminar: tiene registros asociados. Desactívalo.";
 
 /** Extrae el nombre del índice o constraint del mensaje de Postgres (`… constraint "nombre"`). */
 export function nombreConstraint(message: string): string | null {
@@ -73,7 +99,10 @@ export function describirErrorDb(
     return { status: 409, mensaje: buscar(MENSAJES_UNICO, texto) ?? "Ya existe un registro con esos datos." };
   }
   if (code === CODIGO_FK) {
-    return { status: 409, mensaje: "No se puede eliminar: tiene registros asociados. Desactívalo." };
+    const fk = MENSAJES_FK.find(([nombre]) => texto.includes(nombre));
+    if (!fk) return { status: 409, mensaje: FK_GENERICA };
+    const esAsignacion = /insert or update/i.test(message);
+    return esAsignacion ? fk[1].asignar : { status: 409, mensaje: fk[1].eliminar };
   }
   if (code === CODIGO_CHECK) {
     return { status: 400, mensaje: buscar(MENSAJES_CHECK, texto) ?? "Los datos no cumplen las reglas de la base." };

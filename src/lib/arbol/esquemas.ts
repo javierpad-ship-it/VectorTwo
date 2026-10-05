@@ -22,12 +22,16 @@ import {
 const noVacio = { message: "No hay nada que actualizar." };
 const tieneAlgo = (v: object) => Object.keys(v).length > 0;
 
-const nombreValido = z
+// Las piezas básicas (`nombre`, `codigo`, `codigoOpcional`, `uuid`, `activo`,
+// `nombreValido`, `codigoValido`, `derivarCodigo`) se exportan para que los
+// esquemas de otros módulos (M2 marcas) las reutilicen sin duplicarlas.
+
+export const nombreValido = z
   .string()
   .min(1, "El nombre es obligatorio.")
   .max(MAX_NOMBRE, `El nombre no puede superar ${MAX_NOMBRE} caracteres.`);
 
-const codigoValido = z
+export const codigoValido = z
   .string()
   .min(1, "El código no puede quedar vacío (usa letras o números).")
   .max(MAX_CODIGO, `El código no puede superar ${MAX_CODIGO} caracteres.`);
@@ -39,17 +43,17 @@ export const nombre = z.string("El nombre debe ser texto.").transform(normalizar
 export const codigo = z.string("El código debe ser texto.").transform(aCodigo).pipe(codigoValido);
 
 /** Código opcional: vacío o ausente se trata como "derivar del nombre". */
-const codigoOpcional = z
+export const codigoOpcional = z
   .string("El código debe ser texto.")
   .optional()
   .transform((v) => (v === undefined || v.trim() === "" ? undefined : aCodigo(v)));
 
 const orden = z.int("El orden debe ser un número entero.").min(0, "El orden no puede ser negativo.");
-const activo = z.boolean("activo debe ser verdadero o falso.");
-const uuid = z.uuid("Identificador inválido.");
+export const activo = z.boolean("activo debe ser verdadero o falso.");
+export const uuid = z.uuid("Identificador inválido.");
 const temporada = z.enum(TEMPORADAS, "La temporada debe ser Verano, Invierno o Todo el año.");
 
-function derivarCodigo<T extends { nombre: string; codigo?: string }>(v: T): T & { codigo: string } {
+export function derivarCodigo<T extends { nombre: string; codigo?: string }>(v: T): T & { codigo: string } {
   return { ...v, codigo: v.codigo ?? aCodigo(v.nombre) };
 }
 

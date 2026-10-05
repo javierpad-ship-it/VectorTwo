@@ -93,7 +93,15 @@ export function motivoRechazoMoverNodo(
   return null;
 }
 
-export type TipoEliminable = "genero" | "mundo" | "linea" | "nodo" | "equivalencia" | "agrupacion_talla";
+export type TipoEliminable =
+  | "genero"
+  | "mundo"
+  | "linea"
+  | "nodo"
+  | "equivalencia"
+  | "agrupacion_talla"
+  | "agrupacion_marca"
+  | "marca";
 
 type Etiqueta = { sujeto: string; uno: string; varios: string; desactivar: string };
 
@@ -110,6 +118,13 @@ const ETIQUETAS: Record<TipoEliminable, Etiqueta> = {
   },
   agrupacion_talla: {
     sujeto: "la agrupación de talla",
+    uno: "registro asociado",
+    varios: "registros asociados",
+    desactivar: "Desactívala",
+  },
+  agrupacion_marca: { sujeto: "la agrupación de marca", uno: "marca", varios: "marcas", desactivar: "Desactívala" },
+  marca: {
+    sujeto: "la marca",
     uno: "registro asociado",
     varios: "registros asociados",
     desactivar: "Desactívala",

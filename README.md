@@ -57,7 +57,7 @@ Migraciones en `supabase/migrations/`, numeradas e idempotentes. Se aplican con 
 
 `scripts/validar-migraciones-local.sh` crea una base `vector_two_local` en un Postgres local, aplica todas las migraciones dos veces (la segunda pasada prueba que son idempotentes) y lista las tablas con RLS. No toca ningún proyecto Supabase; sirve para validar SQL antes de aplicarlo de verdad.
 
-Proyecto Supabase: **Vector2** (ref `tzjsxzmsvvhxyiooihyq`, región ca-central-1). Las migraciones 0000 y 0001 están aplicadas. Nota operativa: desde Claude Code las sentencias `DROP` quedan esperando una confirmación que no llega; las migraciones se aplican por `execute_sql` sin `DROP` (por eso usan `create or replace trigger`), y cualquier borrado de tabla se hace desde el dashboard.
+Proyecto Supabase: **Vector2** (ref `tzjsxzmsvvhxyiooihyq`, región ca-central-1). Las migraciones 0000, 0001 y 0002 están aplicadas. Nota operativa: desde Claude Code las sentencias `DROP` quedan esperando una confirmación que no llega; las migraciones se aplican por `execute_sql` sin `DROP` (por eso usan `create or replace trigger`), y cualquier borrado de tabla se hace desde el dashboard.
 
 ## Estructura funcional
 
@@ -71,6 +71,9 @@ Lo que existe hoy, por pantalla:
 | `/maestros/arbol` | todos (el comprador solo lee) | Árbol Género → Mundo → Línea → Equivalencia en columnas; buscador global de líneas; interruptor de inactivos; agregar o mover líneas entre mundos; crear, renombrar y desactivar equivalencias |
 | `/maestros/arbol` → pestaña Importar | admin y planner | Carga el árbol desde un CSV o un Excel (.xlsx, .xls; se elige la hoja si hay varias): mapeo de columnas, previsualización con conteos y el detalle de lo que no se cargará (filas con errores, separadas de las repetidas, con filtro por motivo y descarga en CSV), aplicar. Reimportar el mismo archivo no duplica nada |
 | `/maestros/arbol/catalogos` | admin y planner | Géneros y mundos (edita el admin), líneas con su temporada (edita el planner), agrupaciones de talla (solo lectura) |
+| `/maestros/marcas` | admin y planner | Tres pestañas. **Marcas** (edita el planner y el admin): crear marcas con su agrupación obligatoria y, si aplica, tratamiento especial con una nota corta; filtrar por agrupación, por tratamiento o por texto; cambiar la agrupación o la bandera desde la fila; desactivar, reactivar o eliminar. **Agrupaciones** (edita solo el admin; el planner las ve): renombrar, reordenar, desactivar, eliminar si no tienen marcas. **Importar** (planner y admin): carga la lista de marcas desde CSV o Excel con columnas `MARCA`, `AGRUPACION` y, opcional, `TRATAMIENTO_ESPECIAL`; previsualiza lo que se creará, lo que se omitirá y las diferencias con lo ya cargado; reimportar no duplica |
+
+Reglas de marcas que conviene saber: cada marca pertenece a una sola agrupación (no hay comodín "sin agrupar"); el nombre es único en todo el maestro; la nota de tratamiento solo existe con la bandera encendida y se borra al apagarla; desactivar una agrupación oculta sus marcas sin perderlas; el importador nunca crea agrupaciones ni modifica marcas existentes (solo informa las diferencias). El detalle está en `docs/modulos/02-marcas.md`.
 
 Reglas del árbol que conviene saber: los mundos existen en todos los géneros; una línea es catálogo y se activa por nodo género-mundo; la equivalencia cuelga del nodo; las filas con equivalencia `-` crean una equivalencia con el nombre de la línea y las filas con equivalencia vacía caen en una genérica `SIN EQUIVALENCIA` por nodo; toda línea tiene mundo, así que las filas de un CSV con el mundo vacío no se cargan y se listan en la previsualización para corregir el archivo; la acción normal es desactivar, y eliminar solo se permite sin hijos. El detalle está en `docs/modulos/01-arbol-producto.md`.
 
@@ -84,17 +87,22 @@ Reglas del árbol que conviene saber: los mundos existen en todos los géneros; 
 .claude/agents/      arquitecto · datos · backend · frontend · qa · documentador
 docs/                PLAN, DECISIONES, CHANGELOG, modulos/
 scripts/             validar-migraciones-local.sh
-supabase/migrations/ SQL versionado (0000 base, 0001 árbol de producto)
+supabase/migrations/ SQL versionado (0000 base, 0001 árbol de producto, 0002 agrupaciones de marca y marcas)
 src/app/login        inicio de sesión
 src/app/(app)        todo lo que requiere sesión (layout con menú por rol)
 src/app/(app)/maestros/arbol   árbol, importador CSV y catálogos
-src/app/api          route handlers (auth, usuarios, generos, mundos, lineas, agrupaciones-talla, arbol, equivalencias)
+src/app/(app)/maestros/marcas  marcas, agrupaciones de marca e importador de marcas
+src/app/api          route handlers (auth, usuarios, generos, mundos, lineas, agrupaciones-talla, arbol, equivalencias, agrupaciones-marca, marcas, marcas/importar)
 src/lib/auth         roles y guards
 src/lib/supabase     clientes admin / server / browser y tipos
-src/lib/api          respuestas, validación, CRUD de catálogos y traducción de errores de base
+src/lib/api          respuestas, validación, CRUD de catálogos (con conteo de hijos) y traducción de errores de base
 src/lib/arbol        lógica pura del árbol: normalizar, importar, armar-arbol, reglas, esquemas zod
+src/lib/marcas       lógica pura de marcas: seed, esquemas zod, reglas, importador, consultas
+src/lib/formato.ts   formato de números para la interfaz
 src/components/ui    kit de interfaz
-tests/               vitest (131 pruebas en 10 archivos)
+src/components/catalogo    catálogo plano reutilizable (géneros, mundos, agrupaciones de marca) y vista previa del nombre
+src/components/importador  piezas del importador de archivos (tipos, mapeo, hook, pasos, reporte) que usan el árbol y las marcas
+tests/               vitest (194 pruebas en 15 archivos)
 datos/               archivos fuente del negocio (ignorados por git)
 ```
 
@@ -104,9 +112,9 @@ datos/               archivos fuente del negocio (ignorados por git)
 |---|---|
 | M0 Cimientos | Hecho. Desplegado en Railway y validado por Javier (2026-10-05) |
 | M1 Árbol de producto | Hecho. Árbol real importado en producción y validado por Javier (2026-10-05) |
-| M2 Marcas | Pendiente |
-| M3 Agrupaciones de estacionalidad | Pendiente |
-| M4 Tiendas y aperturas | Pendiente |
+| M2 Marcas | Hecho (`0.3.0 · M2`, 2026-10-05). Pendiente de que Javier recorra el hito y cargue la lista real de marcas |
+| M3 Agrupaciones de estacionalidad | Especificado (`docs/modulos/03-agrupaciones-estacionalidad.md`), pendiente de aprobación |
+| M4 Tiendas y aperturas | Especificado (`docs/modulos/04-tiendas.md`), pendiente de aprobación |
 
 ## Marca
 

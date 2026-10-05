@@ -10,10 +10,11 @@ import { error, idDeRuta, leerCuerpo, ok } from "./respuestas";
 import { traducirErrorDb } from "./errores-db";
 
 /**
- * CRUD plano para los catálogos del árbol (géneros, mundos, líneas,
- * agrupaciones de talla). Cada ruta declara su configuración (tabla, guards,
- * esquemas zod, orden, escritura) y delega en estas cuatro funciones; así el
- * patrón "guard → cuerpo → base → traducir error" vive en un solo sitio.
+ * CRUD plano para los catálogos (géneros, mundos, líneas, agrupaciones de
+ * talla y, desde M2, agrupaciones de marca). Cada ruta declara su
+ * configuración (tabla, guards, esquemas zod, orden, escritura) y delega en
+ * estas cuatro funciones; así el patrón "guard → cuerpo → base → traducir
+ * error" vive en un solo sitio.
  *
  * Nota de tipado: supabase-js no resuelve `from(tabla)` con un nombre de
  * tabla genérico. Las lecturas y el borrado funcionan con la unión
@@ -22,7 +23,7 @@ import { traducirErrorDb } from "./errores-db";
  * `escritura`, tipadas contextualmente con su `TablesInsert`/`TablesUpdate`.
  */
 
-export type TablaCatalogo = "generos" | "mundos" | "lineas" | "agrupaciones_talla";
+export type TablaCatalogo = "generos" | "mundos" | "lineas" | "agrupaciones_talla" | "agrupaciones_marca";
 
 export type Guard = typeof requireUser;
 
@@ -33,6 +34,27 @@ export type EscrituraCatalogo<T extends TablaCatalogo> = {
   insertar: (db: Db, datos: TablesInsert<T>) => Resultado<Tables<T>>;
   actualizar: (db: Db, id: string, datos: TablesUpdate<T>) => Resultado<Tables<T>>;
 };
+
+/**
+ * Qué tabla cuelga de este catálogo y por qué columna. `clave` es el nombre
+ * con el que el listado anexa el conteo a cada fila (`nodos` para géneros,
+ * mundos y líneas; `marcas` para agrupaciones de marca). `claveActivos`,
+ * opcional, anexa además el conteo de hijos con `activo = true` (la pantalla
+ * lo usa en el `confirm` de desactivar).
+ */
+export type HijosCatalogo =
+  | {
+      tabla: "genero_mundo_linea";
+      columna: "genero_id" | "mundo_id" | "linea_id";
+      clave: "nodos";
+      claveActivos?: "nodos_activos";
+    }
+  | {
+      tabla: "marcas";
+      columna: "agrupacion_marca_id";
+      clave: "marcas";
+      claveActivos?: "marcas_activas";
+    };
 
 export type ConfigCatalogo<T extends TablaCatalogo> = {
   tabla: T;
@@ -47,10 +69,10 @@ export type ConfigCatalogo<T extends TablaCatalogo> = {
   esquemaEditar: ZodType<TablesUpdate<T>>;
   /** Ausente en catálogos cerrados: POST/PATCH responden 405. */
   escritura?: EscrituraCatalogo<T>;
-  /** Columna de `genero_mundo_linea` que apunta a esta tabla; si falta, la tabla no tiene hijos en M1. */
-  columnaHijos?: "genero_id" | "mundo_id" | "linea_id";
-  /** Anexar `nodos: number` (conteo de nodos, activos o no) a cada fila del listado. */
-  conConteoNodos?: boolean;
+  /** Tabla hija y columna que apunta a este catálogo; si falta, la tabla no tiene hijos todavía. */
+  hijos?: HijosCatalogo;
+  /** Anexar a cada fila del listado el conteo de hijos (activos o no) bajo `hijos.clave`. */
+  conConteoHijos?: boolean;
 };
 
 const CATALOGO_CERRADO = "Este catálogo es cerrado: se cambia por migración.";
@@ -63,13 +85,30 @@ export function incluirInactivos(request: NextRequest): boolean {
 
 type Params = { params: Promise<{ id: string }> };
 
-async function contarHijos(columna: ConfigCatalogo<TablaCatalogo>["columnaHijos"], id: string) {
-  if (!columna) return { hijos: 0, error: null };
-  const { count, error: err } = await supabaseAdmin()
-    .from("genero_mundo_linea")
-    .select("id", { count: "exact", head: true })
-    .eq(columna, id);
+async function contarHijos(hijos: HijosCatalogo | undefined, id: string) {
+  if (!hijos) return { hijos: 0, error: null };
+  const db = supabaseAdmin();
+  const { count, error: err } =
+    hijos.tabla === "marcas"
+      ? await db.from("marcas").select("id", { count: "exact", head: true }).eq(hijos.columna, id)
+      : await db.from("genero_mundo_linea").select("id", { count: "exact", head: true }).eq(hijos.columna, id);
   return { hijos: count ?? 0, error: err };
+}
+
+type HijoMin = { padre: string; activo: boolean };
+
+/** Todos los hijos de la tabla configurada (activos o no) como pares `padre → activo`, paginados. */
+async function leerHijos(db: Db, hijos: HijosCatalogo): Promise<{ data: HijoMin[]; error: PostgrestError | null }> {
+  if (hijos.tabla === "marcas") {
+    const columna = hijos.columna;
+    const { data, error: err } = await leerTodo<Pick<Tables<"marcas">, "id" | "agrupacion_marca_id" | "activo">>(
+      (d, h) => db.from("marcas").select("id, agrupacion_marca_id, activo").order("id").range(d, h)
+    );
+    return { data: data.map((m) => ({ padre: m[columna], activo: m.activo })), error: err };
+  }
+  const columna = hijos.columna;
+  const { data, error: err } = await leerNodos(db);
+  return { data: data.map((n) => ({ padre: n[columna], activo: n.activo })), error: err };
 }
 
 async function existe(tabla: TablaCatalogo, id: string) {
@@ -100,15 +139,25 @@ export async function listarCatalogo<T extends TablaCatalogo>(
   });
   if (err) return traducirErrorDb(err, `listar ${tabla}`);
 
-  if (!cfg.conConteoNodos || !cfg.columnaHijos) return ok(filas);
+  if (!cfg.conConteoHijos || !cfg.hijos) return ok(filas);
 
-  const columna = cfg.columnaHijos;
-  const { data: nodos, error: errNodos } = await leerNodos(db);
-  if (errNodos) return traducirErrorDb(errNodos, `contar nodos de ${tabla}`);
+  const { clave, claveActivos } = cfg.hijos;
+  const { data: hijos, error: errHijos } = await leerHijos(db, cfg.hijos);
+  if (errHijos) return traducirErrorDb(errHijos, `contar ${clave} de ${tabla}`);
   const conteo = new Map<string, number>();
-  for (const n of nodos) conteo.set(n[columna], (conteo.get(n[columna]) ?? 0) + 1);
+  const conteoActivos = new Map<string, number>();
+  for (const h of hijos) {
+    conteo.set(h.padre, (conteo.get(h.padre) ?? 0) + 1);
+    if (h.activo) conteoActivos.set(h.padre, (conteoActivos.get(h.padre) ?? 0) + 1);
+  }
 
-  return ok(filas.map((fila) => ({ ...fila, nodos: conteo.get(fila.id) ?? 0 })));
+  return ok(
+    filas.map((fila) => ({
+      ...fila,
+      [clave]: conteo.get(fila.id) ?? 0,
+      ...(claveActivos ? { [claveActivos]: conteoActivos.get(fila.id) ?? 0 } : {}),
+    }))
+  );
 }
 
 export async function crearEnCatalogo<T extends TablaCatalogo>(
@@ -166,7 +215,7 @@ export async function eliminarDeCatalogo<T extends TablaCatalogo>(
   if (actual.error) return traducirErrorDb(actual.error, `buscar en ${tabla}`);
   if (!actual.existe) return error(cfg.noEncontrado, 404);
 
-  const { hijos, error: errHijos } = await contarHijos(cfg.columnaHijos, id);
+  const { hijos, error: errHijos } = await contarHijos(cfg.hijos, id);
   if (errHijos) return traducirErrorDb(errHijos, `contar hijos de ${tabla}`);
   const motivo = motivoRechazoEliminar(cfg.tipo, hijos);
   if (motivo) return error(motivo, 409);
