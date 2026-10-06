@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { api } from "@/lib/api-client";
 import { useColeccion } from "@/lib/use-coleccion";
 import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
@@ -27,7 +27,7 @@ export type ClaveNumerica<F> = { [K in keyof F]: F[K] extends number ? K : never
 
 /** Cómo se llaman y se cuentan los hijos del catálogo (nodos del árbol, marcas…). */
 export type HijosCatalogo<F> = {
-  /** Campo de la fila con el conteo de hijos (activos o no), según la API: `nodos` o `marcas`. */
+  /** Campo de la fila con el conteo de hijos (activos o no), según la API: `nodos`, `marcas`, `equivalencias`. */
   clave: ClaveNumerica<F>;
   /** Título de la columna de conteo. */
   titulo: string;
@@ -35,6 +35,17 @@ export type HijosCatalogo<F> = {
   avisoDesactivar: (n: number) => string;
   /** `title` del botón Eliminar deshabilitado por tener hijos. */
   bloqueoEliminar: string;
+  /** Cómo pintar el conteo (p. ej. como enlace a la lista de hijos). Por defecto, el número. */
+  render?: (fila: F, n: number) => ReactNode;
+};
+
+/** Texto libre opcional del catálogo (p. ej. la descripción de una agrupación de estacionalidad). */
+export type DescripcionCatalogo<F> = {
+  obtener: (fila: F) => string | null;
+  /** Largo máximo que acepta la API. */
+  max: number;
+  /** Ayuda bajo el campo del formulario de alta. */
+  hint?: string;
 };
 
 type Genero = "m" | "f";
@@ -44,15 +55,17 @@ const ARTICULO: Record<Genero, { el: string; los: string; lo: string; los_: stri
   f: { el: "la", los: "Las", lo: "la", los_: "las", o: "a", nuevo: "Nueva" },
 };
 
-type Edicion = { id: string; nombre: string; codigo: string; orden: string };
+type Edicion = { id: string; nombre: string; codigo: string; orden: string; descripcion: string };
+
+const FORM_VACIO = { nombre: "", codigo: "", codigoTocado: false, orden: "", descripcion: "" };
 
 function capitalizar(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /**
- * Mantenimiento de un catálogo plano (orden · código · nombre · hijos ·
- * estado) contra `/api/{recurso}`: alta arriba, edición en línea abajo,
+ * Mantenimiento de un catálogo plano (orden · código · nombre · [descripción] ·
+ * hijos · estado) contra `/api/{recurso}`: alta arriba, edición en línea abajo,
  * desactivar/reactivar y eliminar (bloqueado con hijos).
  *
  * La columna de hijos y el bloqueo de Eliminar usan `fila[hijos.clave]`
@@ -67,8 +80,10 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   puedeEditar,
   hijos,
   vigentes,
+  descripcion,
   columnasExtra = [],
   notaPie,
+  avisoSoloLectura,
   mostrarInactivos,
   onCambio,
 }: {
@@ -82,17 +97,21 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   hijos: HijosCatalogo<F>;
   /** Hijos vigentes por fila (los que de verdad se ocultarán al desactivar). Sin esto, no hay aviso. */
   vigentes?: (fila: F) => number;
+  /** Si el catálogo tiene descripción libre: campo en el alta y columna editable en línea. */
+  descripcion?: DescripcionCatalogo<F>;
   /** Columnas adicionales, entre el conteo de hijos y el estado. */
   columnasExtra?: Columna<F>[];
   /** Nota al pie de la tabla. */
   notaPie?: string;
+  /** Texto del aviso cuando `puedeEditar` es falso. Por defecto, "lo gestiona un administrador". */
+  avisoSoloLectura?: string;
   /** `false` oculta las filas inactivas (filtro en memoria); ausente, se muestran todas. */
   mostrarInactivos?: boolean;
   /** Se llama tras cada escritura exitosa, para que quien lo usa recargue lo suyo. */
   onCambio?: () => Promise<void> | void;
 }) {
   const { datos, cargando, error, setError, recargar } = useColeccion<F>(`/api/${recurso}?incluir_inactivos=1`);
-  const [form, setForm] = useState({ nombre: "", codigo: "", codigoTocado: false, orden: "" });
+  const [form, setForm] = useState(FORM_VACIO);
   const [guardando, setGuardando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
@@ -128,11 +147,12 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         nombre: nombreNormalizado,
         codigo: codigoPropuesto,
         ...(form.orden.trim() !== "" ? { orden: Number(form.orden) } : {}),
+        ...(descripcion && form.descripcion.trim() !== "" ? { descripcion: form.descripcion.trim() } : {}),
       })
     );
     if (ok) {
       setAviso(`${capitalizar(singular)} ${nombreNormalizado} cread${a.o}.`);
-      setForm({ nombre: "", codigo: "", codigoTocado: false, orden: "" });
+      setForm(FORM_VACIO);
     }
     setGuardando(false);
   }
@@ -146,7 +166,13 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
       return;
     }
     const ok = await ejecutar(() =>
-      api.patch<F>(`/api/${recurso}/${edicion.id}`, { nombre, codigo, orden: Number(edicion.orden) || 0 })
+      api.patch<F>(`/api/${recurso}/${edicion.id}`, {
+        nombre,
+        codigo,
+        orden: Number(edicion.orden) || 0,
+        // Vacía viaja como null: así se puede borrar una descripción existente.
+        ...(descripcion ? { descripcion: edicion.descripcion.trim() === "" ? null : edicion.descripcion.trim() } : {}),
+      })
     );
     if (ok) setEdicion(null);
   }
@@ -198,10 +224,43 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
           <span className="font-medium">{f.nombre}</span>
         ),
     },
+    ...(descripcion
+      ? [
+          {
+            clave: "descripcion",
+            titulo: "Descripción",
+            render: (f: F) => {
+              if (edicion?.id === f.id) {
+                return (
+                  <Input
+                    value={edicion.descripcion}
+                    maxLength={descripcion.max}
+                    onChange={(e) => setEdicion({ ...edicion, descripcion: e.target.value })}
+                    className="h-8 w-64"
+                    aria-label="Descripción"
+                    placeholder="Para qué sirve"
+                  />
+                );
+              }
+              const texto = descripcion.obtener(f);
+              return texto ? (
+                <span className="block max-w-64 truncate text-tinta-suave" title={texto}>
+                  {texto}
+                </span>
+              ) : (
+                <span className="text-tinta-suave">—</span>
+              );
+            },
+          } satisfies Columna<F>,
+        ]
+      : []),
     {
       clave: hijos.clave,
       titulo: hijos.titulo,
-      render: (f) => <span className="text-tinta-suave">{contarHijos(f)}</span>,
+      render: (f) => {
+        const n = contarHijos(f);
+        return hijos.render ? hijos.render(f, n) : <span className="text-tinta-suave">{n}</span>;
+      },
     },
     ...columnasExtra,
     {
@@ -233,7 +292,15 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
               variante="fantasma"
               tamano="sm"
               disabled={ocupado}
-              onClick={() => setEdicion({ id: f.id, nombre: f.nombre, codigo: f.codigo, orden: String(f.orden) })}
+              onClick={() =>
+                setEdicion({
+                  id: f.id,
+                  nombre: f.nombre,
+                  codigo: f.codigo,
+                  orden: String(f.orden),
+                  descripcion: descripcion ? (descripcion.obtener(f) ?? "") : "",
+                })
+              }
             >
               Editar
             </Button>
@@ -280,6 +347,19 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
             <Field label="Orden" hint="Posición en las listas.">
               <Input type="number" min={0} value={form.orden} onChange={(e) => setForm({ ...form, orden: e.target.value })} />
             </Field>
+            {descripcion && (
+              <Field
+                label="Descripción"
+                hint={`${form.descripcion.length}/${descripcion.max}.${descripcion.hint ? ` ${descripcion.hint}` : ""}`}
+                className="md:col-span-4"
+              >
+                <Input
+                  value={form.descripcion}
+                  maxLength={descripcion.max}
+                  onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
+                />
+              </Field>
+            )}
             <div className="flex flex-wrap items-center gap-4 md:col-span-4">
               <Button type="submit" disabled={guardando || ocupado || !nombreNormalizado || !codigoPropuesto}>
                 {guardando ? "Creando…" : `Crear ${singular}`}
@@ -290,7 +370,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         </Card>
       ) : (
         <Alert tono="info">
-          {a.los} {plural} {a.los_} gestiona un administrador. Acá puedes consultar{a.los_}.
+          {avisoSoloLectura ?? `${a.los} ${plural} ${a.los_} gestiona un administrador. Acá puedes consultar${a.los_}.`}
         </Alert>
       )}
 

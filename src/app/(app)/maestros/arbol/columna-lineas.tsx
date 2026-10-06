@@ -134,6 +134,10 @@ export function ColumnaLineas({
         {lineas.map((l) => {
           const estado = estadoNodo(l, genero, mundo);
           const seleccionada = l.nodo_id === nodoSelId;
+          // M3: equivalencias activas sin agrupación activa (regla 7), para ver desde el árbol qué nodos faltan.
+          const sinAgrupacion = l.equivalencias.filter(
+            (e) => e.activo && (e.agrupacion_estacionalidad === null || !e.agrupacion_estacionalidad.activo)
+          ).length;
           return (
             <li key={l.nodo_id}>
               <FilaColumna seleccionada={seleccionada} atenuada={!l.vigente} onClick={() => onSeleccionar(l.nodo_id)}>
@@ -144,7 +148,10 @@ export function ColumnaLineas({
                     {estado && <Badge tono={estado.tono}>{estado.texto}</Badge>}
                   </span>
                 </span>
-                <span className="shrink-0 text-xs text-tinta-suave">{l.equivalencias.length} eq.</span>
+                <span className="shrink-0 text-right text-xs text-tinta-suave">
+                  <span className="block">{l.equivalencias.length} eq.</span>
+                  {sinAgrupacion > 0 && <span className="block text-alerta">{sinAgrupacion} sin agrupación</span>}
+                </span>
               </FilaColumna>
 
               {seleccionada && puedeEditar && (

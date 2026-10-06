@@ -45,10 +45,14 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["agrupaciones_marca_nombre", "Ya existe una agrupación de marca con ese nombre."],
   ["marcas_codigo", "Ya existe una marca con ese código."],
   ["marcas_nombre", "Ya existe una marca con ese nombre."],
+  // M3.
+  ["agrupaciones_estacionalidad_codigo", "Ya existe una agrupación de estacionalidad con ese código."],
+  ["agrupaciones_estacionalidad_nombre", "Ya existe una agrupación de estacionalidad con ese nombre."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["lineas_temporada", "La temporada debe ser Verano, Invierno o Todo el año."],
+  ["agrupaciones_estacionalidad_descripcion", "La descripción no puede superar 500 caracteres."],
   ["marcas_nota_len", "La nota no puede superar 200 caracteres."],
   ["marcas_nota_sin_tratamiento", "La nota solo se guarda si la marca tiene tratamiento especial."],
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
@@ -67,6 +71,13 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     {
       eliminar: "No se puede eliminar la agrupación de marca: tiene marcas. Desactívala.",
       asignar: { status: 404, mensaje: "Agrupación de marca no encontrada." },
+    },
+  ],
+  [
+    "equivalencias_agrupacion_estacionalidad_id_fkey",
+    {
+      eliminar: "No se puede eliminar la agrupación de estacionalidad: tiene equivalencias. Desactívala.",
+      asignar: { status: 404, mensaje: "Agrupación de estacionalidad no encontrada." },
     },
   ],
 ];

@@ -4,11 +4,13 @@ import { useState } from "react";
 import { api } from "@/lib/api-client";
 import { EQUIVALENCIA_GENERICA, aCodigo, esEquivalenciaIgualALinea, normalizarNombre } from "@/lib/arbol/normalizar";
 import type { EquivalenciaArbol, EquivalenciaFila, GeneroArbol, LineaArbol, MundoArbol } from "@/lib/arbol/tipos-api";
+import type { AgrupacionEstacionalidadFila, AsignarEquivalenciaCuerpo } from "@/lib/estacionalidad/tipos-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Field, Input } from "@/components/ui/form";
+import { Field, Input, Select } from "@/components/ui/form";
 import { DataTable, type Columna as ColumnaTabla } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BadgeAgrupacion } from "@/components/estacionalidad/badge-agrupacion";
 import { Columna, VistaPreviaNombre, mensajeError } from "./comunes";
 
 type Props = {
@@ -16,19 +18,33 @@ type Props = {
   mundo: MundoArbol;
   nodo: LineaArbol;
   puedeEditar: boolean;
+  /** Catálogo de agrupaciones de estacionalidad (activas e inactivas) para el `Select` en línea (M3). */
+  agrupaciones?: AgrupacionEstacionalidadFila[];
+  /** `false` si el catálogo no se pudo cargar: se muestra solo el badge. */
+  agrupacionesDisponibles?: boolean;
   onCambio: () => Promise<void>;
   onError: (mensaje: string | null) => void;
 };
 
 type Edicion = { id: string; nombre: string; codigo: string; codigoTocado: boolean };
 
-export function ColumnaEquivalencias({ genero, mundo, nodo, puedeEditar, onCambio, onError }: Props) {
+export function ColumnaEquivalencias({
+  genero,
+  mundo,
+  nodo,
+  puedeEditar,
+  agrupaciones = [],
+  agrupacionesDisponibles = true,
+  onCambio,
+  onError,
+}: Props) {
   const [creando, setCreando] = useState(false);
   const [edicion, setEdicion] = useState<Edicion | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
   const tieneGenerica = nodo.equivalencias.some((e) => e.es_generica);
   const ruta = `${genero.nombre} / ${mundo.nombre} / ${nodo.nombre}`;
+  const agrupacionesActivas = agrupaciones.filter((a) => a.activo).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
 
   async function ejecutar(accion: () => Promise<unknown>) {
     setOcupado(true);
@@ -53,6 +69,14 @@ export function ColumnaEquivalencias({ genero, mundo, nodo, puedeEditar, onCambi
   function eliminar(eq: EquivalenciaArbol) {
     if (!confirm(`¿Eliminar definitivamente la equivalencia ${eq.nombre} de ${ruta}? Esta acción no se puede deshacer.`)) return;
     void ejecutar(() => api.delete(`/api/equivalencias/${eq.id}`));
+  }
+
+  /** M3: el cambio se guarda al instante; `""` quita la agrupación. Los 404/409 llegan por `onError`. */
+  function cambiarAgrupacion(eq: EquivalenciaArbol, id: string) {
+    const actual = eq.agrupacion_estacionalidad?.id ?? "";
+    if (id === actual) return;
+    const cuerpo: AsignarEquivalenciaCuerpo = { agrupacion_estacionalidad_id: id === "" ? null : id };
+    void ejecutar(() => api.patch<EquivalenciaFila>(`/api/equivalencias/${eq.id}`, cuerpo));
   }
 
   function agregarGenerica() {
@@ -114,6 +138,40 @@ export function ColumnaEquivalencias({ genero, mundo, nodo, puedeEditar, onCambi
         ) : (
           <code className="font-mono text-xs text-tinta-suave">{eq.codigo}</code>
         ),
+    },
+    {
+      clave: "agrupacion",
+      titulo: "Agrupación",
+      render: (eq) => {
+        const actual = eq.agrupacion_estacionalidad;
+        // Comprador, fila en edición de nombre o catálogo no cargado: solo el badge.
+        if (!puedeEditar || edicion?.id === eq.id || !agrupacionesDisponibles) return <BadgeAgrupacion agrupacion={actual} />;
+        const inactiva = actual !== null && !actual.activo;
+        return (
+          <span className="flex min-w-0 flex-wrap items-center gap-1">
+            <Select
+              value={actual?.id ?? ""}
+              onChange={(e) => cambiarAgrupacion(eq, e.target.value)}
+              disabled={ocupado}
+              className="h-8 w-full min-w-28 max-w-40"
+              aria-label={`Agrupación de estacionalidad de ${eq.nombre}`}
+            >
+              <option value="">— Sin agrupación —</option>
+              {inactiva && (
+                <option value={actual.id} disabled>
+                  {actual.nombre} (inactiva)
+                </option>
+              )}
+              {agrupacionesActivas.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nombre}
+                </option>
+              ))}
+            </Select>
+            {inactiva && <Badge tono="alerta">Inactiva</Badge>}
+          </span>
+        );
+      },
     },
     {
       clave: "estado",

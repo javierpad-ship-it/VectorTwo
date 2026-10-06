@@ -7,6 +7,7 @@ describe("puedeVerRuta", () => {
   });
   it("el comprador no entra a los otros maestros", () => {
     expect(puedeVerRuta("comprador", "/maestros/marcas")).toBe(false);
+    expect(puedeVerRuta("comprador", "/maestros/estacionalidad")).toBe(false);
     expect(puedeVerRuta("comprador", "/maestros/tiendas")).toBe(false);
   });
   it("las subrutas heredan el permiso del padre", () => {
@@ -18,9 +19,14 @@ describe("puedeVerRuta", () => {
     expect(puedeVerRuta("planner", "/maestros/marcas")).toBe(true);
     expect(puedeVerRuta("comprador", "/maestros/marcas")).toBe(false);
   });
+  it("admin y planner entran a agrupaciones de estacionalidad (M3); el comprador no, ni por URL", () => {
+    expect(puedeVerRuta("admin", "/maestros/estacionalidad")).toBe(true);
+    expect(puedeVerRuta("planner", "/maestros/estacionalidad")).toBe(true);
+    expect(puedeVerRuta("comprador", "/maestros/estacionalidad")).toBe(false);
+  });
   it("los módulos pendientes no se pueden abrir aunque el rol los vea en el menú", () => {
     expect(puedeVerRuta("admin", "/maestros/tiendas")).toBe(false);
-    expect(puedeVerRuta("planner", "/maestros/estacionalidad")).toBe(false);
+    expect(puedeVerRuta("planner", "/maestros/tiendas")).toBe(false);
   });
   it("solo el admin entra a usuarios", () => {
     expect(puedeVerRuta("admin", "/usuarios")).toBe(true);

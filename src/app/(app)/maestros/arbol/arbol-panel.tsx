@@ -4,7 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { puedeEditarMaestros, type Rol } from "@/lib/auth/roles";
 import { useArbol } from "@/lib/arbol/use-arbol";
+import { useColeccion } from "@/lib/use-coleccion";
 import type { GeneroArbol, MundoArbol } from "@/lib/arbol/tipos-api";
+import type { AgrupacionEstacionalidadFila } from "@/lib/estacionalidad/tipos-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
@@ -29,6 +31,11 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
   const { arbol, cargando, error, setError, recargar } = useArbol(mostrarInactivos);
   const [sel, setSel] = useState<Seleccion>(SIN_SELECCION);
   const [busqueda, setBusqueda] = useState("");
+  // M3: el catálogo de agrupaciones de estacionalidad se carga una vez (con
+  // inactivas, para marcar la de una equivalencia que apunte a una apagada) y
+  // alimenta el `Select` de la columna Equivalencias. Si falla, la columna
+  // muestra solo el badge y un aviso.
+  const agrupaciones = useColeccion<AgrupacionEstacionalidadFila>("/api/agrupaciones-estacionalidad?incluir_inactivos=1");
 
   // La selección se guarda por ids y se resuelve contra el árbol en cada
   // render: así sobrevive a las recargas y no hace falta sincronizarla con efectos.
@@ -108,12 +115,33 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
           {r && (
             <p className="text-sm text-tinta-suave">
               {formatearNumero(r.generos)} géneros · {formatearNumero(r.mundos)} mundos · {formatearNumero(r.lineas)} líneas ·{" "}
-              {formatearNumero(r.nodos)} nodos · {formatearNumero(r.equivalencias)} equivalencias
+              {formatearNumero(r.nodos)} nodos · {formatearNumero(r.equivalencias)} equivalencias ·{" "}
+              {puedeEditar ? (
+                <Link
+                  href="/maestros/estacionalidad?pestana=faltantes"
+                  className={`underline-offset-2 hover:underline ${r.equivalencias_sin_agrupacion > 0 ? "text-alerta" : "text-exito"}`}
+                  title="Ver las faltantes en Agrupaciones de estacionalidad"
+                >
+                  {formatearNumero(r.equivalencias_sin_agrupacion)} sin agrupación
+                </Link>
+              ) : (
+                <span>{formatearNumero(r.equivalencias_sin_agrupacion)} sin agrupación</span>
+              )}
               {cargando && <span className="ml-2 italic">Actualizando…</span>}
             </p>
           )}
 
           {cargando && !arbol && <p className="text-sm text-tinta-suave">Cargando el árbol…</p>}
+
+          {agrupaciones.error && (
+            <Alert onCerrar={() => agrupaciones.setError(null)}>
+              No se pudieron cargar las agrupaciones de estacionalidad: {agrupaciones.error}. La columna Equivalencias muestra la agrupación pero no
+              permite cambiarla.{" "}
+              <button type="button" onClick={() => void agrupaciones.recargar()} className="font-medium underline underline-offset-2">
+                Reintentar
+              </button>
+            </Alert>
+          )}
 
           {arbol && generos.length === 0 && (
             <EmptyState titulo="El árbol está vacío" detalle="No hay géneros activos. Un administrador puede crearlos en Catálogos." />
@@ -204,6 +232,8 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
                     mundo={mundoSel}
                     nodo={nodoSel}
                     puedeEditar={puedeEditar}
+                    agrupaciones={agrupaciones.datos}
+                    agrupacionesDisponibles={agrupaciones.error === null}
                     onCambio={recargarSilencioso}
                     onError={setError}
                   />

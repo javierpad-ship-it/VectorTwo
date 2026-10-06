@@ -48,7 +48,7 @@ export const codigoOpcional = z
   .optional()
   .transform((v) => (v === undefined || v.trim() === "" ? undefined : aCodigo(v)));
 
-const orden = z.int("El orden debe ser un número entero.").min(0, "El orden no puede ser negativo.");
+export const orden = z.int("El orden debe ser un número entero.").min(0, "El orden no puede ser negativo.");
 export const activo = z.boolean("activo debe ser verdadero o falso.");
 export const uuid = z.uuid("Identificador inválido.");
 const temporada = z.enum(TEMPORADAS, "La temporada debe ser Verano, Invierno o Todo el año.");
@@ -166,8 +166,12 @@ export const crearEquivalenciaSchema = z
     ])
   );
 
+/**
+ * `agrupacion_estacionalidad_id` (M3): UUID para asignar, `null` para quitar
+ * la agrupación; el handler comprueba que exista y esté activa.
+ */
 export const editarEquivalenciaSchema = z
-  .object({ nombre, codigo, activo })
+  .object({ nombre, codigo, activo, agrupacion_estacionalidad_id: uuid.nullable() })
   .partial()
   .refine(tieneAlgo, noVacio)
   // "-" solo tiene sentido al crear (el handler lo traduce al nombre de la

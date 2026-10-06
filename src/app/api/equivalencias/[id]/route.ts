@@ -5,14 +5,20 @@ import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { editarEquivalenciaSchema } from "@/lib/arbol/esquemas";
 import { motivoRechazoEquivalencia } from "@/lib/arbol/reglas";
+import { motivoRechazoAsignacion, statusRechazoAsignacion } from "@/lib/estacionalidad/reglas";
 
 type Params = { params: Promise<{ id: string }> };
 
 const NO_ENCONTRADA = "Equivalencia no encontrada.";
 
 /**
- * Renombra, cambia el código o activa/desactiva (`requirePlanner`). Sobre la
- * genérica solo se admite `activo` (`409` si intentan renombrarla).
+ * Renombra, cambia el código, activa/desactiva o asigna la agrupación de
+ * estacionalidad (`requirePlanner`). Sobre la genérica solo se admiten
+ * `activo` y `agrupacion_estacionalidad_id` (`409` si intentan renombrarla).
+ * Si el cuerpo trae `agrupacion_estacionalidad_id` no nulo, la agrupación
+ * debe existir (`404`) y estar activa (`409`); `null` la quita. Se comprueba
+ * antes del `update` para que la violación de FK nunca llegue a la base.
+ * Devuelve la fila completa (con `agrupacion_estacionalidad_id`).
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
@@ -28,14 +34,29 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (errActual) return traducirErrorDb(errActual);
   if (!actual) return error(NO_ENCONTRADA, 404);
 
-  const { data: hermanas, error: errHermanas } = await db
-    .from("equivalencias")
-    .select("id, nombre, codigo, es_generica, activo")
-    .eq("genero_mundo_linea_id", actual.genero_mundo_linea_id);
-  if (errHermanas) return traducirErrorDb(errHermanas);
+  const { agrupacion_estacionalidad_id, ...cambio } = datos;
 
-  const motivo = motivoRechazoEquivalencia(hermanas ?? [], { id, ...datos });
-  if (motivo) return error(motivo, 409);
+  if (Object.keys(cambio).length > 0) {
+    const { data: hermanas, error: errHermanas } = await db
+      .from("equivalencias")
+      .select("id, nombre, codigo, es_generica, activo")
+      .eq("genero_mundo_linea_id", actual.genero_mundo_linea_id);
+    if (errHermanas) return traducirErrorDb(errHermanas);
+
+    const motivo = motivoRechazoEquivalencia(hermanas ?? [], { id, ...cambio });
+    if (motivo) return error(motivo, 409);
+  }
+
+  if (agrupacion_estacionalidad_id !== undefined && agrupacion_estacionalidad_id !== null) {
+    const { data: agrupacion, error: errAgrupacion } = await db
+      .from("agrupaciones_estacionalidad")
+      .select("id, nombre, activo")
+      .eq("id", agrupacion_estacionalidad_id)
+      .maybeSingle();
+    if (errAgrupacion) return traducirErrorDb(errAgrupacion, "buscar agrupación de estacionalidad");
+    const motivo = motivoRechazoAsignacion(agrupacion, false);
+    if (motivo) return error(motivo, statusRechazoAsignacion(motivo));
+  }
 
   const { data, error: err } = await db.from("equivalencias").update(datos).eq("id", id).select("*").single();
   if (err) return traducirErrorDb(err);

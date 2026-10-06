@@ -101,7 +101,8 @@ export type TipoEliminable =
   | "equivalencia"
   | "agrupacion_talla"
   | "agrupacion_marca"
-  | "marca";
+  | "marca"
+  | "agrupacion_estacionalidad";
 
 type Etiqueta = { sujeto: string; uno: string; varios: string; desactivar: string };
 
@@ -127,6 +128,12 @@ const ETIQUETAS: Record<TipoEliminable, Etiqueta> = {
     sujeto: "la marca",
     uno: "registro asociado",
     varios: "registros asociados",
+    desactivar: "Desactívala",
+  },
+  agrupacion_estacionalidad: {
+    sujeto: "la agrupación de estacionalidad",
+    uno: "equivalencia",
+    varios: "equivalencias",
     desactivar: "Desactívala",
   },
 };

@@ -41,15 +41,16 @@ const nodos: NodoEntrada[] = [
 ];
 
 const equivalencias: EquivalenciaEntrada[] = [
-  { id: "e1", genero_mundo_linea_id: "n1", codigo: "SIN_EQUIVALENCIA", nombre: "SIN EQUIVALENCIA", es_generica: true, activo: true },
-  { id: "e2", genero_mundo_linea_id: "n1", codigo: "VARIOS", nombre: "VARIOS", es_generica: false, activo: true },
-  { id: "e3", genero_mundo_linea_id: "n1", codigo: "JOGGER", nombre: "JOGGER", es_generica: false, activo: true },
-  { id: "e4", genero_mundo_linea_id: "n1", codigo: "CARGO", nombre: "CARGO", es_generica: false, activo: false },
-  { id: "e5", genero_mundo_linea_id: "n2", codigo: "VARIOS", nombre: "VARIOS", es_generica: false, activo: true },
+  { id: "e1", genero_mundo_linea_id: "n1", codigo: "SIN_EQUIVALENCIA", nombre: "SIN EQUIVALENCIA", es_generica: true, activo: true, agrupacion_estacionalidad_id: null },
+  { id: "e2", genero_mundo_linea_id: "n1", codigo: "VARIOS", nombre: "VARIOS", es_generica: false, activo: true, agrupacion_estacionalidad_id: null },
+  { id: "e3", genero_mundo_linea_id: "n1", codigo: "JOGGER", nombre: "JOGGER", es_generica: false, activo: true, agrupacion_estacionalidad_id: null },
+  { id: "e4", genero_mundo_linea_id: "n1", codigo: "CARGO", nombre: "CARGO", es_generica: false, activo: false, agrupacion_estacionalidad_id: null },
+  { id: "e5", genero_mundo_linea_id: "n2", codigo: "VARIOS", nombre: "VARIOS", es_generica: false, activo: true, agrupacion_estacionalidad_id: null },
 ];
 
-const activos = () => armarArbol(generos, mundos, lineas, nodos, equivalencias, { incluirInactivos: false });
-const todos = () => armarArbol(generos, mundos, lineas, nodos, equivalencias, { incluirInactivos: true });
+// M3: sexto parámetro `agrupaciones`; con `[]` todas las equivalencias salen sin agrupación (regla 18 de M3).
+const activos = () => armarArbol(generos, mundos, lineas, nodos, equivalencias, [], { incluirInactivos: false });
+const todos = () => armarArbol(generos, mundos, lineas, nodos, equivalencias, [], { incluirInactivos: true });
 
 const buscar = (arbol: ReturnType<typeof armarArbol>, g: string, m: string) =>
   arbol.generos.find((x) => x.codigo === g)?.mundos.find((x) => x.codigo === m);
@@ -125,9 +126,9 @@ describe("armarArbol · regla 13: vigencia", () => {
       activo_nodo: true,
       vigente: true,
       equivalencias: [
-        { id: "e3", codigo: "JOGGER", nombre: "JOGGER", es_generica: false, activo: true },
-        { id: "e2", codigo: "VARIOS", nombre: "VARIOS", es_generica: false, activo: true },
-        { id: "e1", codigo: "SIN_EQUIVALENCIA", nombre: "SIN EQUIVALENCIA", es_generica: true, activo: true },
+        { id: "e3", codigo: "JOGGER", nombre: "JOGGER", es_generica: false, activo: true, agrupacion_estacionalidad: null },
+        { id: "e2", codigo: "VARIOS", nombre: "VARIOS", es_generica: false, activo: true, agrupacion_estacionalidad: null },
+        { id: "e1", codigo: "SIN_EQUIVALENCIA", nombre: "SIN EQUIVALENCIA", es_generica: true, activo: true, agrupacion_estacionalidad: null },
       ],
     });
   });
@@ -145,7 +146,7 @@ describe("armarArbol · regla 14: orden", () => {
       { id: "b", codigo: "B", nombre: "BETA", orden: 0, activo: true },
       { id: "a", codigo: "A", nombre: "ALFA", orden: 0, activo: true },
     ];
-    const arbol = armarArbol(empatados, [], [], [], [], { incluirInactivos: false });
+    const arbol = armarArbol(empatados, [], [], [], [], [], { incluirInactivos: false });
     expect(arbol.generos.map((g) => g.nombre)).toEqual(["ALFA", "BETA"]);
   });
   it("ordenarEquivalencias deja la genérica al final aunque alfabéticamente vaya antes", () => {
@@ -166,6 +167,7 @@ describe("armarArbol · regla 15: resumen cuenta lo devuelto", () => {
       lineas: 2, // PANTALON y BLUSA
       nodos: 4, // n1, n2, n3, n8
       equivalencias: 4, // e1, e2, e3, e5
+      equivalencias_sin_agrupacion: 4, // M3: sin agrupaciones, todas las activas y vigentes son faltantes
     });
   });
   it("con inactivos", () => {
@@ -175,10 +177,18 @@ describe("armarArbol · regla 15: resumen cuenta lo devuelto", () => {
       lineas: 3,
       nodos: 8,
       equivalencias: 5,
+      equivalencias_sin_agrupacion: 4, // e4 está inactiva: nunca es faltante
     });
   });
   it("el resumen no trae claves de mundos especiales", () => {
-    expect(Object.keys(activos().resumen).sort()).toEqual(["equivalencias", "generos", "lineas", "mundos", "nodos"]);
+    expect(Object.keys(activos().resumen).sort()).toEqual([
+      "equivalencias",
+      "equivalencias_sin_agrupacion",
+      "generos",
+      "lineas",
+      "mundos",
+      "nodos",
+    ]);
   });
   it("no muta las entradas", () => {
     const copia = JSON.parse(JSON.stringify({ generos, mundos, lineas, nodos, equivalencias }));

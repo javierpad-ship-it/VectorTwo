@@ -50,7 +50,7 @@ export type NodoFila = {
   updated_at: string;
 };
 
-/** Fila de `equivalencias` (respuestas de /api/equivalencias). */
+/** Fila de `equivalencias` (respuestas de /api/equivalencias). Desde M3 trae `agrupacion_estacionalidad_id`. */
 export type EquivalenciaFila = {
   id: string;
   genero_mundo_linea_id: string;
@@ -58,11 +58,20 @@ export type EquivalenciaFila = {
   nombre: string;
   es_generica: boolean;
   activo: boolean;
+  /** M3: agrupación de estacionalidad asignada, o `null` (equivalencia sin curva). */
+  agrupacion_estacionalidad_id: string | null;
   created_at: string;
   updated_at: string;
 };
 
 // ─── Árbol completo (GET /api/arbol) ───
+
+/** M3: la agrupación de estacionalidad tal como viaja en cada equivalencia del árbol. */
+export type AgrupacionEstacionalidadArbol = {
+  id: string;
+  nombre: string;
+  activo: boolean;
+};
 
 export type EquivalenciaArbol = {
   id: string;
@@ -70,6 +79,8 @@ export type EquivalenciaArbol = {
   nombre: string;
   es_generica: boolean;
   activo: boolean;
+  /** M3: `null` si la equivalencia no tiene agrupación (incluye las que apuntan a una inactiva, con su `activo`). */
+  agrupacion_estacionalidad: AgrupacionEstacionalidadArbol | null;
 };
 
 /** Un nodo género-mundo-línea visto desde el árbol: la línea del catálogo más las banderas del nodo. */
@@ -114,6 +125,8 @@ export type ResumenArbol = {
   lineas: number;
   nodos: number;
   equivalencias: number;
+  /** M3: entre las equivalencias devueltas, las faltantes (activas, en nodo vigente y sin agrupación activa). */
+  equivalencias_sin_agrupacion: number;
 };
 
 export type ArbolRespuesta = {

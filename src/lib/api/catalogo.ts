@@ -5,13 +5,14 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { Database, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types";
 import type { requireUser } from "@/lib/auth/guard";
 import { motivoRechazoEliminar, type TipoEliminable } from "@/lib/arbol/reglas";
-import { leerNodos, leerTodo } from "@/lib/arbol/consultas";
+import { leerEquivalencias, leerNodos, leerTodo } from "@/lib/arbol/consultas";
 import { error, idDeRuta, leerCuerpo, ok } from "./respuestas";
 import { traducirErrorDb } from "./errores-db";
 
 /**
  * CRUD plano para los catálogos (géneros, mundos, líneas, agrupaciones de
- * talla y, desde M2, agrupaciones de marca). Cada ruta declara su
+ * talla, desde M2 agrupaciones de marca y desde M3 agrupaciones de
+ * estacionalidad). Cada ruta declara su
  * configuración (tabla, guards, esquemas zod, orden, escritura) y delega en
  * estas cuatro funciones; así el patrón "guard → cuerpo → base → traducir
  * error" vive en un solo sitio.
@@ -23,7 +24,13 @@ import { traducirErrorDb } from "./errores-db";
  * `escritura`, tipadas contextualmente con su `TablesInsert`/`TablesUpdate`.
  */
 
-export type TablaCatalogo = "generos" | "mundos" | "lineas" | "agrupaciones_talla" | "agrupaciones_marca";
+export type TablaCatalogo =
+  | "generos"
+  | "mundos"
+  | "lineas"
+  | "agrupaciones_talla"
+  | "agrupaciones_marca"
+  | "agrupaciones_estacionalidad";
 
 export type Guard = typeof requireUser;
 
@@ -38,9 +45,10 @@ export type EscrituraCatalogo<T extends TablaCatalogo> = {
 /**
  * Qué tabla cuelga de este catálogo y por qué columna. `clave` es el nombre
  * con el que el listado anexa el conteo a cada fila (`nodos` para géneros,
- * mundos y líneas; `marcas` para agrupaciones de marca). `claveActivos`,
- * opcional, anexa además el conteo de hijos con `activo = true` (la pantalla
- * lo usa en el `confirm` de desactivar).
+ * mundos y líneas; `marcas` para agrupaciones de marca; `equivalencias` para
+ * agrupaciones de estacionalidad, M3). `claveActivos`, opcional, anexa además
+ * el conteo de hijos con `activo = true` (la pantalla lo usa en el `confirm`
+ * de desactivar).
  */
 export type HijosCatalogo =
   | {
@@ -54,6 +62,12 @@ export type HijosCatalogo =
       columna: "agrupacion_marca_id";
       clave: "marcas";
       claveActivos?: "marcas_activas";
+    }
+  | {
+      tabla: "equivalencias";
+      columna: "genero_mundo_linea_id" | "agrupacion_estacionalidad_id";
+      clave: "equivalencias";
+      claveActivos?: "equivalencias_activas";
     };
 
 export type ConfigCatalogo<T extends TablaCatalogo> = {
@@ -91,7 +105,9 @@ async function contarHijos(hijos: HijosCatalogo | undefined, id: string) {
   const { count, error: err } =
     hijos.tabla === "marcas"
       ? await db.from("marcas").select("id", { count: "exact", head: true }).eq(hijos.columna, id)
-      : await db.from("genero_mundo_linea").select("id", { count: "exact", head: true }).eq(hijos.columna, id);
+      : hijos.tabla === "equivalencias"
+        ? await db.from("equivalencias").select("id", { count: "exact", head: true }).eq(hijos.columna, id)
+        : await db.from("genero_mundo_linea").select("id", { count: "exact", head: true }).eq(hijos.columna, id);
   return { hijos: count ?? 0, error: err };
 }
 
@@ -105,6 +121,17 @@ async function leerHijos(db: Db, hijos: HijosCatalogo): Promise<{ data: HijoMin[
       (d, h) => db.from("marcas").select("id, agrupacion_marca_id, activo").order("id").range(d, h)
     );
     return { data: data.map((m) => ({ padre: m[columna], activo: m.activo })), error: err };
+  }
+  if (hijos.tabla === "equivalencias") {
+    // `agrupacion_estacionalidad_id` es nullable: una equivalencia sin agrupación no cuelga de nadie.
+    const columna = hijos.columna;
+    const { data, error: err } = await leerEquivalencias(db);
+    const pares: HijoMin[] = [];
+    for (const e of data) {
+      const padre = e[columna];
+      if (padre !== null) pares.push({ padre, activo: e.activo });
+    }
+    return { data: pares, error: err };
   }
   const columna = hijos.columna;
   const { data, error: err } = await leerNodos(db);

@@ -1,4 +1,5 @@
 import type { Tables } from "@/lib/supabase/database.types";
+import { motivoFaltante } from "@/lib/estacionalidad/reglas";
 import { esTemporada, type Temporada } from "./normalizar";
 import type {
   ArbolRespuesta,
@@ -11,7 +12,11 @@ import type {
 
 /**
  * Arma la respuesta de `GET /api/arbol` a partir de las cinco tablas leídas
- * planas (docs/modulos/01-arbol-producto.md, reglas 12–15). Pura, sin I/O.
+ * planas (docs/modulos/01-arbol-producto.md, reglas 12–15) más, desde M3, las
+ * agrupaciones de estacionalidad (docs/modulos/03-agrupaciones-estacionalidad.md,
+ * regla 18): cada equivalencia sale con su `agrupacion_estacionalidad` o
+ * `null`, y `resumen.equivalencias_sin_agrupacion` cuenta las faltantes entre
+ * las devueltas. Pura, sin I/O.
  */
 
 export type GeneroEntrada = Pick<Tables<"generos">, "id" | "codigo" | "nombre" | "orden" | "activo">;
@@ -20,8 +25,9 @@ export type LineaEntrada = Pick<Tables<"lineas">, "id" | "codigo" | "nombre" | "
 export type NodoEntrada = Pick<Tables<"genero_mundo_linea">, "id" | "genero_id" | "mundo_id" | "linea_id" | "activo">;
 export type EquivalenciaEntrada = Pick<
   Tables<"equivalencias">,
-  "id" | "genero_mundo_linea_id" | "codigo" | "nombre" | "es_generica" | "activo"
+  "id" | "genero_mundo_linea_id" | "codigo" | "nombre" | "es_generica" | "activo" | "agrupacion_estacionalidad_id"
 >;
+export type AgrupacionEstacionalidadEntrada = Pick<Tables<"agrupaciones_estacionalidad">, "id" | "nombre" | "activo">;
 
 export type OpcionesArbol = { incluirInactivos: boolean };
 
@@ -64,6 +70,7 @@ export function armarArbol(
   lineas: LineaEntrada[],
   nodos: NodoEntrada[],
   equivalencias: EquivalenciaEntrada[],
+  agrupaciones: AgrupacionEstacionalidadEntrada[],
   { incluirInactivos }: OpcionesArbol
 ): ArbolRespuesta {
   const visible = (fila: { activo: boolean }) => incluirInactivos || fila.activo;
@@ -71,12 +78,24 @@ export function armarArbol(
   const generosOrdenados = generos.filter(visible).sort(compararOrdenNombre);
   const mundosOrdenados = mundos.filter(visible).sort(compararOrdenNombre);
   const lineasPorId = new Map(lineas.map((l) => [l.id, l]));
+  const agrupacionPorId = new Map(agrupaciones.map((a) => [a.id, a]));
 
   const equivalenciasPorNodo = new Map<string, EquivalenciaArbol[]>();
   for (const e of equivalencias) {
     if (!visible(e)) continue;
     const lista = equivalenciasPorNodo.get(e.genero_mundo_linea_id) ?? [];
-    lista.push({ id: e.id, codigo: e.codigo, nombre: e.nombre, es_generica: e.es_generica, activo: e.activo });
+    // Una agrupación que no esté en la lista (imposible con la FK) se trata como "sin agrupación".
+    const agrupacion = e.agrupacion_estacionalidad_id ? agrupacionPorId.get(e.agrupacion_estacionalidad_id) : undefined;
+    lista.push({
+      id: e.id,
+      codigo: e.codigo,
+      nombre: e.nombre,
+      es_generica: e.es_generica,
+      activo: e.activo,
+      agrupacion_estacionalidad: agrupacion
+        ? { id: agrupacion.id, nombre: agrupacion.nombre, activo: agrupacion.activo }
+        : null,
+    });
     equivalenciasPorNodo.set(e.genero_mundo_linea_id, lista);
   }
 
@@ -94,6 +113,7 @@ export function armarArbol(
     lineas: 0,
     nodos: 0,
     equivalencias: 0,
+    equivalencias_sin_agrupacion: 0,
   };
   const lineasDevueltas = new Set<string>();
 
@@ -122,6 +142,11 @@ export function armarArbol(
 
         resumen.nodos += 1;
         resumen.equivalencias += eqs.length;
+        for (const eq of eqs) {
+          if (motivoFaltante(eq, vigente, eq.agrupacion_estacionalidad) !== null) {
+            resumen.equivalencias_sin_agrupacion += 1;
+          }
+        }
         lineasDevueltas.add(linea.id);
       }
 
