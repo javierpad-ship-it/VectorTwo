@@ -1,7 +1,7 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-05 contra `generate_typescript_types` del proyecto
+ * Verificados el 2026-10-06 contra `generate_typescript_types` del proyecto
  * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
  * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
  */
@@ -16,6 +16,39 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      agrupaciones_estacionalidad: {
+        Row: {
+          activo: boolean;
+          codigo: string;
+          created_at: string;
+          descripcion: string | null;
+          id: string;
+          nombre: string;
+          orden: number;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          codigo: string;
+          created_at?: string;
+          descripcion?: string | null;
+          id?: string;
+          nombre: string;
+          orden?: number;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          codigo?: string;
+          created_at?: string;
+          descripcion?: string | null;
+          id?: string;
+          nombre?: string;
+          orden?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       agrupaciones_marca: {
         Row: {
           activo: boolean;
@@ -79,6 +112,7 @@ export type Database = {
       equivalencias: {
         Row: {
           activo: boolean;
+          agrupacion_estacionalidad_id: string | null;
           codigo: string;
           created_at: string;
           es_generica: boolean;
@@ -89,6 +123,7 @@ export type Database = {
         };
         Insert: {
           activo?: boolean;
+          agrupacion_estacionalidad_id?: string | null;
           codigo: string;
           created_at?: string;
           es_generica?: boolean;
@@ -99,6 +134,7 @@ export type Database = {
         };
         Update: {
           activo?: boolean;
+          agrupacion_estacionalidad_id?: string | null;
           codigo?: string;
           created_at?: string;
           es_generica?: boolean;
@@ -108,6 +144,13 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [
+          {
+            foreignKeyName: "equivalencias_agrupacion_estacionalidad_id_fkey";
+            columns: ["agrupacion_estacionalidad_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_estacionalidad";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "equivalencias_genero_mundo_linea_id_fkey";
             columns: ["genero_mundo_linea_id"];
