@@ -16,6 +16,45 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      agrupacion_estacionalidad_genero: {
+        Row: {
+          agrupacion_estacionalidad_id: string;
+          created_at: string;
+          genero_id: string;
+          id: string;
+          updated_at: string;
+        };
+        Insert: {
+          agrupacion_estacionalidad_id: string;
+          created_at?: string;
+          genero_id: string;
+          id?: string;
+          updated_at?: string;
+        };
+        Update: {
+          agrupacion_estacionalidad_id?: string;
+          created_at?: string;
+          genero_id?: string;
+          id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "agrupacion_estacionalidad_genero_agrupacion_id_fkey";
+            columns: ["agrupacion_estacionalidad_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_estacionalidad";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "agrupacion_estacionalidad_genero_genero_id_fkey";
+            columns: ["genero_id"];
+            isOneToOne: false;
+            referencedRelation: "generos";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       agrupaciones_estacionalidad: {
         Row: {
           activo: boolean;
