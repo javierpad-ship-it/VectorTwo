@@ -162,8 +162,3 @@ export function descargarFaltantesCsv(filas: EquivalenciaPlana[], catalogos: Cat
   });
   descargarCsv(["GENERO", "MUNDO", "LINEA", "EQUIVALENCIA", "AGRUPACION"], data, nombreArchivo);
 }
-
-/** Agrupaciones activas por `orden, nombre`, para los `Select` de destino. */
-export function ordenarAgrupaciones<A extends CatalogoPlanoEstacionalidad>(agrupaciones: A[]): A[] {
-  return [...agrupaciones].sort(ordenCatalogo);
-}

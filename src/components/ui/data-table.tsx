@@ -13,12 +13,15 @@ export function DataTable<T>({
   claveFila,
   vacio = "Sin registros.",
   cargando = false,
+  claseFila,
 }: {
   columnas: Columna<T>[];
   filas: T[];
   claveFila: (fila: T) => string;
   vacio?: string;
   cargando?: boolean;
+  /** Clase extra por fila (p. ej. para resaltar las que hay que corregir). */
+  claseFila?: (fila: T) => string | undefined;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-borde">
@@ -49,7 +52,7 @@ export function DataTable<T>({
           )}
           {!cargando &&
             filas.map((fila) => (
-              <tr key={claveFila(fila)} className="hover:bg-fondo/60">
+              <tr key={claveFila(fila)} className={claseFila?.(fila) ?? "hover:bg-fondo/60"}>
                 {columnas.map((c) => (
                   <td key={c.clave} className={`px-3 py-2 align-middle ${c.className ?? ""}`}>
                     {c.render(fila)}

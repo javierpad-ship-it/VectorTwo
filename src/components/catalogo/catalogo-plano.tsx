@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { api } from "@/lib/api-client";
 import { useColeccion } from "@/lib/use-coleccion";
 import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
@@ -11,6 +11,7 @@ import { Field, Input } from "@/components/ui/form";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
+import { ChipsMultiples } from "@/components/ui/chips-multiples";
 import { VistaPreviaNombre } from "./vista-previa-nombre";
 
 /** Lo mínimo que devuelve cualquier catálogo plano (`generos`, `mundos`, `agrupaciones_marca`…). */
@@ -48,6 +49,20 @@ export type DescripcionCatalogo<F> = {
   hint?: string;
 };
 
+/**
+ * Géneros a los que pertenece cada fila (agrupaciones de estacionalidad):
+ * selector múltiple obligatorio (mínimo uno) en el alta y en la edición en
+ * línea, columna Géneros con chips y badge "Sin género" resaltando la fila.
+ */
+export type GenerosCatalogo<F> = {
+  /** Géneros de la fila, en el orden de la API. */
+  obtener: (fila: F) => { id: string; nombre: string }[];
+  /** Catálogo completo de géneros (`/api/generos`): el alta ofrece los activos. */
+  catalogo: { id: string; nombre: string; activo: boolean }[];
+  /** Mientras carga el catálogo no se puede crear. */
+  cargando?: boolean;
+};
+
 type Genero = "m" | "f";
 
 const ARTICULO: Record<Genero, { el: string; los: string; lo: string; los_: string; o: string; nuevo: string }> = {
@@ -55,9 +70,12 @@ const ARTICULO: Record<Genero, { el: string; los: string; lo: string; los_: stri
   f: { el: "la", los: "Las", lo: "la", los_: "las", o: "a", nuevo: "Nueva" },
 };
 
-type Edicion = { id: string; nombre: string; codigo: string; orden: string; descripcion: string };
+type Edicion = { id: string; nombre: string; codigo: string; orden: string; descripcion: string; generoIds: string[] };
 
-const FORM_VACIO = { nombre: "", codigo: "", codigoTocado: false, orden: "", descripcion: "" };
+const FORM_VACIO = { nombre: "", codigo: "", codigoTocado: false, orden: "", descripcion: "", generoIds: [] as string[] };
+
+const MOTIVO_SIN_GENERO = "Elige al menos un género.";
+const TITLE_SIN_GENERO = "Asígnale al menos un género para poder usarla";
 
 function capitalizar(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -81,6 +99,8 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   hijos,
   vigentes,
   descripcion,
+  generos,
+  ordenar,
   columnasExtra = [],
   notaPie,
   avisoSoloLectura,
@@ -99,6 +119,10 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   vigentes?: (fila: F) => number;
   /** Si el catálogo tiene descripción libre: campo en el alta y columna editable en línea. */
   descripcion?: DescripcionCatalogo<F>;
+  /** Si el catálogo se asigna a uno o más géneros (obligatorio): selector, columna Géneros y resaltado de las filas sin género. */
+  generos?: GenerosCatalogo<F>;
+  /** Orden de presentación de las filas; ausente, el de la API. */
+  ordenar?: (a: F, b: F) => number;
   /** Columnas adicionales, entre el conteo de hijos y el estado. */
   columnasExtra?: Columna<F>[];
   /** Nota al pie de la tabla. */
@@ -120,7 +144,9 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   const a = ARTICULO[genero];
   const nombreNormalizado = normalizarNombre(form.nombre);
   const codigoPropuesto = form.codigoTocado ? aCodigo(form.codigo) : aCodigo(nombreNormalizado);
-  const filas = mostrarInactivos === false ? datos.filter((f) => f.activo) : datos;
+  const visibles = mostrarInactivos === false ? datos.filter((f) => f.activo) : datos;
+  const filas = useMemo(() => (ordenar ? [...visibles].sort(ordenar) : visibles), [visibles, ordenar]);
+  const sinGeneroForm = generos !== undefined && form.generoIds.length === 0;
   const contarHijos = (f: F) => f[hijos.clave] as unknown as number;
 
   async function ejecutar(accion: () => Promise<unknown>) {
@@ -140,7 +166,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
 
   async function crear(e: React.FormEvent) {
     e.preventDefault();
-    if (!nombreNormalizado || !codigoPropuesto) return;
+    if (!nombreNormalizado || !codigoPropuesto || sinGeneroForm) return;
     setGuardando(true);
     const ok = await ejecutar(() =>
       api.post<F>(`/api/${recurso}`, {
@@ -148,6 +174,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         codigo: codigoPropuesto,
         ...(form.orden.trim() !== "" ? { orden: Number(form.orden) } : {}),
         ...(descripcion && form.descripcion.trim() !== "" ? { descripcion: form.descripcion.trim() } : {}),
+        ...(generos ? { genero_ids: form.generoIds } : {}),
       })
     );
     if (ok) {
@@ -165,6 +192,10 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
       setError("El nombre y el código no pueden quedar vacíos.");
       return;
     }
+    if (generos && edicion.generoIds.length === 0) {
+      setError(MOTIVO_SIN_GENERO);
+      return;
+    }
     const ok = await ejecutar(() =>
       api.patch<F>(`/api/${recurso}/${edicion.id}`, {
         nombre,
@@ -172,6 +203,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         orden: Number(edicion.orden) || 0,
         // Vacía viaja como null: así se puede borrar una descripción existente.
         ...(descripcion ? { descripcion: edicion.descripcion.trim() === "" ? null : edicion.descripcion.trim() } : {}),
+        ...(generos ? { genero_ids: edicion.generoIds } : {}),
       })
     );
     if (ok) setEdicion(null);
@@ -224,6 +256,41 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
           <span className="font-medium">{f.nombre}</span>
         ),
     },
+    ...(generos
+      ? [
+          {
+            clave: "generos",
+            titulo: "Géneros",
+            render: (f: F) => {
+              if (edicion?.id === f.id) {
+                return (
+                  <SelectorGeneros
+                    generos={generos}
+                    valor={edicion.generoIds}
+                    onCambiar={(generoIds) => setEdicion({ ...edicion, generoIds })}
+                    disabled={ocupado}
+                    etiqueta={`Géneros de ${f.nombre}`}
+                  />
+                );
+              }
+              const lista = generos.obtener(f);
+              return lista.length > 0 ? (
+                <ul className="flex flex-wrap gap-1" aria-label={`Géneros de ${f.nombre}`}>
+                  {lista.map((g) => (
+                    <li key={g.id}>
+                      <Badge>{g.nombre}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span title={TITLE_SIN_GENERO} className="whitespace-nowrap">
+                  <Badge tono="alerta">Sin género</Badge>
+                </span>
+              );
+            },
+          } satisfies Columna<F>,
+        ]
+      : []),
     ...(descripcion
       ? [
           {
@@ -279,7 +346,12 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         const tieneHijos = contarHijos(f) > 0;
         return edicion?.id === f.id ? (
           <div className="flex justify-end gap-1">
-            <Button tamano="sm" disabled={ocupado} onClick={guardarEdicion}>
+            <Button
+              tamano="sm"
+              disabled={ocupado || (generos !== undefined && edicion.generoIds.length === 0)}
+              title={generos !== undefined && edicion.generoIds.length === 0 ? MOTIVO_SIN_GENERO : undefined}
+              onClick={guardarEdicion}
+            >
               {ocupado ? "Guardando…" : "Guardar"}
             </Button>
             <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => setEdicion(null)}>
@@ -291,6 +363,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
             <Button
               variante="fantasma"
               tamano="sm"
+              className="whitespace-nowrap"
               disabled={ocupado}
               onClick={() =>
                 setEdicion({
@@ -299,10 +372,11 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
                   codigo: f.codigo,
                   orden: String(f.orden),
                   descripcion: descripcion ? (descripcion.obtener(f) ?? "") : "",
+                  generoIds: generos ? generos.obtener(f).map((g) => g.id) : [],
                 })
               }
             >
-              Editar
+              {generos && generos.obtener(f).length === 0 ? "Asignar géneros" : "Editar"}
             </Button>
             <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(f)}>
               {f.activo ? "Desactivar" : "Reactivar"}
@@ -360,8 +434,31 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
                 />
               </Field>
             )}
+            {generos && (
+              <div className="md:col-span-4">
+                <span className="mb-1 block text-sm font-medium text-tinta">Géneros</span>
+                <SelectorGeneros
+                  generos={generos}
+                  valor={form.generoIds}
+                  onCambiar={(generoIds) => setForm({ ...form, generoIds })}
+                  disabled={guardando || ocupado}
+                  etiqueta="Géneros de la nueva agrupación"
+                />
+                <span className={`mt-1 block text-xs ${sinGeneroForm ? "text-alerta" : "text-tinta-suave"}`}>
+                  {generos.cargando
+                    ? "Cargando géneros…"
+                    : sinGeneroForm
+                      ? `${MOTIVO_SIN_GENERO} Solo recibirá equivalencias de los géneros que marques.`
+                      : "Solo recibirá equivalencias de los géneros marcados."}
+                </span>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-4 md:col-span-4">
-              <Button type="submit" disabled={guardando || ocupado || !nombreNormalizado || !codigoPropuesto}>
+              <Button
+                type="submit"
+                disabled={guardando || ocupado || !nombreNormalizado || !codigoPropuesto || sinGeneroForm || generos?.cargando === true}
+                title={sinGeneroForm ? MOTIVO_SIN_GENERO : undefined}
+              >
                 {guardando ? "Creando…" : `Crear ${singular}`}
               </Button>
               <VistaPreviaNombre nombre={nombreNormalizado} codigo={codigoPropuesto} />
@@ -375,9 +472,40 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
       )}
 
       <Card titulo={capitalizar(plural)}>
-        <DataTable columnas={columnas} filas={filas} claveFila={(f) => f.id} cargando={cargando} />
+        <DataTable
+          columnas={columnas}
+          filas={filas}
+          claveFila={(f) => f.id}
+          cargando={cargando}
+          claseFila={generos ? (f) => (generos.obtener(f).length === 0 ? "bg-alerta-suave/40 hover:bg-alerta-suave/60" : undefined) : undefined}
+        />
         {notaPie && <p className="mt-3 text-xs text-tinta-suave">{notaPie}</p>}
       </Card>
     </div>
   );
+}
+
+/** Casillas-chip de los géneros: los activos, más los inactivos que la fila ya tiene (se pueden quitar pero no volver a añadir). */
+function SelectorGeneros<F>({
+  generos,
+  valor,
+  onCambiar,
+  disabled,
+  etiqueta,
+}: {
+  generos: GenerosCatalogo<F>;
+  valor: string[];
+  onCambiar: (ids: string[]) => void;
+  disabled: boolean;
+  etiqueta: string;
+}) {
+  const items = generos.catalogo
+    .filter((g) => g.activo || valor.includes(g.id))
+    .map((g) => ({
+      id: g.id,
+      label: g.activo ? g.nombre : `${g.nombre} (inactivo)`,
+      disabled: !g.activo && !valor.includes(g.id),
+    }));
+  if (items.length === 0) return <span className="text-xs text-tinta-suave">{generos.cargando ? "Cargando géneros…" : "No hay géneros activos."}</span>;
+  return <ChipsMultiples items={items} valor={valor} onCambiar={onCambiar} disabled={disabled} etiqueta={etiqueta} />;
 }

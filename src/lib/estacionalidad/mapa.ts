@@ -21,6 +21,8 @@ export type AgrupacionMapaEntrada = {
   descripcion?: string | null;
   orden: number;
   activo: boolean;
+  /** Géneros de la agrupación (si el catálogo los trae); la tarjeta los pinta o marca "Sin género". */
+  generos?: readonly { id: string; codigo?: string; nombre: string }[];
 };
 
 export type ConteoGenero = { id: string; nombre: string; conteo: number };

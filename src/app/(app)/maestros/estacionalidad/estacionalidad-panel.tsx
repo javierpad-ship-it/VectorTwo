@@ -54,6 +54,10 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "mapa" }: { rol: Rol
     return { total, conAgrupacion, faltantes: faltantes.length, genericas, porInactiva };
   }, [equivalencias, faltantes]);
 
+  function irAPestanaAgrupaciones() {
+    setPestana("agrupaciones");
+  }
+
   function irAAgrupacion(id: string) {
     setVista("agrupacion");
     setAgrupacionVistaId(id);
@@ -101,7 +105,14 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "mapa" }: { rol: Rol
       )}
 
       {pestana === "mapa" && (
-        <MapaTab lista={lista.datos} cargando={lista.cargando} agrupaciones={agrupaciones.datos} onAsignar={irAAgrupacion} onIrAFaltantes={() => setPestana("faltantes")} />
+        <MapaTab
+          lista={lista.datos}
+          cargando={lista.cargando}
+          agrupaciones={agrupaciones.datos}
+          onAsignar={irAAgrupacion}
+          onIrAFaltantes={() => setPestana("faltantes")}
+          onIrAAgrupaciones={irAPestanaAgrupaciones}
+        />
       )}
 
       {pestana === "agrupaciones" && <AgrupacionesTab puedeEditar={puedeEditar} onCambio={recargarTodo} onVerEquivalencias={irAAgrupacion} />}
@@ -119,6 +130,7 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "mapa" }: { rol: Rol
           mostrarInactivas={mostrarInactivas}
           onMostrarInactivas={setMostrarInactivas}
           onCambio={recargarTodo}
+          onIrAAgrupaciones={irAPestanaAgrupaciones}
         />
       )}
 
@@ -131,6 +143,7 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "mapa" }: { rol: Rol
           puedeEditar={puedeEditar}
           onCambio={recargarTodo}
           onIrAImportar={() => setPestana("importar")}
+          onIrAAgrupaciones={irAPestanaAgrupaciones}
         />
       )}
 

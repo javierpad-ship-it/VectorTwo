@@ -12,7 +12,9 @@ import { traducirErrorDb } from "./errores-db";
 /**
  * CRUD plano para los catálogos (géneros, mundos, líneas, agrupaciones de
  * talla, desde M2 agrupaciones de marca y desde M3 agrupaciones de
- * estacionalidad). Cada ruta declara su
+ * estacionalidad, estas últimas solo para ELIMINAR: desde que pertenecen a uno
+ * o más géneros, listar/crear/editar tienen handlers propios en
+ * `src/lib/estacionalidad/agrupaciones.ts`). Cada ruta declara su
  * configuración (tabla, guards, esquemas zod, orden, escritura) y delega en
  * estas cuatro funciones; así el patrón "guard → cuerpo → base → traducir
  * error" vive en un solo sitio.

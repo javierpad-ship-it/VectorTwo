@@ -24,6 +24,13 @@ import type { ConteosCrear, ConteosExistentes, FilaImportacion, FilaOmitida, Rep
 export const MUESTRA_MAX = 20;
 export const TANDA = 500;
 
+/**
+ * Tamaño de tanda para filtros `.in("id", ids)`: los ids viajan en la URL (36
+ * caracteres cada uno) y 500 pasan de 18 KB, más de lo que admiten varios
+ * gateways. Con 150 la URL queda en unos 5,5 KB.
+ */
+export const TANDA_IN = 150;
+
 export type GeneroEstado = Pick<Tables<"generos">, "id" | "codigo" | "nombre" | "activo">;
 export type MundoEstado = Pick<Tables<"mundos">, "id" | "codigo" | "nombre" | "activo">;
 export type LineaEstado = Pick<Tables<"lineas">, "id" | "codigo" | "nombre" | "activo">;

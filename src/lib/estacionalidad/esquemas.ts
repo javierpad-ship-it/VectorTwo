@@ -25,6 +25,7 @@ import {
 export const MAX_DESCRIPCION = 500;
 export const MENSAJE_DESCRIPCION_LARGA = `La descripción no puede superar ${MAX_DESCRIPCION} caracteres.`;
 export const MAX_EQUIVALENCIAS_ASIGNAR = 2_000;
+export const MAX_GENEROS_AGRUPACION = 50;
 
 const noVacio = { message: "No hay nada que actualizar." };
 const tieneAlgo = (v: object) => Object.keys(v).length > 0;
@@ -46,8 +47,19 @@ export const descripcion = z
 
 // ─── Catálogo de agrupaciones ───
 
+/**
+ * Géneros de una agrupación: UUID únicos, de 1 a 50. Obligatorio al crear; al
+ * editar es opcional y, si viene, reemplaza el conjunto (por eso también exige
+ * al menos uno: una agrupación nunca se deja sin género desde la API).
+ */
+export const generoIds = z
+  .array(uuid, "genero_ids debe ser una lista de géneros.")
+  .min(1, "Elige al menos un género.")
+  .max(MAX_GENEROS_AGRUPACION, `Una agrupación admite hasta ${MAX_GENEROS_AGRUPACION} géneros.`)
+  .refine((ids) => new Set(ids).size === ids.length, "No repitas géneros.");
+
 export const crearAgrupacionSchema = z
-  .object({ nombre, codigo: codigoOpcional, descripcion, orden: orden.optional() })
+  .object({ nombre, codigo: codigoOpcional, descripcion, orden: orden.optional(), genero_ids: generoIds })
   .transform(derivarCodigo)
   .pipe(
     z.object({
@@ -55,11 +67,12 @@ export const crearAgrupacionSchema = z
       codigo: codigoValido,
       descripcion: z.string().nullable(),
       orden: orden.optional(),
+      genero_ids: z.array(z.string()),
     })
   );
 
 export const editarAgrupacionSchema = z
-  .object({ nombre, codigo, descripcion, orden, activo })
+  .object({ nombre, codigo, descripcion, orden, activo, genero_ids: generoIds })
   .partial()
   .refine(tieneAlgo, noVacio);
 

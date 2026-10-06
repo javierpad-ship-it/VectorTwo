@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import { EQUIVALENCIA_GENERICA, aCodigo, esEquivalenciaIgualALinea, normalizarNombre } from "@/lib/arbol/normalizar";
 import type { EquivalenciaArbol, EquivalenciaFila, GeneroArbol, LineaArbol, MundoArbol } from "@/lib/arbol/tipos-api";
 import type { AgrupacionEstacionalidadFila, AsignarEquivalenciaCuerpo } from "@/lib/estacionalidad/tipos-api";
+import { agrupacionesParaGeneros, incluyeGenero, tieneGeneros } from "@/lib/estacionalidad/generos";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field, Input, Select } from "@/components/ui/form";
@@ -45,7 +46,8 @@ export function ColumnaEquivalencias({
 
   const tieneGenerica = nodo.equivalencias.some((e) => e.es_generica);
   const ruta = `${genero.nombre} / ${mundo.nombre} / ${nodo.nombre}`;
-  const agrupacionesActivas = agrupaciones.filter((a) => a.activo).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
+  // M3: solo las activas que incluyen el género del nodo (por nombre); la actual, si ya no sirve, se muestra aparte.
+  const agrupacionesDelGenero = useMemo(() => agrupacionesParaGeneros(agrupaciones, [genero.id]), [agrupaciones, genero.id]);
   // M3: el mismo color por agrupación que en /maestros/estacionalidad.
   const colores = useMapaColores(agrupaciones);
 
@@ -150,9 +152,15 @@ export function ColumnaEquivalencias({
         // Comprador, fila en edición de nombre o catálogo no cargado: solo el badge.
         if (!puedeEditar || edicion?.id === eq.id || !agrupacionesDisponibles) return <BadgeAgrupacion agrupacion={actual} colores={colores} />;
         const inactiva = actual !== null && !actual.activo;
+        // Activa pero que no incluye el género del nodo (o sin géneros): ya no sirve para esta equivalencia.
+        const enCatalogo = actual ? agrupaciones.find((a) => a.id === actual.id) : undefined;
+        const sinGenero = enCatalogo !== undefined && !tieneGeneros(enCatalogo);
+        const noIncluye = actual !== null && !inactiva && enCatalogo !== undefined && !incluyeGenero(enCatalogo, genero.id);
+        const noSirve = inactiva || noIncluye;
+        
         return (
           <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-            <Punto color={actual && !inactiva ? colores.get(actual.id)?.pleno : null} tono={actual ? "gris" : "alerta"} />
+            <Punto color={actual && !noSirve ? colores.get(actual.id)?.pleno : null} tono={actual ? "gris" : "alerta"} />
             <Select
               value={actual?.id ?? ""}
               onChange={(e) => cambiarAgrupacion(eq, e.target.value)}
@@ -161,18 +169,23 @@ export function ColumnaEquivalencias({
               aria-label={`Agrupación de estacionalidad de ${eq.nombre}`}
             >
               <option value="">— Sin agrupación —</option>
-              {inactiva && (
+              {noSirve && actual && (
                 <option value={actual.id} disabled>
-                  {actual.nombre} (inactiva)
+                  {actual.nombre} ({inactiva ? "inactiva" : sinGenero ? "sin género" : "no incluye este género"})
                 </option>
               )}
-              {agrupacionesActivas.map((a) => (
+              {agrupacionesDelGenero.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.nombre}
                 </option>
               ))}
             </Select>
             {inactiva && <Badge tono="alerta">Inactiva</Badge>}
+            {noIncluye && (
+              <span title={`La agrupación ${actual?.nombre} ${sinGenero ? "no tiene géneros" : `no incluye el género ${genero.nombre}`}: elige otra o añádeselo en Agrupaciones.`}>
+                <Badge tono="alerta">{sinGenero ? "Sin género" : "Género no incluido"}</Badge>
+              </span>
+            )}
           </span>
         );
       },

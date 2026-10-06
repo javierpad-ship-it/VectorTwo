@@ -7,22 +7,32 @@ import { describirErrorDb, registrarErrorDb, traducirErrorDb } from "@/lib/api/e
 import type { TablesInsert } from "@/lib/supabase/database.types";
 import { normalizarNombre } from "@/lib/arbol/normalizar";
 import { importarEstacionalidadSchema } from "@/lib/estacionalidad/esquemas";
-import { cargarEstadoEstacionalidad, leerAgrupacionesEstacionalidad } from "@/lib/estacionalidad/consultas";
+import {
+  agrupacionesConGeneros,
+  cargarEstadoEstacionalidad,
+  leerAgrupacionesEstacionalidad,
+} from "@/lib/estacionalidad/consultas";
 import {
   enTandas,
   planificarImportacionEstacionalidad,
   type AsignacionPlan,
 } from "@/lib/estacionalidad/importar";
+import { TANDA_IN } from "@/lib/arbol/importar";
 import type { ConteosAsignar, ReporteImportacionEstacionalidad } from "@/lib/estacionalidad/tipos";
 
 /**
  * Importador de asignaciones (`requirePlanner`). `previsualizar` devuelve el
  * reporte sin escribir; `aplicar` inserta las agrupaciones nuevas con `on
  * conflict do nothing`, las relee para obtener ids y hace un `update … where
- * id in (…)` por agrupación destino en tandas de 500. Nunca crea líneas,
- * nodos ni equivalencias, ni quita agrupaciones. Sin transacción: si una
- * tanda falla, `500` con lo escrito hasta ahí y reimportar completa el resto
- * sin duplicar ni cambiar nada más (regla 12).
+ * id in (…)` por agrupación destino en tandas de 500. Las agrupaciones nuevas
+ * nacen con los géneros de las filas que apuntan a ellas (se insertan sus
+ * vínculos justo después de crearlas); las existentes nunca amplían sus
+ * géneros. Nunca crea líneas, nodos ni equivalencias, ni quita agrupaciones.
+ * Sin transacción: si una tanda falla, `500` con lo escrito hasta ahí y
+ * reimportar completa el resto sin duplicar ni cambiar nada más (regla 12). Si
+ * fallan los vínculos de género de las agrupaciones nuevas, se borran esas
+ * agrupaciones (todavía sin equivalencias) para que reimportar no las
+ * encuentre "sin género".
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -35,7 +45,10 @@ export async function POST(request: NextRequest) {
   const { estado, error: errEstado } = await cargarEstadoEstacionalidad(db);
   if (errEstado) return traducirErrorDb(errEstado, "importar estacionalidad: leer estado");
 
-  const plan = planificarImportacionEstacionalidad(datos.filas, estado);
+  const plan = planificarImportacionEstacionalidad(datos.filas, {
+    ...estado,
+    agrupaciones: agrupacionesConGeneros(estado),
+  });
 
   if (datos.modo === "previsualizar") {
     const reporte: ReporteImportacionEstacionalidad = { modo: "previsualizar", ...plan.reporte };
@@ -61,15 +74,37 @@ export async function POST(request: NextRequest) {
     );
   };
 
-  // 1. Agrupaciones nuevas (único por nombre).
+  // 1. Agrupaciones nuevas (único por nombre) y, enseguida, sus géneros. Los
+  // vínculos se escriben solo para las que ESTA corrida creó (el `select` de un
+  // `upsert … ignoreDuplicates` devuelve solo las insertadas): si otra sesión
+  // creó el mismo nombre en el medio, el importador no le toca los géneros.
+  const generosPorNombre = new Map(plan.agrupaciones_nuevas.map((a) => [a.nombre, a.genero_ids]));
+  const creadasIds: string[] = [];
   for (const tanda of enTandas(plan.agrupaciones_nuevas)) {
     const filas: TablesInsert<"agrupaciones_estacionalidad">[] = tanda.map((a) => ({ nombre: a.nombre, codigo: a.codigo }));
     const { data, error: err } = await db
       .from("agrupaciones_estacionalidad")
       .upsert(filas, { onConflict: "nombre", ignoreDuplicates: true })
-      .select("id");
+      .select("id, nombre");
     if (err) return falloEn("crear agrupaciones", err);
-    agrupacionesCreadas += data?.length ?? 0;
+    const creadas = data ?? [];
+    agrupacionesCreadas += creadas.length;
+    creadasIds.push(...creadas.map((c) => c.id));
+
+    const vinculos: TablesInsert<"agrupacion_estacionalidad_genero">[] = creadas.flatMap((c) =>
+      (generosPorNombre.get(normalizarNombre(c.nombre)) ?? []).map((genero_id) => ({
+        agrupacion_estacionalidad_id: c.id,
+        genero_id,
+      }))
+    );
+    if (vinculos.length > 0) {
+      const { error: errVinculos } = await db.from("agrupacion_estacionalidad_genero").insert(vinculos);
+      if (errVinculos) {
+        for (const ids of enTandas(creadasIds, 100)) await db.from("agrupaciones_estacionalidad").delete().in("id", ids);
+        agrupacionesCreadas = 0;
+        return falloEn("asignar los géneros de las agrupaciones nuevas", errVinculos);
+      }
+    }
   }
 
   const { data: agrupaciones, error: errAgrupaciones } = await leerAgrupacionesEstacionalidad(db);
@@ -88,7 +123,7 @@ export async function POST(request: NextRequest) {
 
   for (const [destino, asignaciones] of porDestino) {
     const tipoPorId = new Map(asignaciones.map((a) => [a.equivalencia_id, a.tipo]));
-    for (const tanda of enTandas(asignaciones.map((a) => a.equivalencia_id))) {
+    for (const tanda of enTandas(asignaciones.map((a) => a.equivalencia_id), TANDA_IN)) {
       const { data, error: err } = await db
         .from("equivalencias")
         .update({ agrupacion_estacionalidad_id: destino })

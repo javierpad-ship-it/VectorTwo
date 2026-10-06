@@ -12,6 +12,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import type { CampoImportador, ColumnaOmitida } from "@/components/importador/tipos";
 import { useImportador } from "@/components/importador/use-importador";
@@ -89,8 +90,8 @@ export function ImportarEstacionalidad({ onAplicado }: { onAplicado: () => void 
 
       <Alert tono="info">
         Formato: las cuatro columnas del árbol más AGRUPACION (descárgalo listo desde Faltantes). Equivalencia vacía = la genérica del nodo; «-»
-        = la que se llama como la línea. Las agrupaciones que no existan se crean; las filas que no casen con el árbol se reportan y no se
-        cargan. Nunca se quita una agrupación por archivo.
+        = la que se llama como la línea. Las agrupaciones que no existan se crean con los géneros de sus filas; una equivalencia solo se asigna a una
+        agrupación que incluya su género. Las filas que no casen con el árbol o con los géneros de la agrupación se reportan y no se cargan. Nunca se quita una agrupación por archivo.
       </Alert>
 
       <PasoArchivo
@@ -204,6 +205,22 @@ function TablaAgrupacionesNuevas({ agrupaciones, aplicado }: { agrupaciones: Agr
   const columnas: Columna<AgrupacionNuevaImportacion>[] = [
     { clave: "nombre", titulo: "Nombre", render: (g) => <span className="font-medium">{g.nombre}</span> },
     { clave: "codigo", titulo: "Código", render: (g) => <code className="font-mono text-xs">{g.codigo}</code> },
+    {
+      clave: "generos",
+      titulo: "Géneros",
+      render: (g) =>
+        (g.generos ?? []).length > 0 ? (
+          <ul className="flex flex-wrap gap-1" aria-label={`Géneros de ${g.nombre}`}>
+            {g.generos.map((nombre) => (
+              <li key={nombre}>
+                <Badge>{nombre}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-tinta-suave">—</span>
+        ),
+    },
     { clave: "equivalencias", titulo: "Equivalencias en el archivo", render: (g) => <span className="font-mono text-xs">{formatearNumero(g.equivalencias)}</span> },
   ];
   return (
@@ -213,7 +230,8 @@ function TablaAgrupacionesNuevas({ agrupaciones, aplicado }: { agrupaciones: Agr
       </h3>
       {!aplicado && (
         <p className="text-xs text-tinta-suave">
-          Revisa los nombres: una con pocas equivalencias junto a otra parecida suele ser un error de tipeo («PANTALON INVIERNO» vs «PANTALONES
+          Las agrupaciones nuevas se crean con los géneros de sus filas (la columna Géneros). Una agrupación que ya existe conserva los suyos: las
+          filas de otro género se omiten y se reportan en «Filas con errores». Revisa los nombres: una con pocas equivalencias junto a otra parecida suele ser un error de tipeo («PANTALON INVIERNO» vs «PANTALONES
           INVIERNO»).
         </p>
       )}

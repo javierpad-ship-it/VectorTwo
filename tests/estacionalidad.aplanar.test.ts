@@ -109,7 +109,30 @@ describe("aplanarEquivalencias · regla 9: ruta, ids y agrupación", () => {
       nombre: "PANTALONES INVIERNO",
       orden: 10,
       activo: true,
+      genero_ids: ["g-h", "g-m"],
     });
+  });
+  it("cada agrupación del catálogo trae genero_ids en el orden del catálogo de géneros", () => {
+    const e = estadoFx();
+    // Ids mezclados a propósito: MUJER (orden 20) antes que HOMBRE (orden 10), y uno de un género inactivo.
+    e.agrupaciones[0].genero_ids = ["g-x", "g-m", "g-h"];
+    e.agrupaciones[1].genero_ids = [];
+    const r = aplanarEquivalencias(e, e.agrupaciones, { incluirInactivos: false });
+    const porId = new Map(r.agrupaciones.map((a) => [a.id, a.genero_ids]));
+    expect(porId.get("a-ver")).toEqual(["g-h", "g-m", "g-x"]);
+    expect(porId.get("a-inv")).toEqual([]); // "sin género": viaja vacía
+    expect(porId.get("a-old")).toEqual(["g-h"]);
+  });
+  it("las filas ya traen genero_id (para validar contra genero_ids sin otra llamada)", () => {
+    const r = activas();
+    for (const f of r.equivalencias) expect(f.genero_id).toBeTruthy();
+    expect(fila(r, "e5").genero_id).toBe("g-m");
+  });
+  it("no depende de que la agrupación incluya el género de la equivalencia (solo informa)", () => {
+    const e = estadoFx();
+    e.agrupaciones.find((a) => a.id === "a-inv")!.genero_ids = ["g-m"]; // e2 es de HOMBRE
+    const r = aplanarEquivalencias(e, e.agrupaciones, { incluirInactivos: false });
+    expect(fila(r, "e2")).toMatchObject({ faltante: false, motivo_faltante: null });
   });
 });
 

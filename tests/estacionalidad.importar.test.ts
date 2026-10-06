@@ -15,7 +15,7 @@ import type {
   FilaOmitidaEstacionalidad,
   MotivoOmisionEstacionalidad,
 } from "@/lib/estacionalidad/tipos";
-import { estadoFx } from "./estacionalidad.fixture";
+import { agrupacionFx, estadoFx } from "./estacionalidad.fixture";
 
 const fila = (
   genero: string,
@@ -74,7 +74,7 @@ describe("regla 11: resolución de nodo y equivalencia igual que el árbol", () 
       },
     ]);
   });
-  it("los 16 motivos, cada uno con su detalle", () => {
+  it("los 18 motivos, cada uno con su detalle", () => {
     const filas: Array<[FilaImportacionEstacionalidad, MotivoOmisionEstacionalidad, string | undefined]> = [
       [fila("HOMBRE", "URBANO", "", "X", "A"), "linea_vacia", undefined],
       [fila("TOTAL", "", "PANTALON", "", "A"), "fila_total", undefined],
@@ -91,23 +91,27 @@ describe("regla 11: resolución de nodo y equivalencia igual que el árbol", () 
       [hup("JOGER", "A"), "equivalencia_desconocida", "JOGER"],
       [hup("CHINO", "A"), "equivalencia_inactiva", "CHINO"],
       [hup("JOGGER", "vieja"), "agrupacion_inactiva", "VIEJA"],
-      [hup("CARGO", "A"), "duplicada_en_archivo", undefined], // ver abajo: se duplica contra la fila 17
+      [fila("MUJER", "URBANO", "PANTALON", "", "solo hombre"), "genero_no_incluido", "MUJER"],
+      [hup("JOGGER", "sin genero"), "agrupacion_sin_genero", "SIN GENERO"],
+      [hup("CARGO", "A"), "duplicada_en_archivo", undefined], // ver abajo: se duplica contra la fila 18
     ];
     const entrada = [...filas.map(([f]) => f), hup("CARGO", "A"), hup("CARGO", "B")];
-    const plan = planificar(entrada);
+    const estado = estadoFx();
+    estado.agrupaciones.push(agrupacionFx("a-h", "SOLO HOMBRE", ["g-h"]), agrupacionFx("a-sin", "SIN GENERO", []));
+    const plan = planificar(entrada, estado);
     const porFila = new Map(plan.reporte.omitidas.map((o) => [o.fila, o]));
     filas.forEach(([, motivo, detalle], i) => {
       if (motivo === "duplicada_en_archivo") return;
       expect(porFila.get(i + 1), `fila ${i + 1}`).toMatchObject({ motivo, ...(detalle ? { detalle } : {}) });
       expect(porFila.get(i + 1)?.detalle).toBe(detalle);
     });
-    // Fila 16 CARGO→A procesada; 17 repite A → duplicada; 18 trae B → contradictoria con detalle A.
-    expect(porFila.get(16)).toBeUndefined();
-    expect(porFila.get(17)).toMatchObject({ motivo: "duplicada_en_archivo", fila_original: 16 });
-    expect(porFila.get(18)).toMatchObject({ motivo: "contradictoria_en_archivo", fila_original: 16, detalle: "A" });
+    // Fila 18 CARGO→A procesada; 19 repite A → duplicada; 20 trae B → contradictoria con detalle A.
+    expect(porFila.get(18)).toBeUndefined();
+    expect(porFila.get(19)).toMatchObject({ motivo: "duplicada_en_archivo", fila_original: 18 });
+    expect(porFila.get(20)).toMatchObject({ motivo: "contradictoria_en_archivo", fila_original: 18, detalle: "A" });
     const todosLosMotivos = new Set(motivos(plan.reporte.omitidas));
-    expect(todosLosMotivos.size).toBe(16);
-    expect(plan.reporte.totales).toEqual({ recibidas: 18, procesadas: 1, omitidas: 17 });
+    expect(todosLosMotivos.size).toBe(18);
+    expect(plan.reporte.totales).toEqual({ recibidas: 20, procesadas: 1, omitidas: 19 });
   });
 });
 
@@ -185,15 +189,17 @@ describe("regla 14: agrupaciones nuevas y existentes", () => {
       hup("JOGGER", " curva  nueva "),
       fila("MUJER", "URBANO", "BLUSA", "MANGA LARGA", "CURVA NUEVA"),
     ]);
-    expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA" }]);
-    expect(plan.reporte.muestra.agrupaciones).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", equivalencias: 3 }]);
+    expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h", "g-m"] }]);
+    expect(plan.reporte.muestra.agrupaciones).toEqual([
+      { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", equivalencias: 3, generos: ["HOMBRE", "MUJER"] },
+    ]);
     expect(plan.reporte.crear.agrupaciones).toBe(1);
   });
   it("dos nombres distintos que derivan al mismo código reciben _2", () => {
     const plan = planificar([hup("", "PANTALON INVIERNO"), hup("JOGGER", "PANTALON-INVIERNO")]);
     expect(plan.agrupaciones_nuevas).toEqual([
-      { nombre: "PANTALON INVIERNO", codigo: "PANTALON_INVIERNO" },
-      { nombre: "PANTALON-INVIERNO", codigo: "PANTALON_INVIERNO_2" },
+      { nombre: "PANTALON INVIERNO", codigo: "PANTALON_INVIERNO", genero_ids: ["g-h"] },
+      { nombre: "PANTALON-INVIERNO", codigo: "PANTALON_INVIERNO_2", genero_ids: ["g-h"] },
     ]);
   });
   it("el código nuevo no choca con los existentes", () => {
@@ -202,17 +208,24 @@ describe("regla 14: agrupaciones nuevas y existentes", () => {
     expect(plan.agrupaciones_nuevas).toEqual([]);
     expect(plan.asignaciones[0]).toMatchObject({ equivalencia_id: "e1", agrupacion_id: "a-ver" });
     const estado = estadoFx();
-    estado.agrupaciones.push({ id: "a-z", codigo: "CURVA_X", nombre: "OTRO NOMBRE", orden: 0, activo: true });
+    estado.agrupaciones.push({
+      id: "a-z",
+      codigo: "CURVA_X",
+      nombre: "OTRO NOMBRE",
+      orden: 0,
+      activo: true,
+      genero_ids: ["g-h"],
+    });
     const plan2 = planificar([hup("", "curva x!")], estado);
     expect(plan2.agrupaciones_nuevas).toEqual([]);
     expect(plan2.asignaciones[0]?.agrupacion_id).toBe("a-z");
     const plan3 = planificar([hup("", "CURVA X Y")], estado);
-    expect(plan3.agrupaciones_nuevas).toEqual([{ nombre: "CURVA X Y", codigo: "CURVA_X_Y" }]);
+    expect(plan3.agrupaciones_nuevas).toEqual([{ nombre: "CURVA X Y", codigo: "CURVA_X_Y", genero_ids: ["g-h"] }]);
   });
   it("existente se resuelve por nombre normalizado o por código; el nombre literal gana", () => {
     const agrupaciones = [
-      { id: "1", codigo: "A_B", nombre: "A B", activo: true },
-      { id: "2", codigo: "A_B_2", nombre: "A-B", activo: true },
+      { id: "1", codigo: "A_B", nombre: "A B", activo: true, genero_ids: [] },
+      { id: "2", codigo: "A_B_2", nombre: "A-B", activo: true, genero_ids: [] },
     ];
     expect(buscarAgrupacion(agrupaciones, " a  b ")?.id).toBe("1");
     expect(buscarAgrupacion(agrupaciones, "A-B")?.id).toBe("2");
@@ -250,7 +263,7 @@ describe("regla 15: la misma equivalencia dos veces", () => {
     ]);
     // La agrupación B no se crea: ninguna fila procesada la usa.
     expect(plan.agrupaciones_nuevas.map((a) => a.nombre)).toEqual(["A"]);
-    expect(plan.reporte.muestra.agrupaciones).toEqual([{ nombre: "A", codigo: "A", equivalencias: 1 }]);
+    expect(plan.reporte.muestra.agrupaciones).toEqual([{ nombre: "A", codigo: "A", equivalencias: 1, generos: ["HOMBRE"] }]);
   });
   it("la agrupación de la primera aparición se compara por nombre resuelto (código o nombre)", () => {
     const plan = planificar([hup("JOGGER", "pantalones_verano"), hup("JOGGER", "Pantalones Verano")]);
@@ -326,6 +339,155 @@ describe("regla 17: inactivos y cierre de conteos", () => {
     const { totales, asignar } = plan.reporte;
     expect(totales).toEqual({ recibidas: 6, procesadas: 3, omitidas: 3 });
     expect(asignar.nuevas + asignar.reasignadas + asignar.sin_cambio).toBe(totales.procesadas);
+  });
+});
+
+describe("géneros de la agrupación (cambio «agrupaciones por género»)", () => {
+  const conExtras = () => {
+    const estado = estadoFx();
+    estado.agrupaciones.push(agrupacionFx("a-h", "SOLO HOMBRE", ["g-h"]), agrupacionFx("a-sin", "SIN GENERO", []));
+    return estado;
+  };
+  const MUJER_PANT = (equivalencia: string, agrupacion: string) =>
+    fila("MUJER", "URBANO", "PANTALON", equivalencia, agrupacion);
+
+  describe("agrupación existente: el importador nunca amplía sus géneros", () => {
+    it("género de la fila no incluido → genero_no_incluido con el nombre del género en detalle", () => {
+      const plan = planificar([MUJER_PANT("", "solo hombre"), hup("JOGGER", "SOLO HOMBRE")], conExtras());
+      expect(plan.reporte.omitidas).toEqual([
+        {
+          fila: 1,
+          motivo: "genero_no_incluido",
+          detalle: "MUJER",
+          genero: "MUJER",
+          mundo: "URBANO",
+          linea: "PANTALON",
+          equivalencia: "",
+          agrupacion: "SOLO HOMBRE",
+        },
+      ]);
+      expect(plan.asignaciones.map((a) => a.equivalencia_id)).toEqual(["e2"]);
+      expect(plan.reporte.totales).toEqual({ recibidas: 2, procesadas: 1, omitidas: 1 });
+    });
+    it("se resuelve igual por código y por nombre", () => {
+      const plan = planificar([MUJER_PANT("", "solo_hombre")], conExtras());
+      expect(motivos(plan.reporte.omitidas)).toEqual(["genero_no_incluido"]);
+    });
+    it("existente sin géneros → agrupacion_sin_genero con la agrupación en detalle", () => {
+      const plan = planificar([hup("JOGGER", "sin genero"), MUJER_PANT("", "SIN GENERO")], conExtras());
+      expect(plan.reporte.omitidas.map((o) => [o.fila, o.motivo, o.detalle])).toEqual([
+        [1, "agrupacion_sin_genero", "SIN GENERO"],
+        [2, "agrupacion_sin_genero", "SIN GENERO"],
+      ]);
+      expect(plan.asignaciones).toEqual([]);
+      expect(plan.agrupaciones_nuevas).toEqual([]);
+    });
+    it("una inactiva sigue siendo agrupacion_inactiva antes que sin género o no incluido", () => {
+      const estado = conExtras();
+      estado.agrupaciones.push(agrupacionFx("a-ix", "INACTIVA SIN GENERO", [], false));
+      const plan = planificar([hup("JOGGER", "inactiva sin genero"), MUJER_PANT("", "vieja")], estado);
+      expect(motivos(plan.reporte.omitidas)).toEqual(["agrupacion_inactiva", "agrupacion_inactiva"]);
+    });
+    it("la fila omitida por género no registra la equivalencia: otra fila válida de la misma equivalencia se procesa", () => {
+      const plan = planificar([MUJER_PANT("", "solo hombre"), MUJER_PANT("", "pantalones invierno")], conExtras());
+      expect(motivos(plan.reporte.omitidas)).toEqual(["genero_no_incluido"]);
+      expect(plan.asignaciones).toEqual([
+        { equivalencia_id: "e6", agrupacion_nombre: "PANTALONES INVIERNO", agrupacion_id: "a-inv", tipo: "reasignada" },
+      ]);
+    });
+    it("los dos motivos son errores (no el informativo duplicada_en_archivo)", () => {
+      const plan = planificar([MUJER_PANT("", "solo hombre"), hup("JOGGER", "sin genero")], conExtras());
+      const informativos = new Set<MotivoOmisionEstacionalidad>(["duplicada_en_archivo"]);
+      expect(plan.reporte.omitidas.every((o) => !informativos.has(o.motivo))).toBe(true);
+    });
+  });
+
+  describe("agrupación nueva: se crea con los géneros de las filas procesadas", () => {
+    it("conjunto de géneros distintos, ordenados por orden del género; muestra con nombres", () => {
+      const plan = planificar([
+        MUJER_PANT("", "CURVA NUEVA"),
+        hup("JOGGER", "CURVA NUEVA"),
+        fila("MUJER", "URBANO", "BLUSA", "MANGA LARGA", "CURVA NUEVA"),
+      ]);
+      expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h", "g-m"] }]);
+      expect(plan.reporte.muestra.agrupaciones).toEqual([
+        { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", equivalencias: 3, generos: ["HOMBRE", "MUJER"] },
+      ]);
+    });
+    it("un solo género → una sola entrada, aunque haya muchas filas", () => {
+      const plan = planificar([hup("", "SOLO H"), hup("JOGGER", "SOLO H"), hup("CARGO", "SOLO H")]);
+      expect(plan.agrupaciones_nuevas[0].genero_ids).toEqual(["g-h"]);
+      expect(plan.reporte.muestra.agrupaciones[0].generos).toEqual(["HOMBRE"]);
+    });
+    it("cada agrupación nueva lleva solo los géneros de SUS filas", () => {
+      const plan = planificar([hup("", "CURVA H"), MUJER_PANT("", "CURVA M")]);
+      expect(plan.agrupaciones_nuevas).toEqual([
+        { nombre: "CURVA H", codigo: "CURVA_H", genero_ids: ["g-h"] },
+        { nombre: "CURVA M", codigo: "CURVA_M", genero_ids: ["g-m"] },
+      ]);
+    });
+    it("toda agrupación nueva tiene al menos un género", () => {
+      const plan = planificar([hup("", "A"), MUJER_PANT("", "B"), hup("JOGER", "C"), hup("CARGO", "D")]);
+      expect(plan.agrupaciones_nuevas.length).toBeGreaterThan(0);
+      for (const a of plan.agrupaciones_nuevas) expect(a.genero_ids.length).toBeGreaterThanOrEqual(1);
+      // C solo tenía una fila omitida (equivalencia desconocida): no se crea.
+      expect(plan.agrupaciones_nuevas.map((a) => a.nombre)).toEqual(["A", "B", "D"]);
+    });
+    it("una fila duplicada o contradictoria no aporta género a la agrupación nueva", () => {
+      const plan = planificar([
+        hup("JOGGER", "CURVA NUEVA"), // procesada: HOMBRE
+        hup("JOGGER", "CURVA NUEVA"), // duplicada
+        MUJER_PANT("", "OTRA"), // procesada: MUJER → OTRA
+        MUJER_PANT("", "CURVA NUEVA"), // contradictoria con OTRA: no aporta MUJER a CURVA NUEVA
+      ]);
+      expect(motivos(plan.reporte.omitidas)).toEqual(["duplicada_en_archivo", "contradictoria_en_archivo"]);
+      expect(plan.agrupaciones_nuevas).toEqual([
+        { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h"] },
+        { nombre: "OTRA", codigo: "OTRA", genero_ids: ["g-m"] },
+      ]);
+    });
+    it("una fila omitida por otro motivo (nodo, equivalencia, género inactivo) tampoco aporta género", () => {
+      const plan = planificar([
+        hup("", "CURVA NUEVA"),
+        fila("MUJER", "URBANO", "ABRIGO", "VARIOS", "CURVA NUEVA"), // nodo inactivo
+        MUJER_PANT("JOGER", "CURVA NUEVA"), // equivalencia desconocida
+      ]);
+      expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h"] }]);
+    });
+  });
+
+  describe("aplicar en memoria e idempotencia con géneros", () => {
+    const filas = [
+      hup("", "CURVA NUEVA"),
+      MUJER_PANT("", "CURVA NUEVA"),
+      fila("MUJER", "URBANO", "BLUSA", "MANGA LARGA", "OTRA CURVA"),
+    ];
+    it("aplicar crea la agrupación con sus géneros y no toca los de las existentes", () => {
+      const estado = conExtras();
+      const plan = planificar(filas, estado);
+      const despues = aplicarPlanEstacionalidad(estado, plan);
+      const nueva = despues.agrupaciones.find((a) => a.nombre === "CURVA NUEVA");
+      expect(nueva?.genero_ids).toEqual(["g-h", "g-m"]);
+      expect(despues.agrupaciones.find((a) => a.nombre === "OTRA CURVA")?.genero_ids).toEqual(["g-m"]);
+      expect(despues.agrupaciones.slice(0, estado.agrupaciones.length)).toEqual(estado.agrupaciones);
+    });
+    it("regla 12: reimportar el mismo archivo da cero cambios y ninguna omisión por género", () => {
+      const estado = conExtras();
+      const plan1 = planificar(filas, estado);
+      expect(plan1.reporte.crear.agrupaciones).toBe(2);
+      const plan2 = planificar(filas, aplicarPlanEstacionalidad(estado, plan1));
+      expect(plan2.reporte.crear).toEqual({ agrupaciones: 0 });
+      expect(plan2.reporte.asignar).toEqual({ nuevas: 0, reasignadas: 0, sin_cambio: plan1.reporte.totales.procesadas });
+      expect(plan2.reporte.omitidas).toEqual([]);
+      expect(plan2.agrupaciones_nuevas).toEqual([]);
+      expect(plan2.asignaciones).toEqual([]);
+    });
+    it("aplicar dos veces el mismo plan produce el mismo estado (los géneros no se duplican)", () => {
+      const estado = conExtras();
+      const plan = planificar(filas, estado);
+      const una = aplicarPlanEstacionalidad(estado, plan);
+      expect(aplicarPlanEstacionalidad(una, plan)).toEqual(una);
+    });
   });
 });
 
@@ -450,6 +612,16 @@ describe.skipIf(!hayCsv)("planificarImportacionEstacionalidad · sobre el árbol
     // 3. Idempotencia sobre el árbol real.
     const despues = aplicarPlanEstacionalidad(estado, plan);
     expect(despues.equivalencias.every((e) => e.agrupacion_estacionalidad_id !== null)).toBe(true);
+    // Cada agrupación creada lleva los géneros de sus filas (≥ 1) y toda equivalencia cumple la regla de género.
+    expect(plan.agrupaciones_nuevas.every((a) => a.genero_ids.length >= 1)).toBe(true);
+    const generoDelNodo = new Map(despues.nodos.map((n) => [n.id, n.genero_id]));
+    const agrupacionPorId = new Map(despues.agrupaciones.map((a) => [a.id, a]));
+    const incumplen = despues.equivalencias.filter((e) => {
+      const g = generoDelNodo.get(e.genero_mundo_linea_id);
+      const a = e.agrupacion_estacionalidad_id ? agrupacionPorId.get(e.agrupacion_estacionalidad_id) : undefined;
+      return !a || !g || !a.genero_ids.includes(g);
+    });
+    expect(incumplen).toEqual([]);
     const plan2 = planificarImportacionEstacionalidad(filas, despues);
     expect(plan2.reporte.crear.agrupaciones).toBe(0);
     expect(plan2.reporte.asignar).toEqual({ nuevas: 0, reasignadas: 0, sin_cambio: reporte.totales.procesadas });

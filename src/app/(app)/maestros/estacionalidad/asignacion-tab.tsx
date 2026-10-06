@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { AgrupacionEstacionalidadFila, EquivalenciaPlana, EquivalenciasEstacionalidadRespuesta } from "@/lib/estacionalidad/tipos-api";
+import { agrupacionesParaFiltro, incluyeGenero, tieneGeneros, ordenarPorNombre } from "@/lib/estacionalidad/generos";
 import { formatearNumero } from "@/lib/formato";
 import { Card } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
@@ -10,7 +11,7 @@ import { Chips, type ChipItem } from "@/components/ui/chips";
 import { Field, Select } from "@/components/ui/form";
 import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/ui/empty-state";
-import { CATALOGOS_VACIOS, FiltrosArbol, ordenarAgrupaciones, useFiltroArbol } from "./comunes";
+import { CATALOGOS_VACIOS, FiltrosArbol, useFiltroArbol } from "./comunes";
 import { TablaSeleccion } from "./tabla-seleccion";
 import { useAsignar } from "./use-asignar";
 
@@ -34,6 +35,7 @@ export function AsignacionTab({
   mostrarInactivas,
   onMostrarInactivas,
   onCambio,
+  onIrAAgrupaciones,
 }: {
   lista: EquivalenciasEstacionalidadRespuesta | null;
   cargando: boolean;
@@ -47,6 +49,8 @@ export function AsignacionTab({
   mostrarInactivas: boolean;
   onMostrarInactivas: (v: boolean) => void;
   onCambio: () => Promise<void>;
+  /** Lleva a la pestaña Agrupaciones (añadir géneros a una agrupación). */
+  onIrAAgrupaciones: () => void;
 }) {
   const asignacion = useAsignar(onCambio);
   const todas = lista?.equivalencias ?? EMPTY;
@@ -60,6 +64,8 @@ export function AsignacionTab({
           {asignacion.aviso}
         </Alert>
       )}
+
+      {asignacion.advertencia && <Alert onCerrar={() => asignacion.setAdvertencia(null)}>{asignacion.advertencia}</Alert>}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Chips<VistaAsignacion>
@@ -83,6 +89,7 @@ export function AsignacionTab({
           puedeEditar={puedeEditar}
           ocupado={asignacion.ocupado}
           onAsignar={asignacion.asignar}
+          onIrAAgrupaciones={onIrAAgrupaciones}
         />
       ) : (
         <VistaPorAgrupacion
@@ -96,6 +103,7 @@ export function AsignacionTab({
           onIrAlArbol={() => onVista("arbol")}
           ocupado={asignacion.ocupado}
           onAsignar={asignacion.asignar}
+          onIrAAgrupaciones={onIrAAgrupaciones}
         />
       )}
     </div>
@@ -112,9 +120,10 @@ type PropsVista = {
   puedeEditar: boolean;
   ocupado: boolean;
   onAsignar: ReturnType<typeof useAsignar>["asignar"];
+  onIrAAgrupaciones: () => void;
 };
 
-function VistaPorArbol({ todas, catalogos, cargando, agrupaciones, puedeEditar, ocupado, onAsignar }: PropsVista) {
+function VistaPorArbol({ todas, catalogos, cargando, agrupaciones, puedeEditar, ocupado, onAsignar, onIrAAgrupaciones }: PropsVista) {
   const { filtro, setFiltro, lineasDisponibles, filas } = useFiltroArbol(todas, catalogos.lineas);
   const [estado, setEstado] = useState<FiltroEstado>("todas");
 
@@ -147,9 +156,11 @@ function VistaPorArbol({ todas, catalogos, cargando, agrupaciones, puedeEditar, 
           vacio={todas.length === 0 ? "No hay equivalencias activas en el árbol." : "Ninguna equivalencia coincide con el filtro."}
           puedeEditar={puedeEditar}
           agrupaciones={agrupaciones}
+          generoId={filtro.generoId}
           verbo="Asignar a"
           ocupado={ocupado}
           onAsignar={onAsignar}
+          onIrAAgrupaciones={onIrAAgrupaciones}
         />
         {puedeEditar && (
           <p className="text-xs text-tinta-suave">
@@ -173,11 +184,34 @@ function VistaPorAgrupacion({
   onIrAlArbol,
   ocupado,
   onAsignar,
+  onIrAAgrupaciones,
 }: PropsVista & { agrupacionId: string; onAgrupacionId: (id: string) => void; onIrAlArbol: () => void }) {
-  const ordenadas = useMemo(() => ordenarAgrupaciones(agrupaciones), [agrupaciones]);
-  const elegida = ordenadas.find((a) => a.id === agrupacionId) ?? null;
+  const elegida = agrupaciones.find((a) => a.id === agrupacionId) ?? null;
   const deLaAgrupacion = useMemo(() => (elegida ? todas.filter((e) => e.agrupacion?.id === elegida.id) : EMPTY), [todas, elegida]);
   const { filtro, setFiltro, lineasDisponibles, filas } = useFiltroArbol(deLaAgrupacion, catalogos.lineas);
+
+  // Opciones, por nombre. Con un género filtrado, solo las activas que lo
+  // incluyen (más la elegida, marcada, para que no desaparezca sin avisar).
+  // Con "Todos", las activas con género y, para poder consultarlas, las
+  // inactivas o sin género que tengan equivalencias.
+  const opciones = useMemo(() => {
+    const generoFiltro = filtro.generoId;
+    const base =
+      generoFiltro === ""
+        ? agrupaciones.filter((a) => (a.activo && tieneGeneros(a)) || a.equivalencias > 0 || a.id === agrupacionId)
+        : agrupacionesParaFiltro(agrupaciones, generoFiltro).concat(
+            agrupaciones.filter((a) => a.id === agrupacionId && !(a.activo && incluyeGenero(a, generoFiltro)))
+          );
+    return ordenarPorNombre(base);
+  }, [agrupaciones, agrupacionId, filtro.generoId]);
+  const nombreGeneroFiltro = catalogos.generos.find((g) => g.id === filtro.generoId)?.nombre;
+  const etiquetaOpcion = (a: AgrupacionEstacionalidadFila) => {
+    const notas: string[] = [];
+    if (!a.activo) notas.push("inactiva");
+    if (!tieneGeneros(a)) notas.push("sin género");
+    else if (filtro.generoId !== "" && !incluyeGenero(a, filtro.generoId)) notas.push(`no incluye ${nombreGeneroFiltro ?? "este género"}`);
+    return `${a.nombre} (${formatearNumero(a.equivalencias)})${notas.length > 0 ? ` · ${notas.join(", ")}` : ""}`;
+  };
 
   return (
     <Card titulo={elegida ? `${elegida.nombre} (${formatearNumero(filas.length)})` : "Por agrupación"}>
@@ -185,18 +219,20 @@ function VistaPorAgrupacion({
         <Field label="Agrupación" className="max-w-md">
           <Select value={agrupacionId} onChange={(e) => onAgrupacionId(e.target.value)} className="h-9">
             <option value="">Elige una agrupación…</option>
-            {ordenadas.map((a) => (
+            {opciones.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.nombre} ({formatearNumero(a.equivalencias)}){a.activo ? "" : " · inactiva"}
+                {etiquetaOpcion(a)}
               </option>
             ))}
           </Select>
         </Field>
 
+        {elegida && <FiltrosArbol catalogos={catalogos} lineasDisponibles={lineasDisponibles} filtro={filtro} onCambiar={setFiltro} />}
+
         {!elegida ? (
           <EmptyState
-            titulo={ordenadas.length === 0 ? "Todavía no hay agrupaciones" : "Elige una agrupación"}
-            detalle={ordenadas.length === 0 ? "Créalas en la pestaña Agrupaciones." : "Verás sus equivalencias y podrás moverlas o quitarles la agrupación."}
+            titulo={agrupaciones.length === 0 ? "Todavía no hay agrupaciones" : "Elige una agrupación"}
+            detalle={agrupaciones.length === 0 ? "Créalas en la pestaña Agrupaciones." : "Verás sus equivalencias y podrás moverlas o quitarles la agrupación."}
           />
         ) : deLaAgrupacion.length === 0 && !cargando ? (
           <EmptyState
@@ -220,7 +256,6 @@ function VistaPorAgrupacion({
                 Esta agrupación está desactivada: sus equivalencias cuentan como faltantes. Reactívala en Agrupaciones o muévelas a otra.
               </Alert>
             )}
-            <FiltrosArbol catalogos={catalogos} lineasDisponibles={lineasDisponibles} filtro={filtro} onCambiar={setFiltro} />
             <TablaSeleccion
               filas={filas}
               catalogos={catalogos}
@@ -228,9 +263,11 @@ function VistaPorAgrupacion({
               vacio="Ninguna equivalencia coincide con el filtro."
               puedeEditar={puedeEditar}
               agrupaciones={agrupaciones}
+              generoId={filtro.generoId}
               verbo="Mover a"
               ocupado={ocupado}
               onAsignar={onAsignar}
+              onIrAAgrupaciones={onIrAAgrupaciones}
             />
           </>
         )}

@@ -48,6 +48,8 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   // M3.
   ["agrupaciones_estacionalidad_codigo", "Ya existe una agrupación de estacionalidad con ese código."],
   ["agrupaciones_estacionalidad_nombre", "Ya existe una agrupación de estacionalidad con ese nombre."],
+  // Géneros de una agrupación (único por pareja agrupación + género).
+  ["agrupacion_estacionalidad_genero_par", "Esa agrupación ya incluye ese género."],
   // M4.
   ["tiendas_codigo", "Ya existe una tienda con ese código."],
   ["tiendas_nombre", "Ya existe una tienda con ese nombre."],
@@ -90,6 +92,25 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     "equivalencias_agrupacion_estacionalidad_id_fkey",
     {
       eliminar: "No se puede eliminar la agrupación de estacionalidad: tiene equivalencias. Desactívala.",
+      asignar: { status: 404, mensaje: "Agrupación de estacionalidad no encontrada." },
+    },
+  ],
+  // Géneros de una agrupación. La FK al género es `restrict`: borrar un género
+  // con agrupaciones asignadas se rechaza. La FK a la agrupación es `cascade`
+  // (los vínculos se van con ella), así que su mensaje de "eliminar" no debería
+  // verse nunca; queda por si el modelo cambia.
+  [
+    "agrupacion_estacionalidad_genero_genero_id_fkey",
+    {
+      eliminar:
+        "No se puede eliminar el género: tiene agrupaciones de estacionalidad asignadas. Quítalo de ellas o desactívalo.",
+      asignar: { status: 404, mensaje: "Género no encontrado." },
+    },
+  ],
+  [
+    "agrupacion_estacionalidad_genero_agrupacion_id_fkey",
+    {
+      eliminar: "No se puede eliminar la agrupación de estacionalidad: tiene géneros asignados.",
       asignar: { status: 404, mensaje: "Agrupación de estacionalidad no encontrada." },
     },
   ],

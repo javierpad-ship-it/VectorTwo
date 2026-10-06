@@ -11,40 +11,79 @@ import { editarEquivalenciaSchema } from "@/lib/arbol/esquemas";
 
 const UUID = "123e4567-e89b-42d3-a456-426614174000";
 const UUID2 = "223e4567-e89b-42d3-a456-426614174000";
+const GENEROS = [UUID];
 
 describe("crearAgrupacionSchema (regla 1)", () => {
   it("normaliza el nombre, deriva el código y deja la descripción en null si no viene", () => {
-    expect(crearAgrupacionSchema.parse({ nombre: " pantalones  invierno " })).toEqual({
+    expect(crearAgrupacionSchema.parse({ nombre: " pantalones  invierno ", genero_ids: GENEROS })).toEqual({
       nombre: "PANTALONES INVIERNO",
       codigo: "PANTALONES_INVIERNO",
       descripcion: null,
+      genero_ids: GENEROS,
     });
   });
   it("respeta el código enviado (a ASCII) y vacío lo deriva", () => {
-    expect(crearAgrupacionSchema.parse({ nombre: "Pantalones-Invierno", codigo: "pant inv 2" }).codigo).toBe("PANT_INV_2");
-    expect(crearAgrupacionSchema.parse({ nombre: "Pantalones-Invierno", codigo: "  " }).codigo).toBe("PANTALONES_INVIERNO");
+    expect(crearAgrupacionSchema.parse({ nombre: "Pantalones-Invierno", codigo: "pant inv 2", genero_ids: GENEROS }).codigo).toBe("PANT_INV_2");
+    expect(crearAgrupacionSchema.parse({ nombre: "Pantalones-Invierno", codigo: "  ", genero_ids: GENEROS }).codigo).toBe("PANTALONES_INVIERNO");
   });
   it("recorta la descripción sin pasarla a mayúsculas; vacía → null", () => {
-    expect(crearAgrupacionSchema.parse({ nombre: "X", descripcion: "  Pico en mayo-junio  " }).descripcion).toBe(
+    expect(crearAgrupacionSchema.parse({ nombre: "X", descripcion: "  Pico en mayo-junio  ", genero_ids: GENEROS }).descripcion).toBe(
       "Pico en mayo-junio"
     );
-    expect(crearAgrupacionSchema.parse({ nombre: "X", descripcion: "   " }).descripcion).toBeNull();
-    expect(crearAgrupacionSchema.parse({ nombre: "X", descripcion: null }).descripcion).toBeNull();
+    expect(crearAgrupacionSchema.parse({ nombre: "X", descripcion: "   ", genero_ids: GENEROS }).descripcion).toBeNull();
+    expect(crearAgrupacionSchema.parse({ nombre: "X", descripcion: null, genero_ids: GENEROS }).descripcion).toBeNull();
   });
   it("rechaza más de 500 caracteres de descripción", () => {
-    const r = crearAgrupacionSchema.safeParse({ nombre: "X", descripcion: "a".repeat(501) });
+    const r = crearAgrupacionSchema.safeParse({ nombre: "X", descripcion: "a".repeat(501), genero_ids: GENEROS });
     expect(r.success).toBe(false);
     if (!r.success) expect(r.error.issues[0].message).toBe(MENSAJE_DESCRIPCION_LARGA);
-    expect(crearAgrupacionSchema.safeParse({ nombre: "X", descripcion: "a".repeat(500) }).success).toBe(true);
+    expect(crearAgrupacionSchema.safeParse({ nombre: "X", descripcion: "a".repeat(500), genero_ids: GENEROS }).success).toBe(true);
   });
   it("orden entero ≥ 0 opcional", () => {
-    expect(crearAgrupacionSchema.parse({ nombre: "X", orden: 10 }).orden).toBe(10);
-    expect(crearAgrupacionSchema.safeParse({ nombre: "X", orden: -1 }).success).toBe(false);
-    expect(crearAgrupacionSchema.safeParse({ nombre: "X", orden: 1.5 }).success).toBe(false);
+    expect(crearAgrupacionSchema.parse({ nombre: "X", orden: 10, genero_ids: GENEROS }).orden).toBe(10);
+    expect(crearAgrupacionSchema.safeParse({ nombre: "X", orden: -1, genero_ids: GENEROS }).success).toBe(false);
+    expect(crearAgrupacionSchema.safeParse({ nombre: "X", orden: 1.5, genero_ids: GENEROS }).success).toBe(false);
   });
   it("nombre vacío → rechazo", () => {
-    expect(crearAgrupacionSchema.safeParse({ nombre: "   " }).success).toBe(false);
-    expect(crearAgrupacionSchema.safeParse({}).success).toBe(false);
+    expect(crearAgrupacionSchema.safeParse({ nombre: "   ", genero_ids: GENEROS }).success).toBe(false);
+    expect(crearAgrupacionSchema.safeParse({ genero_ids: GENEROS }).success).toBe(false);
+  });
+});
+
+describe("crearAgrupacionSchema · genero_ids", () => {
+  const base = { nombre: "Pantalones" };
+  const mensaje = (r: ReturnType<typeof crearAgrupacionSchema.safeParse>) => (r.success ? null : r.error.issues[0].message);
+
+  it("exige genero_ids: ausente → rechazo", () => {
+    const r = crearAgrupacionSchema.safeParse(base);
+    expect(r.success).toBe(false);
+    expect(mensaje(r)).toBe("genero_ids debe ser una lista de géneros.");
+  });
+  it("vacío → rechazo con mensaje legible", () => {
+    const r = crearAgrupacionSchema.safeParse({ ...base, genero_ids: [] });
+    expect(r.success).toBe(false);
+    expect(mensaje(r)).toBe("Elige al menos un género.");
+  });
+  it("uno o varios UUID distintos → ok, en el mismo orden", () => {
+    expect(crearAgrupacionSchema.parse({ ...base, genero_ids: [UUID] }).genero_ids).toEqual([UUID]);
+    expect(crearAgrupacionSchema.parse({ ...base, genero_ids: [UUID2, UUID] }).genero_ids).toEqual([UUID2, UUID]);
+  });
+  it("repetidos → rechazo", () => {
+    const r = crearAgrupacionSchema.safeParse({ ...base, genero_ids: [UUID, UUID] });
+    expect(r.success).toBe(false);
+    expect(mensaje(r)).toBe("No repitas géneros.");
+  });
+  it("no UUID o no lista → rechazo", () => {
+    expect(crearAgrupacionSchema.safeParse({ ...base, genero_ids: ["HOMBRE"] }).success).toBe(false);
+    expect(crearAgrupacionSchema.safeParse({ ...base, genero_ids: UUID }).success).toBe(false);
+    expect(crearAgrupacionSchema.safeParse({ ...base, genero_ids: null }).success).toBe(false);
+  });
+  it("máximo 50", () => {
+    const uuids = (n: number) => Array.from({ length: n }, (_, i) => `123e4567-e89b-42d3-a456-${String(i).padStart(12, "0")}`);
+    expect(crearAgrupacionSchema.safeParse({ ...base, genero_ids: uuids(50) }).success).toBe(true);
+    const r = crearAgrupacionSchema.safeParse({ ...base, genero_ids: uuids(51) });
+    expect(r.success).toBe(false);
+    expect(mensaje(r)).toMatch(/hasta 50 géneros/);
   });
 });
 
@@ -65,6 +104,26 @@ describe("editarAgrupacionSchema (regla 2)", () => {
   });
   it("normaliza nombre y código", () => {
     expect(editarAgrupacionSchema.parse({ nombre: " abrigos ", codigo: "abr-x" })).toEqual({ nombre: "ABRIGOS", codigo: "ABR_X" });
+  });
+});
+
+describe("editarAgrupacionSchema · genero_ids", () => {
+  it("genero_ids solo ya es un cuerpo válido (reemplaza el conjunto)", () => {
+    expect(editarAgrupacionSchema.parse({ genero_ids: [UUID, UUID2] })).toEqual({ genero_ids: [UUID, UUID2] });
+  });
+  it("es opcional: los demás campos siguen funcionando sin él (también en una agrupación sin género)", () => {
+    expect(editarAgrupacionSchema.parse({ nombre: "x", activo: true })).toEqual({ nombre: "X", activo: true });
+  });
+  it("si viene, mínimo 1, sin repetidos, UUID y máximo 50", () => {
+    expect(editarAgrupacionSchema.safeParse({ genero_ids: [] }).success).toBe(false);
+    expect(editarAgrupacionSchema.safeParse({ genero_ids: [UUID, UUID] }).success).toBe(false);
+    expect(editarAgrupacionSchema.safeParse({ genero_ids: ["x"] }).success).toBe(false);
+    expect(editarAgrupacionSchema.safeParse({ genero_ids: null }).success).toBe(false);
+    const cincuentaYUno = Array.from({ length: 51 }, (_, i) => `123e4567-e89b-42d3-a456-${String(i).padStart(12, "0")}`);
+    expect(editarAgrupacionSchema.safeParse({ genero_ids: cincuentaYUno }).success).toBe(false);
+  });
+  it("el cuerpo vacío sigue rechazado", () => {
+    expect(editarAgrupacionSchema.safeParse({}).success).toBe(false);
   });
 });
 

@@ -303,3 +303,51 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** La lista oficial son datos reales de Lukers y no van en el repo. La relación con el CD la tuvo V1 y la quitó: con un solo CD no distingue nada. Si M8 necesita flujos por CD, se agrega `centro_distribucion_id` en ese momento, con la información real a la vista.
 
 **Descartado.** Sembrar la red con un archivo de ejemplo (datos reales o inventados que luego habría que borrar). Un `centro_distribucion_id` "por si acaso".
+
+## 2026-10-06 · Una agrupación de estacionalidad pertenece a uno o más géneros y solo acepta equivalencias de sus géneros
+
+**Decisión.** Cada agrupación de estacionalidad se vincula a uno o más géneros (tabla `agrupacion_estacionalidad_genero`, migración `0005`) y una equivalencia solo puede asignarse a una agrupación que incluya el género de su nodo. Desde la API una agrupación nunca queda sin género: crear exige al menos uno, editar reemplaza el conjunto con mínimo uno y no deja quitar un género del que la agrupación tenga equivalencias. Una agrupación sin género (solo las heredadas) se puede renombrar, activar o desactivar, pero no acepta asignaciones.
+
+**Por qué.** Javier lo pidió así ("las agrupaciones de estacionalidad tienen que poder asignarse a 1 o más géneros") y añadió que, al filtrar por género para asignar, la pantalla debe mostrar solo las agrupaciones que aplican. Eso solo es confiable si el vínculo se hace cumplir: si el género fuera una etiqueta, una equivalencia de MUJER podría entrar en una agrupación de HOMBRE por la API o por el importador, y el filtro de la pantalla ocultaría datos que sí existen. Que sean uno o más géneros (y no exactamente uno) es literalmente lo que pidió. La tabla de vínculos no lleva `activo`: el vínculo existe o no existe. `agrupacion_estacionalidad_id` es `on delete cascade` (los géneros son un atributo de la agrupación, que solo se elimina sin equivalencias) y `genero_id` es `on delete restrict` (el género es un catálogo raíz y no arrastra en silencio la configuración de estacionalidad; eliminar uno con agrupaciones responde `409`).
+
+**Descartado.** Que el género sea solo informativo (una etiqueta sin regla, ni backend ni pantalla la harían cumplir; el filtro dejaría de ser una garantía). Una columna `genero_id` en la propia agrupación (solo permitiría un género, no "1 o más"). Que una agrupación sin género valga "para todos los géneros" (esconde una decisión que le toca a Javier; ver la entrada siguiente).
+
+## 2026-10-06 · El backfill parte de las asignaciones existentes; las agrupaciones sin equivalencias quedan "sin género"
+
+**Decisión.** `0005` registra, para cada equivalencia que ya tenía agrupación, el género de su nodo como género de esa agrupación (`select distinct … on conflict do nothing`), de modo que toda asignación previa cumple la regla desde el primer momento. Las agrupaciones sin equivalencias quedan con cero géneros y la pantalla las marca "Sin género": no se les inventa ninguno (ni "todos los géneros" ni uno por defecto). El backfill solo agrega, nunca borra, y no resucita un género que el planner ya hubiera quitado de una agrupación sin equivalencias de ese género. En producción ASESORIA 1 y TES HO INV PESADO quedaron con HOMBRE, y AASE_INVIERNO y TES HO INV LIGERO quedaron sin género.
+
+**Por qué.** Con las asignaciones existentes hay un dato real del que partir; sin ellas, cualquier género sería una suposición nuestra que escondería la decisión que Javier tiene que tomar, el mismo criterio con el que se descartó sembrar una agrupación `GENERAL` en `0003`. Una agrupación sin género no puede recibir equivalencias, así que la omisión es visible (badge, fila resaltada, aviso en el Mapa) y se corrige en diez segundos desde Agrupaciones.
+
+**Descartado.** Asignar "todos los géneros" a las agrupaciones vacías (las dejaría aceptando cualquier cosa sin que nadie lo haya decidido). Elegir un género por defecto (misma razón).
+
+## 2026-10-06 · La regla de género la aplican el backend y la pantalla, porque no cabe en un `check`
+
+**Decisión.** La regla "una equivalencia solo entra en una agrupación que incluya su género" la hacen cumplir los handlers (asignación individual, masiva e importador) con funciones puras (`rechazoAsignacion`, `planificarAsignacion`), y la pantalla no ofrece los destinos que se sabe que van a fallar. Por la misma razón crear, listar y editar agrupaciones dejan de usar el catálogo genérico (`catalogo.ts`) y pasan a handlers propios en `src/lib/estacionalidad/agrupaciones.ts`; `DELETE` sigue con el genérico. La asignación masiva no aborta por una equivalencia de otro género: la devuelve en `no_permitidas` y asigna el resto; la individual responde `409`.
+
+**Por qué.** La regla cruza tres tablas (equivalencia, nodo y género, y la agrupación con sus géneros) y no se puede expresar con un `check`; una FK compuesta exigiría duplicar el género dentro de `equivalencias`, con un segundo dato que habría que mantener sincronizado con el nodo. Crear y editar escriben en dos tablas y validan antes de escribir, algo que el CRUD plano no hace; es el mismo camino que siguió M2 con las marcas. Que la masiva no aborte sigue el criterio de `no_encontradas`: una selección grande no debe perderse por unas pocas filas.
+
+**Descartado.** Duplicar `genero_id` en `equivalencias` para poder usar una FK compuesta (un segundo dato que habría que mantener sincronizado con el nodo). Abortar toda la asignación masiva ante una sola equivalencia de otro género.
+
+## 2026-10-06 · El importador de estacionalidad no amplía los géneros de una agrupación existente
+
+**Decisión.** Si una fila del archivo apunta a una agrupación que ya existe y no incluye el género de la fila, se omite con `genero_no_incluido`; si la agrupación no tiene ningún género, con `agrupacion_sin_genero`. El importador nunca agrega géneros a una agrupación existente. Una agrupación nueva sí se crea con los géneros distintos de las filas procesadas que le apuntan, de modo que nunca nace sin género, y la previsualización lo muestra en la columna Géneros de "Agrupaciones a crear".
+
+**Por qué.** Los géneros de una agrupación son una decisión de configuración que se toma en la pantalla de Agrupaciones; ampliarlos desde un archivo haría que una sola fila equivocada (el tipeo de una agrupación, una fila de MUJER en una agrupación de HOMBRE) cambiara el alcance de la agrupación y lo dejara aceptado para todo el resto. Con la regla de arriba, el error se ve como fila omitida y se corrige a mano. Para una agrupación nueva no hay nada previo que proteger y los géneros salen de lo que el propio archivo pide, además de que es la única forma de crearla sin dejarla sin género.
+
+**Descartado.** Ampliar automáticamente los géneros de la agrupación existente al ver la fila (cambiaría configuración sin que nadie lo vea antes de aplicar). Crear la agrupación nueva sin géneros (quedaría inutilizable, sin aceptar asignaciones).
+
+## 2026-10-06 · Las listas de agrupaciones van en orden alfabético; `orden` ya no manda ahí
+
+**Decisión.** Leyenda de colores, selectores de asignación ("Asignar a", "Mover a", "Por agrupación"), tarjetas del Mapa, selector del árbol y tabla de Agrupaciones se ordenan por nombre con `localeCompare("es", { sensitivity: "base", numeric: true })`: sin distinguir acentos ni mayúsculas y con números naturales ("ASESORIA 2" antes de "ASESORIA 10"). El campo `orden` deja de mandar en esas vistas, pero sigue fijando el orden de `GET /api/agrupaciones-estacionalidad` y, sobre todo, el color de cada agrupación: los colores siguen la posición por `orden, nombre`, de modo que el cambio de orden no recolorea nada. Los chips de género de una agrupación van por el `orden` del género, no alfabéticos, como el resto de listas de géneros.
+
+**Por qué.** Javier pidió "organicemos por orden alfabético". Buscar una agrupación por nombre es más natural que recordar su posición, y el orden natural evita que "ASESORIA 10" aparezca antes que "ASESORIA 2". Mantener el color por `orden, nombre` conserva la identidad visual de cada agrupación: ordenar la lista por nombre no la recolorea.
+
+**Descartado.** Colorear por posición alfabética (cambiaría el color de varias agrupaciones al crear una nueva o renombrar otra). Comparar sin `numeric` (deja "ASESORIA 10" antes de "ASESORIA 2").
+
+## 2026-10-06 · Los filtros `.in(...)` de la asignación masiva y del importador van en tandas de 150 ids
+
+**Decisión.** La lectura y la escritura por `in("id", …)` de `POST /api/estacionalidad/asignar` y de `POST /api/estacionalidad/importar` se hacen en tandas de 150 ids (`TANDA_IN` en `src/lib/arbol/importar.ts`), no de 500. Las inserciones de agrupaciones nuevas siguen en tandas de 500.
+
+**Por qué.** El cliente de Supabase manda los ids en la URL: 500 UUID pasan de 18 KB y el gateway puede rechazar la petición por tamaño de URL, un error que solo aparecería con selecciones grandes (el árbol real tiene 1 956 equivalencias). Con 150 ids la URL queda por debajo. La operación sigue siendo idempotente, así que el costo es solo más llamadas.
+
+**Descartado.** Mantener 500. Queda anotado que el límite del gateway no se probó contra Supabase real: 150 es un margen conservador, no un valor medido.

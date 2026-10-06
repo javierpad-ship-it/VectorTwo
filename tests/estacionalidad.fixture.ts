@@ -22,7 +22,15 @@ export type EquivalenciaFx = {
   activo: boolean;
   agrupacion_estacionalidad_id: string | null;
 };
-export type AgrupacionFx = { id: string; codigo: string; nombre: string; orden: number; activo: boolean };
+export type AgrupacionFx = {
+  id: string;
+  codigo: string;
+  nombre: string;
+  orden: number;
+  activo: boolean;
+  /** Géneros de la agrupación (vacío = heredada "sin género"). */
+  genero_ids: string[];
+};
 
 export type EstadoFx = {
   generos: GeneroFx[];
@@ -93,9 +101,12 @@ export function estadoFx(): EstadoFx {
       eq("e11", "n7", "VARIOS", null), // género inactivo
     ],
     agrupaciones: [
-      { id: "a-ver", codigo: "PANTALONES_VERANO", nombre: "PANTALONES VERANO", orden: 20, activo: true },
-      { id: "a-inv", codigo: "PANTALONES_INVIERNO", nombre: "PANTALONES INVIERNO", orden: 10, activo: true },
-      { id: "a-old", codigo: "VIEJA", nombre: "VIEJA", orden: 5, activo: false },
+      // Las dos activas incluyen HOMBRE y MUJER (los dos géneros activos con nodos vigentes) para que las
+      // pruebas anteriores al cambio "agrupaciones por género" no tengan que pensar en géneros; las pruebas
+      // de género agregan las suyas con `agrupacionFx` (solo mujer, sin género…).
+      { id: "a-ver", codigo: "PANTALONES_VERANO", nombre: "PANTALONES VERANO", orden: 20, activo: true, genero_ids: ["g-h", "g-m"] },
+      { id: "a-inv", codigo: "PANTALONES_INVIERNO", nombre: "PANTALONES INVIERNO", orden: 10, activo: true, genero_ids: ["g-h", "g-m"] },
+      { id: "a-old", codigo: "VIEJA", nombre: "VIEJA", orden: 5, activo: false, genero_ids: ["g-h"] },
     ],
   };
 }
@@ -104,3 +115,13 @@ export function estadoFx(): EstadoFx {
 export const ACTIVAS_VIGENTES_ORDENADAS = ["e3", "e12", "e2", "e1", "e7", "e5", "e6"];
 /** De esas, las faltantes (regla 7). */
 export const FALTANTES = ["e3", "e12", "e1", "e7", "e5"];
+
+/** Agrupación activa extra para las pruebas de género (`agrupacionFx("a-solo-m", "SOLO MUJER", ["g-m"])`). */
+export const agrupacionFx = (id: string, nombre: string, generoIds: string[], activo = true): AgrupacionFx => ({
+  id,
+  codigo: nombre.replace(/ /g, "_"),
+  nombre,
+  orden: 0,
+  activo,
+  genero_ids: generoIds,
+});

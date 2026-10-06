@@ -34,6 +34,7 @@ export function FaltantesTab({
   puedeEditar,
   onCambio,
   onIrAImportar,
+  onIrAAgrupaciones,
 }: {
   lista: EquivalenciasEstacionalidadRespuesta | null;
   faltantes: EquivalenciaPlana[];
@@ -42,6 +43,8 @@ export function FaltantesTab({
   puedeEditar: boolean;
   onCambio: () => Promise<void>;
   onIrAImportar: () => void;
+  /** Lleva a la pestaña Agrupaciones (añadir géneros a una agrupación). */
+  onIrAAgrupaciones: () => void;
 }) {
   const asignacion = useAsignar(onCambio);
   const catalogos = lista ?? CATALOGOS_VACIOS;
@@ -97,6 +100,7 @@ export function FaltantesTab({
             {asignacion.aviso}
           </Alert>
         )}
+        {asignacion.advertencia && <Alert onCerrar={() => asignacion.setAdvertencia(null)}>{asignacion.advertencia}</Alert>}
         <EmptyState titulo="Toda equivalencia activa tiene agrupación." detalle="Listo para M6: cada equivalencia vigente tiene una curva de estacionalidad asignada." />
       </div>
     );
@@ -110,6 +114,7 @@ export function FaltantesTab({
           {asignacion.aviso}
         </Alert>
       )}
+      {asignacion.advertencia && <Alert onCerrar={() => asignacion.setAdvertencia(null)}>{asignacion.advertencia}</Alert>}
 
       {porGenero.length > 0 && (
         <Chips<string>
@@ -155,9 +160,11 @@ export function FaltantesTab({
             vacio="Ninguna faltante coincide con el filtro."
             puedeEditar={puedeEditar}
             agrupaciones={agrupaciones}
+            generoId={filtro.generoId}
             verbo="Asignar a"
             ocupado={asignacion.ocupado}
             onAsignar={asignacion.asignar}
+            onIrAAgrupaciones={onIrAAgrupaciones}
           />
           <p className="text-xs text-tinta-suave">
             El CSV descarga {plural(visibles.length, "fila", "filas")} según los filtros, en el formato exacto del importador (la genérica sale con

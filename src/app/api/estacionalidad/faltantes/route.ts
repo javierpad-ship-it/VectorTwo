@@ -2,7 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/guard";
 import { ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
-import { cargarEstadoEstacionalidad } from "@/lib/estacionalidad/consultas";
+import { agrupacionesConGeneros, cargarEstadoEstacionalidad } from "@/lib/estacionalidad/consultas";
 import { aplanarEquivalencias } from "@/lib/estacionalidad/aplanar";
 
 /**
@@ -18,5 +18,5 @@ export async function GET() {
   const { estado, error: err } = await cargarEstadoEstacionalidad(supabaseAdmin());
   if (err) return traducirErrorDb(err, "estacionalidad: leer estado");
 
-  return ok(aplanarEquivalencias(estado, estado.agrupaciones, { incluirInactivos: false, soloFaltantes: true }));
+  return ok(aplanarEquivalencias(estado, agrupacionesConGeneros(estado), { incluirInactivos: false, soloFaltantes: true }));
 }

@@ -11,7 +11,15 @@ export type { ModoImportacion };
 
 // ─── Catálogo (GET /api/agrupaciones-estacionalidad) ───
 
-/** Fila de `agrupaciones_estacionalidad` en el listado, con el conteo de equivalencias asignadas (activas o no). */
+/** Género de una agrupación tal como viaja en el listado (por `orden, nombre`). */
+export type GeneroDeAgrupacion = { id: string; codigo: string; nombre: string };
+
+/**
+ * Fila de `agrupaciones_estacionalidad` en el listado, con el conteo de
+ * equivalencias asignadas (activas o no) y los géneros a los que pertenece
+ * (una agrupación pertenece a uno o más géneros; sin ninguno no admite
+ * asignaciones).
+ */
 export type AgrupacionEstacionalidadFila = {
   id: string;
   codigo: string;
@@ -26,6 +34,10 @@ export type AgrupacionEstacionalidadFila = {
   equivalencias: number;
   /** Solo las activas (lo que pasa a faltante al desactivar). */
   equivalencias_activas: number;
+  /** Ids de los géneros de la agrupación; vacío = "sin género". */
+  genero_ids: string[];
+  /** Los mismos géneros con nombre, por `orden, nombre`. */
+  generos: GeneroDeAgrupacion[];
 };
 
 /** La agrupación tal como viaja embebida en cada equivalencia de la lista plana. */
@@ -39,6 +51,8 @@ export type CrearAgrupacionEstacionalidadCuerpo = {
   codigo?: string;
   descripcion?: string | null;
   orden?: number;
+  /** Mínimo uno (`400` si falta o va vacío). */
+  genero_ids: string[];
 };
 
 export type EditarAgrupacionEstacionalidadCuerpo = Partial<{
@@ -47,6 +61,8 @@ export type EditarAgrupacionEstacionalidadCuerpo = Partial<{
   descripcion: string | null;
   orden: number;
   activo: boolean;
+  /** Reemplaza el conjunto de géneros; mínimo uno. */
+  genero_ids: string[];
 }>;
 
 // ─── Equivalencias: asignación individual (PATCH /api/equivalencias/[id]) ───
@@ -68,6 +84,8 @@ export type AsignarRespuesta = {
   sin_cambio: number;
   /** Ids que no existen (la pantalla tenía datos viejos); no abortan la operación. */
   no_encontradas: string[];
+  /** Equivalencias cuyo género la agrupación no incluye: no se asignan y no abortan. `genero` es el nombre del género. */
+  no_permitidas: { id: string; genero: string }[];
 };
 
 // ─── Lista plana y faltantes (GET /api/estacionalidad/equivalencias · /faltantes) ───
@@ -125,7 +143,7 @@ export type EquivalenciasEstacionalidadRespuesta = {
   generos: CatalogoPlanoEstacionalidad[];
   mundos: CatalogoPlanoEstacionalidad[];
   lineas: LineaPlana[];
-  agrupaciones: (CatalogoPlanoEstacionalidad & { descripcion?: string | null })[];
+  agrupaciones: (CatalogoPlanoEstacionalidad & { descripcion?: string | null; genero_ids: string[] })[];
   resumen: ResumenEstacionalidad;
 };
 
@@ -163,7 +181,10 @@ export type MotivoOmisionEstacionalidad =
   | "equivalencia_inactiva"
   | "agrupacion_vacia"
   | "agrupacion_inactiva"
-  | "contradictoria_en_archivo";
+  | "contradictoria_en_archivo"
+  // Del vínculo agrupación-género.
+  | "genero_no_incluido"
+  | "agrupacion_sin_genero";
 
 /** Fila omitida con su contenido normalizado, para corregir el archivo. */
 export type FilaOmitidaEstacionalidad = FilaImportacionEstacionalidad & {
@@ -187,6 +208,8 @@ export type AgrupacionNuevaImportacion = {
   nombre: string;
   codigo: string;
   equivalencias: number;
+  /** Géneros (nombres) de las filas que apuntan a ella: con ellos se crea. */
+  generos: string[];
 };
 
 export type ReporteImportacionEstacionalidad = {
@@ -220,6 +243,8 @@ export const ETIQUETA_MOTIVO_OMISION_ESTACIONALIDAD: Record<MotivoOmisionEstacio
   agrupacion_inactiva: "Agrupación inactiva",
   contradictoria_en_archivo: "Contradictoria en el archivo",
   duplicada_en_archivo: "Duplicada en el archivo",
+  genero_no_incluido: "El género no está en la agrupación",
+  agrupacion_sin_genero: "La agrupación no tiene géneros",
 };
 
 export const ETIQUETA_MOTIVO_FALTANTE: Record<MotivoFaltante, string> = {

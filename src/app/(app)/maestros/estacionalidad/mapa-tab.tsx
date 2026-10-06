@@ -5,7 +5,9 @@ import { normalizarNombre } from "@/lib/arbol/normalizar";
 import type { AgrupacionEstacionalidadFila, EquivalenciasEstacionalidadRespuesta } from "@/lib/estacionalidad/tipos-api";
 import { resumirMapa, type CoberturaGenero, type LineaMapa, type ResumenMapa } from "@/lib/estacionalidad/mapa";
 import type { ColorAgrupacion, MapaColores } from "@/lib/estacionalidad/colores";
+import { agrupacionesSinGenero, compararPorNombre } from "@/lib/estacionalidad/generos";
 import { formatearNumero, plural } from "@/lib/formato";
+import { Alert } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +19,8 @@ import { LeyendaAgrupaciones } from "@/components/estacionalidad/leyenda-agrupac
 
 /** A partir de cuántas equivalencias la tarjeta ofrece un buscador en su lista. */
 const UMBRAL_BUSCADOR = 30;
+
+const SIN_GENERO_TITLE = "Asígnale al menos un género para poder usarla";
 
 const EMPTY_RESUMEN: ResumenMapa = { total: 0, sinAgrupacion: { total: 0, porGenero: [], lineas: [] }, tarjetas: [], cobertura: [] };
 
@@ -33,12 +37,15 @@ export function MapaTab({
   agrupaciones,
   onAsignar,
   onIrAFaltantes,
+  onIrAAgrupaciones,
 }: {
   lista: EquivalenciasEstacionalidadRespuesta | null;
   cargando: boolean;
   agrupaciones: AgrupacionEstacionalidadFila[];
   onAsignar: (agrupacionId: string) => void;
   onIrAFaltantes: () => void;
+  /** Lleva a la pestaña Agrupaciones para añadir géneros. */
+  onIrAAgrupaciones: () => void;
 }) {
   const colores = useMapaColores(agrupaciones);
   const resumen = useMemo(
@@ -46,14 +53,28 @@ export function MapaTab({
     [lista, agrupaciones]
   );
 
+  // Las tarjetas y la leyenda se presentan por nombre; los colores siguen la posición por `orden, nombre`.
+  const tarjetas = useMemo(() => [...resumen.tarjetas].sort((a, b) => compararPorNombre(a.agrupacion, b.agrupacion)), [resumen.tarjetas]);
+  const sinGenero = useMemo(() => agrupacionesSinGenero(agrupaciones), [agrupaciones]);
+
   if (!lista) {
     return <EmptyState titulo={cargando ? "Cargando el mapa…" : "No hay datos que mostrar."} />;
   }
 
-  const itemsLeyenda = resumen.tarjetas.map((t) => ({ id: t.agrupacion.id, nombre: t.agrupacion.nombre, conteo: t.total, activo: t.agrupacion.activo }));
+  const itemsLeyenda = tarjetas.map((t) => ({ id: t.agrupacion.id, nombre: t.agrupacion.nombre, conteo: t.total, activo: t.agrupacion.activo }));
 
   return (
     <div className="space-y-6">
+      {sinGenero.length > 0 && (
+        <Alert>
+          {plural(sinGenero.length, "agrupación activa sin género", "agrupaciones activas sin género")} ({sinGenero.map((a) => a.nombre).join(", ")}): no
+          {sinGenero.length === 1 ? " acepta" : " aceptan"} asignaciones hasta que tengan al menos un género.{" "}
+          <button type="button" onClick={onIrAAgrupaciones} className="font-medium underline underline-offset-2">
+            Asignar géneros
+          </button>
+        </Alert>
+      )}
+
       <Card titulo="Cobertura por género" descripcion="Cada barra reparte las equivalencias activas del género entre sus agrupaciones; el tramo rayado es lo que falta asignar.">
         {resumen.cobertura.length === 0 ? (
           <EmptyState titulo="No hay equivalencias activas en el árbol." />
@@ -84,7 +105,7 @@ export function MapaTab({
           lineas={resumen.sinAgrupacion.lineas}
           accion={resumen.sinAgrupacion.total > 0 ? { texto: "Ir a Faltantes", onClick: onIrAFaltantes } : undefined}
         />
-        {resumen.tarjetas.map((t) => (
+        {tarjetas.map((t) => (
           <Tarjeta
             key={t.agrupacion.id}
             titulo={t.agrupacion.nombre}
@@ -96,12 +117,22 @@ export function MapaTab({
             totalGlobal={resumen.total}
             porGenero={t.porGenero}
             lineas={t.lineas}
-            accion={{ texto: "Asignar", onClick: () => onAsignar(t.agrupacion.id) }}
+            generos={t.agrupacion.generos ?? []}
+            accion={
+              (t.agrupacion.generos?.length ?? 0) > 0
+                ? { texto: "Asignar", onClick: () => onAsignar(t.agrupacion.id) }
+                : {
+                    texto: "Asignar",
+                    onClick: () => onAsignar(t.agrupacion.id),
+                    deshabilitada: SIN_GENERO_TITLE,
+                    extra: { texto: "Asignar géneros", onClick: onIrAAgrupaciones },
+                  }
+            }
           />
         ))}
       </div>
 
-      {resumen.tarjetas.length === 0 && (
+      {tarjetas.length === 0 && (
         <EmptyState titulo="Todavía no hay agrupaciones" detalle="Créalas en la pestaña Agrupaciones o súbelas con un archivo en Importar; aquí verás una tarjeta por cada una." />
       )}
     </div>
@@ -168,6 +199,7 @@ function Tarjeta({
   totalGlobal,
   porGenero,
   lineas,
+  generos,
   accion,
 }: {
   titulo: string;
@@ -179,7 +211,9 @@ function Tarjeta({
   totalGlobal: number;
   porGenero: { id: string; nombre: string; conteo: number }[];
   lineas: LineaMapa[];
-  accion?: { texto: string; onClick: () => void };
+  /** Géneros de la agrupación (solo las tarjetas de agrupación; vacío = "Sin género"). */
+  generos?: readonly { id: string; nombre: string }[];
+  accion?: { texto: string; onClick: () => void; /** Motivo por el que no se puede usar (queda deshabilitada). */ deshabilitada?: string; extra?: { texto: string; onClick: () => void } };
 }) {
   const [abierta, setAbierta] = useState(false);
   const [busqueda, setBusqueda] = useState("");
@@ -230,6 +264,20 @@ function Tarjeta({
             {inactiva && <Badge tono="alerta">Inactiva</Badge>}
           </div>
           {codigo && <code className="font-mono text-xs text-tinta-suave">{codigo}</code>}
+          {generos &&
+            (generos.length > 0 ? (
+              <ul className="mt-1 flex flex-wrap gap-1" aria-label="Géneros de la agrupación">
+                {generos.map((g) => (
+                  <li key={g.id}>
+                    <Badge>{g.nombre}</Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 whitespace-nowrap" title={SIN_GENERO_TITLE}>
+                <Badge tono="alerta">Sin género</Badge>
+              </p>
+            ))}
           {descripcion && <p className="mt-1 text-xs text-tinta-suave">{descripcion}</p>}
         </header>
 
@@ -343,10 +391,15 @@ function Tarjeta({
       </div>
 
       {accion && (
-        <footer className="border-t border-borde px-4 py-2">
-          <Button variante="secundario" tamano="sm" onClick={accion.onClick}>
+        <footer className="flex flex-wrap items-center gap-2 border-t border-borde px-4 py-2">
+          <Button variante="secundario" tamano="sm" onClick={accion.onClick} disabled={accion.deshabilitada !== undefined} title={accion.deshabilitada}>
             {accion.texto}
           </Button>
+          {accion.extra && (
+            <Button tamano="sm" onClick={accion.extra.onClick}>
+              {accion.extra.texto}
+            </Button>
+          )}
         </footer>
       )}
     </section>

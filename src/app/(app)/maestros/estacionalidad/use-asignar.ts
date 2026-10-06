@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api-client";
 import { formatearNumero, mensajeError, plural } from "@/lib/formato";
+import { avisoNoPermitidas } from "@/lib/estacionalidad/generos";
 import type { AsignarCuerpo, AsignarRespuesta, EquivalenciaPlana } from "@/lib/estacionalidad/tipos-api";
 
 /** Límite del esquema `asignarSchema`; una selección mayor se envía en tandas. */
@@ -19,6 +20,8 @@ export function useAsignar(onCambio: () => Promise<void>) {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  /** Aviso en tono alerta: equivalencias que no se asignaron porque la agrupación no incluye su género. */
+  const [advertencia, setAdvertencia] = useState<string | null>(null);
 
   /** Devuelve `true` si se aplicó (para que quien llama limpie la selección). */
   async function asignar(destino: DestinoAsignacion, filas: EquivalenciaPlana[]): Promise<boolean> {
@@ -35,15 +38,17 @@ export function useAsignar(onCambio: () => Promise<void>) {
     setOcupado(true);
     setError(null);
     setAviso(null);
+    setAdvertencia(null);
     try {
       const ids = Array.from(new Set(filas.map((f) => f.id)));
-      const total: AsignarRespuesta = { asignadas: 0, sin_cambio: 0, no_encontradas: [] };
+      const total: AsignarRespuesta = { asignadas: 0, sin_cambio: 0, no_encontradas: [], no_permitidas: [] };
       for (let i = 0; i < ids.length; i += MAX_IDS_POR_LLAMADA) {
         const cuerpo: AsignarCuerpo = { agrupacion_id: destino?.id ?? null, equivalencia_ids: ids.slice(i, i + MAX_IDS_POR_LLAMADA) };
         const r = await api.post<AsignarRespuesta>("/api/estacionalidad/asignar", cuerpo);
         total.asignadas += r.asignadas;
         total.sin_cambio += r.sin_cambio;
         total.no_encontradas.push(...r.no_encontradas);
+        total.no_permitidas.push(...(r.no_permitidas ?? []));
       }
       const partes = [
         destino
@@ -57,6 +62,7 @@ export function useAsignar(onCambio: () => Promise<void>) {
         );
       }
       setAviso(`${partes.join(" · ")}.`);
+      setAdvertencia(avisoNoPermitidas(total.no_permitidas));
       await onCambio();
       return true;
     } catch (e) {
@@ -67,5 +73,5 @@ export function useAsignar(onCambio: () => Promise<void>) {
     }
   }
 
-  return { ocupado, error, setError, aviso, setAviso, asignar };
+  return { ocupado, error, setError, aviso, setAviso, advertencia, setAdvertencia, asignar };
 }

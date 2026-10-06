@@ -11,7 +11,15 @@ export type { ModoImportacion, Temporada };
 
 // ─── Catálogo (GET /api/agrupaciones-estacionalidad) ───
 
-/** Fila de `agrupaciones_estacionalidad` en el listado, con el conteo de equivalencias asignadas (activas o no). */
+/** Un género de una agrupación (`agrupacion_estacionalidad_genero`), tal como viaja en el catálogo. */
+export type GeneroDeAgrupacion = { id: string; codigo: string; nombre: string };
+
+/**
+ * Fila de `agrupaciones_estacionalidad` en el listado y en las respuestas de
+ * POST/PATCH, con el conteo de equivalencias asignadas (activas o no) y sus
+ * géneros. Una agrupación pertenece a uno o más géneros; las heredadas de antes
+ * de ese cambio pueden tener cero ("sin género") y no aceptan asignaciones.
+ */
 export type AgrupacionEstacionalidadFila = {
   id: string;
   codigo: string;
@@ -26,18 +34,29 @@ export type AgrupacionEstacionalidadFila = {
   equivalencias: number;
   /** Solo las activas (lo que pasa a faltante al desactivar). */
   equivalencias_activas: number;
+  /** Ids de sus géneros, en el orden de `generos` (`orden, nombre` del género). */
+  genero_ids: string[];
+  /** Sus géneros ordenados por `orden, nombre` del género. */
+  generos: GeneroDeAgrupacion[];
 };
 
-/** La agrupación tal como viaja en los catálogos de la lista plana. */
+/** La agrupación tal como viaja en los catálogos de la lista plana (con `genero_ids`). */
 export type AgrupacionEstacionalidadCatalogo = Pick<
   AgrupacionEstacionalidadFila,
-  "id" | "codigo" | "nombre" | "orden" | "activo"
+  "id" | "codigo" | "nombre" | "orden" | "activo" | "genero_ids"
 >;
 
 /** La agrupación embebida en cada equivalencia de la lista plana. */
 export type AgrupacionEstacionalidadEmbebida = Pick<AgrupacionEstacionalidadFila, "id" | "codigo" | "nombre" | "activo">;
 
 // ─── Asignación masiva (POST /api/estacionalidad/asignar) ───
+
+/** Equivalencia que no se asignó porque su género no está entre los de la agrupación destino. */
+export type AsignacionNoPermitida = {
+  id: string;
+  /** Nombre del género de la equivalencia (el de su nodo). */
+  genero: string;
+};
 
 export type ResultadoAsignacion = {
   /** Equivalencias cuya agrupación cambió (incluye quitarla cuando `agrupacion_id` es `null`). */
@@ -46,6 +65,11 @@ export type ResultadoAsignacion = {
   sin_cambio: number;
   /** Ids enviados que no existen; no abortan la operación. */
   no_encontradas: string[];
+  /**
+   * Equivalencias cuyo género no está en la agrupación destino: no se asignan y
+   * no abortan la operación. Siempre presente (`[]` si no hay).
+   */
+  no_permitidas: AsignacionNoPermitida[];
 };
 
 // ─── Lista plana y faltantes (GET /api/estacionalidad/equivalencias · /faltantes) ───
@@ -113,7 +137,10 @@ export type FilaImportacionEstacionalidad = {
 
 /**
  * Por qué una fila del archivo no se procesa: los ocho de M1 más los propios
- * de M3. Solo `duplicada_en_archivo` es informativa; el resto son errores.
+ * de M3 (18 en total). Solo `duplicada_en_archivo` es informativa; el resto
+ * son errores. `genero_no_incluido` y `agrupacion_sin_genero` nacen del cambio
+ * "agrupaciones por género": el importador nunca amplía los géneros de una
+ * agrupación que ya existe.
  */
 export type MotivoOmisionEstacionalidad =
   | "linea_vacia"
@@ -131,7 +158,9 @@ export type MotivoOmisionEstacionalidad =
   | "equivalencia_inactiva"
   | "agrupacion_vacia"
   | "agrupacion_inactiva"
-  | "contradictoria_en_archivo";
+  | "contradictoria_en_archivo"
+  | "genero_no_incluido"
+  | "agrupacion_sin_genero";
 
 /**
  * Fila omitida con su contenido normalizado (los cinco campos) para corregir
@@ -140,7 +169,11 @@ export type MotivoOmisionEstacionalidad =
 export type FilaOmitidaEstacionalidad = FilaImportacionEstacionalidad & {
   fila: number;
   motivo: MotivoOmisionEstacionalidad;
-  /** El valor que no se reconoció o, en `contradictoria_en_archivo`, la agrupación de la primera aparición. */
+  /**
+   * El valor que no se reconoció; en `contradictoria_en_archivo`, la agrupación
+   * de la primera aparición; en `genero_no_incluido`, el nombre del género de la
+   * fila; en `agrupacion_sin_genero`, el nombre de la agrupación.
+   */
   detalle?: string;
   /** En `duplicada_en_archivo` y `contradictoria_en_archivo`: la primera aparición de la misma equivalencia. */
   fila_original?: number;
@@ -156,8 +189,12 @@ export type Reasignacion = {
   a: string;
 };
 
-/** Agrupación que el importador va a crear, con cuántas filas procesadas del archivo apuntan a ella. */
-export type AgrupacionAImportar = { nombre: string; codigo: string; equivalencias: number };
+/**
+ * Agrupación que el importador va a crear, con cuántas filas procesadas del
+ * archivo apuntan a ella y los géneros (nombres) de esas filas, que serán los
+ * suyos al crearla (distintos, al menos uno).
+ */
+export type AgrupacionAImportar = { nombre: string; codigo: string; equivalencias: number; generos: string[] };
 
 export type ConteosAsignar = { nuevas: number; reasignadas: number; sin_cambio: number };
 

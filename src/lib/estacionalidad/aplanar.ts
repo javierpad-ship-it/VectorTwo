@@ -21,7 +21,11 @@ import type { EquivalenciaPlana, ReporteEstacionalidad, ResumenEstacionalidad } 
  * y `GET /api/estacionalidad/faltantes`.
  */
 
-export type AgrupacionPlanaEntrada = Pick<Tables<"agrupaciones_estacionalidad">, "id" | "codigo" | "nombre" | "orden" | "activo">;
+/** La agrupación con los ids de sus géneros (`anexarGeneroIds` los pone desde los vínculos). */
+export type AgrupacionPlanaEntrada = Pick<
+  Tables<"agrupaciones_estacionalidad">,
+  "id" | "codigo" | "nombre" | "orden" | "activo"
+> & { genero_ids: string[] };
 
 /** Las cinco tablas del árbol, planas (el `EstadoArbol` de `cargarEstadoArbol` encaja aquí). */
 export type EstadoAplanar = {
@@ -52,6 +56,10 @@ export function aplanarEquivalencias(
   const mundosOrdenados = [...estado.mundos].sort(compararOrdenNombre);
   const lineasOrdenadas = [...estado.lineas].sort((a, b) => compararNombre(a.nombre, b.nombre));
   const agrupacionesOrdenadas = [...agrupaciones].sort(compararOrdenNombre);
+  // `genero_ids` de cada agrupación en el mismo orden que el catálogo de géneros.
+  const posicionGenero = new Map(generosOrdenados.map((g, i) => [g.id, i]));
+  const generoIdsOrdenados = (ids: string[]) =>
+    [...ids].sort((a, b) => (posicionGenero.get(a) ?? Infinity) - (posicionGenero.get(b) ?? Infinity));
 
   const lineasPorId = new Map(estado.lineas.map((l) => [l.id, l]));
   const agrupacionPorId = new Map(agrupaciones.map((a) => [a.id, a]));
@@ -149,6 +157,7 @@ export function aplanarEquivalencias(
       nombre: a.nombre,
       orden: a.orden,
       activo: a.activo,
+      genero_ids: generoIdsOrdenados(a.genero_ids),
     })),
     resumen,
   };

@@ -1,16 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { CatalogoPlanoEstacionalidad, EquivalenciaPlana } from "@/lib/estacionalidad/tipos-api";
+import type { AgrupacionEstacionalidadFila, EquivalenciaPlana } from "@/lib/estacionalidad/tipos-api";
+import {
+  agrupacionesDestino,
+  agrupacionesParaFiltro,
+  agrupacionesSinGenero,
+  explicarSinDestinos,
+  generosDeSeleccion,
+} from "@/lib/estacionalidad/generos";
 import { formatearNumero, plural } from "@/lib/formato";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/alert";
 import { Select } from "@/components/ui/form";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import { BadgeAgrupacion, useMapaColores } from "@/components/estacionalidad/badge-agrupacion";
 import { LeyendaAgrupaciones } from "@/components/estacionalidad/leyenda-agrupaciones";
-import { estadoEquivalencia, ordenarAgrupaciones, type Catalogos } from "./comunes";
+import { estadoEquivalencia, type Catalogos } from "./comunes";
 import type { DestinoAsignacion } from "./use-asignar";
 
 /**
@@ -29,9 +37,11 @@ export function TablaSeleccion({
   vacio,
   puedeEditar,
   agrupaciones,
+  generoId,
   verbo,
   ocupado,
   onAsignar,
+  onIrAAgrupaciones,
 }: {
   /** Filas visibles (ya filtradas). */
   filas: EquivalenciaPlana[];
@@ -39,18 +49,29 @@ export function TablaSeleccion({
   cargando: boolean;
   vacio: string;
   puedeEditar: boolean;
-  /** Catálogo completo; en el `Select` de destino solo salen las activas, por `orden, nombre`. */
-  agrupaciones: CatalogoPlanoEstacionalidad[];
+  /**
+   * Catálogo completo. El `Select` de destino y la leyenda solo ofrecen las
+   * activas con género que incluyen el género filtrado (`generoId`) y los de
+   * las filas seleccionadas, por nombre.
+   */
+  agrupaciones: AgrupacionEstacionalidadFila[];
+  /** Género del filtro de la pantalla (`""` = todos): es quien define qué agrupaciones aplican. */
+  generoId: string;
   /** "Asignar a" en Por árbol y Faltantes; "Mover a" en Por agrupación. */
   verbo: "Asignar a" | "Mover a";
   ocupado: boolean;
   /** Devuelve `true` si se aplicó: la selección se limpia. */
   onAsignar: (destino: DestinoAsignacion, filas: EquivalenciaPlana[]) => Promise<boolean>;
+  /** Lleva a la pestaña Agrupaciones (para añadir géneros). */
+  onIrAAgrupaciones: () => void;
 }) {
   const [seleccion, setSeleccion] = useState<Set<string>>(() => new Set());
   const [destinoId, setDestinoId] = useState("");
 
-  const activas = useMemo(() => ordenarAgrupaciones(agrupaciones.filter((a) => a.activo)), [agrupaciones]);
+  // Las que aplican al filtro de género (activas, con género, por nombre): son
+  // la leyenda, aunque tengan 0 filas, porque son destinos válidos.
+  const activas = useMemo(() => agrupacionesParaFiltro(agrupaciones, generoId), [agrupaciones, generoId]);
+  const sinGenero = useMemo(() => agrupacionesSinGenero(agrupaciones), [agrupaciones]);
   const colores = useMapaColores(agrupaciones);
   // Leyenda de colores sobre la tabla: las activas (las del `Select`) con
   // cuántas de las filas visibles tienen cada una, y el chip de faltantes.
@@ -65,7 +86,16 @@ export function TablaSeleccion({
   }, [filas, activas]);
   const seleccionadas = useMemo(() => filas.filter((f) => seleccion.has(f.id)), [filas, seleccion]);
   const todasSeleccionadas = filas.length > 0 && seleccionadas.length === filas.length;
-  const destino = activas.find((a) => a.id === destinoId) ?? null;
+  // Destinos = filtro de género ∩ géneros de la selección. El destino elegido
+  // se deriva: si deja de aplicar (cambió el filtro o la selección), el
+  // `Select` vuelve a "— Elegir —" sin efectos.
+  const generosSeleccion = useMemo(() => generosDeSeleccion(filas, seleccion), [filas, seleccion]);
+  const destinos = useMemo(() => agrupacionesDestino(agrupaciones, generoId, generosSeleccion), [agrupaciones, generoId, generosSeleccion]);
+  const destino = destinos.find((a) => a.id === destinoId) ?? null;
+  const sinDestinos = useMemo(() => {
+    const nombres = new Map(catalogos.generos.map((g) => [g.id, g.nombre]));
+    return explicarSinDestinos(agrupaciones, generoId, generosSeleccion, (id) => nombres.get(id) ?? "género desconocido");
+  }, [agrupaciones, generoId, generosSeleccion, catalogos.generos]);
 
   function alternar(id: string, v: boolean) {
     setSeleccion((s) => {
@@ -131,6 +161,23 @@ export function TablaSeleccion({
       {agrupaciones.length > 0 && (
         <LeyendaAgrupaciones items={leyenda.items} colores={colores} sinAgrupacion={leyenda.sin} etiqueta="Colores de las agrupaciones (conteo sobre las filas visibles)" />
       )}
+      {generoId === "" && sinGenero.length > 0 && (
+        <Alert>
+          {plural(sinGenero.length, "agrupación activa no tiene género", "agrupaciones activas no tienen género")} ({sinGenero.map((a) => a.nombre).join(", ")}) y no
+          {sinGenero.length === 1 ? " acepta" : " aceptan"} asignaciones hasta que tengan al menos uno.{" "}
+          <button type="button" onClick={onIrAAgrupaciones} className="font-medium underline underline-offset-2">
+            Asignar géneros
+          </button>
+        </Alert>
+      )}
+      {puedeEditar && sinDestinos && (
+        <Alert tono="info">
+          {sinDestinos.texto}{" "}
+          <button type="button" onClick={onIrAAgrupaciones} className="font-medium underline underline-offset-2">
+            Ir a Agrupaciones
+          </button>
+        </Alert>
+      )}
       {puedeEditar && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-borde bg-fondo px-3 py-2 text-sm">
           <label className="inline-flex items-center gap-2">
@@ -153,20 +200,20 @@ export function TablaSeleccion({
               <span className="inline-flex flex-wrap items-center gap-2">
                 <span className="text-tinta-suave">{verbo}</span>
                 <Select
-                  value={destinoId}
+                  value={destino?.id ?? ""}
                   onChange={(e) => setDestinoId(e.target.value)}
-                  disabled={ocupado || activas.length === 0}
+                  disabled={ocupado || destinos.length === 0}
                   className="h-8 w-56"
                   aria-label="Agrupación de destino"
                 >
-                  <option value="">{activas.length === 0 ? "No hay agrupaciones activas" : "Elige una agrupación…"}</option>
-                  {activas.map((a) => (
+                  <option value="">{destinos.length === 0 ? "— Sin destinos —" : "— Elegir —"}</option>
+                  {destinos.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.nombre}
                     </option>
                   ))}
                 </Select>
-                <Button tamano="sm" disabled={ocupado || !destino} onClick={() => destino && ejecutar({ id: destino.id, nombre: destino.nombre })}>
+                <Button tamano="sm" disabled={ocupado || !destino} title={sinDestinos?.texto} onClick={() => destino && ejecutar({ id: destino.id, nombre: destino.nombre })}>
                   {ocupado ? "Guardando…" : verbo === "Mover a" ? "Mover" : "Asignar"}
                 </Button>
               </span>

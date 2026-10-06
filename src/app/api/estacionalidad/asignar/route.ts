@@ -3,23 +3,26 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requirePlanner } from "@/lib/auth/guard";
 import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
-import { enTandas } from "@/lib/arbol/importar";
+import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
+import { leerDestino, leerGeneros } from "@/lib/estacionalidad/agrupaciones";
 import { asignarSchema } from "@/lib/estacionalidad/esquemas";
 import {
-  motivoRechazoAsignacion,
   planificarAsignacion,
-  statusRechazoAsignacion,
+  rechazoDestinoAsignacion,
   type EquivalenciaAsignable,
 } from "@/lib/estacionalidad/reglas";
 import type { ResultadoAsignacion } from "@/lib/estacionalidad/tipos";
 
 /**
  * Asignación masiva (`requirePlanner`): pone `agrupacion_id` (o `null` para
- * quitarla) en todas las `equivalencia_ids`. `404` si la agrupación no existe,
- * `409` si está inactiva. Los ids de equivalencia que no existan van en
- * `no_encontradas` y no abortan; se asigna también a equivalencias inactivas.
- * Sin transacción: si una tanda falla, `500`, y repetir la misma asignación
- * completa el resto (es idempotente).
+ * quitarla) en todas las `equivalencia_ids`. Rechaza TODA la petición si el
+ * destino no sirve: `404` si la agrupación no existe, `409` si está inactiva o
+ * no tiene géneros. Lo que no es del destino no aborta: los ids que no existan
+ * van en `no_encontradas` y las equivalencias cuyo género la agrupación no
+ * incluye van en `no_permitidas` (`{ id, genero }`, género por nombre) y no se
+ * asignan. Se asigna también a equivalencias inactivas. Quitar no comprueba
+ * géneros. Sin transacción: si una tanda falla, `500`, y repetir la misma
+ * asignación completa el resto (es idempotente).
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -30,32 +33,42 @@ export async function POST(request: NextRequest) {
 
   const db = supabaseAdmin();
 
+  let destino: Awaited<ReturnType<typeof leerDestino>>["data"] = null;
   if (datos.agrupacion_id !== null) {
-    const { data: agrupacion, error: errAgrupacion } = await db
-      .from("agrupaciones_estacionalidad")
-      .select("id, nombre, activo")
-      .eq("id", datos.agrupacion_id)
-      .maybeSingle();
-    if (errAgrupacion) return traducirErrorDb(errAgrupacion, "asignar: buscar agrupación");
-    const motivo = motivoRechazoAsignacion(agrupacion, false);
-    if (motivo) return error(motivo, statusRechazoAsignacion(motivo));
+    const leido = await leerDestino(db, datos.agrupacion_id);
+    if (leido.error) return traducirErrorDb(leido.error, "asignar: buscar agrupación");
+    destino = leido.data;
   }
+  const rechazo = rechazoDestinoAsignacion(destino, datos.agrupacion_id === null);
+  if (rechazo) return error(rechazo.mensaje, rechazo.status);
+
+  const generos = await leerGeneros(db);
+  if (generos.error) return traducirErrorDb(generos.error, "asignar: leer géneros");
+  const nombreGenero = new Map(generos.data.map((g) => [g.id, g.nombre]));
 
   const ids = [...new Set(datos.equivalencia_ids)];
   const encontradas: EquivalenciaAsignable[] = [];
-  for (const tanda of enTandas(ids)) {
+  for (const tanda of enTandas(ids, TANDA_IN)) {
     const { data, error: err } = await db
       .from("equivalencias")
-      .select("id, agrupacion_estacionalidad_id")
+      .select("id, agrupacion_estacionalidad_id, genero_mundo_linea(genero_id)")
       .in("id", tanda);
     if (err) return traducirErrorDb(err, "asignar: leer equivalencias");
-    encontradas.push(...(data ?? []));
+    for (const e of data ?? []) {
+      const generoId = e.genero_mundo_linea?.genero_id ?? "";
+      encontradas.push({
+        id: e.id,
+        agrupacion_estacionalidad_id: e.agrupacion_estacionalidad_id,
+        genero_id: generoId,
+        genero_nombre: nombreGenero.get(generoId) ?? "",
+      });
+    }
   }
 
-  const plan = planificarAsignacion(ids, encontradas, datos.agrupacion_id);
+  const plan = planificarAsignacion(ids, encontradas, destino);
 
   let asignadas = 0;
-  for (const tanda of enTandas(plan.a_asignar)) {
+  for (const tanda of enTandas(plan.a_asignar, TANDA_IN)) {
     const { data, error: err } = await db
       .from("equivalencias")
       .update({ agrupacion_estacionalidad_id: datos.agrupacion_id })
@@ -69,6 +82,7 @@ export async function POST(request: NextRequest) {
     asignadas,
     sin_cambio: plan.sin_cambio,
     no_encontradas: plan.no_encontradas,
+    no_permitidas: plan.no_permitidas,
   };
   return ok(resultado);
 }

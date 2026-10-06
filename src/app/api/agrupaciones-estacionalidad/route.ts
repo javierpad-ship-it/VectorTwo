@@ -1,17 +1,21 @@
 import type { NextRequest } from "next/server";
-import { crearEnCatalogo, listarCatalogo } from "@/lib/api/catalogo";
-import { catalogoAgrupacionesEstacionalidad } from "@/lib/estacionalidad/catalogos";
+import { crearAgrupacion, listarAgrupaciones } from "@/lib/estacionalidad/agrupaciones";
 
 /**
  * Agrupaciones de estacionalidad por `orden, nombre` (`requireUser`;
- * `?incluir_inactivos=1`), cada fila con `equivalencias` (las asignadas,
- * activas o no).
+ * `?incluir_inactivos=1`), cada fila con `equivalencias` y
+ * `equivalencias_activas` (las asignadas), `genero_ids` y `generos`
+ * (`{ id, codigo, nombre }`, por `orden, nombre` del género).
  */
 export async function GET(request: NextRequest) {
-  return listarCatalogo(catalogoAgrupacionesEstacionalidad, request);
+  return listarAgrupaciones(request);
 }
 
-/** Crea una agrupación (`requirePlanner`), 201; `409` nombre o código repetido. */
+/**
+ * Crea una agrupación (`requirePlanner`), 201, con `genero_ids` obligatorio
+ * (mínimo 1). `404` género inexistente · `409` género inactivo, nombre o
+ * código repetido.
+ */
 export async function POST(request: NextRequest) {
-  return crearEnCatalogo(catalogoAgrupacionesEstacionalidad, request);
+  return crearAgrupacion(request);
 }

@@ -12,9 +12,11 @@ import {
   resolverCatalogo,
   type EquivalenciaEstado,
   type EstadoImportacion,
+  type GeneroEstado,
 } from "@/lib/arbol/importar";
-import { nodoVigente } from "@/lib/arbol/armar-arbol";
+import { compararOrdenNombre, nodoVigente } from "@/lib/arbol/armar-arbol";
 import { armarRuta } from "./aplanar";
+import { generoPermitido } from "./reglas";
 import type {
   AgrupacionAImportar,
   ConteosAsignar,
@@ -37,23 +39,35 @@ import type {
  * asigna equivalencias; NUNCA crea líneas, nodos ni equivalencias, nunca
  * cambia `activo` de nada y nunca quita una agrupación. El archivo manda en
  * las reasignaciones y el reporte las muestra una por una.
+ *
+ * Géneros de la agrupación: una agrupación NUEVA se crea con los géneros
+ * distintos de las filas procesadas que apuntan a ella. Una agrupación
+ * EXISTENTE nunca amplía sus géneros: la fila cuyo género no incluye se omite
+ * con `genero_no_incluido` y, si no tiene ninguno, con `agrupacion_sin_genero`.
  */
 
 export { enTandas, TANDA } from "@/lib/arbol/importar";
 
 export const REASIGNACIONES_MAX = 500;
 
-export type AgrupacionEstado = Pick<Tables<"agrupaciones_estacionalidad">, "id" | "codigo" | "nombre" | "activo">;
+export type AgrupacionEstado = Pick<Tables<"agrupaciones_estacionalidad">, "id" | "codigo" | "nombre" | "activo"> & {
+  /** Géneros de la agrupación (`agrupacion_estacionalidad_genero`); vacío en las heredadas "sin género". */
+  genero_ids: string[];
+};
+/** Género del estado; `orden` (si viene) ordena los nombres del reporte. */
+export type GeneroEstadoEstacionalidad = GeneroEstado & { orden?: number };
 export type EquivalenciaEstadoEstacionalidad = EquivalenciaEstado &
   Pick<Tables<"equivalencias">, "agrupacion_estacionalidad_id">;
 
 /** El estado del árbol (activo e inactivo) más las agrupaciones; `cargarEstadoEstacionalidad` lo lee de la base. */
-export type EstadoImportacionEstacionalidad = Omit<EstadoImportacion, "equivalencias"> & {
+export type EstadoImportacionEstacionalidad = Omit<EstadoImportacion, "equivalencias" | "generos"> & {
+  generos: GeneroEstadoEstacionalidad[];
   equivalencias: EquivalenciaEstadoEstacionalidad[];
   agrupaciones: AgrupacionEstado[];
 };
 
-export type AgrupacionNueva = { nombre: string; codigo: string };
+/** Agrupación a crear con los ids de sus géneros (≥ 1 por construcción), en el orden del catálogo de géneros. */
+export type AgrupacionNueva = { nombre: string; codigo: string; genero_ids: string[] };
 
 /**
  * Una asignación a escribir. El destino se referencia por nombre normalizado
@@ -103,7 +117,6 @@ export function planificarImportacionEstacionalidad(
   const asignar: ConteosAsignar = { nuevas: 0, reasignadas: 0, sin_cambio: 0 };
   const omitidas: FilaOmitidaEstacionalidad[] = [];
   const reasignaciones: Reasignacion[] = [];
-  const agrupacionesNuevas: AgrupacionNueva[] = [];
   const asignaciones: AsignacionPlan[] = [];
 
   // Índices del estado actual.
@@ -119,7 +132,7 @@ export function planificarImportacionEstacionalidad(
   const codigosAgrupacion = new Set(estado.agrupaciones.map((a) => a.codigo.toUpperCase()));
 
   // Lo visto dentro del archivo.
-  const nuevasPorNombre = new Map<string, AgrupacionAImportar>();
+  const nuevasPorNombre = new Map<string, { nombre: string; codigo: string; equivalencias: number; generos: Set<string> }>();
   const vistas = new Map<string, { fila: number; agrupacion: string }>();
 
   let procesadas = 0;
@@ -194,6 +207,9 @@ export function planificarImportacionEstacionalidad(
     // segunda recibe `_2`, regla 14).
     const existente = buscarAgrupacion(estado.agrupaciones, agrupacionTxt);
     if (existente && !existente.activo) return omitir("agrupacion_inactiva", { detalle: existente.nombre });
+    // Género de la agrupación existente: nunca se amplía desde el importador.
+    if (existente && existente.genero_ids.length === 0) return omitir("agrupacion_sin_genero", { detalle: existente.nombre });
+    if (existente && !generoPermitido(existente, genero.id)) return omitir("genero_no_incluido", { detalle: genero.nombre });
     const destinoNombre = existente ? normalizarNombre(existente.nombre) : agrupacionTxt;
 
     // 6. Duplicados dentro del archivo: gana la primera aparición. Va antes de
@@ -213,11 +229,12 @@ export function planificarImportacionEstacionalidad(
       if (!nueva) {
         const codigo = codigoUnico(aCodigo(agrupacionTxt), codigosAgrupacion, "AGRUPACION");
         codigosAgrupacion.add(codigo);
-        nueva = { nombre: agrupacionTxt, codigo, equivalencias: 0 };
+        nueva = { nombre: agrupacionTxt, codigo, equivalencias: 0, generos: new Set() };
         nuevasPorNombre.set(agrupacionTxt, nueva);
-        agrupacionesNuevas.push({ nombre: agrupacionTxt, codigo });
       }
       nueva.equivalencias += 1;
+      // Solo las filas procesadas aportan género: las duplicadas y contradictorias ya salieron arriba.
+      nueva.generos.add(genero.id);
     }
 
     // 7. Comparar con la asignación actual. Nunca se quita una agrupación.
@@ -249,13 +266,31 @@ export function planificarImportacionEstacionalidad(
     });
   });
 
+  // Géneros de cada agrupación nueva, ya completos, en el orden del catálogo de géneros (`orden, nombre`).
+  const generosOrdenados = [...estado.generos].sort((a, b) =>
+    compararOrdenNombre({ orden: a.orden ?? 0, nombre: a.nombre }, { orden: b.orden ?? 0, nombre: b.nombre })
+  );
+  const generosDe = (ids: Set<string>) => generosOrdenados.filter((g) => ids.has(g.id));
+  const nuevas = [...nuevasPorNombre.values()];
+  const agrupacionesNuevas: AgrupacionNueva[] = nuevas.map((n) => ({
+    nombre: n.nombre,
+    codigo: n.codigo,
+    genero_ids: generosDe(n.generos).map((g) => g.id),
+  }));
+  const muestra: AgrupacionAImportar[] = nuevas.map((n) => ({
+    nombre: n.nombre,
+    codigo: n.codigo,
+    equivalencias: n.equivalencias,
+    generos: generosDe(n.generos).map((g) => g.nombre),
+  }));
+
   const reporte: ReporteImportacionEstacionalidadBase = {
     totales: { recibidas: filas.length, procesadas, omitidas: omitidas.length },
     crear: { agrupaciones: agrupacionesNuevas.length },
     asignar,
     omitidas,
     reasignaciones,
-    muestra: { agrupaciones: [...nuevasPorNombre.values()] },
+    muestra: { agrupaciones: muestra },
   };
   return { reporte, agrupaciones_nuevas: agrupacionesNuevas, asignaciones };
 }
@@ -263,8 +298,8 @@ export function planificarImportacionEstacionalidad(
 /**
  * Aplica el plan en memoria con la misma semántica que el handler: las
  * agrupaciones nuevas se insertan con `on conflict do nothing` (si ya existe
- * una con ese nombre, se reutiliza) y cada asignación escribe la agrupación
- * destino en su equivalencia. Devuelve un estado nuevo; no muta el recibido.
+ * una con ese nombre, se reutiliza y no se tocan sus géneros) y cada asignación
+ * escribe la agrupación destino en su equivalencia. Devuelve un estado nuevo; no muta el recibido.
  * Los ids generados son deterministas.
  */
 export function aplicarPlanEstacionalidad(
@@ -275,7 +310,13 @@ export function aplicarPlanEstacionalidad(
   const porNombre = new Map(agrupaciones.map((a) => [normalizarNombre(a.nombre), a]));
   plan.agrupaciones_nuevas.forEach((a, i) => {
     if (porNombre.has(a.nombre)) return;
-    const nueva: AgrupacionEstado = { id: `plan-agrupacion-${i + 1}`, nombre: a.nombre, codigo: a.codigo, activo: true };
+    const nueva: AgrupacionEstado = {
+      id: `plan-agrupacion-${i + 1}`,
+      nombre: a.nombre,
+      codigo: a.codigo,
+      activo: true,
+      genero_ids: [...a.genero_ids],
+    };
     agrupaciones.push(nueva);
     porNombre.set(a.nombre, nueva);
   });

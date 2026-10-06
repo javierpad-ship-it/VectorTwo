@@ -5,7 +5,8 @@ import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { editarEquivalenciaSchema } from "@/lib/arbol/esquemas";
 import { motivoRechazoEquivalencia } from "@/lib/arbol/reglas";
-import { motivoRechazoAsignacion, statusRechazoAsignacion } from "@/lib/estacionalidad/reglas";
+import { leerDestino, leerGeneros } from "@/lib/estacionalidad/agrupaciones";
+import { rechazoAsignacion } from "@/lib/estacionalidad/reglas";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,9 +17,11 @@ const NO_ENCONTRADA = "Equivalencia no encontrada.";
  * estacionalidad (`requirePlanner`). Sobre la genérica solo se admiten
  * `activo` y `agrupacion_estacionalidad_id` (`409` si intentan renombrarla).
  * Si el cuerpo trae `agrupacion_estacionalidad_id` no nulo, la agrupación
- * debe existir (`404`) y estar activa (`409`); `null` la quita. Se comprueba
- * antes del `update` para que la violación de FK nunca llegue a la base.
- * Devuelve la fila completa (con `agrupacion_estacionalidad_id`).
+ * debe existir (`404`), estar activa (`409`), tener géneros (`409`) e incluir
+ * el género del nodo de la equivalencia (`409`); `null` la quita sin
+ * comprobar nada. Se comprueba antes del `update` para que la violación de FK
+ * nunca llegue a la base. Devuelve la fila completa (con
+ * `agrupacion_estacionalidad_id`).
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
@@ -48,14 +51,23 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   if (agrupacion_estacionalidad_id !== undefined && agrupacion_estacionalidad_id !== null) {
-    const { data: agrupacion, error: errAgrupacion } = await db
-      .from("agrupaciones_estacionalidad")
-      .select("id, nombre, activo")
-      .eq("id", agrupacion_estacionalidad_id)
+    const destino = await leerDestino(db, agrupacion_estacionalidad_id);
+    if (destino.error) return traducirErrorDb(destino.error, "buscar agrupación de estacionalidad");
+
+    // Género del nodo de la equivalencia: lo pide la regla "solo a agrupaciones que incluyan su género".
+    const { data: nodo, error: errNodo } = await db
+      .from("genero_mundo_linea")
+      .select("genero_id")
+      .eq("id", actual.genero_mundo_linea_id)
       .maybeSingle();
-    if (errAgrupacion) return traducirErrorDb(errAgrupacion, "buscar agrupación de estacionalidad");
-    const motivo = motivoRechazoAsignacion(agrupacion, false);
-    if (motivo) return error(motivo, statusRechazoAsignacion(motivo));
+    if (errNodo) return traducirErrorDb(errNodo, "buscar nodo de la equivalencia");
+    const generos = await leerGeneros(db);
+    if (generos.error) return traducirErrorDb(generos.error, "buscar género de la equivalencia");
+    const generoId = nodo?.genero_id ?? "";
+    const genero = { id: generoId, nombre: generos.data.find((g) => g.id === generoId)?.nombre ?? "" };
+
+    const rechazo = rechazoAsignacion(destino.data, false, genero);
+    if (rechazo) return error(rechazo.mensaje, rechazo.status);
   }
 
   const { data, error: err } = await db.from("equivalencias").update(datos).eq("id", id).select("*").single();
