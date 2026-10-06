@@ -2,6 +2,12 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.4.1 · M3 — 2026-10-06
+
+- **Vista visual de las agrupaciones**, pedida por Javier al recorrer el hito. Pestaña nueva **Mapa** (primera y por defecto) en `/maestros/estacionalidad`: barra de cobertura por género apilada por agrupación con el tramo faltante rayado, y una tarjeta por agrupación con su color, conteo, porcentaje, chips por género y la lista de equivalencias por línea (colapsable, con buscador a partir de 30); tarjeta "Sin agrupación" en alerta que pasa a éxito al cerrar el hito. Cada tarjeta enlaza a Asignación · Por agrupación.
+- **Color por agrupación** consistente en toda la app (`src/lib/estacionalidad/colores.ts`, 12 colores asignados por posición estable): badges de Asignación y Faltantes con punto de color, leyenda sobre la barra de acción, y punto de color junto al selector de cada equivalencia en el árbol.
+- Lógica pura `resumirMapa` en `src/lib/estacionalidad/mapa.ts`. Tests: 291 en 23 archivos.
+
 ## 0.4.0 · M3 — 2026-10-06
 
 - Migración `0003_agrupaciones_estacionalidad.sql` (aplicada dos veces en Vector2 sin error): `agrupaciones_estacionalidad` (misma forma que géneros y mundos más `descripcion` ≤ 500 con `check`; únicos sobre `upper(codigo)` y `nombre`; **sin seed**) y columna nullable `equivalencias.agrupacion_estacionalidad_id` con FK `on delete restrict` e índice. RLS activo sin políticas; trigger con `create or replace trigger`; sin `DROP`. Tipos regenerados.

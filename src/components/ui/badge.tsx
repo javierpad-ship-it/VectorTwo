@@ -9,9 +9,15 @@ const tonos: Record<Tono, string> = {
   neutro: "bg-neutro-suave text-tinta-suave",
 };
 
-export function Badge({ tono = "neutro", children }: { tono?: Tono; children: ReactNode }) {
+/** Fondo y texto arbitrarios (p. ej. el color de una agrupación); sustituye al `tono`. */
+export type ColorBadge = { fondo: string; texto: string };
+
+export function Badge({ tono = "neutro", color, children }: { tono?: Tono; color?: ColorBadge | null; children: ReactNode }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tonos[tono]}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${color ? "" : tonos[tono]}`}
+      style={color ? { backgroundColor: color.fondo, color: color.texto } : undefined}
+    >
       {children}
     </span>
   );

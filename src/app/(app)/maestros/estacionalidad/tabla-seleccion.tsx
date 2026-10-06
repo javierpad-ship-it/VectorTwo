@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/form";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DataTable, type Columna } from "@/components/ui/data-table";
-import { BadgeAgrupacion } from "@/components/estacionalidad/badge-agrupacion";
+import { BadgeAgrupacion, useMapaColores } from "@/components/estacionalidad/badge-agrupacion";
+import { LeyendaAgrupaciones } from "@/components/estacionalidad/leyenda-agrupaciones";
 import { estadoEquivalencia, ordenarAgrupaciones, type Catalogos } from "./comunes";
 import type { DestinoAsignacion } from "./use-asignar";
 
@@ -50,6 +51,18 @@ export function TablaSeleccion({
   const [destinoId, setDestinoId] = useState("");
 
   const activas = useMemo(() => ordenarAgrupaciones(agrupaciones.filter((a) => a.activo)), [agrupaciones]);
+  const colores = useMapaColores(agrupaciones);
+  // Leyenda de colores sobre la tabla: las activas (las del `Select`) con
+  // cuántas de las filas visibles tienen cada una, y el chip de faltantes.
+  const leyenda = useMemo(() => {
+    const conteo = new Map<string, number>();
+    let sin = 0;
+    for (const f of filas) {
+      if (f.faltante || f.agrupacion === null) sin++;
+      if (f.agrupacion !== null) conteo.set(f.agrupacion.id, (conteo.get(f.agrupacion.id) ?? 0) + 1);
+    }
+    return { items: activas.map((a) => ({ id: a.id, nombre: a.nombre, conteo: conteo.get(a.id) ?? 0 })), sin };
+  }, [filas, activas]);
   const seleccionadas = useMemo(() => filas.filter((f) => seleccion.has(f.id)), [filas, seleccion]);
   const todasSeleccionadas = filas.length > 0 && seleccionadas.length === filas.length;
   const destino = activas.find((a) => a.id === destinoId) ?? null;
@@ -102,7 +115,7 @@ export function TablaSeleccion({
       ),
     },
     { clave: "codigo", titulo: "Código", render: (e) => <code className="font-mono text-xs text-tinta-suave">{e.codigo}</code> },
-    { clave: "agrupacion", titulo: "Agrupación actual", render: (e) => <BadgeAgrupacion agrupacion={e.agrupacion} /> },
+    { clave: "agrupacion", titulo: "Agrupación actual", render: (e) => <BadgeAgrupacion agrupacion={e.agrupacion} colores={colores} /> },
     {
       clave: "estado",
       titulo: "Estado",
@@ -115,6 +128,9 @@ export function TablaSeleccion({
 
   return (
     <div className="space-y-3">
+      {agrupaciones.length > 0 && (
+        <LeyendaAgrupaciones items={leyenda.items} colores={colores} sinAgrupacion={leyenda.sin} etiqueta="Colores de las agrupaciones (conteo sobre las filas visibles)" />
+      )}
       {puedeEditar && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-borde bg-fondo px-3 py-2 text-sm">
           <label className="inline-flex items-center gap-2">

@@ -8,6 +8,7 @@ import { formatearNumero } from "@/lib/formato";
 import { Alert } from "@/components/ui/alert";
 import { Tabs } from "@/components/ui/tabs";
 import { useEstacionalidad } from "./use-estacionalidad";
+import { MapaTab } from "./mapa-tab";
 import { AgrupacionesTab } from "./agrupaciones-tab";
 import { AsignacionTab, type VistaAsignacion } from "./asignacion-tab";
 import { FaltantesTab } from "./faltantes-tab";
@@ -16,7 +17,7 @@ import type { PestanaEstacionalidad } from "@/lib/estacionalidad/pestanas";
 
 const EMPTY: EquivalenciaPlana[] = [];
 
-export function EstacionalidadPanel({ rol, pestanaInicial = "agrupaciones" }: { rol: Rol; pestanaInicial?: PestanaEstacionalidad }) {
+export function EstacionalidadPanel({ rol, pestanaInicial = "mapa" }: { rol: Rol; pestanaInicial?: PestanaEstacionalidad }) {
   const puedeEditar = puedeEditarMaestros(rol);
   const [pestana, setPestana] = useState<PestanaEstacionalidad>(pestanaInicial);
   const [mostrarInactivas, setMostrarInactivas] = useState(false);
@@ -71,6 +72,7 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "agrupaciones" }: { 
 
       <Tabs<PestanaEstacionalidad>
         items={[
+          { id: "mapa", label: "Mapa" },
           { id: "agrupaciones", label: "Agrupaciones" },
           { id: "asignacion", label: "Asignación" },
           { id: "faltantes", label: lista.datos ? `Faltantes (${formatearNumero(resumen.faltantes)})` : "Faltantes" },
@@ -96,6 +98,10 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "agrupaciones" }: { 
       {lista.error && <Alert onCerrar={() => lista.setError(null)}>No se pudieron cargar las equivalencias: {lista.error}</Alert>}
       {agrupaciones.error && (
         <Alert onCerrar={() => agrupaciones.setError(null)}>No se pudieron cargar las agrupaciones: {agrupaciones.error}</Alert>
+      )}
+
+      {pestana === "mapa" && (
+        <MapaTab lista={lista.datos} cargando={lista.cargando} agrupaciones={agrupaciones.datos} onAsignar={irAAgrupacion} onIrAFaltantes={() => setPestana("faltantes")} />
       )}
 
       {pestana === "agrupaciones" && <AgrupacionesTab puedeEditar={puedeEditar} onCambio={recargarTodo} onVerEquivalencias={irAAgrupacion} />}

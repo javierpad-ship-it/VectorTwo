@@ -4,9 +4,10 @@
  * un export de un módulo "use client" llega al servidor como referencia,
  * no como valor, y `.includes` no existe.
  */
-export type PestanaEstacionalidad = "agrupaciones" | "asignacion" | "faltantes" | "importar";
+export type PestanaEstacionalidad = "mapa" | "agrupaciones" | "asignacion" | "faltantes" | "importar";
 
 export const PESTANAS_ESTACIONALIDAD: readonly PestanaEstacionalidad[] = [
+  "mapa",
   "agrupaciones",
   "asignacion",
   "faltantes",

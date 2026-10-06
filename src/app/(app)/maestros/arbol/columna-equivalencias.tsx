@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Field, Input, Select } from "@/components/ui/form";
 import { DataTable, type Columna as ColumnaTabla } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
-import { BadgeAgrupacion } from "@/components/estacionalidad/badge-agrupacion";
+import { BadgeAgrupacion, useMapaColores } from "@/components/estacionalidad/badge-agrupacion";
+import { Punto } from "@/components/ui/punto";
 import { Columna, VistaPreviaNombre, mensajeError } from "./comunes";
 
 type Props = {
@@ -45,6 +46,8 @@ export function ColumnaEquivalencias({
   const tieneGenerica = nodo.equivalencias.some((e) => e.es_generica);
   const ruta = `${genero.nombre} / ${mundo.nombre} / ${nodo.nombre}`;
   const agrupacionesActivas = agrupaciones.filter((a) => a.activo).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
+  // M3: el mismo color por agrupación que en /maestros/estacionalidad.
+  const colores = useMapaColores(agrupaciones);
 
   async function ejecutar(accion: () => Promise<unknown>) {
     setOcupado(true);
@@ -145,10 +148,11 @@ export function ColumnaEquivalencias({
       render: (eq) => {
         const actual = eq.agrupacion_estacionalidad;
         // Comprador, fila en edición de nombre o catálogo no cargado: solo el badge.
-        if (!puedeEditar || edicion?.id === eq.id || !agrupacionesDisponibles) return <BadgeAgrupacion agrupacion={actual} />;
+        if (!puedeEditar || edicion?.id === eq.id || !agrupacionesDisponibles) return <BadgeAgrupacion agrupacion={actual} colores={colores} />;
         const inactiva = actual !== null && !actual.activo;
         return (
-          <span className="flex min-w-0 flex-wrap items-center gap-1">
+          <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+            <Punto color={actual && !inactiva ? colores.get(actual.id)?.pleno : null} tono={actual ? "gris" : "alerta"} />
             <Select
               value={actual?.id ?? ""}
               onChange={(e) => cambiarAgrupacion(eq, e.target.value)}
