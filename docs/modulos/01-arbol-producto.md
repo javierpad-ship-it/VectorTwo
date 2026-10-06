@@ -98,7 +98,7 @@ Es un **catálogo plano y cerrado**: no se relaciona con equivalencias ni con ma
 
 ### Borrado y desactivación
 
-Regla única para las seis tablas: **la acción normal es desactivar**; eliminar solo se permite cuando la fila no tiene hijos, y lo hace cumplir la base con `on delete restrict`. El handler traduce la violación de FK (`23503`) a `409 "No se puede eliminar: tiene N registros asociados. Desactívalo."` y la de único (`23505`) a `409 "Ya existe …"`. En M1 una equivalencia nunca tiene hijos, así que sí se puede eliminar; dejará de poderse cuando M2 cuelgue `equivalencia_marca` y la Fase 2 cuelgue ventas.
+Regla única para las seis tablas: **la acción normal es desactivar**; eliminar solo se permite cuando la fila no tiene hijos, y lo hace cumplir la base con `on delete restrict`. El handler traduce la violación de FK (`23503`) a `409 "No se puede eliminar: tiene N registros asociados. Desactívalo."` y la de único (`23505`) a `409 "Ya existe …"`. En M1 una equivalencia nunca tiene hijos, así que sí se puede eliminar; dejará de poderse cuando la Fase 2 (M5) cuelgue ventas. (La ficha decía "cuando M2 cuelgue `equivalencia_marca`"; esa tabla se descartó el 2026-10-06, ver `DECISIONES.md`.)
 
 Desactivar **no** se propaga en cascada en la base: desactivar el mundo FORMAL deja sus nodos con `activo = true` pero el árbol los oculta porque la vigencia efectiva de un nodo es `nodo.activo ∧ genero.activo ∧ mundo.activo ∧ linea.activo` (función pura `nodoVigente`, ver Reglas). Reactivar el mundo los devuelve tal cual estaban, sin perder qué nodos sí se habían desactivado a mano.
 

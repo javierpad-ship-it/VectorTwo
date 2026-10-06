@@ -6,7 +6,7 @@
 
 Dar al planner el maestro de marcas con el que Lukers planifica: cada marca pertenece a **una** agrupación de marca (Ultra Low · Mid Value · Valor · Reconocido · Premium, nombres todavía no oficiales y por eso editables) y puede llevar la bandera **tratamiento especial**, que la Fase 2 usará para tratarla aparte al elaborar los flujos. Javier pidió dos mantenimientos separados ("uno de agrupación de marcas y otro para asignar las marcas a cada grupo") y todavía no entregó la lista de marcas, así que el módulo tiene que quedar usable con alta manual desde el primer día y con un importador CSV/Excel para cuando llegue el archivo.
 
-La relación Marca ↔ Equivalencia (`equivalencia_marca` en PLAN §4) **no** se construye aquí: se propone derivarla de la data real de venta y stock en M5 (ver "Fuera de alcance" y pregunta abierta 1).
+La relación Marca ↔ Equivalencia (`equivalencia_marca`, que PLAN §4 asignaba a M2) **no** se construye aquí ni en ningún módulo: Javier confirmó el 2026-10-06 que se deriva de la venta real que carga M5 (ver "Fuera de alcance" y la pregunta 1, resuelta).
 
 ## Modelo de datos
 
@@ -300,7 +300,7 @@ Cómo se recorre: en local (`INICIAR.cmd`) o en Railway una vez desplegado `0.3.
 
 ## Fuera de alcance
 
-- **`equivalencia_marca` (qué marcas hay en qué equivalencias).** PLAN §4 la asignaba a M2, pero Javier no la pidió hoy y todavía no existe la lista de marcas. Propuesta: no mantenerla a mano. Cada fila de venta y stock de M5 trae marca y equivalencia, así que la relación (y las "5 principales por equivalencia" que necesita M7) se **deriva de la data real** con volumen de venta como criterio, en vez de pedirle a alguien que marque cientos de cruces. Si Javier quiere mantenerla a mano (por ejemplo, para marcas nuevas sin histórico), se abre **M2b** con la tabla `equivalencia_marca (equivalencia_id, marca_id, unique)`, una pestaña "Equivalencias" en la pantalla de marcas y el `409` al eliminar equivalencias con marcas. Pregunta abierta 1.
+- **`equivalencia_marca` (qué marcas hay en qué equivalencias).** PLAN §4 la asignaba a M2. **Resuelto el 2026-10-06**: no existe ni existirá. Cada fila de venta de M5 trae marca y equivalencia, así que la relación (y las "5 principales por equivalencia" que necesita M7) se **deriva de la venta real** con el volumen como criterio. M2b (tabla manual con pestaña "Equivalencias") queda descartado. Ver pregunta 1 y `DECISIONES.md`.
 - Reasignación masiva de marcas entre agrupaciones (seleccionar varias y mover): se hace una a una o por importación.
 - Que el importador actualice la agrupación o el tratamiento de marcas existentes (solo las reporta en `diferencias`). Pregunta abierta 4.
 - Importar `nota_tratamiento` desde archivo.
@@ -338,6 +338,7 @@ Lo que backend, frontend y QA construyeron distinto de lo escrito arriba, o que 
 ## Preguntas abiertas para Javier
 
 1. **Marca ↔ Equivalencia.** PLAN §4 preveía una tabla `equivalencia_marca` en M2. Propongo no mantenerla a mano y derivar de la venta y el stock (M5) qué marcas hay en cada equivalencia y cuáles son las 5 principales. ¿Te sirve así, o necesitas asignar marcas a equivalencias a mano (por ejemplo, para marcas nuevas sin histórico)? Si es lo segundo, se abre M2b.
+   **Resuelta (2026-10-06).** Javier: "No hay relación marca equivalencia, eso viene en la venta real". No se construye la tabla; la relación se deriva de la venta que cargue M5. M2b descartado. Registrado en `DECISIONES.md`.
 2. **Quién edita las agrupaciones.** Especificado como admin (es un catálogo raíz, como géneros y mundos). Como dijiste que los nombres todavía no son oficiales, ¿prefieres que también las edite el planner mientras se definen? Es cambiar una línea de configuración.
 3. **Formato de la lista de marcas.** ¿Qué columnas trae y cómo viene la agrupación: por número (`1`…`5`), por nombre (`Ultra Low`) o como `1 Ultra Low`? El importador acepta las tres formas, pero quiero confirmar que no viene de otra manera (por ejemplo, una columna por agrupación con una X).
 4. **Marcas que ya existen con otra agrupación.** Si vuelves a cargar el archivo con cambios, el importador **no** modifica las marcas que ya están (solo te muestra las diferencias). ¿Está bien, o quieres una opción "actualizar agrupación y tratamiento de las existentes"?

@@ -1,12 +1,14 @@
 # M3 · Agrupaciones de estacionalidad
 
-> Estado: **en especificación** (pendiente de aprobación de Javier). Módulo anterior: [01-arbol-producto](01-arbol-producto.md) (M2, [02-marcas](02-marcas.md), se construye en paralelo y no es prerrequisito: M3 solo depende de M1). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construya distinto de lo especificado irá en "Cambios respecto a la especificación", al final.
+> Estado: **aprobada por Javier el 2026-10-06; en construcción**. Módulo anterior: [01-arbol-producto](01-arbol-producto.md) (M2, [02-marcas](02-marcas.md), se construye en paralelo y no es prerrequisito: M3 solo depende de M1). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construya distinto de lo especificado irá en "Cambios respecto a la especificación", al final.
 
 ## Objetivo
 
 En la Fase 2 cada curva de estacionalidad (M6) se calcula por **agrupación de estacionalidad**, no por equivalencia: muchas de las 1 956 equivalencias del árbol real venden poco y una curva propia sería ruido. M3 construye el catálogo de agrupaciones (nombres del negocio, mantenidos por el planner) y la asignación de **cada equivalencia a una agrupación**, con un reporte de faltantes que diga qué equivalencias activas y vigentes todavía no tienen curva: **una equivalencia sin agrupación no se puede proyectar** en M7. Las curvas en sí (cálculo a partir de la venta histórica) son M6 y quedan fuera.
 
 Relación con lo que viene: M5 cargará venta y stock al grano del árbol; M6 agregará esa venta por agrupación de estacionalidad y calculará una curva mensual por agrupación (o por agrupación × tienda, pregunta abierta); M7 aplicará a cada equivalencia la curva de su agrupación. Por eso el hito de M3 es "toda equivalencia activa tiene agrupación" (PLAN §5), y la pantalla gira alrededor de cerrar esa lista.
+
+Lo que Javier fijó al aprobar la ficha (2026-10-06): no existe una lista previa de agrupaciones ni de asignaciones que importar; la clasificación género-mundo-línea-equivalencia → agrupación la construye él dentro del sistema con las pestañas Agrupaciones, Asignación y Faltantes. El importador de este módulo se conserva como apoyo opcional (completar en Excel el CSV de faltantes y subirlo), no como la vía principal. Y las curvas se calculan sobre la venta real cuando exista (M5 → M6): M3 solo agrupa, sin curvas manuales ni cálculo alguno en Fase 1.
 
 ## Modelo de datos
 
@@ -356,8 +358,10 @@ Para registrar en `docs/DECISIONES.md` cuando Javier apruebe la especificación:
 ## Preguntas abiertas para Javier
 
 1. **La lista.** ¿Ya tienes las agrupaciones de estacionalidad y a qué equivalencias va cada una? Si sí, ¿en qué formato (¿una columna más en el archivo del árbol?)? El importador acepta `GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION`, con las mismas reglas que el árbol (`-` = igual a la línea, vacío = genérica). Si no la tienes, la pestaña Faltantes y el CSV descargable están pensados para armarla.
+   **Resuelta (2026-10-06).** No hay lista previa: Javier construye las agrupaciones y la asignación dentro del sistema, con las pestañas Agrupaciones, Asignación y Faltantes. El importador queda como apoyo opcional. Registrado en `DECISIONES.md`.
 2. **La genérica `SIN EQUIVALENCIA`.** La ficha propone que lleve agrupación como cualquier otra (su venta existe y M7 tiene que proyectarla). ¿De acuerdo, o prefieres que las 265 genéricas queden fuera del reporte de faltantes y se proyecten de otra forma?
 3. **Grano de la curva (afecta solo a M6).** ¿La curva será una por agrupación para toda la red, o por agrupación × tienda (como en Vector-One, que calculaba por tienda / marca / género / línea)? Si es por tienda, M6 necesita suficiente historia por tienda y M4 (aperturas) para las tiendas nuevas; la asignación de M3 es la misma en ambos casos.
+   **Resuelta en parte (2026-10-06).** Las curvas se calculan sobre la venta real cuando exista (M5 → M6); M3 no guarda ni calcula curvas. El grano (agrupación o agrupación × tienda) sigue abierto y se decide al especificar M6.
 4. **Reasignar desde el archivo.** Decidimos que, si una fila del archivo trae una agrupación distinta de la que la equivalencia ya tiene, el archivo manda (y la previsualización lo muestra). ¿Prefieres que esas filas se omitan y haya que cambiarlas a mano?
 5. **Obligatoria al crear.** Hoy una equivalencia nueva (desde el árbol o desde el importador del árbol) nace sin agrupación y aparece en Faltantes. ¿Quieres que al crear una equivalencia a mano la agrupación sea obligatoria? Se decidió que no, para no frenar la carga del árbol, pero es un `Select` más en el formulario.
 6. **Temporada.** En Vector-One el tratamiento de años Niño dependía de `linea.temporada` (Invierno). Si la curva pasa a ser por agrupación, ¿la temporada debería vivir en la agrupación (p. ej. "PANTALONES INVIERNO" es de invierno) además de o en vez de en la línea? Solo para dejar lista la columna; no bloquea M3.
