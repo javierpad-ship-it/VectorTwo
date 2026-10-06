@@ -25,7 +25,13 @@ const MODULOS: Modulo[] = [
     estado: "listo",
     href: "/maestros/estacionalidad",
   },
-  { id: "M4", nombre: "Tiendas y aperturas", detalle: "Tiendas, CD y fechas de apertura.", estado: "pendiente" },
+  {
+    id: "M4",
+    nombre: "Tiendas y aperturas",
+    detalle: "Tiendas y CD con fechas de apertura y cierre; el estado se calcula solo.",
+    estado: "listo",
+    href: "/maestros/tiendas",
+  },
 ];
 
 export default async function InicioPage() {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { puedeVerRuta, seccionesVisibles } from "@/lib/nav";
+import { NAV_SECTIONS, puedeVerRuta, seccionesVisibles } from "@/lib/nav";
 
 describe("puedeVerRuta", () => {
   it("el comprador ve el árbol de producto (solo lectura)", () => {
@@ -24,9 +24,15 @@ describe("puedeVerRuta", () => {
     expect(puedeVerRuta("planner", "/maestros/estacionalidad")).toBe(true);
     expect(puedeVerRuta("comprador", "/maestros/estacionalidad")).toBe(false);
   });
-  it("los módulos pendientes no se pueden abrir aunque el rol los vea en el menú", () => {
-    expect(puedeVerRuta("admin", "/maestros/tiendas")).toBe(false);
-    expect(puedeVerRuta("planner", "/maestros/tiendas")).toBe(false);
+  it("admin y planner entran a tiendas y aperturas (M4); el comprador no, ni por URL", () => {
+    expect(puedeVerRuta("admin", "/maestros/tiendas")).toBe(true);
+    expect(puedeVerRuta("planner", "/maestros/tiendas")).toBe(true);
+    expect(puedeVerRuta("comprador", "/maestros/tiendas")).toBe(false);
+  });
+  it("un item marcado pendiente no se puede abrir aunque el rol lo vea en el menú (ya no queda ninguno en la Fase 1)", () => {
+    const pendientes = NAV_SECTIONS.flatMap((s) => s.links).filter((l) => l.pendiente);
+    expect(pendientes).toHaveLength(0);
+    for (const l of pendientes) expect(puedeVerRuta("admin", l.href)).toBe(false);
   });
   it("solo el admin entra a usuarios", () => {
     expect(puedeVerRuta("admin", "/usuarios")).toBe(true);

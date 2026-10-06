@@ -1,6 +1,6 @@
 # M4 · Tiendas y aperturas
 
-> Estado: **especificación, pendiente de aprobación de Javier**. Módulo anterior: [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (en especificación en paralelo; M4 no depende de él ni de [02-marcas](02-marcas.md): Javier confirmó que "en esta etapa es independiente a lo anterior"). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construya distinto de lo especificado irá en "Cambios respecto a la especificación", al final.
+> Estado: **construida (2026-10-06, `0.5.0 · M4`); hito pendiente de recorrer por Javier con la lista real de tiendas**. Módulo anterior: [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (M4 no depende de él ni de [02-marcas](02-marcas.md): Javier confirmó que "en esta etapa es independiente a lo anterior"). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final; las dos limitaciones conocidas que dejó QA, en "Limitaciones conocidas".
 
 ## Objetivo
 
@@ -120,9 +120,10 @@ Lectura `requireUser`; escritura `requirePlanner` (el planner mantiene la red ig
 Filtros de la lectura: `tipo` ∈ `Tienda | Centro de Distribución`; `estado` ∈ `Planificada | Activa | Cerrada` (se aplica en memoria tras calcular, porque no es columna); `zona` compara contra `zona` normalizada; `hoy` opcional (`aaaa-mm-dd`, por defecto `hoyLima()`). Los filtros se combinan con AND. El panel carga una sola vez `?incluir_inactivos=1` sin filtros y filtra en memoria; los parámetros existen para la Fase 2 y para probar la API a mano.
 
 ```ts
-// pseudocódigo zod — src/lib/tiendas/esquemas.ts (reutiliza `nombre`, `activo`, `tieneAlgo`/`noVacio` de arbol/esquemas.ts; exportarlos si hace falta)
-export const TIPOS_TIENDA = ["Tienda", "Centro de Distribución"] as const;
-export const ESTADOS_TIENDA = ["Planificada", "Activa", "Cerrada"] as const;
+// pseudocódigo zod — src/lib/tiendas/esquemas.ts (reutiliza `nombre` y `activo` de arbol/esquemas.ts; `tieneAlgo`/`noVacio` se repiten localmente)
+// TIPOS_TIENDA y ESTADOS_TIENDA viven en src/lib/tiendas/tipos.ts:
+//   export const TIPOS_TIENDA = ["Tienda", "Centro de Distribución"] as const;
+//   export const ESTADOS_TIENDA = ["Planificada", "Activa", "Cerrada"] as const;
 
 const codigoTienda = z.string("El código debe ser texto.").transform(aCodigo)
   .pipe(z.string().min(1, "El código es obligatorio (letras o números).").max(40));   // NO se deriva del nombre
@@ -137,7 +138,7 @@ crearTiendaSchema = z.object({
   codigo: codigoTienda, nombre, tipo: z.enum(TIPOS_TIENDA).default("Tienda"),
   zona: textoOpcional, razon_social: textoOpcional,
   fecha_apertura: fecha, fecha_cierre: fecha, venta_esperada_promedio: monto,
-}).superRefine((v, ctx) => { const m = motivoRechazoTienda(v); if (m) ctx.addIssue({ message: m, path: m.path }); });
+}).superRefine((v, ctx) => { const m = motivoRechazoTienda(v); if (m) ctx.addIssue({ message: m.mensaje, path: m.path }); });
 
 editarTiendaSchema = z.object({
   codigo: codigoTienda, nombre, tipo: z.enum(TIPOS_TIENDA), zona: textoOpcional, razon_social: textoOpcional,
@@ -155,7 +156,7 @@ Orden de comprobaciones en `POST` y `PATCH`: zod (forma y normalización) → `m
 
 `GET /api/tiendas/aperturas?desde=&hasta=&hoy=&incluir_inactivos=1` · `requireUser`.
 
-Devuelve un evento por fecha registrada (una tienda con apertura y cierre produce dos), ordenados por `fecha` ascendente y luego por `codigo`, con la función pura `eventosTiendas(tiendas, hoy)` (`src/lib/tiendas/aperturas.ts`). `desde`/`hasta` acotan por fecha (ISO, inclusive) y por defecto no acotan: con una docena de tiendas la lista completa es trivial y la pantalla agrupa en memoria.
+Devuelve un evento por fecha registrada (una tienda con apertura y cierre produce dos), ordenados por `fecha` ascendente y luego por `codigo`, con la función pura `eventosTiendas(tiendas, hoy, rango)` (`src/lib/tiendas/aperturas.ts`). `desde`/`hasta` acotan por fecha (ISO, inclusive) y por defecto no acotan: con una docena de tiendas la lista completa es trivial y la pantalla agrupa en memoria. El rango acota los eventos y los conteos de próximas aperturas y cierres, pero no `sin_fecha_apertura`, que es un conteo de tiendas y no de eventos.
 
 ```jsonc
 { "data": {
@@ -206,13 +207,13 @@ El cliente lee el archivo con `leerArchivoTabular` (`src/lib/arbol/leer-archivo.
 Una columna `Tda#` del archivo de V1 no se mapea a nada (se descarta). Algoritmo, función pura `planificarImportacionTiendas(filas, estado)` en `src/lib/tiendas/importar.ts`, donde `estado = { tiendas }` leído completo (activas e inactivas):
 
 1. `codigo = aCodigo(valor)` y `nombre = normalizarNombre(valor)`. Código vacío tras normalizar → `omitida` (`codigo_vacio`, con el valor original en `detalle` si lo había); nombre vacío → `nombre_vacio`; `nombre === "TOTAL"` → `fila_total`.
-2. **Tipo** con `leerTipo(valor): Tipo | null` (`src/lib/tiendas/fechas.ts`, junto a los otros lectores): `""`, `TIENDA`, `T` → `Tienda`; `CD`, `CENTRO DE DISTRIBUCION`, `CENTRO DE DISTRIBUCIÓN`, `ALMACEN`, `ALMACÉN`, `DISTRIBUCION` → `Centro de Distribución`; otra cosa → `omitida` (`tipo_invalido`, `detalle`). No se infiere el tipo del código (`RD50` no es CD por empezar con `RD`, sino porque lo dice el archivo o la pantalla).
+2. **Tipo** con `leerTipo(valor): Tipo | null` (`src/lib/tiendas/fechas.ts`, junto a los otros lectores): `""`, `TIENDA`, `T` → `Tienda`; `CD`, `CENTRO DE DISTRIBUCION`, `CENTRO DISTRIBUCION`, `CENTRO DE DISTRIBUCIÓN`, `ALMACEN`, `ALMACÉN`, `DISTRIBUCION` → `Centro de Distribución`; otra cosa → `omitida` (`tipo_invalido`, `detalle`). No se infiere el tipo del código (`RD50` no es CD por empezar con `RD`, sino porque lo dice el archivo o la pantalla).
 3. **Fechas** con `leerFecha(valor): string | null | "invalida"`: vacío → `null`; se aceptan `dd/mm/aaaa`, `dd-mm-aaaa`, `dd.mm.aaaa`, `aaaa-mm-dd`, `aaaa/mm/dd` y `dd/mm/aa` (año de dos cifras → `20aa`); **siempre día primero** (locale de Perú; `03/05/2026` es 3 de mayo). Se valida que sea un día real del calendario (`31/02/2026` → inválida). Devuelve ISO `aaaa-mm-dd`. Inválida → `omitida` (`fecha_apertura_invalida` / `fecha_cierre_invalida`, `detalle`). Luego la coherencia: cierre sin apertura → `cierre_sin_apertura`; cierre anterior a apertura → `cierre_antes_de_apertura` (`detalle` con las dos fechas).
-4. **Venta esperada** con `leerMonto(valor): number | null | "invalido"`: vacío → `null`; se quita `S/`, `S/.`, espacios y las comas de miles; el punto es el separador decimal (`S/ 12,500.00` → `12500`, `85000` → `85000`, `12.5` → `12.5`). Negativo o cualquier otro texto → `omitida` (`venta_invalida`, `detalle`). Venta en un CD → `venta_en_cd`. Se redondea a dos decimales.
-5. **Duplicados en el archivo** por `codigo` → `duplicada_en_archivo` con `fila_original` (manda la primera; si difieren en algo, `detalle` lo dice, p. ej. "nombre distinto: …"). Un **nombre** que ya usa otro código (en la base o en una fila anterior del archivo) → `omitida` (`nombre_repetido`, `detalle` = el código que lo tiene): dos tiendas no pueden llamarse igual y no se decide a ciegas cuál es la buena.
+4. **Venta esperada** con `leerMonto(valor): number | null | "invalido"`: vacío → `null`; se quita `S/`, `S/.` y los espacios (también los de miles: `1 000` → `1000`) y las comas de miles; el punto es el separador decimal (`S/ 12,500.00` → `12500`, `85000` → `85000`, `12.5` → `12.5`). Un `S/` sin cifra, un negativo o cualquier otro texto → `omitida` (`venta_invalida`, `detalle`); el resultado nunca es `-0`. Venta en un CD → `venta_en_cd`. Se redondea a dos decimales.
+5. **Duplicados en el archivo** por `codigo` → `duplicada_en_archivo` con `fila_original` (manda la primera; si difieren en algo, `detalle` lista todos los campos que difieren, p. ej. "nombre distinto: …"). Una fila **nueva** cuyo **nombre** ya usa otro código (en la base o en una fila anterior del archivo) → `omitida` (`nombre_repetido`, `detalle` = el código que lo tiene): dos tiendas no pueden llamarse igual y no se decide a ciegas cuál es la buena. `nombre_repetido` solo aplica a filas nuevas: una fila cuyo código ya existe cuenta como existente aunque su nombre choque con el de otra tienda, y ese choque aparece en `diferencias`.
 6. **Tienda existente** (por `upper(codigo)`): `existentes++` si está activa, `existentes_inactivos++` si no; **no se modifica ni se reactiva**. Cualquier campo que difiera (`nombre`, `tipo`, `zona`, `razon_social`, `fecha_apertura`, `fecha_cierre`, `venta_esperada_promedio`) se anota en `diferencias[]` (`{ fila, codigo, campo, en_base, en_archivo }`, legible: fechas en `dd/mm/aaaa`, montos con dos decimales, nulos como `—`). Es el mismo criterio que M2: el importador es una carga inicial idempotente, no una sincronización; con doce tiendas, los cambios de fechas se hacen desde la pantalla, donde además se ve el estado resultante. Si Javier prefiere que el archivo mande (pregunta abierta 7, compartida con M2), se agrega un `modo: "actualizar"` en los dos módulos a la vez.
 7. **Tienda nueva** → `crear.tiendas++` (y `crear.centros_distribucion++` si es CD); `crear.sin_fecha_apertura` cuenta cuántas tiendas (no CD) nuevas entran sin apertura y por tanto se verán **Planificadas**: es informativo pero se muestra con aviso, porque es el error más probable al cargar la red actual. `muestra.tiendas` lista las primeras 20 como `"R401 · LUKERS IQUITOS LORES · Activa"` (estado calculado con `hoy`).
-8. `previsualizar` devuelve el reporte sin escribir. `aplicar` inserta en tandas de 500 (`enTandas`) con `insert` plano: el plan ya excluyó los códigos existentes, y el único de código es sobre la expresión `upper(codigo)`, que PostgREST no admite en `onConflict` (M2 ya fijó "solo columnas, nunca expresiones"). Si entre previsualizar y aplicar alguien creó una tienda con uno de esos códigos, el `23505` se traduce a `409 "Ya existe una tienda con ese código. Vuelve a previsualizar."` y reimportar completa el resto sin duplicar. Sin transacción, como en M1 y M2.
+8. `previsualizar` devuelve el reporte sin escribir. `aplicar` inserta en tandas de 500 (`enTandas`) con `insert` plano: el plan ya excluyó los códigos existentes, y el único de código es sobre la expresión `upper(codigo)`, que PostgREST no admite en `onConflict` (M2 ya fijó "solo columnas, nunca expresiones"). Si entre previsualizar y aplicar alguien creó una tienda con uno de esos códigos, el `23505` se traduce a `409 "Ya existe una tienda con ese código. Vuelve a previsualizar."` y reimportar completa el resto sin duplicar. Un fallo distinto de `23505` devuelve el status que da `traducirErrorDb` (500 solo si es genérico) con un mensaje que dice cuántas tiendas y centros de distribución se crearon hasta ahí. Sin transacción, como en M1 y M2.
 
 Reporte, igual en los dos modos (en `aplicar`, `crear` es lo realmente insertado):
 
@@ -272,7 +273,7 @@ Debajo del formulario, antes de guardar, un `Badge` con el estado que tendrá la
 | Razón social | texto o `—` | `Input` con `datalist` |
 | Apertura | `dd/mm/aaaa` o `—` | `Input type="date"` |
 | Cierre | `dd/mm/aaaa` o `—` | `Input type="date"` |
-| Venta esp. | `S/ 85 000.00` (`Intl.NumberFormat("es-PE")`) o `—` | `Input type="number"`, deshabilitado en CD |
+| Venta esp. | `S/ 85,000.00` (`Intl.NumberFormat("es-PE")`) o `—` | `Input type="number"`, deshabilitado en CD |
 | Estado | `Badge`: Activa (`exito`), Planificada (`marca`), Cerrada (`alerta`); si `activo = false`, "Desactivada" (`neutro`) en lugar del estado | — |
 | Acciones | — | Editar · Guardar/Cancelar · Desactivar/Reactivar · Eliminar |
 
@@ -321,19 +322,19 @@ Funciones puras en `src/lib/tiendas/` probadas en `tests/tiendas.*.test.ts`. Nor
 
 **`reglas.ts`**
 
-4. `motivoRechazoTienda(fila)` sobre la fila resultante (alta, o actual más cambio): cierre sin apertura → "Para registrar un cierre, la tienda necesita fecha de apertura." (`path: ["fecha_cierre"]`); cierre < apertura → "La fecha de cierre no puede ser anterior a la de apertura."; cierre = apertura → permitido (abrió y cerró el mismo día); CD con venta esperada → "Un centro de distribución no lleva venta esperada: quítala primero." (`path: ["venta_esperada_promedio"]`); venta negativa → rechazo; si no, `null`. Un `PATCH` que solo cambia `nombre` sobre una fila coherente nunca se rechaza.
+4. `motivoRechazoTienda(fila)` sobre la fila resultante (alta, o actual más cambio) devuelve `{ mensaje, path }` o `null`: cierre sin apertura → `mensaje` "Para registrar un cierre, la tienda necesita fecha de apertura." (`path: ["fecha_cierre"]`); cierre < apertura → "La fecha de cierre no puede ser anterior a la de apertura."; cierre = apertura → permitido (abrió y cerró el mismo día); CD con venta esperada → "Un centro de distribución no lleva venta esperada: quítala primero." (`path: ["venta_esperada_promedio"]`); venta negativa → rechazo; si no, `null`. Un `PATCH` que solo cambia `nombre` sobre una fila coherente nunca se rechaza.
 5. `motivoRechazoEliminar("tienda", 0) === null`; con `3` → "No se puede eliminar la tienda: tiene 3 registros de venta o stock. Desactívala." (el conteo lo aportará M5; en M4 el handler pasa `0`).
 6. Código obligatorio y no derivado: `crearTiendaSchema` sin `codigo` → error "El código es obligatorio"; con `codigo: "r-401"` → `R_401`; con `codigo: "---"` → error; el nombre nunca se usa para proponer código (test explícito: dos cuerpos con el mismo nombre y códigos distintos pasan los dos).
 
 **`fechas.ts`**
 
 7. `leerFecha`: `"15/03/2019"`, `"15-03-2019"`, `"15.03.2019"`, `"2019-03-15"`, `"2019/03/15"` → `"2019-03-15"`; `"5/3/19"` → `"2019-03-05"`; `"03/05/2026"` → `"2026-05-03"` (día primero, nunca mes primero); `""` y `"  "` → `null`; `"31/02/2024"`, `"2024-13-01"`, `"ayer"`, `"20240315"` → `"invalida"`. Nunca pasa por `new Date(texto)` (su parseo depende del motor y de la zona horaria).
-8. `leerMonto`: `""` → `null`; `"85000"` → `85000`; `"S/ 12,500.00"` → `12500`; `"S/.1,250.5"` → `1250.5`; `"12.345"` → `12.35` (punto decimal, redondeo a dos); `"-5"`, `"12,5"` (coma no seguida de tres dígitos), `"abc"` → `"invalido"`.
-9. `leerTipo`: `""`, `"tienda"`, `"T"` → `Tienda`; `"CD"`, `"Centro de Distribución"`, `"CENTRO DE DISTRIBUCION"`, `"Almacén"` → `Centro de Distribución`; `"deposito"`, `"X"` → `null`.
+8. `leerMonto`: `""` → `null`; `"85000"` → `85000`; `"S/ 12,500.00"` → `12500`; `"S/.1,250.5"` → `1250.5`; `"1 000"` → `1000`; `"12.345"` → `12.35` (punto decimal, redondeo a dos); `"-5"`, `"12,5"` (coma no seguida de tres dígitos), `"S/"` sin cifra, `"abc"` → `"invalido"`; nunca devuelve `-0`.
+9. `leerTipo`: `""`, `"tienda"`, `"T"` → `Tienda`; `"CD"`, `"Centro de Distribución"`, `"CENTRO DE DISTRIBUCION"`, `"CENTRO DISTRIBUCION"`, `"Almacén"` → `Centro de Distribución`; `"deposito"`, `"X"` → `null`.
 
 **`aperturas.ts`**
 
-10. `eventosTiendas(tiendas, hoy)`: una tienda con apertura y cierre produce dos eventos; sin fechas, ninguno; el orden es por `fecha` y luego `codigo`; `pasado` es `fecha < hoy` (apertura hoy → `pasado: false`, cierre hoy → `pasado: false`); cada evento lleva el `estado` de su tienda a la fecha `hoy`; `resumen.proximas_aperturas` y `proximos_cierres` cuentan eventos no pasados; `resumen.sin_fecha_apertura` cuenta tiendas activas de tipo Tienda sin apertura (un CD sin fecha no cuenta).
+10. `eventosTiendas(tiendas, hoy, rango)`: una tienda con apertura y cierre produce dos eventos; sin fechas, ninguno; el orden es por `fecha` y luego `codigo`; `pasado` es `fecha < hoy` (apertura hoy → `pasado: false`, cierre hoy → `pasado: false`); cada evento lleva el `estado` de su tienda a la fecha `hoy`; `resumen.proximas_aperturas` y `proximos_cierres` cuentan eventos no pasados; `resumen.sin_fecha_apertura` cuenta tiendas activas de tipo Tienda sin apertura (un CD sin fecha no cuenta); `desde`/`hasta` acotan eventos y conteos de próximos, no este.
 11. `agruparPorMes(eventos)` devuelve grupos `{ mes: "2027-03", etiqueta: "marzo de 2027", eventos }` ordenados cronológicamente, sin meses vacíos, y la suma de eventos de los grupos es igual al total recibido.
 
 **`importar.ts` — `planificarImportacionTiendas(filas, estado, hoy)`**
@@ -352,21 +353,30 @@ Funciones puras en `src/lib/tiendas/` probadas en `tests/tiendas.*.test.ts`. Nor
 
 ## Hito de prueba
 
-- [ ] Checks automáticos: `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (los de M1–M3 más `tests/tiendas.*`), `npm run build` y `scripts/validar-migraciones-local.sh` (todas las migraciones dos veces) en verde.
-- [ ] `0004_tiendas.sql` aplicada dos veces en `vector-two` sin error, sin ningún `DROP` y sin bloques `do $$`; tipos regenerados; `APP_VERSION` = `0.5.0 · M4`.
-- [ ] Tras la migración: `select count(*) from tiendas` = 0 (sin semilla); `GET /api/tiendas` devuelve `[]`; el menú muestra "Tiendas y aperturas" habilitado para admin y planner; el comprador no lo ve, `/maestros/tiendas` le redirige a `/`, `GET /api/tiendas` le responde `200` y `POST /api/tiendas` `403`.
-- [ ] Como planner, crear a mano `r401` / `  lukers iquitos lores ` / Tienda / zona `lukers sur oriente` / apertura 15/03/2019 → se guarda `R401`, `LUKERS IQUITOS LORES`, `LUKERS SUR ORIENTE`, badge **Activa**. Crear `R401` de nuevo con otro nombre → `409` "Ya existe una tienda con ese código."; crear `R999` con nombre `Lukers Iquitos Lores` → `409` por nombre.
-- [ ] Crear `RD50` / `CD LUKERS` / Centro de Distribución: el campo Venta esperada se deshabilita; `POST /api/tiendas` a mano con `tipo: "Centro de Distribución"` y `venta_esperada_promedio: 1000` → `400` "Un centro de distribución no lleva venta esperada". El CD aparece con badge "CD" y, sin fechas, estado Planificada (ver pregunta 5).
-- [ ] **Hito del plan — tienda futura**: crear `R512` / `LUKERS AREQUIPA` con apertura = mañana y venta esperada `85000` → badge **Planificada**, el formulario anticipa "Quedará Planificada". En Calendario, con "Ver la red al día" = mañana, R512 aparece **Activa** y su apertura en el mes correspondiente sin `pasado`; `GET /api/tiendas?hoy=<mañana>` la devuelve con `estado: "Activa"`. Editar su apertura a hoy → badge **Activa** sin tocar nada más.
-- [ ] Cierre: a `R401` ponerle cierre = hoy → sigue **Activa**; cierre = ayer → **Cerrada** y la tabla la muestra con `activo = true` (no se desactivó); chip "Cerradas (1)". Intentar cierre anterior a la apertura → Guardar deshabilitado con el motivo y, forzando el `PATCH` a mano, `400` "La fecha de cierre no puede ser anterior a la de apertura."; `PATCH` con `fecha_cierre` sobre una tienda sin apertura → `400` "…necesita fecha de apertura."
-- [ ] Desactivar una tienda Activa → `confirm` avisa que cerrar no es desactivar; tras aceptar, badge "Desactivada", desaparece sin "Mostrar inactivos" y `GET /api/tiendas` no la trae; con `?incluir_inactivos=1` sí. Reactivar la devuelve con su estado calculado.
-- [ ] Eliminar una tienda recién creada → funciona (en M4 no hay hijos). `DELETE /api/tiendas/abc` → `404`.
-- [ ] Filtros: chips de tipo y estado con conteos correctos; `Select` de zona con las zonas existentes y "Sin zona" (el CD); buscador `iqui` encuentra `R401`; `GET /api/tiendas?estado=Planificada` devuelve solo las planificadas; `?estado=activa` (minúsculas) → `400`; `?hoy=ayer` → `400`.
-- [ ] Calendario: tarjetas "Próximas aperturas", "Próximos cierres" y "Sin fecha de apertura" con los conteos esperados; la lista agrupa por mes en español, separador "Hoy" en su sitio, pasados atenuados; "Ver todo el historial" muestra la apertura de 2019.
-- [ ] Importar un CSV de prueba (forma del ejemplo de la ficha, sin datos reales de Lukers) con, a propósito: una fila con `Tda#` que no se mapea, un código repetido, un nombre repetido con otro código, una fecha `31/02/2024`, una venta `S/ 12,500.00`, un tipo `deposito`, una tienda sin fecha de apertura, una tienda que ya existe con otra zona y una fila `TOTAL`. Previsualizar: el mapeo autodetecta las ocho columnas; `S/ 12,500.00` se lee como 12 500; las filas malas salen en "Filas con errores" con motivo, detalle y fila completa; la repetida en "Repetidas"; la existente en "Diferencias con lo ya cargado"; la tarjeta "Se crearán" avisa "K sin fecha de apertura"; "Descargar omitidas (CSV)" abre en Excel con acentos correctos.
-- [ ] Aplicar: el `confirm` repite los conteos; el reporte final coincide con la previsualización; la pestaña Tiendas muestra las nuevas con su estado; la existente **no** cambió de zona.
+Cómo leer las casillas: `[x]` es lo que ya está verificado, sea por los checks automáticos o por QA con la app levantada y un stub de Supabase en lugar de la base real; `[ ]` es lo que solo se puede comprobar con la base real y lo recorre Javier. El stub devuelve filas y errores como lo haría la API, pero no tiene los índices únicos ni los `check` de Postgres, ni persiste entre recargas.
+
+- [x] Checks automáticos: `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (364 pruebas en 30 archivos: los de M1–M3 más 72 en `tests/tiendas.*`) y `npm run build` en verde. `scripts/validar-migraciones-local.sh` también pasó en QA (0000–0004 dos veces, sin ningún `ERROR` en la salida completa, `tiendas` con RLS); la idempotencia de `0004` quedó probada además aplicándola dos veces en Vector2.
+- [x] `0004_tiendas.sql` aplicada dos veces en `vector-two` sin error, sin ningún `DROP` ni bloques `do $$`; tipos regenerados; `APP_VERSION` = `0.5.0 · M4`.
+- [x] Roles: el menú muestra "Tiendas y aperturas" a admin y planner; el comprador no lo ve, `/maestros/tiendas` le redirige a `/`, `GET /api/tiendas` le responde `200` y `POST /api/tiendas` `403`.
+- [x] Alta a mano de `r401` / `  lukers iquitos lores ` / Tienda / zona `lukers sur oriente` / apertura 15/03/2019: la API devuelve `R401`, `LUKERS IQUITOS LORES`, `LUKERS SUR ORIENTE` y estado **Activa**, y el formulario anticipa el badge.
+- [x] `RD50` / `CD LUKERS` / Centro de Distribución: Venta esperada se deshabilita; `POST` con `tipo: "Centro de Distribución"` y `venta_esperada_promedio: 1000` → `400` "Un centro de distribución no lleva venta esperada". El CD sale con badge "CD" y, sin fechas, Planificada (ver pregunta 5).
+- [x] **Hito del plan, tienda futura**: `R512` con apertura = mañana y venta esperada `85000` → badge **Planificada** y "Quedará Planificada" en el formulario; en Calendario, con "Ver la red al día" = mañana, aparece **Activa** y su apertura sin `pasado`; `GET /api/tiendas?hoy=<mañana>` la devuelve con `estado: "Activa"`; editar su apertura a hoy → **Activa**.
+- [x] Cierre: `R401` con cierre = hoy sigue **Activa**; con cierre = ayer pasa a **Cerrada** conservando `activo = true`, y el chip "Cerradas (1)" la cuenta. Cierre anterior a la apertura → Guardar deshabilitado con el motivo y, forzando el `PATCH`, `400`; `PATCH` con `fecha_cierre` sobre una tienda sin apertura → `400` "…necesita fecha de apertura."
+- [x] Desactivar una tienda Activa pide `confirm` (cerrar no es desactivar); desactivar una Planificada o Cerrada y reactivar no piden `confirm`; el badge pasa a "Desactivada" y la fila se oculta sin "Mostrar inactivos".
+- [x] `DELETE /api/tiendas/abc` → `404`. Filtros: chips de tipo y estado con conteos, `Select` de zona (con "Sin zona"), buscador `iqui` encuentra `R401`; `?estado=Planificada` devuelve solo las planificadas; `?estado=activa` → `400`; `?hoy=ayer` → `400`.
+- [x] Calendario: tarjetas "Próximas aperturas", "Próximos cierres" y "Sin fecha de apertura" con los conteos esperados; meses en español, separador "Hoy" en su sitio, pasados atenuados; "Ver todo el historial" muestra lo anterior al corte de 12 meses.
+- [x] Importar un CSV de prueba (forma del ejemplo de la ficha, sin datos reales de Lukers) con una fila con `Tda#` sin mapear, un código repetido, un nombre repetido con otro código, una fecha `31/02/2024`, una venta `S/ 12,500.00`, un tipo `deposito`, una tienda sin fecha de apertura, una existente con otra zona y una fila `TOTAL`: el mapeo autodetecta las ocho columnas; `S/ 12,500.00` se lee como 12 500; las filas malas salen en "Filas con errores" con motivo, detalle y fila completa; la repetida en "Repetidas"; la existente en "Diferencias con lo ya cargado"; "Se crearán" avisa "K sin fecha de apertura".
+- [x] Importar un archivo con solo `CODIGO` y `NOMBRE`: Previsualizar se habilita; todas entran como Tienda sin fechas y la tarjeta avisa que quedarán Planificadas.
+
+**Solo se verifica con la base real** (Javier, en local o en Railway):
+
+- [ ] Tras la migración en la base de producción: `select count(*) from tiendas` = 0 y `GET /api/tiendas` devuelve `[]` (sin semilla).
+- [ ] Los únicos de verdad: crear `R401` de nuevo con otro nombre → `409` "Ya existe una tienda con ese código."; crear `R999` con nombre `Lukers Iquitos Lores` → `409` por nombre; `r401` y `R401` no conviven. El stub no tiene los índices `tiendas_codigo_uniq` y `tiendas_nombre_uniq`.
+- [ ] Persistencia: lo creado, editado, desactivado y eliminado sobrevive a recargar la página; con `?incluir_inactivos=1` la desactivada vuelve y sin él no; eliminar una tienda recién creada funciona.
+- [ ] Aplicar la importación contra la tabla real: el `confirm` repite los conteos, el reporte final coincide con la previsualización, las tiendas nuevas aparecen en la pestaña Tiendas con su estado y la existente **no** cambió de zona.
 - [ ] Reimportar el mismo archivo: `crear` en cero, "Nada nuevo que crear", las mismas omitidas y diferencias, y `select count(*) from tiendas` no cambia después de aplicar.
-- [ ] Importar un archivo con solo `CODIGO` y `NOMBRE`: Previsualizar se habilita; todas entran como Tienda sin fechas y la tarjeta avisa que quedarán Planificadas.
+- [ ] "Descargar omitidas (CSV)" abierto en Excel: los acentos salen bien (lleva BOM; no se probó con Excel real).
+- [ ] **Con la lista real de tiendas** (el archivo *CODIGOS DE TIENDAS LUKERS* o su versión nueva): importarla; revisar que cada tienda tenga el estado que Javier espera; que las que lleguen sin fecha de apertura se vean en la tarjeta "Sin fecha de apertura" y se completen desde la pestaña Tiendas; que el CD quede como tipo Centro de Distribución. Es el cierre real del hito y depende de las preguntas abiertas 1, 5 y 6.
 
 ## Fuera de alcance
 
@@ -382,7 +392,7 @@ Funciones puras en `src/lib/tiendas/` probadas en `tests/tiendas.*.test.ts`. Nor
 
 ## Decisiones nuevas propuestas
 
-Para que el `documentador` las registre en `docs/DECISIONES.md` cuando Javier apruebe la ficha; ninguna contradice una entrada vigente:
+Registradas en `docs/DECISIONES.md` el 2026-10-06, al construir el módulo; ninguna contradice una entrada vigente. Javier las valida al recorrer el hito (las preguntas abiertas 3, 5 y 6 siguen tocando algunas):
 
 1. **El estado de la tienda se calcula, no se guarda.** `estadoTienda(tienda, hoy)` a partir de `fecha_apertura` y `fecha_cierre`, con `hoy` en `America/Lima`. Por qué: en V1 era una columna y las tiendas no cambiaban de estado al abrir. Descartado: columna `estado` mantenida por un job diario (otra pieza que falla en silencio); trigger que la recalcule (no sabe qué día es "hoy" para el usuario).
 2. **`activo` no es "cerrada".** Una tienda cerrada conserva `activo = true` y su histórico; desactivar es administrativo. Descartado: desactivar al cerrar (M5 no podría cargar su histórico y M7 no sabría desde cuándo dejó de vender).
@@ -393,7 +403,37 @@ Para que el `documentador` las registre en `docs/DECISIONES.md` cuando Javier ap
 
 ## Cambios respecto a la especificación
 
-*(Se completa al construir: lo que QA, backend y frontend encontraron que la especificación no decía o decía distinto.)*
+Lo que la construcción y QA encontraron que la especificación no decía o decía distinto. Ninguno cambia el modelo de datos ni las rutas; el cuerpo de esta ficha ya está corregido donde la letra cambió (forma de `motivoRechazoTienda`, formato del monto, `leerMonto`, `leerTipo`, `eventosTiendas`, `nombre_repetido`).
+
+**Lógica y API**
+
+- `motivoRechazoTienda` devuelve `{ mensaje, path }` (o `null`) y no un texto con un `path` colgado: así zod y la pantalla enganchan el motivo al control correcto sin parsear.
+- `TIPOS_TIENDA` y `ESTADOS_TIENDA` viven en `src/lib/tiendas/tipos.ts` y no en `esquemas.ts`, junto al resto de los tipos de dominio, que el backend importa sin depender de la pantalla.
+- `leerMonto` trata `S/` sin cifra como inválido, acepta `1 000` como 1000 y no devuelve `-0`. `leerTipo` acepta también `CENTRO DISTRIBUCION`.
+- `eventosTiendas(tiendas, hoy, rango)`: `desde`/`hasta` acotan los eventos y los conteos de próximas aperturas y cierres, pero no `sin_fecha_apertura`, que cuenta tiendas y no eventos.
+- Importador: `duplicada_en_archivo` lista en `detalle` todos los campos que difieren, no solo el primero. Una fila cuyo código ya existe cuenta como existente aunque su nombre choque con otra tienda; `nombre_repetido` solo aplica a filas nuevas (el choque de una existente se ve en `diferencias`). El reporte lleva `hoy`. En `aplicar`, un fallo distinto de `23505` devuelve el status de `traducirErrorDb` con cuántas se crearon hasta ahí.
+- `tieneAlgo` y `noVacio` se repiten localmente en `esquemas.ts` en lugar de importarlos del árbol, como proponía la ficha.
+- `GET /api/tiendas` pasa `venta_esperada_promedio` por `Number()` para que el JSON entregue siempre un número (o `null`), como promete `TiendaFila`.
+
+**Pantalla**
+
+- El `hoy` del cliente se calcula en el navegador con la zona de Lima y se fija al montar el panel (ver "Limitaciones conocidas").
+- El resumen de la pantalla cuenta solo tiendas activas; los chips de tipo y estado cuentan sobre lo que está visible (con o sin inactivas), así que pueden diferir del resumen cuando "Mostrar inactivos" está encendido.
+- Calendario: el separador "Hoy" va antes del primer evento no pasado si hay pasados antes, al final de la lista si todo es pasado y no aparece si nada es pasado. El corte por defecto de 12 meses es desde el día 1 del mes de hace un año respecto a la fecha que se está viendo, y "Ver todo el historial" lo quita (con vuelta atrás).
+- La zona entra en el filtro "Todas las zonas" como una opción más junto a las existentes y "Sin zona".
+- La vista previa del código ("se guardará como R401") sale como `hint` del campo y no como línea aparte.
+- El aviso de éxito al crear usa el estado que devolvió la API, no el calculado en el cliente.
+- Desactivar una tienda Planificada o Cerrada, y reactivar cualquiera, no piden `confirm`; solo desactivar una Activa lo pide.
+- Importar: la tarjeta "Se crearán" pasa a tono alerta cuando hay tiendas sin fecha de apertura, y el `confirm` de Aplicar menciona además las diferencias que no se aplicarán (el importador no modifica existentes).
+- Los montos con `Intl.NumberFormat("es-PE")` salen `S/ 85,000.00` (coma de miles); la ficha decía espacio. El importador sigue leyendo la coma como separador de miles, de modo que lo que se muestra se puede volver a cargar.
+- El calendario muestra el estado derivado también de las tiendas desactivadas cuando "Mostrar inactivos" está encendido: `EventoTienda` no trae `activo`, así que el calendario no distingue una tienda desactivada.
+
+## Limitaciones conocidas
+
+Observaciones menores de QA que quedan abiertas a propósito; ninguna pierde datos.
+
+- **Error de un Guardar fallido en edición en línea.** Si un `PATCH` falla (por ejemplo, un `409` por nombre repetido), el `Alert` sale arriba de la tabla y no junto a la fila que se estaba editando; la fila sigue en edición con lo escrito. Con una docena de tiendas se ve igual, pero con una lista larga el mensaje puede quedar fuera de pantalla.
+- **El `hoy` del cliente no se refresca pasada la medianoche con la pantalla abierta.** Se fija al montar. Si alguien deja `/maestros/tiendas` abierta de un día para otro, el badge de vista previa del formulario y de la edición, y la fecha con la que arranca la pestaña Calendario, siguen con el día de ayer hasta que recargue; los estados de la tabla vienen de la API y se actualizan en la siguiente lectura. Recargar la página lo corrige.
 
 ## Preguntas abiertas para Javier
 

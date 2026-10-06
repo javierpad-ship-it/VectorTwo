@@ -48,6 +48,9 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   // M3.
   ["agrupaciones_estacionalidad_codigo", "Ya existe una agrupación de estacionalidad con ese código."],
   ["agrupaciones_estacionalidad_nombre", "Ya existe una agrupación de estacionalidad con ese nombre."],
+  // M4.
+  ["tiendas_codigo", "Ya existe una tienda con ese código."],
+  ["tiendas_nombre", "Ya existe una tienda con ese nombre."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -55,6 +58,16 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["agrupaciones_estacionalidad_descripcion", "La descripción no puede superar 500 caracteres."],
   ["marcas_nota_len", "La nota no puede superar 200 caracteres."],
   ["marcas_nota_sin_tratamiento", "La nota solo se guarda si la marca tiene tratamiento especial."],
+  // M4. `tiendas_cierre_requiere_apertura` va antes que `tiendas_cierre_apertura`
+  // por claridad; los dos nombres no se contienen entre sí.
+  ["tiendas_tipo", "El tipo debe ser Tienda o Centro de Distribución."],
+  ["tiendas_cierre_requiere_apertura", "Para registrar un cierre, la tienda necesita fecha de apertura."],
+  ["tiendas_cierre_apertura", "La fecha de cierre no puede ser anterior a la de apertura."],
+  ["tiendas_venta_no_negativa", "La venta esperada no puede ser negativa."],
+  ["tiendas_venta_solo_tienda", "Un centro de distribución no lleva venta esperada."],
+  ["tiendas_zona_len", "La zona no puede superar 120 caracteres."],
+  ["tiendas_razon_social_len", "La razón social no puede superar 120 caracteres."],
+  // Genéricos: cubren `*_codigo_len_check` y `*_nombre_len_check` de todas las tablas, incluidas tiendas.
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
 ];

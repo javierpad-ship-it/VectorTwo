@@ -102,7 +102,8 @@ export type TipoEliminable =
   | "agrupacion_talla"
   | "agrupacion_marca"
   | "marca"
-  | "agrupacion_estacionalidad";
+  | "agrupacion_estacionalidad"
+  | "tienda";
 
 type Etiqueta = { sujeto: string; uno: string; varios: string; desactivar: string };
 
@@ -134,6 +135,13 @@ const ETIQUETAS: Record<TipoEliminable, Etiqueta> = {
     sujeto: "la agrupación de estacionalidad",
     uno: "equivalencia",
     varios: "equivalencias",
+    desactivar: "Desactívala",
+  },
+  // M4. Las tiendas no tienen hijos hasta que M5 cuelgue venta y stock.
+  tienda: {
+    sujeto: "la tienda",
+    uno: "registro de venta o stock",
+    varios: "registros de venta o stock",
     desactivar: "Desactívala",
   },
 };

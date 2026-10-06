@@ -44,7 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/maestros/arbol", label: "Árbol de producto" },
       { href: "/maestros/marcas", label: "Agrupaciones y marcas", roles: PLANIFICACION },
       { href: "/maestros/estacionalidad", label: "Agrupaciones de estacionalidad", roles: PLANIFICACION },
-      { href: "/maestros/tiendas", label: "Tiendas y aperturas", roles: PLANIFICACION, pendiente: "M4" },
+      { href: "/maestros/tiendas", label: "Tiendas y aperturas", roles: PLANIFICACION },
     ],
   },
   {
