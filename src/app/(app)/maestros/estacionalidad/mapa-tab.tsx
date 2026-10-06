@@ -183,7 +183,17 @@ function Tarjeta({
 }) {
   const [abierta, setAbierta] = useState(false);
   const [busqueda, setBusqueda] = useState("");
+  // Líneas desplegadas a mano. Con una búsqueda activa se despliegan solas las que coinciden.
+  const [lineasAbiertas, setLineasAbiertas] = useState<ReadonlySet<string>>(new Set());
   const estilos = estilosDe(tono);
+  const buscando = normalizarNombre(busqueda) !== "";
+  const alternarLinea = (id: string) =>
+    setLineasAbiertas((prev) => {
+      const sig = new Set(prev);
+      if (sig.has(id)) sig.delete(id);
+      else sig.add(id);
+      return sig;
+    });
   const pct = totalGlobal > 0 ? (total / totalGlobal) * 100 : 0;
   const conBuscador = total > UMBRAL_BUSCADOR;
   const esSinAgrupacion = tono === "alerta" || tono === "exito";
@@ -271,26 +281,60 @@ function Tarjeta({
                 {lineasVisibles.length === 0 ? (
                   <p className="text-xs text-tinta-suave">Ninguna equivalencia coincide.</p>
                 ) : (
-                  <ul className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-borde bg-fondo p-2 text-xs">
-                    {lineasVisibles.map((l) => (
-                      <li key={l.id}>
-                        <p className="flex items-center justify-between gap-2 font-medium text-tinta">
-                          <span className="truncate">{l.nombre}</span>
-                          <span className="font-mono text-tinta-suave">{formatearNumero(l.conteo)}</span>
-                        </p>
-                        <ul className="mt-0.5 space-y-0.5">
-                          {l.equivalencias.map((e) => (
-                            <li key={e.id} className="flex flex-wrap items-baseline gap-x-2 pl-2">
-                              <span className="text-tinta">{e.nombre}</span>
-                              {e.es_generica && <Badge tono="marca">Genérica</Badge>}
-                              <span className="text-tinta-suave/80">{e.rutaCorta}</span>
-                              {e.motivo_faltante === "agrupacion_inactiva" && <span className="text-alerta">· agrupación inactiva</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-tinta-suave">
+                      <span>{formatearNumero(lineasVisibles.length)} {lineasVisibles.length === 1 ? "línea" : "líneas"}</span>
+                      {!buscando && (
+                        <button
+                          type="button"
+                          className="font-medium text-marca-oscura hover:underline"
+                          onClick={() =>
+                            setLineasAbiertas(lineasAbiertas.size === lineasVisibles.length ? new Set() : new Set(lineasVisibles.map((l) => l.id)))
+                          }
+                        >
+                          {lineasAbiertas.size === lineasVisibles.length ? "Cerrar todas" : "Abrir todas"}
+                        </button>
+                      )}
+                    </div>
+                    <ul className="max-h-80 divide-y divide-borde overflow-y-auto rounded-lg border border-borde bg-fondo text-xs">
+                      {lineasVisibles.map((l) => {
+                        const desplegada = buscando || lineasAbiertas.has(l.id);
+                        return (
+                          <li key={l.id}>
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left font-medium text-tinta hover:bg-neutro-suave"
+                              aria-expanded={desplegada}
+                              onClick={() => alternarLinea(l.id)}
+                              disabled={buscando}
+                            >
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <span aria-hidden className={`inline-block text-tinta-suave transition-transform ${desplegada ? "rotate-90" : ""}`}>
+                                  ▸
+                                </span>
+                                <span className="truncate">{l.nombre}</span>
+                              </span>
+                              <span className="font-mono text-tinta-suave">{formatearNumero(l.conteo)}</span>
+                            </button>
+                            {desplegada && (
+                              <ul className="space-y-1 border-t border-borde bg-superficie px-2 py-1.5 pl-6">
+                                {l.equivalencias.map((e) => (
+                                  <li key={e.id} className="flex items-baseline justify-between gap-2">
+                                    <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                                      <span className="text-tinta">{e.nombre}</span>
+                                      {e.es_generica && <Badge tono="marca">Genérica</Badge>}
+                                      {e.motivo_faltante === "agrupacion_inactiva" && <span className="text-alerta">· agrupación inactiva</span>}
+                                    </span>
+                                    <span className="shrink-0 text-[11px] text-tinta-suave/80">{e.rutaCorta}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 )}
               </div>
             )}

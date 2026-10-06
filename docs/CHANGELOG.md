@@ -2,6 +2,10 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.5.1 · M3 — 2026-10-06
+
+- **Mapa de agrupaciones: primero líneas, después equivalencias.** Al desplegar una tarjeta se ve la lista de líneas cerradas, cada una con su conteo; al abrir una línea aparecen sus equivalencias (con la ruta género / mundo a la derecha). Enlace "Abrir todas / Cerrar todas" y contador de líneas sobre la lista; con una búsqueda activa se abren solas las líneas que coinciden. Pedido por Javier al recorrer el hito.
+
 ## 0.5.0 · M4 — 2026-10-06
 
 - Migración `0004_tiendas.sql` (aplicada dos veces en Vector2 sin error): tabla `tiendas` **sin seed y sin FKs**. `codigo` obligatorio (1–40) con único sobre `upper(codigo)` y no derivado del nombre; `nombre` (1–120) único; `tipo` como texto con `check` (`Tienda` | `Centro de Distribución`, por defecto Tienda); `zona` y `razon_social` nulables (1–120); `fecha_apertura` y `fecha_cierre` (`date`) con dos checks cruzados (el cierre exige apertura y no puede ser anterior a ella; cierre = apertura se permite); `venta_esperada_promedio numeric(14,2)` no negativa y solo para tipo Tienda. RLS activo sin políticas; trigger con `create or replace trigger`; sin `DROP` ni bloques `do $$`. Tipos regenerados.
