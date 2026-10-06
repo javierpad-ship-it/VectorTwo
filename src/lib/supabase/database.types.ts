@@ -376,6 +376,51 @@ export type Database = {
         };
         Relationships: [];
       };
+      tiendas: {
+        Row: {
+          activo: boolean;
+          codigo: string;
+          created_at: string;
+          fecha_apertura: string | null;
+          fecha_cierre: string | null;
+          id: string;
+          nombre: string;
+          razon_social: string | null;
+          tipo: string;
+          updated_at: string;
+          venta_esperada_promedio: number | null;
+          zona: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          codigo: string;
+          created_at?: string;
+          fecha_apertura?: string | null;
+          fecha_cierre?: string | null;
+          id?: string;
+          nombre: string;
+          razon_social?: string | null;
+          tipo?: string;
+          updated_at?: string;
+          venta_esperada_promedio?: number | null;
+          zona?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          codigo?: string;
+          created_at?: string;
+          fecha_apertura?: string | null;
+          fecha_cierre?: string | null;
+          id?: string;
+          nombre?: string;
+          razon_social?: string | null;
+          tipo?: string;
+          updated_at?: string;
+          venta_esperada_promedio?: number | null;
+          zona?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
