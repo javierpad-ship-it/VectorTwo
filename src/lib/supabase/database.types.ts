@@ -1,7 +1,7 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-06 contra `generate_typescript_types` del proyecto
+ * Verificados el 2026-10-07 contra `generate_typescript_types` del proyecto
  * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
  * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
  */
@@ -414,6 +414,58 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      responsables_genero_mundo: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          genero_id: string;
+          id: string;
+          mundo_id: string;
+          perfil_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          genero_id: string;
+          id?: string;
+          mundo_id: string;
+          perfil_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          genero_id?: string;
+          id?: string;
+          mundo_id?: string;
+          perfil_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "responsables_genero_mundo_genero_id_fkey";
+            columns: ["genero_id"];
+            isOneToOne: false;
+            referencedRelation: "generos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "responsables_genero_mundo_mundo_id_fkey";
+            columns: ["mundo_id"];
+            isOneToOne: false;
+            referencedRelation: "mundos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "responsables_genero_mundo_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       tiendas: {
         Row: {
