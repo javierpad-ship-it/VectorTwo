@@ -351,3 +351,67 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** El cliente de Supabase manda los ids en la URL: 500 UUID pasan de 18 KB y el gateway puede rechazar la petición por tamaño de URL, un error que solo aparecería con selecciones grandes (el árbol real tiene 1 956 equivalencias). Con 150 ids la URL queda por debajo. La operación sigue siendo idempotente, así que el costo es solo más llamadas.
 
 **Descartado.** Mantener 500. Queda anotado que el límite del gateway no se probó contra Supabase real: 150 es un margen conservador, no un valor medido.
+
+## 2026-10-07 · El responsable de una combinación género-mundo es un comprador, y sirve para filtrar, no para limitar permisos
+
+**Decisión.** Cada combinación género × mundo tiene como máximo un responsable (titular), que es un usuario con rol `comprador`. Vive en una tabla propia, `responsables_genero_mundo`, con único sobre la pareja `(genero_id, mundo_id)`. El selector solo ofrece compradores activos y la API rechaza a cualquier otro rol (`409`). Los compradores ven todo; el responsable solo reduce la vista a "las combinaciones que me tocan" o "las de Ana". Un solo titular y solo comprador asignable son valores por defecto mientras Javier no responda las preguntas abiertas 1 y 2 de la ficha.
+
+**Por qué.** Es lo que pidió Javier: "otro módulo… a nivel de género-mundo asignar un responsable", "los compradores pueden ver todo, pero para filtrar". El par género × mundo no existe como entidad en el árbol (los mundos existen en todos los géneros) y existe aunque no tenga líneas, así que no cabe como columna de `generos`, `mundos` ni del nodo `genero_mundo_linea`. Un usuario como responsable (y no un texto) permite filtrar por persona y sirve a la Fase 3, donde el comprador entra con "Mis combinaciones".
+
+**Descartado.** Una columna en `mundos`, `generos` o en el nodo (no representan el par). Una tabla pre-poblada con las 40 filas (habría que sincronizarla al crear un género o un mundo y duplicaría la regla "no hay relación Género↔Mundo"). Texto libre (no filtra por usuario). Un suplente (nadie lo pidió; sería una columna nullable `suplente_perfil_id` más adelante). Que el responsable restrinja permisos (contradice lo dicho por Javier; si M9 quisiera limitar quién registra compras, sería una decisión de esa ficha).
+
+## 2026-10-07 · Eliminar un comprador deja sus combinaciones sin asignar: `perfil_id` es `on delete cascade`
+
+**Decisión.** `responsables_genero_mundo.perfil_id` referencia a `perfiles(id)` con `on delete cascade`; `genero_id` y `mundo_id` siguen `on delete restrict`. Al eliminar a un comprador, sus filas desaparecen y esas combinaciones aparecen en Faltantes. Eliminar nunca se bloquea por esto. Es la primera FK en cascada fuera de `perfiles → auth.users`. Se probó en un Postgres local que borrar el perfil, o la fila de `auth.users`, elimina las asignaciones; falta repetirlo con la API de Auth real.
+
+**Por qué.** Respuesta de Javier: "si elimino al comprador quedarían sin asignar". Nada cuelga de la asignación (en la Fase 3 las compras cuelgan del usuario que las registra y de la combinación, no de esta fila) y la asignación es un atributo de la persona. Con `cascade` la fila existe si y solo si hay alguien asignado. Géneros y mundos son catálogos raíz con la regla de M1 "nada se elimina con hijos, se desactiva", y una asignación cuenta como hijo: eliminar uno con responsables responde `409`.
+
+**Descartado.** `restrict` en `perfil_id` (obligaría a reasignar antes de borrar a alguien que ya se fue). `set null` (obligaría a `perfil_id` nullable y dejaría dos formas de "sin responsable": sin fila o fila con `null`, con reglas y pruebas duplicadas).
+
+## 2026-10-07 · Desactivar al comprador o cambiarle el rol conserva la asignación, que pasa a ser faltante calculada
+
+**Decisión.** Si un comprador se desactiva o deja de ser comprador, la fila se conserva y la combinación cuenta como faltante con un motivo visible: `responsable_inactivo` o `responsable_no_comprador` (si coinciden, gana `responsable_inactivo`). Reactivarlo o devolverle el rol la deja válida sin reasignar. Un rol desconocido cuenta como "ya no es comprador". Es el valor por defecto mientras Javier no responda la pregunta abierta 6 de la ficha.
+
+**Por qué.** Es el mismo criterio sin cascada de `activo` del árbol y de M3 (`agrupacion_inactiva`): corregir un rol por error devuelve todo como estaba, y editar un usuario en `/usuarios` no borra datos de otra pantalla a escondidas. A cambio, la combinación no queda silenciosamente asignada a alguien que no entra o que ya no compra. La base solo sabe si hay fila; el resto se calcula, porque depende de `perfiles`, que cambia por otras pantallas.
+
+**Descartado.** Limpiar las asignaciones al desactivar o al cambiar el rol (irreversible y con un efecto oculto desde `/usuarios`). Bloquear la desactivación o el cambio de rol (frena retirar a alguien).
+
+## 2026-10-07 · Faltante = combinación vigente sin responsable válido, con una sola función `motivoFaltante`
+
+**Decisión.** Una combinación es vigente si su género y su mundo están activos. Es faltante si es vigente y no tiene responsable válido (activo y comprador). `motivoFaltante` es la única definición y la usan la matriz, el resumen, el bloque, los filtros y el CSV. Las combinaciones sin líneas también cuentan: el hito es siempre "las 40 tienen responsable". Una combinación no vigente nunca es faltante y no se puede asignar (conserva la asignación que tuviera). Los filtros de la pantalla descartan las no vigentes, de modo que los conteos de los chips coinciden con `resumen`. Que cuenten las combinaciones sin líneas es el valor por defecto mientras Javier no responda la pregunta abierta 3.
+
+**Por qué.** El producto cartesiano de géneros y mundos es la definición de combinación del árbol (los mundos existen en todos los géneros), y con una sola función no hay dos pantallas que cuenten distinto. Contar solo las que tienen líneas haría que el hito cambiara cada vez que se carga una línea nueva en un género-mundo vacío.
+
+**Descartado.** Contar solo combinaciones con alguna línea vigente (el hito dejaría de ser estable).
+
+## 2026-10-07 · `/usuarios` avisa y no bloquea
+
+**Decisión.** Desactivar, eliminar o quitarle el rol de comprador a alguien con combinaciones pide un `confirm` con el conteo (`avisoResponsabilidades`); la API nunca lo rechaza. La lista de usuarios suma la columna "Responsable de" con enlace a la matriz filtrada por ese usuario, y tras eliminar un `Alert` dice cuántas combinaciones quedaron sin responsable (`DELETE` responde `{ id, combinaciones_liberadas }`). Las reglas de "último admin" y "no auto-eliminarse" no cambian.
+
+**Por qué.** Javier dijo que al eliminar al comprador sus combinaciones quedan sin asignar; un `409` lo contradiría. Y bloquear la desactivación frenaría retirar a alguien. Avisar da la información en el momento en que se decide, sin quitar la decisión a quien administra.
+
+**Descartado.** `409` por responsabilidades (contradice la respuesta de Javier).
+
+## 2026-10-07 · No hay importador de responsables
+
+**Decisión.** M1b no trae importador CSV ni Excel. Las 40 combinaciones se reparten con la asignación en bloque por fila, columna o toda la matriz. Solo se ofrece la descarga del CSV de la matriz, para compartir el reparto o revisarlo en Excel.
+
+**Por qué.** Con el bloque, repartir todo el catálogo son cinco o seis acciones. Un importador sería la pieza más grande del módulo (hay que resolver usuarios por nombre o correo, con homónimos, errores de tipeo y desactivados) y cuesta lo mismo que lo que ahorra. Si el catálogo de géneros o mundos creciera a cientos de combinaciones, se reabre.
+
+**Descartado.** Un importador de responsables por nombre o correo (por lo anterior).
+
+## 2026-10-07 · `activo` queda en `responsables_genero_mundo` por convención y sin uso; quitar un responsable borra la fila
+
+**Decisión.** La tabla lleva `activo boolean not null default true` por la convención de PLAN §4 ("toda tabla lleva `activo`"), pero la API no lo expone: toda asignación se escribe con `activo = true` y quitar un responsable borra la fila. Las lecturas tratan una fila con `activo = false` (solo posible desde el SQL Editor) como sin responsable, y al quitar esa fila se borra.
+
+**Por qué.** Nada cuelga de la asignación, así que desactivarla en vez de borrarla solo agregaría un estado más sin dueño. Se mantiene la columna para no romper una convención que otras tablas y herramientas esperan. Si Javier prefiere no tener columnas sin uso, se quita con una migración (el mismo criterio con el que se descartaron `tallas` y `equivalencia_marca`).
+
+**Descartado.** Desactivar la asignación en lugar de borrarla (un estado más sin dueño). Omitir la columna (rompe la convención de PLAN §4).
+
+## 2026-10-07 · Numeración M1b, migración `0006_responsables.sql`, versión `0.7.0 · M1b`
+
+**Decisión.** El módulo se llama M1b (un maestro más de la Fase 1 que cuelga del árbol), su migración es `0006_responsables.sql` y la versión que sale es `0.7.0 · M1b`. Entra antes de M5, que no depende de él.
+
+**Por qué.** M5 sigue siendo la carga de histórico de ventas de la Fase 2 y renombrarla confundiría los documentos ya escritos. M1b es independiente de M2–M4, así que puede construirse mientras Javier valida sus hitos, y le permite repartir las combinaciones sin esperar a la Fase 2. Lo consumirán M7, M8 y M9 (filtro "Mis combinaciones" y documento para compradores partido por responsable).
+
+**Descartado.** Renombrar la Fase 2 o llamarlo M5.

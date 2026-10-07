@@ -17,6 +17,13 @@ type Modulo = {
 const MODULOS: Modulo[] = [
   { id: "M0", nombre: "Cimientos", detalle: "Login, roles y administración de usuarios.", estado: "listo" },
   { id: "M1", nombre: "Árbol de producto", detalle: "Género · Mundo · Línea · Equivalencia · Agrupación talla.", estado: "listo", href: "/maestros/arbol" },
+  {
+    id: "M1b",
+    nombre: "Responsables género-mundo",
+    detalle: "Qué comprador responde por cada género × mundo; sirve para filtrar lo que le toca a cada uno.",
+    estado: "listo",
+    href: "/maestros/responsables",
+  },
   { id: "M2", nombre: "Agrupaciones y marcas", detalle: "Agrupaciones de marca administrables y marcas con tratamiento especial.", estado: "listo", href: "/maestros/marcas" },
   {
     id: "M3",
@@ -54,7 +61,7 @@ export default async function InicioPage() {
             const enlazable = m.estado === "listo" && m.href && r.estado === "ok" && puedeVerRuta(r.rol, m.href);
             return (
               <li key={m.id} className="flex items-center gap-4 py-3">
-                <span className="w-9 font-mono text-xs text-tinta-suave">{m.id}</span>
+                <span className="w-10 font-mono text-xs text-tinta-suave">{m.id}</span>
                 <div className="flex-1">
                   <div className="text-sm font-medium">
                     {enlazable && m.href ? (

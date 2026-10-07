@@ -27,6 +27,8 @@ export const api = {
   get: <T>(url: string) => llamar<T>(url),
   post: <T>(url: string, body: unknown) =>
     llamar<T>(url, { method: "POST", body: JSON.stringify(body) }),
+  put: <T>(url: string, body: unknown) =>
+    llamar<T>(url, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(url: string, body: unknown) =>
     llamar<T>(url, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(url: string) => llamar<T>(url, { method: "DELETE" }),

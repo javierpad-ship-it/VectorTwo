@@ -2,20 +2,33 @@ import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/guard";
 import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
+import { traducirErrorDb } from "@/lib/api/errores-db";
 import { crearUsuarioSchema } from "@/lib/usuarios/esquemas";
+import { leerAsignaciones } from "@/lib/responsables/consultas";
+import { contarPorPerfil } from "@/lib/responsables/reglas";
 
-/** Lista de usuarios (solo admin). */
+/**
+ * Lista de usuarios (solo admin). Cada perfil suma `responsabilidades`: las
+ * filas de `responsables_genero_mundo` con su `perfil_id`, vigentes o no (M1b,
+ * para que `/usuarios` avise antes de desactivar, cambiar el rol o eliminar).
+ */
 export async function GET() {
   const { response } = await requireAdmin();
   if (response) return response;
 
-  const { data, error: err } = await supabaseAdmin()
+  const db = supabaseAdmin();
+  const { data, error: err } = await db
     .from("perfiles")
     .select("*")
     .order("created_at", { ascending: true });
 
   if (err) return error(err.message, 500);
-  return ok(data);
+
+  const asignaciones = await leerAsignaciones(db);
+  if (asignaciones.error) return traducirErrorDb(asignaciones.error, "listar usuarios: contar responsabilidades");
+  const conteo = contarPorPerfil(asignaciones.data);
+
+  return ok(data.map((perfil) => ({ ...perfil, responsabilidades: conteo.get(perfil.id) ?? 0 })));
 }
 
 /** Crea el usuario en Auth y su perfil. Si el perfil falla, deshace el usuario de Auth. */

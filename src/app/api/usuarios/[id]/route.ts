@@ -2,6 +2,8 @@ import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/guard";
 import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
+import { traducirErrorDb } from "@/lib/api/errores-db";
+import type { UsuarioEliminado } from "@/lib/responsables/tipos";
 import { editarUsuarioSchema } from "@/lib/usuarios/esquemas";
 import { motivoRechazo } from "@/lib/usuarios/reglas";
 
@@ -67,7 +69,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   return ok(data);
 }
 
-/** Elimina el usuario de Auth; el perfil cae en cascada. */
+/**
+ * Elimina el usuario de Auth; el perfil y sus responsabilidades (M1b) caen en
+ * cascada. Cuenta las responsabilidades antes de borrar y las devuelve en
+ * `combinaciones_liberadas`; nunca responde `409` por tenerlas (esas
+ * combinaciones quedan sin asignar, respuesta 3 de Javier).
+ */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   const { perfil: actor, response } = await requireAdmin();
   if (response) return response;
@@ -80,8 +87,16 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   const motivo = motivoRechazo(actor, objetivo, todos, { eliminar: true });
   if (motivo) return error(motivo, 409);
 
-  const { error: errAuth } = await supabaseAdmin().auth.admin.deleteUser(id);
+  const db = supabaseAdmin();
+  const { count, error: errConteo } = await db
+    .from("responsables_genero_mundo")
+    .select("id", { count: "exact", head: true })
+    .eq("perfil_id", id);
+  if (errConteo) return traducirErrorDb(errConteo, "eliminar usuario: contar responsabilidades");
+
+  const { error: errAuth } = await db.auth.admin.deleteUser(id);
   if (errAuth) return error(errAuth.message);
 
-  return ok({ id });
+  const eliminado: UsuarioEliminado = { id, combinaciones_liberadas: count ?? 0 };
+  return ok(eliminado);
 }

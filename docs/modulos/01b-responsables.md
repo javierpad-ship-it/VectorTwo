@@ -1,6 +1,6 @@
 # M1b · Responsables género-mundo
 
-> Estado: **📝 especificada (2026-10-06, `0.7.0 · M1b`), pendiente de aprobación de Javier**. Dependencias: [00-cimientos](00-cimientos.md) (`perfiles`, roles) y [01-arbol-producto](01-arbol-producto.md) (`generos`, `mundos`). Independiente de [02-marcas](02-marcas.md), [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) y [04-tiendas](04-tiendas.md) (esta última es la más reciente y la plantilla de estructura). Reglas de base en `docs/PLAN.md` y `docs/DECISIONES.md`. Numerada **M1b** para no renombrar la Fase 2 (M5 sigue siendo la carga de histórico de ventas): es un maestro más de la Fase 1 que cuelga del árbol.
+> Estado: **construida (2026-10-07, `0.7.0 · M1b`); hito pendiente de recorrer por Javier con compradores reales**. Especificada el 2026-10-06 y aprobada por Javier. Hoy no hay ningún comprador en producción (solo el usuario admin), así que el reparto de las 40 combinaciones empieza creando compradores en `/usuarios`. Dependencias: [00-cimientos](00-cimientos.md) (`perfiles`, roles) y [01-arbol-producto](01-arbol-producto.md) (`generos`, `mundos`). Independiente de [02-marcas](02-marcas.md), [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) y [04-tiendas](04-tiendas.md) (esta última es la más reciente y la plantilla de estructura). Reglas de base en `docs/PLAN.md` y `docs/DECISIONES.md`. Numerada **M1b** para no renombrar la Fase 2 (M5 sigue siendo la carga de histórico de ventas): es un maestro más de la Fase 1 que cuelga del árbol.
 
 ## Objetivo
 
@@ -24,6 +24,8 @@ Respuestas de Javier a las preguntas abiertas de esta ficha (2026-10-06); entran
 1. **Los responsables son compradores.** "Los compradores, para que sea más fácil filtrar lo que van a comprar." Solo los usuarios con rol `comprador` aparecen en el selector y la API rechaza a cualquier otro rol.
 2. **Los compradores pueden ver todo.** "Los compradores pueden ver todo, pero para filtrar." El responsable es un filtro, no un permiso: un comprador ve la matriz completa (y el resto de lo que ya ve) sea o no responsable de algo. Nada se oculta ni se bloquea por no ser el responsable.
 3. **Si se elimina al comprador, sus combinaciones quedan sin asignar.** "Si elimino al comprador quedarían sin asignar." Eliminar un usuario borra sus asignaciones (FK `on delete cascade`, no `restrict`) y esas combinaciones aparecen en Faltantes. Eliminar nunca se bloquea por esto; `/usuarios` avisa cuántas combinaciones quedarán libres.
+
+**Luz verde (2026-10-07).** Javier dio luz verde a la ficha y a su construcción. Sus tres respuestas de arriba son reglas firmes. Las siete preguntas abiertas del final **no se han contestado**: el módulo se construyó con los valores por defecto de cada una, que siguen vigentes hasta que Javier responda (resumen al final, en "Preguntas abiertas para Javier"). Cambiar cualquiera es chico, salvo el suplente (pregunta 1), que agrega una columna y una fila de selectores.
 
 ## Modelo de datos
 
@@ -65,6 +67,8 @@ Por qué se conservan en vez de limpiarse: es el mismo criterio sin cascada de `
 **Combinación vigente** = género activo y mundo activo. Una combinación no vigente nunca es faltante y no se puede asignar (la asignación existente se conserva si luego se desactiva el género o el mundo, y reaparece al reactivarlo).
 
 **Por qué `activo` existe y no se usa.** Se mantiene por la convención de PLAN §4 ("toda tabla lleva `activo`"). La API no lo expone: **quitar un responsable borra la fila** (no cuelga nada de ella, y desactivar en vez de borrar dejaría un estado más). Las lecturas tratan una fila con `activo = false` (solo posible desde el SQL Editor) como sin responsable, y toda asignación la escribe con `activo = true`. Si Javier prefiere no tener columnas sin uso, se quita y la entrada nueva 7 se retira (es el mismo criterio con el que se descartaron `tallas` y `equivalencia_marca`).
+
+**Aplicada y verificada.** `0006_responsables.sql` está aplicada en `vector-two` (dos veces, sin error, sin `DROP`, `DELETE` ni `TRUNCATE`) y los tipos regenerados. Cifras de producción antes de aplicar: 8 géneros × 5 mundos = 40 combinaciones, y solo existía el usuario admin (ningún comprador). La cascada `perfiles → responsables_genero_mundo` y `auth.users → perfiles → responsables_genero_mundo` se probó en un Postgres local: borrar el perfil, o la fila de `auth.users`, elimina sus asignaciones. No se ha probado todavía con la API de Auth real (`deleteUser`).
 
 ## Contratos de API
 
@@ -143,7 +147,7 @@ asignarMasivaSchema = z.object({
 1. Si `perfil_id` no es nulo: `404` si no existe, `409` si no es comprador o está desactivado (mismas reglas y mensajes que el individual; falla toda la petición porque el error es del destino, no de las celdas).
 2. Se deduplican las combinaciones. Las que no existan (género o mundo borrado desde que se cargó la pantalla) vuelven en `no_encontradas` y **no** abortan; al asignar, las que no sean vigentes vuelven en `no_vigentes`. Es el mismo criterio de M3: una pantalla con datos viejos no pierde el trabajo por una combinación que cambió.
 3. Con `solo_faltantes: true`, se saltan las celdas cuyo responsable actual es válido (activo y comprador); se cuentan en `con_responsable`. "Faltante" es la misma `motivoFaltante` de la matriz (una celda con responsable desactivado sí se reemplaza). Se hace en el servidor y no solo en la pantalla para que "completar las vacías" nunca pise una asignación que otro planner hizo hace un minuto.
-4. Escritura: un `upsert` (`onConflict: "genero_id,mundo_id"`, `activo: true`) con las celdas a asignar y un `delete … in (ids)` con las filas a quitar. Sin transacción (supabase-js no las expone); repetir la misma petición completa lo que faltó sin efectos secundarios (es idempotente).
+4. Escritura: un `upsert` (`onConflict: "genero_id,mundo_id"`, `activo: true`) con las celdas a asignar y un `delete … in (ids)` con las filas a quitar, en tandas de 150 ids (`TANDA_IN`, mismo criterio de M3 por el largo de la URL). Sin transacción (supabase-js no las expone); repetir la misma petición completa lo que faltó sin efectos secundarios (es idempotente).
 5. Respuesta `200`:
 
 ```jsonc
@@ -185,6 +189,8 @@ Ruta nueva en el menú **Maestros**, entrada "Responsables género-mundo", **sin
 - `Todas (40)` · `Faltantes (3)` · `Mis combinaciones (12)` (visible para quien tenga al menos una; es el filtro para el que existe el módulo).
 - `Select` **Responsable**: Todos · cada comprador con asignaciones y su conteo ("ANA RAMOS (12)") · Sin responsable. El chip y el select son excluyentes entre sí.
 - Para el comprador que tiene combinaciones asignadas, la pantalla **abre con "Mis combinaciones"** activo y "Todas" a un clic (pregunta abierta 4). Ve todo; el filtro es solo el punto de partida.
+- `?responsable=<uuid>` abre la pantalla filtrada por ese usuario (es el enlace de `/usuarios`). Solo se acepta si es un UUID y tiene prioridad sobre "Mis combinaciones". Si el filtro apunta a alguien sin combinaciones vigentes, el `Select` lo muestra como "Responsable elegido (sin combinaciones vigentes)".
+- Los conteos de los chips cuentan solo combinaciones vigentes, de modo que coinciden con `resumen` (ver "Cambios respecto a la especificación").
 
 **Matriz** (tabla; filas = géneros por `orden`, columnas = mundos por `orden`):
 
@@ -194,35 +200,35 @@ Ruta nueva en el menú **Maestros**, entrada "Responsables género-mundo", **sin
 - Para admin y planner, cada celda es un `Select` que **guarda al instante** (como la agrupación en el árbol de M3) con las opciones "— Sin responsable —" y los compradores activos por nombre; si el responsable actual no es válido aparece como opción deshabilitada "ANA RAMOS (desactivado)" para que se vea qué se está cambiando. Un error de la API (`404` usuario borrado, `409` desactivado) se muestra en un `Alert` encima de la matriz y recarga la lista de compradores.
 - Si no hay compradores activos, los selectores quedan vacíos y un aviso dice "No hay compradores activos. Un administrador puede crearlos en Usuarios." (con enlace solo para el admin).
 
-**Asignar en bloque** (solo admin y planner): desde el encabezado de una fila, de una columna o la esquina, "Asignar…" abre un panel en línea con: `Select` de comprador (o "Quitar responsable"), casilla **"Reemplazar también las que ya tienen responsable"** (apagada por defecto = `solo_faltantes: true`) y el texto que calcula `planificarBloque`: "Se asignarán 3 de 5 combinaciones de HOMBRE (2 ya tienen responsable y no se tocan)". Aplicar pide `confirm` cuando va a reemplazar a alguien ("Se reemplazará el responsable de 2 combinaciones…") o a quitar. Tras aplicar, `Alert` de éxito con `asignadas / sin_cambio / con_responsable`. Con la casilla apagada y "Quitar", el botón se deshabilita con el motivo ("No se puede quitar el responsable solo a las faltantes").
+**Asignar en bloque** (solo admin y planner): desde el encabezado de una fila, de una columna o la esquina, "Asignar…" abre un panel en línea con: `Select` de comprador (o "Quitar responsable"), casilla **"Reemplazar también las que ya tienen responsable"** (apagada por defecto = `solo_faltantes: true`) y el texto que calcula `planificarBloque`: "Se asignarán 3 de 5 combinaciones de HOMBRE (2 ya tienen responsable y no se tocan)". Aplicar pide `confirm` cuando va a reemplazar a alguien ("Se reemplazará el responsable de 2 combinaciones…") o a quitar. Tras aplicar, `Alert` de éxito con `asignadas / sin_cambio / con_responsable`. Con la casilla apagada y "Quitar", el botón se deshabilita con el motivo ("No se puede quitar el responsable solo a las faltantes"). Si el comprador elegido deja de estar activo mientras el panel está abierto, el panel vuelve a "Elige un comprador…".
 
 **Carga por responsable** (tarjeta lateral o debajo): lista de `por_responsable` con nombre, conteo y una marca "desactivado" / "ya no es comprador" donde `valido = false`; clic en un nombre aplica ese filtro.
 
-**Descargar CSV**: botón que baja lo visible (`descargarCsv` de `src/components/importador/csv.ts`, con BOM) con columnas `GENERO, MUNDO, RESPONSABLE, CORREO, ESTADO` (`Asignada` / `Sin responsable` / `Responsable desactivado` / `Responsable ya no es comprador`). Sirve para compartir el reparto o revisarlo en Excel.
+**Descargar CSV**: botón que baja lo visible (`descargarCsv` de `src/components/importador/csv.ts`, con BOM) con columnas `GENERO, MUNDO, RESPONSABLE, CORREO, ESTADO` (`Asignada` / `Sin responsable` / `Responsable desactivado` / `Responsable ya no es comprador`, y `Inactiva` para las celdas de un género o mundo inactivo). Sirve para compartir el reparto o revisarlo en Excel.
 
 **No hay importador.** Son 40 celdas. Con la asignación en bloque por fila, columna o toda la matriz, repartir todo el catálogo son cinco o seis acciones, y un importador sería la pieza más grande del módulo (hay que resolver usuarios por nombre o correo, con homónimos, errores de tipeo y desactivados, y ya cuesta lo mismo que lo que ahorra). Si el catálogo de géneros o mundos creciera mucho o llegaran cientos de combinaciones, se reabre.
 
 ### `/maestros/arbol` — responsable a la vista (solo lectura)
 
-El panel del árbol pide `GET /api/responsables` como segunda llamada (como ya hace con las agrupaciones de estacionalidad; si falla, el árbol sigue y simplemente no muestra el responsable). Dos cambios, de solo lectura para todos los roles:
+El panel del árbol pide `GET /api/responsables?incluir_inactivos=1` como segunda llamada (con el hook compartido `useResponsables`; los inactivos cubren lo que el árbol muestre con "Mostrar inactivos"). Si falla, el árbol sigue funcionando y muestra un `Alert` informativo ("No se pudo cargar el responsable de cada combinación… El árbol funciona igual, sin mostrar responsables") con un enlace Reintentar. Dos cambios, de solo lectura para todos los roles:
 
 - Columna **Mundos** del género elegido: bajo el nombre de cada mundo, el responsable de esa combinación como texto pequeño (o "Sin responsable" en tono alerta, o "NOMBRE · desactivado").
-- Columna **Líneas**: el subtítulo pasa de `HOMBRE / URBANO` a `HOMBRE / URBANO · Responsable: ANA RAMOS`, con enlace "Cambiar" a la matriz para admin y planner.
+- Columna **Líneas**: el subtítulo mantiene el conteo de líneas y suma el responsable: `HOMBRE / URBANO · 12 líneas · Responsable: ANA RAMOS`, con enlace "Cambiar" a la matriz solo para admin y planner. Con el subtítulo largo, el botón "Agregar línea" puede partirse en dos líneas (ver "Limitaciones conocidas").
 
 La edición vive solo en la matriz: no hay dos caminos para cambiar un responsable. Un filtro "Solo mis combinaciones" dentro del árbol (que oculte los géneros y mundos que no le tocan al comprador) **queda como propuesta, fuera de M1b** (pregunta abierta 5); `filtrarCeldas` ya deja la lógica lista.
 
 ### `/usuarios` — avisos (sin bloquear)
 
-La tabla suma la columna **Responsable de**: `N combinaciones` con enlace a `/maestros/responsables` filtrada por ese usuario (o "—" si N = 0). Los `confirm` existentes suman el aviso cuando `responsabilidades > 0` (texto de `avisoResponsabilidades(accion, n)`):
+La tabla suma la columna **Responsable de**: `N combinaciones` con enlace a `/maestros/responsables?responsable=<uuid>` (o "—" si N = 0). Los `confirm` existentes suman el aviso cuando `responsabilidades > 0` (texto de `avisoResponsabilidades(accion, n, nombre)`, que lleva el nombre del usuario y la pregunta final, y concuerda singular y plural):
 
 - **Desactivar**: "ANA RAMOS es responsable de 6 combinaciones género-mundo. Seguirán asignadas pero aparecerán como Faltantes (responsable desactivado) hasta que las reasignes. ¿Desactivar?"
-- **Eliminar**: "ANA RAMOS es responsable de 6 combinaciones género-mundo. Al eliminarla quedarán sin responsable y aparecerán en Faltantes. ¿Eliminar definitivamente?" Tras borrar, `Alert` "Usuario eliminado. 6 combinaciones quedaron sin responsable."
-- **Cambiar el rol de un comprador a otro rol** (el `Select` hoy no pide confirmación; la pide solo en este caso): "ANA RAMOS es responsable de 6 combinaciones. Solo los compradores pueden serlo: seguirán asignadas pero aparecerán como Faltantes (ya no es comprador) hasta que el rol vuelva a comprador o las reasignes."
+- **Eliminar**: "Esta acción no se puede deshacer." y debajo "ANA RAMOS es responsable de 6 combinaciones género-mundo. Al eliminar el usuario quedarán sin responsable y aparecerán en Faltantes. ¿Eliminar definitivamente?" (sin combinaciones, el `confirm` de siempre). Tras borrar, `Alert` "Usuario eliminado. 6 combinaciones quedaron sin responsable."
+- **Cambiar el rol de un comprador a otro rol** (el `Select` no pedía confirmación; la pide solo en este caso): "ANA RAMOS es responsable de 6 combinaciones género-mundo. Solo los compradores pueden serlo: seguirán asignadas pero aparecerán como Faltantes (ya no es comprador) hasta que el rol vuelva a comprador o las reasignes. ¿Cambiar el rol?"
 - **Reactivar** o devolver el rol de comprador no pide nada: las asignaciones vuelven a ser válidas solas.
 
 ## Reglas de negocio
 
-Funciones puras en `src/lib/responsables/` (`tipos.ts`, `tipos-api.ts`, `esquemas.ts`, `reglas.ts`, `matriz.ts`, `filtros.ts`, `csv.ts`, `consultas.ts`) probadas en `tests/responsables.*.test.ts`. Se reutilizan `normalizarNombre`, `leerTodo`, `leerNodos`, `leerLineas` y `nodoVigente` del árbol.
+Funciones puras en `src/lib/responsables/` (`tipos.ts`, `tipos-api.ts`, `esquemas.ts`, `reglas.ts`, `matriz.ts`, `filtros.ts`, `csv.ts`, `consultas.ts`, `pantalla.ts` y el hook `use-responsables.ts`) probadas en `tests/responsables.*.test.ts`. Se reutilizan `normalizarNombre`, `leerTodo`, `leerNodos`, `leerLineas` y `nodoVigente` del árbol.
 
 **`matriz.ts` — `armarMatriz(generos, mundos, asignaciones, perfiles, nodos, lineas, { incluirInactivos })`**
 
@@ -234,48 +240,59 @@ Funciones puras en `src/lib/responsables/` (`tipos.ts`, `tipos-api.ts`, `esquema
 
 **`reglas.ts`**
 
-6. **`motivoRechazoAsignacion({ perfil, genero, mundo })`** devuelve `{ status, mensaje } | null`: perfil inexistente → `404`; perfil con rol distinto de `comprador` → `409` "…no es comprador…"; perfil desactivado → `409` "…está desactivado…"; género o mundo inactivo → `409`; todo bien → `null`. Con `perfil_id = null` (quitar) no se evalúa el perfil ni la vigencia. Un administrador o planner **nunca** es asignable, aunque esté activo (respuesta 1 de Javier; ver pregunta abierta 2).
+6. **`motivoRechazoAsignacion({ perfilId, perfil, genero, mundo })`** devuelve `{ status, mensaje } | null`: género o mundo inexistente → `404` ("Género no encontrado." / "Mundo no encontrado."); perfil inexistente → `404`; perfil con rol distinto de `comprador` → `409` "…no es comprador…"; perfil desactivado → `409` "…está desactivado…"; género o mundo inactivo → `409`; todo bien → `null`. Con `perfil_id = null` (quitar) no se evalúa el perfil ni la vigencia, pero género y mundo sí deben existir. La parte del perfil vive aparte en `motivoRechazoPerfil` (la usa también la asignación en bloque, donde el error es del destino). Un administrador o planner **nunca** es asignable, aunque esté activo (respuesta 1 de Javier; ver pregunta abierta 2).
 7. **`planificarAsignacion(actuales, combinaciones, perfilId, { soloFaltantes }, perfiles)`** devuelve `{ asignar, quitar, sin_cambio, con_responsable }`: deduplica combinaciones; con `perfilId` no nulo, una celda cuyo responsable ya es ese perfil va a `sin_cambio`, y con `soloFaltantes` una celda con responsable válido distinto va a `con_responsable` y no se toca (una con responsable desactivado o no comprador sí se reemplaza); con `perfilId = null`, las celdas con fila van a `quitar` y las demás a `sin_cambio`. **Idempotencia**: volver a planificar sobre el estado resultante da `asignar = []` y `quitar = []`; aplicar dos veces el mismo plan produce el mismo estado.
 8. **`asignarMasivaSchema`**: rechaza lista vacía, más de 400, ids que no son UUID, y `perfil_id: null` con `solo_faltantes: true`; `solo_faltantes` por defecto `false`. `asignarUnaSchema` exige `perfil_id` presente (nulo o UUID): un cuerpo sin él es `400`, no "quitar".
-9. **`planificarBloque(celdas, ámbito, { soloFaltantes })`** (usada por la pantalla y probada aparte): `ámbito` es `{ genero_id }` (fila), `{ mundo_id }` (columna) o `"todas"`; devuelve las combinaciones vigentes del ámbito y, para el texto del panel, cuántas se asignarán y cuántas se respetan. Las celdas no vigentes nunca entran. Una fila de 5 con 2 asignadas válidas: con `soloFaltantes` son 3 y 2 se respetan; sin él son 5.
-10. **`avisoResponsabilidades(accion, n)`** (`"desactivar" | "eliminar" | "cambiar_rol"`): `n = 0` → `null`; `n > 0` → el texto de la pantalla de usuarios con el conteo en singular o plural ("1 combinación", "6 combinaciones"). Nunca produce un rechazo: `/usuarios` avisa y no bloquea.
+9. **`planificarBloque(celdas, ámbito, { soloFaltantes })`** (`reglas.ts`; la pantalla usa su gemela `planBloque` de `pantalla.ts`, y un test comprueba que las dos coinciden): `ámbito` es `{ genero_id }` (fila), `{ mundo_id }` (columna) o `"todas"`; devuelve las combinaciones vigentes del ámbito y, para el texto del panel, cuántas se asignarán y cuántas se respetan. Las celdas no vigentes nunca entran. Una fila de 5 con 2 asignadas válidas: con `soloFaltantes` son 3 y 2 se respetan; sin él son 5.
+10. **`avisoResponsabilidades(accion, n, nombre)`** (`"desactivar" | "eliminar" | "cambiar_rol"`): `n = 0` → `null`; `n > 0` → el texto de la pantalla de usuarios con el nombre, el conteo y la pregunta final, todo concordado en singular o plural ("1 combinación … seguirá asignada", "6 combinaciones … seguirán asignadas"). Nunca produce un rechazo: `/usuarios` avisa y no bloquea.
 
 **`filtros.ts`**
 
-11. **`filtrarCeldas(celdas, filtro)`** con `filtro` = `todas` | `faltantes` | `{ responsable: perfilId }` | `sin_responsable`; `faltantes` = `motivoFaltante ≠ null`; `{ responsable }` compara por `perfil_id` y **no** exige que sea válido (así se ve y se corrige lo que ya no lo es). Los conteos de los chips salen de la misma función, de modo que `todas = vigentes`, `faltantes` = `resumen.faltantes` y "Mis combinaciones" = `{ responsable: yo }`.
+11. **`filtrarCeldas(celdas, filtro)`** con `filtro` = `todas` | `faltantes` | `{ responsable: perfilId }` | `sin_responsable`; descarta siempre las celdas no vigentes (en todos los filtros); `faltantes` = `motivoFaltante ≠ null`; `sin_responsable` = `responsable === null`; `{ responsable }` compara por `perfil_id` y **no** exige que sea válido (así se ve y se corrige lo que ya no lo es). Los conteos de los chips salen de la misma función, de modo que `todas = vigentes`, `faltantes` = `resumen.faltantes` y "Mis combinaciones" = `{ responsable: yo }`.
 12. **Un comprador sin combinaciones** no ve el chip "Mis combinaciones" y la pantalla abre en "Todas"; uno con combinaciones abre en "Mis combinaciones". Ningún filtro oculta datos del servidor: el cliente siempre recibió todo.
 
 **`csv.ts`**
 
-13. `filasCsvResponsables(celdas, generos, mundos)` genera una fila por celda con `GENERO, MUNDO, RESPONSABLE, CORREO, ESTADO`, sin perder comas ni comillas en nombres (las escapa `Papa.unparse`) y con el estado en texto según `motivoFaltante`.
+13. `filasCsvResponsables(celdas, generos, mundos)` genera una fila por celda con `GENERO, MUNDO, RESPONSABLE, CORREO, ESTADO`, sin perder comas ni comillas en nombres (las escapa `Papa.unparse`) y con el estado en texto según `motivoFaltante` (más `Inactiva` si el género o el mundo están inactivos).
 
 **Errores y compartidos**
 
 14. `describirErrorDb` traduce: `23505` sobre `responsables_genero_mundo_par` → `409` "Esa combinación género-mundo ya tiene responsable."; `23503` por `insert or update` sobre `…_perfil_id_fkey` → `404` "Usuario no encontrado."; `23503` por `update or delete` sobre `generos` o `mundos` con ese constraint → `409` con el mensaje de "tiene responsables asignados".
-15. **Eliminar un usuario libera sus combinaciones** (propiedad de la base, verificada contra la base real en el hito): tras eliminar, `resumen.faltantes` sube exactamente en las combinaciones que tenía y el borrado no devuelve `409`. La función pura equivalente: `armarMatriz` sin las filas de ese perfil da `sin_responsable` en esas celdas.
+15. **Eliminar un usuario libera sus combinaciones** (propiedad de la base: verificada en un Postgres local; falta repetirla con la API de Auth real en el hito): tras eliminar, `resumen.faltantes` sube exactamente en las combinaciones que tenía y el borrado no devuelve `409`. La función pura equivalente: `armarMatriz` sin las filas de ese perfil da `sin_responsable` en esas celdas.
 16. **Desactivar o cambiar el rol no toca la tabla**: las filas se conservan; `armarMatriz` con ese perfil desactivado o no comprador da `responsable_inactivo` / `responsable_no_comprador`, y reactivarlo o devolverle el rol de comprador deja otra vez `faltante: false` sin reasignar.
 17. **`nav.ts`**: el comprador ve "Responsables género-mundo" y puede abrir la ruta; admin y planner también.
 
 ## Hito de prueba
 
-Cómo leer las casillas: igual que en M4. `[ ]` las recorren QA y Javier cuando el módulo esté construido.
+Cómo leer las casillas: `[x]` lo cubrieron QA y la construcción (pruebas unitarias, handlers contra un stub de Supabase y un Postgres local); `[ ]` solo se puede comprobar contra la base real y con compradores reales, y lo recorre Javier. QA recomienda repetir una vez el hito del bloque (`upsert`) contra la base real.
 
-- [ ] Checks automáticos: `npm run lint`, `npx tsc --noEmit`, `npx vitest run` y `npm run build` en verde; `scripts/validar-migraciones-local.sh` aplica 0000–0006 dos veces sin ningún `ERROR`.
-- [ ] `0006_responsables.sql` aplicada dos veces en `vector-two` sin error, sin `DROP`, `DELETE` ni `TRUNCATE`; `responsables_genero_mundo` con RLS y sin políticas; tipos regenerados; `APP_VERSION` = `0.7.0 · M1b`.
-- [ ] Tabla vacía: `GET /api/responsables` devuelve 8 géneros, 5 mundos, **40 celdas**, `resumen.faltantes = 40` y `compradores` con los compradores activos (admin y planner no aparecen).
-- [ ] Como planner: en `/maestros/responsables` cada celda tiene su selector con solo compradores activos; asignar a Ana en una celda la muestra al instante y `faltantes` baja a 39; "— Sin responsable —" la devuelve a faltante.
-- [ ] Asignar un admin o un planner por API (`PUT` con su `perfil_id`) → `409` "no es comprador"; un usuario inexistente → `404`; un comprador desactivado → `409`.
-- [ ] En bloque: "Asignar…" en la fila HOMBRE con Ana y la casilla apagada asigna solo las vacías y respeta las ya asignadas (el panel anticipa los conteos); con la casilla encendida pide `confirm` y las reemplaza; "Asignar todas…" cubre las 40; quitar en bloque deja las celdas en faltante; "Quitar" con la casilla apagada está deshabilitado.
+**Cubierto**
+
+- [x] Checks automáticos: `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (571 pruebas en 38 archivos) y `npm run build` en verde. `scripts/validar-migraciones-local.sh` también pasó en QA (0000–0006 dos veces, sin ningún `ERROR` en la salida completa, 13 tablas con RLS).
+- [x] `0006_responsables.sql` aplicada dos veces en `vector-two` sin error, sin `DROP`, `DELETE` ni `TRUNCATE`; `responsables_genero_mundo` con RLS y sin políticas; tipos regenerados; `APP_VERSION` = `0.7.0 · M1b`.
+- [x] Cascada probada en Postgres local: borrar el perfil (o la fila de `auth.users`) elimina las asignaciones de ese usuario.
+- [x] Tabla vacía (stub): `GET /api/responsables` devuelve el producto cartesiano completo (8 géneros × 5 mundos = 40 celdas, cifras de la base antes de aplicar), `resumen.faltantes = 40`, y admin y planner no aparecen en `compradores`.
+- [x] Rechazos de la asignación individual (stub y pruebas de `motivoRechazoAsignacion`): admin o planner → `409` "no es comprador"; usuario inexistente → `404`; comprador desactivado → `409`; género o mundo inactivo → `409`.
+- [x] Permisos (stub): como comprador, `PUT /api/responsables` y `POST /api/responsables/asignar` → `403` y `GET` devuelve `compradores: []`.
+- [x] Lógica del bloque (pruebas): solo faltantes respeta lo asignado, reemplazar pisa, quitar con la casilla apagada se rechaza, idempotente; `planBloque` y `planificarBloque` coinciden.
+- [x] Filtros (pruebas): los conteos de Todas, Faltantes y Mis combinaciones coinciden con `resumen`; la carga por responsable suma las celdas asignadas.
+- [x] Desactivar o cambiar el rol conserva la asignación y la marca como faltante; reactivar o devolver el rol la restaura (pruebas de `armarMatriz`).
+- [x] `/api/usuarios`: `GET` trae `responsabilidades` y `DELETE` responde `{ id, combinaciones_liberadas }` sin `409` por responsabilidades; "último admin" y "no auto-eliminarse" intactas (stub).
+
+**Pendiente con la base real y compradores reales (Javier)**
+
+- [ ] Crear compradores en `/usuarios` (hoy solo existe el admin): el `Select` de las celdas los lista y no lista a admin ni planner.
+- [ ] Como planner, en `/maestros/responsables` asignar a un comprador en una celda: se ve al instante, `faltantes` baja a 39 y "— Sin responsable —" la devuelve a faltante.
+- [ ] Bloque contra Supabase real (el `upsert` con `onConflict` y `.select()` no se ha probado ahí): "Asignar…" en la fila HOMBRE con la casilla apagada asigna solo las vacías y respeta las ya asignadas (el panel anticipa los conteos); con la casilla encendida pide `confirm` y las reemplaza; "Asignar todas…" cubre las 40; quitar en bloque deja las celdas en faltante.
 - [ ] **Hito del módulo**: repartir las 40 combinaciones entre los compradores reales hasta que el resumen diga "Toda combinación vigente tiene responsable" (`resumen.faltantes = 0`).
-- [ ] **Desactivar** a un comprador con combinaciones: `/usuarios` avisa cuántas y no bloquea; sus celdas pasan a Faltante con "ANA RAMOS · desactivado" y siguen contando en su fila de "Carga por responsable" como no válido; reactivarlo las devuelve a válidas sin reasignar.
+- [ ] **Desactivar** a un comprador con combinaciones: `/usuarios` avisa cuántas y no bloquea; sus celdas pasan a Faltante con "ANA RAMOS · desactivado" y siguen contando en "Carga por responsable" como no válido; reactivarlo las devuelve a válidas sin reasignar.
 - [ ] **Cambiar el rol** de ese comprador a planner: el `confirm` avisa; sus celdas pasan a Faltante con "ya no es comprador"; devolverle el rol `comprador` las restaura.
-- [ ] **Eliminar** a un comprador con combinaciones: `/usuarios` avisa, borra sin `409`, la respuesta trae `combinaciones_liberadas` y esas celdas aparecen como "Sin responsable" en la matriz (verificar con `select count(*) from responsables_genero_mundo where perfil_id = …` = 0).
-- [ ] Como comprador: ve "Responsables género-mundo" en el menú, la matriz completa sin selectores ni botones de bloque y el aviso de solo lectura; abre con "Mis combinaciones" si tiene alguna y "Todas" muestra las 40; `PUT /api/responsables` y `POST /api/responsables/asignar` → `403`; `GET` devuelve `compradores: []`.
-- [ ] Filtros: "Faltantes", "Mis combinaciones" y el `Select` de responsable cambian las celdas visibles y sus conteos coinciden con `resumen`; la carga por responsable suma las celdas asignadas.
-- [ ] Desactivar un mundo: su columna sale de la matriz (o se atenúa con "Mostrar inactivos"), deja de contar en `combinaciones` y conserva sus responsables al reactivarlo. Eliminar un género o mundo sin nodos pero con responsables → `409` "tiene responsables asignados".
-- [ ] Árbol: la columna Mundos muestra el responsable de cada mundo del género elegido y la columna Líneas lo muestra en el subtítulo; sin responsable sale en tono alerta; el comprador lo ve igual.
-- [ ] "Descargar CSV" abre en Excel con acentos correctos y las 40 filas (o las del filtro).
-- [ ] Persistencia: lo asignado sobrevive a recargar la página.
+- [ ] **Eliminar** a un comprador con combinaciones (Auth real, `deleteUser` y la cascada completa): `/usuarios` avisa, borra sin `409`, muestra "Usuario eliminado. N combinaciones quedaron sin responsable" y esas celdas aparecen como "Sin responsable" en la matriz (verificar con `select count(*) from responsables_genero_mundo where perfil_id = …` = 0).
+- [ ] Como comprador real: ve "Responsables género-mundo" en el menú, la matriz completa sin selectores ni botones de bloque y el aviso "Vista de solo lectura"; abre con "Mis combinaciones" si tiene alguna y "Todas" muestra las 40.
+- [ ] Desactivar un mundo: su columna sale de la matriz (o se atenúa con "Mostrar inactivos"), deja de contar en `combinaciones` y conserva sus responsables al reactivarlo. Eliminar un género o mundo sin nodos pero con responsables → `409` "tiene responsables asignados" (la traducción está probada; falta ver la FK real).
+- [ ] Árbol: la columna Mundos muestra el responsable de cada mundo del género elegido y la columna Líneas lo muestra en el subtítulo (sin responsable en tono alerta); el comprador lo ve igual; revisar que "Agregar línea" no se parta feo con un subtítulo largo.
+- [ ] "Descargar CSV" abre en Excel real con acentos correctos y las 40 filas (o las del filtro).
+- [ ] Persistencia: lo asignado sobrevive a recargar la página, con datos reales.
 
 ## Fuera de alcance
 
@@ -291,7 +308,7 @@ Cómo leer las casillas: igual que en M4. `[ ]` las recorren QA y Javier cuando 
 
 ## Decisiones nuevas que propone esta ficha
 
-Se registrarán en `docs/DECISIONES.md` al construir el módulo; ninguna contradice una entrada vigente, pero la 2 introduce la primera FK `on delete cascade` fuera de `perfiles → auth.users` y la 7 matiza la convención de PLAN §4:
+Registradas en `docs/DECISIONES.md` el 2026-10-07, al cerrar el módulo; ninguna contradice una entrada vigente, pero la 2 introduce la primera FK `on delete cascade` fuera de `perfiles → auth.users` y la 7 matiza la convención de PLAN §4:
 
 1. **El responsable de una combinación género-mundo es un comprador, y sirve para filtrar, no para limitar permisos.** Un usuario `comprador` por combinación (titular único), tabla propia `responsables_genero_mundo` con único sobre la pareja. Por qué: es lo que pidió Javier ("para que sea más fácil filtrar lo que van a comprar… pueden ver todo, pero para filtrar"); el par no existe como entidad en el árbol y existe aunque no tenga líneas. Descartado: columna en `mundos`, `generos` o en el nodo (no cubren el par); tabla pre-poblada con las 40 filas (hay que sincronizarla con los catálogos); texto libre (no filtra por usuario ni sirve a la Fase 3); suplente (nadie lo pidió).
 2. **Eliminar un comprador deja sus combinaciones sin asignar: `perfil_id` es `on delete cascade`.** Por qué: respuesta de Javier ("si elimino al comprador quedarían sin asignar"); nada cuelga de la asignación; con `set null` habría dos formas de "sin responsable". `genero_id` y `mundo_id` siguen `restrict`. Descartado: `restrict` (obligaría a reasignar antes de borrar a alguien que ya se fue); `set null` (por lo anterior).
@@ -304,9 +321,49 @@ Se registrarán en `docs/DECISIONES.md` al construir el módulo; ninguna contrad
 
 ## Cambios respecto a la especificación
 
-(Vacía: la ficha aún no se ha construido.)
+Lo construido sigue la ficha en lo esencial (tabla, contratos de API, pantallas, reglas). Estas son las diferencias, todas menores. La ficha de arriba ya está corregida a lo construido; esta lista dice qué cambió y por qué.
+
+**Reglas y funciones puras**
+
+- **`filtrarCeldas` descarta las celdas no vigentes en todos los filtros**, no solo en "Faltantes". Así los conteos de los chips (Todas, Faltantes, Mis combinaciones) coinciden siempre con `resumen`, que cuenta solo vigentes. El filtro `sin_responsable` es `responsable === null`.
+- **El CSV suma el estado `Inactiva`** para las celdas de un género o mundo inactivo (la ficha solo tenía cuatro estados).
+- **`avisoResponsabilidades(accion, n, nombre)`** recibe el nombre y trae la pregunta final ("¿Desactivar?", "¿Eliminar definitivamente?", "¿Cambiar el rol?"); concuerda singular y plural ("1 combinación … seguirá asignada").
+- **`motivoRechazoAsignacion({ perfilId, perfil, genero, mundo })`** devuelve también el `404` de género o mundo inexistente (la ficha lo dejaba al handler). El criterio del perfil se separó en `motivoRechazoPerfil`.
+- **Funciones extra** que la ficha no nombraba: `motivoRechazoPerfil`, `clasificarCombinaciones`, `deduplicarCombinaciones`, `aplicarPlanAsignacion`, `contarPorPerfil`, `leerNodosDePareja` y `resumirCeldas`. Salieron de partir los handlers en piezas puras que se pueden probar sin Supabase.
+- **Un rol desconocido cuenta como "ya no es comprador"**, y **una fila con `activo = false` cuenta como sin responsable** (y al quitar se borra). Es la lectura prudente: nada queda "asignado" por un dato raro.
+- **`planBloque` (pantalla) y `planificarBloque` (reglas) coexisten**, con un test que comprueba que dan lo mismo. La ficha preveía una sola.
+- **`use-responsables.ts` vive en `src/lib/responsables/`** y no junto al panel, porque lo usan el panel de la matriz y el árbol.
+
+**Pantallas**
+
+- **El árbol avisa si falla la segunda llamada.** Pide `GET /api/responsables?incluir_inactivos=1` y, si falla, sigue funcionando con un `Alert` informativo y un enlace Reintentar (la ficha decía que seguía sin avisar). El subtítulo de Líneas mantiene el conteo de líneas.
+- **El `confirm` de eliminar antepone "Esta acción no se puede deshacer."** al aviso de responsabilidades, para no perder la advertencia que ya tenía.
+- **`?responsable=<uuid>`** solo se acepta si es UUID y tiene prioridad sobre "Mis combinaciones".
+- **El `Select` de responsable** muestra "Responsable elegido (sin combinaciones vigentes)" cuando el filtro apunta a alguien que no tiene combinaciones vigentes (si no, la lista no lo traería y el filtro quedaría en blanco).
+- **El panel de bloque vuelve a "Elige un comprador…"** si el comprador elegido deja de estar activo mientras está abierto.
+- **`api.put`** es nuevo en `src/lib/api-client.ts` (el cliente solo tenía `get`, `post`, `patch` y `delete`).
+
+## Limitaciones conocidas
+
+- **Sin transacción ni control de concurrencia.** Con `solo_faltantes`, entre la lectura y la escritura otro planner puede asignar una de las celdas y quedar pisado. La ventana es de milisegundos y el efecto es que gana la última escritura; repetir la petición completa lo que faltó.
+- **Privacidad del correo (aceptable según la ficha).** Al comprador le llegan `rol` y `activo` de cada responsable y, si un admin o planner fue comprador y conserva asignaciones, también su correo. Si se quiere mínimo privilegio, basta con devolver `{ id, nombre, email }`.
+- **Botón "Agregar línea" del árbol.** Puede partirse en dos líneas cuando el subtítulo de la columna Líneas es largo (nombre de género y mundo más el responsable).
+- **Handlers sin tests de integración.** Las reglas puras tienen 125 pruebas nuevas, pero `GET/PUT /api/responsables`, `POST /api/responsables/asignar` y los cambios de `/api/usuarios` solo se probaron contra un stub (QA).
+- **No probado contra Supabase real:** el `upsert` con `onConflict: "genero_id,mundo_id"` y `.select()`, Auth real (`deleteUser` y la cascada completa), datos reales de compradores y un Excel real con acentos en el CSV. QA recomienda repetir el hito del bloque una vez contra la base real.
 
 ## Preguntas abiertas para Javier
+
+**Siguen sin responder. El módulo está construido con las respuestas por defecto de esta tabla y esos valores rigen hasta que Javier diga otra cosa.**
+
+| # | Pregunta | Respuesta por defecto en vigor |
+|---|---|---|
+| 1 | Titular y suplente | Solo titular |
+| 2 | Admin o planner como responsables | Solo comprador |
+| 3 | Combinaciones sin líneas | Cuentan como faltantes; la celda dice "sin líneas" |
+| 4 | Qué ve el comprador al entrar | Abre en "Mis combinaciones" si tiene alguna |
+| 5 | Hasta dónde llega el filtro | Solo la matriz; el árbol muestra el responsable, sin filtro |
+| 6 | Cuando el comprador deja de serlo | Conserva la asignación y la marca como faltante |
+| 7 | Nombre en el menú | "Responsables género-mundo" |
 
 1. **Titular y suplente.** La ficha propone **un solo responsable (titular)** por combinación. ¿Necesitas también un suplente (para vacaciones o ausencias)? Si sí, se agrega como columna `suplente_perfil_id` en la misma fila y una segunda fila de selectores en la matriz. *Por defecto: solo titular.*
 2. **¿Pueden ser responsables el admin o el planner?** Con tu respuesta ("los compradores"), el selector solo lista compradores activos y la API rechaza a los demás. ¿Alguna vez tú o alguien de planeamiento se asigna una combinación (por ejemplo, mientras no haya comprador)? Abrirlo es cambiar una regla y la lista de candidatos. *Por defecto: solo comprador.*

@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useColeccion } from "@/lib/use-coleccion";
 import { TEMPORADAS, aCodigo, normalizarNombre, type Temporada } from "@/lib/arbol/normalizar";
 import type { GeneroArbol, LineaArbol, LineaFila, MundoArbol, NodoFila } from "@/lib/arbol/tipos-api";
+import { textoResponsable } from "@/lib/responsables/pantalla";
+import type { CeldaResponsable } from "@/lib/responsables/tipos-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
@@ -18,6 +21,8 @@ type Props = {
   nodoSelId: string | null;
   onSeleccionar: (nodoId: string | null) => void;
   puedeEditar: boolean;
+  /** M1b: la celda género-mundo con su responsable (solo lectura); `null` si no cargó. */
+  celdaResponsable?: CeldaResponsable | null;
   /** Recarga el árbol tras una escritura. */
   onCambio: () => Promise<void>;
   onError: (mensaje: string | null) => void;
@@ -31,6 +36,7 @@ export function ColumnaLineas({
   nodoSelId,
   onSeleccionar,
   puedeEditar,
+  celdaResponsable = null,
   onCambio,
   onError,
   onMovido,
@@ -83,10 +89,30 @@ export function ColumnaLineas({
     });
   }
 
+  const quien = textoResponsable(celdaResponsable);
+
   return (
     <Columna
       titulo="Líneas"
-      subtitulo={`${genero.nombre} / ${mundo.nombre} · ${mundo.lineas.length} línea${mundo.lineas.length === 1 ? "" : "s"}`}
+      subtitulo={
+        <span className="block whitespace-normal">
+          {genero.nombre} / {mundo.nombre} · {mundo.lineas.length} línea{mundo.lineas.length === 1 ? "" : "s"}
+          {quien && (
+            <>
+              {celdaResponsable?.responsable ? " · Responsable: " : " · "}
+              <span className={quien.tono === "alerta" ? "font-medium text-alerta" : "font-medium text-tinta"}>{quien.texto}</span>
+              {puedeEditar && (
+                <>
+                  {" · "}
+                  <Link href="/maestros/responsables" className="font-medium text-marca-oscura underline-offset-2 hover:underline">
+                    Cambiar
+                  </Link>
+                </>
+              )}
+            </>
+          )}
+        </span>
+      }
       acciones={
         puedeEditar && (
           <Button variante="secundario" tamano="sm" onClick={() => setAgregando((v) => !v)}>

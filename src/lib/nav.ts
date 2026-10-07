@@ -36,12 +36,16 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     // La sección la ven todos porque el árbol de producto es el vocabulario
-    // común con los compradores (solo lectura para ellos; M1). El resto de
-    // maestros sigue siendo de planificación.
+    // común con los compradores (solo lectura para ellos; M1), y la matriz de
+    // responsables también (M1b). El resto de maestros sigue siendo de
+    // planificación.
     title: "Maestros",
     roles: TODOS,
     links: [
       { href: "/maestros/arbol", label: "Árbol de producto" },
+      // M1b: quién responde por cada género-mundo. Sin restricción de rol: el
+      // comprador ve todo (el responsable es un filtro, no un permiso).
+      { href: "/maestros/responsables", label: "Responsables género-mundo" },
       { href: "/maestros/marcas", label: "Agrupaciones y marcas", roles: PLANIFICACION },
       { href: "/maestros/estacionalidad", label: "Agrupaciones de estacionalidad", roles: PLANIFICACION },
       { href: "/maestros/tiendas", label: "Tiendas y aperturas", roles: PLANIFICACION },

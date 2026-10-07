@@ -5,6 +5,11 @@ describe("puedeVerRuta", () => {
   it("el comprador ve el árbol de producto (solo lectura)", () => {
     expect(puedeVerRuta("comprador", "/maestros/arbol")).toBe(true);
   });
+  it("el comprador ve la matriz de responsables género-mundo (M1b): puede ver todo, es un filtro", () => {
+    expect(puedeVerRuta("comprador", "/maestros/responsables")).toBe(true);
+    expect(puedeVerRuta("planner", "/maestros/responsables")).toBe(true);
+    expect(puedeVerRuta("admin", "/maestros/responsables")).toBe(true);
+  });
   it("el comprador no entra a los otros maestros", () => {
     expect(puedeVerRuta("comprador", "/maestros/marcas")).toBe(false);
     expect(puedeVerRuta("comprador", "/maestros/estacionalidad")).toBe(false);
@@ -45,12 +50,21 @@ describe("puedeVerRuta", () => {
 });
 
 describe("seccionesVisibles", () => {
-  it("al comprador la sección Maestros solo le muestra el árbol", () => {
+  it("al comprador la sección Maestros solo le muestra el árbol y los responsables", () => {
     const maestros = seccionesVisibles("comprador").find((s) => s.title === "Maestros");
-    expect(maestros?.links.map((l) => l.href)).toEqual(["/maestros/arbol"]);
+    expect(maestros?.links.map((l) => l.href)).toEqual(["/maestros/arbol", "/maestros/responsables"]);
   });
-  it("el planner ve los cuatro maestros", () => {
-    const maestros = seccionesVisibles("planner").find((s) => s.title === "Maestros");
-    expect(maestros?.links).toHaveLength(4);
+  it("el planner y el admin ven los cinco maestros, con los responsables justo después del árbol", () => {
+    for (const rol of ["planner", "admin"] as const) {
+      const maestros = seccionesVisibles(rol).find((s) => s.title === "Maestros");
+      expect(maestros?.links).toHaveLength(5);
+      expect(maestros?.links.slice(0, 2).map((l) => l.label)).toEqual(["Árbol de producto", "Responsables género-mundo"]);
+    }
+  });
+  it("la entrada de responsables no tiene restricción de rol ni está pendiente", () => {
+    const l = NAV_SECTIONS.flatMap((s) => s.links).find((x) => x.href === "/maestros/responsables");
+    expect(l).toBeDefined();
+    expect(l?.roles).toBeUndefined();
+    expect(l?.pendiente).toBeUndefined();
   });
 });

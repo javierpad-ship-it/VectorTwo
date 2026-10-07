@@ -1,10 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useColeccion } from "@/lib/use-coleccion";
 import { DESCRIPCION_ROL, ETIQUETA_ROL, ROLES, normalizarRol, type Rol } from "@/lib/auth/roles";
 import type { Tables } from "@/lib/supabase/database.types";
+import { avisoResponsabilidades } from "@/lib/responsables/reglas";
+import { nombreVisible } from "@/lib/responsables/pantalla";
+import type { EliminarUsuarioRespuesta } from "@/lib/responsables/tipos-api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
@@ -12,7 +16,10 @@ import { DataTable, type Columna } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 
-type Perfil = Tables<"perfiles">;
+/** `responsabilidades` (M1b): combinaciones género-mundo asignadas al usuario, vigentes o no. */
+type Perfil = Tables<"perfiles"> & { responsabilidades?: number };
+
+const nCombinaciones = (n: number) => `${n} ${n === 1 ? "combinación" : "combinaciones"}`;
 
 const FORM_INICIAL = { email: "", nombre: "", password: "", rol: "planner" as Rol };
 
@@ -43,6 +50,11 @@ export function UsuariosPanel({ actorId }: { actorId: string }) {
   }
 
   async function cambiarRol(p: Perfil, rol: Rol) {
+    // M1b: un comprador con combinaciones que deja de serlo las conserva como faltantes; se avisa, nunca se bloquea.
+    if (normalizarRol(p.rol) === "comprador" && rol !== "comprador") {
+      const advertencia = avisoResponsabilidades("cambiar_rol", p.responsabilidades ?? 0, nombreVisible(p));
+      if (advertencia && !confirm(advertencia)) return;
+    }
     setError(null);
     try {
       await api.patch(`/api/usuarios/${p.id}`, { rol });
@@ -54,7 +66,8 @@ export function UsuariosPanel({ actorId }: { actorId: string }) {
 
   async function alternarActivo(p: Perfil) {
     const accion = p.activo ? "desactivar" : "reactivar";
-    if (!confirm(`¿${accion.charAt(0).toUpperCase() + accion.slice(1)} a ${p.email}?`)) return;
+    const advertencia = p.activo ? avisoResponsabilidades("desactivar", p.responsabilidades ?? 0, nombreVisible(p)) : null;
+    if (!confirm(advertencia ?? `¿${accion.charAt(0).toUpperCase() + accion.slice(1)} a ${p.email}?`)) return;
     setError(null);
     try {
       await api.patch(`/api/usuarios/${p.id}`, { activo: !p.activo });
@@ -77,10 +90,18 @@ export function UsuariosPanel({ actorId }: { actorId: string }) {
   }
 
   async function eliminar(p: Perfil) {
-    if (!confirm(`¿Eliminar definitivamente a ${p.email}? Esta acción no se puede deshacer.`)) return;
+    const advertencia = avisoResponsabilidades("eliminar", p.responsabilidades ?? 0, nombreVisible(p));
+    const base = `¿Eliminar definitivamente a ${p.email}? Esta acción no se puede deshacer.`;
+    if (!confirm(advertencia ? `Esta acción no se puede deshacer.\n\n${advertencia}` : base)) return;
     setError(null);
     try {
-      await api.delete(`/api/usuarios/${p.id}`);
+      const r = await api.delete<EliminarUsuarioRespuesta>(`/api/usuarios/${p.id}`);
+      const liberadas = r?.combinaciones_liberadas ?? 0;
+      setAviso(
+        liberadas > 0
+          ? `Usuario eliminado. ${nCombinaciones(liberadas)} ${liberadas === 1 ? "quedó" : "quedaron"} sin responsable.`
+          : "Usuario eliminado."
+      );
       await recargar();
     } catch (err) {
       fallo(err);
@@ -118,6 +139,23 @@ export function UsuariosPanel({ actorId }: { actorId: string }) {
           ))}
         </Select>
       ),
+    },
+    {
+      clave: "responsabilidades",
+      titulo: "Responsable de",
+      render: (p) => {
+        const n = p.responsabilidades ?? 0;
+        if (n <= 0) return <span className="text-tinta-suave">—</span>;
+        return (
+          <Link
+            href={`/maestros/responsables?responsable=${p.id}`}
+            className="text-marca-oscura underline-offset-2 hover:underline"
+            title="Ver sus combinaciones en la matriz de responsables"
+          >
+            {nCombinaciones(n)}
+          </Link>
+        );
+      },
     },
     {
       clave: "estado",

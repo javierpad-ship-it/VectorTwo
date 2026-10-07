@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { puedeEditarMaestros, type Rol } from "@/lib/auth/roles";
 import { useArbol } from "@/lib/arbol/use-arbol";
 import { useColeccion } from "@/lib/use-coleccion";
+import { useResponsables } from "@/lib/responsables/use-responsables";
+import { claveCelda, indexarCeldas, textoResponsable } from "@/lib/responsables/pantalla";
 import type { GeneroArbol, MundoArbol } from "@/lib/arbol/tipos-api";
 import type { AgrupacionEstacionalidadFila } from "@/lib/estacionalidad/tipos-api";
 import { Button } from "@/components/ui/button";
@@ -36,6 +38,12 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
   // alimenta el `Select` de la columna Equivalencias. Si falla, la columna
   // muestra solo el badge y un aviso.
   const agrupaciones = useColeccion<AgrupacionEstacionalidadFila>("/api/agrupaciones-estacionalidad?incluir_inactivos=1");
+
+  // M1b: responsable de cada género-mundo (solo lectura; la edición vive en la
+  // matriz). Segunda llamada, con inactivos para cubrir lo que el árbol muestre
+  // con «Mostrar inactivos». Si falla, el árbol sigue sin responsable.
+  const responsables = useResponsables(true);
+  const celdasResponsables = useMemo(() => indexarCeldas(responsables.datos?.celdas ?? []), [responsables.datos]);
 
   // La selección se guarda por ids y se resuelve contra el árbol en cada
   // render: así sobrevive a las recargas y no hace falta sincronizarla con efectos.
@@ -143,6 +151,15 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
             </Alert>
           )}
 
+          {responsables.error && (
+            <Alert tono="info" onCerrar={() => responsables.setError(null)}>
+              No se pudo cargar el responsable de cada combinación: {responsables.error}. El árbol funciona igual, sin mostrar responsables.{" "}
+              <button type="button" onClick={() => void responsables.recargar()} className="font-medium underline underline-offset-2">
+                Reintentar
+              </button>
+            </Alert>
+          )}
+
           {arbol && generos.length === 0 && (
             <EmptyState titulo="El árbol está vacío" detalle="No hay géneros activos. Un administrador puede crearlos en Catálogos." />
           )}
@@ -177,6 +194,7 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
                     <ul className="space-y-0.5">
                       {generoSel.mundos.map((m) => {
                         const n = m.lineas.length;
+                        const quien = textoResponsable(celdasResponsables.get(claveCelda(generoSel.id, m.id)));
                         return (
                           <li key={m.id}>
                             <FilaColumna
@@ -187,6 +205,9 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
                               <span className="min-w-0">
                                 <span className="block truncate font-medium">{m.nombre}</span>
                                 {!m.activo && <Badge tono="alerta">Inactivo</Badge>}
+                                {quien && (
+                                  <span className={`block break-words text-xs leading-tight ${quien.tono === "alerta" ? "text-alerta" : "text-tinta-suave"}`}>{quien.texto}</span>
+                                )}
                               </span>
                               <span className="shrink-0 text-xs text-tinta-suave">
                                 {n} línea{n === 1 ? "" : "s"}
@@ -213,6 +234,7 @@ export function ArbolPanel({ rol }: { rol: Rol }) {
                     nodoSelId={nodoSel?.nodo_id ?? null}
                     onSeleccionar={(nodoId) => setSel({ ...sel, generoId: generoSel.id, mundoId: mundoSel.id, nodoId })}
                     puedeEditar={puedeEditar}
+                    celdaResponsable={celdasResponsables.get(claveCelda(generoSel.id, mundoSel.id)) ?? null}
                     onCambio={recargarSilencioso}
                     onError={setError}
                     onMovido={(mundoId, nodoId) => setSel({ generoId: generoSel.id, mundoId, nodoId })}

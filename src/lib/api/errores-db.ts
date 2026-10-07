@@ -53,6 +53,8 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   // M4.
   ["tiendas_codigo", "Ya existe una tienda con ese código."],
   ["tiendas_nombre", "Ya existe una tienda con ese nombre."],
+  // M1b. Solo alcanzable si alguien inserta a mano: la API usa `upsert`.
+  ["responsables_genero_mundo_par", "Esa combinación género-mundo ya tiene responsable."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -73,6 +75,8 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
 ];
+
+const FK_GENERICA = "No se puede eliminar: tiene registros asociados. Desactívalo.";
 
 /**
  * FKs con mensaje propio. Postgres distingue en el texto quién violó la FK:
@@ -114,9 +118,33 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
       asignar: { status: 404, mensaje: "Agrupación de estacionalidad no encontrada." },
     },
   ],
+  // M1b. Géneros y mundos son `restrict`: las asignaciones cuentan como hijos
+  // (el handler de catálogos solo cuenta nodos, así que esta FK es la red de
+  // seguridad de eliminar un género o mundo sin nodos pero con responsables).
+  [
+    "responsables_genero_mundo_genero_id_fkey",
+    {
+      eliminar: "No se puede eliminar el género: tiene responsables asignados. Quítalos o desactívalo.",
+      asignar: { status: 404, mensaje: "Género no encontrado." },
+    },
+  ],
+  [
+    "responsables_genero_mundo_mundo_id_fkey",
+    {
+      eliminar: "No se puede eliminar el mundo: tiene responsables asignados. Quítalos o desactívalo.",
+      asignar: { status: 404, mensaje: "Mundo no encontrado." },
+    },
+  ],
+  // `perfil_id` es `cascade`: borrar un perfil nunca viola esta FK, así que
+  // `eliminar` queda con el texto genérico.
+  [
+    "responsables_genero_mundo_perfil_id_fkey",
+    {
+      eliminar: FK_GENERICA,
+      asignar: { status: 404, mensaje: "Usuario no encontrado." },
+    },
+  ],
 ];
-
-const FK_GENERICA = "No se puede eliminar: tiene registros asociados. Desactívalo.";
 
 /** Extrae el nombre del índice o constraint del mensaje de Postgres (`… constraint "nombre"`). */
 export function nombreConstraint(message: string): string | null {
