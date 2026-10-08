@@ -20,6 +20,7 @@ import { PasoArchivo } from "@/components/importador/paso-archivo";
 import { BotonesImportar, PasoMapeo } from "@/components/importador/paso-mapeo";
 import { Muestra, TablaDuplicadas, TablaErrores, Tarjeta, descripcionTotales, separarOmitidas } from "@/components/importador/reporte";
 import { formatearNumero, plural } from "@/lib/formato";
+import { causaSinCreaciones } from "@/lib/tiendas/mensajes";
 
 type Campo = keyof FilaImportacionTienda;
 
@@ -143,8 +144,8 @@ export function ImportarTiendas({ onAplicado }: { onAplicado: () => void }) {
 
       {final && archivo && (
         <>
-          <Alert tono="exito">
-            Importación aplicada. {resumenCrear(final)}
+          <Alert tono={causaSinCreaciones(final) === null ? "exito" : "info"}>
+            {causaSinCreaciones(final) === null ? "Importación aplicada." : "No se creó ninguna tienda."} {resumenCrear(final)}
             <span className="ml-3">
               <Button tamano="sm" onClick={onAplicado}>
                 Ver las tiendas
@@ -160,14 +161,27 @@ export function ImportarTiendas({ onAplicado }: { onAplicado: () => void }) {
 
 function Reporte({ titulo, reporte, nombreArchivo }: { titulo: string; reporte: ReporteImportacionTiendas; nombreArchivo: string }) {
   const c = reporte.crear;
-  const nadaNuevo = c.tiendas + c.centros_distribucion === 0;
   const aplicado = reporte.modo === "aplicar";
   const { errores, duplicadas } = separarOmitidas(reporte.omitidas);
+  const causa = causaSinCreaciones(reporte);
 
   return (
     <Card titulo={titulo} descripcion={descripcionTotales(reporte.totales)}>
       <div className="space-y-5">
-        {nadaNuevo && <Alert tono="info">Nada nuevo que crear: todas las tiendas válidas del archivo ya existen.</Alert>}
+        {causa === "ya_existen" && <Alert tono="info">Nada nuevo que crear: todas las tiendas válidas del archivo ya existen.</Alert>}
+        {causa === "solo_errores" && (
+          <Alert>
+            <strong>{aplicado ? "No se creó ninguna tienda" : "No se creará ninguna tienda"}:</strong> las {plural(errores.length, "fila", "filas")} del
+            archivo con datos tienen errores y no se cargarán. Revisa «Filas con errores» más abajo (cada una dice el motivo y el valor), corrige el archivo y
+            vuelve a previsualizar.
+          </Alert>
+        )}
+        {causa === "sin_filas" && (
+          <Alert>
+            {aplicado ? "No se creó ninguna tienda" : "No se creará ninguna tienda"}: el archivo no trae filas con código y nombre. Revisa que la hoja y el
+            mapeo de columnas sean los correctos.
+          </Alert>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Tarjeta

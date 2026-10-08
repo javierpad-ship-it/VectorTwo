@@ -2,6 +2,12 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.7.1 · M4 — 2026-10-08
+
+- **Importar tiendas desde Excel con fechas reales.** Javier cargó el archivo y no se guardó ninguna tienda (la tabla quedó en 0 filas; los registros de Supabase mostraban solo lecturas, ningún insert). Causa: SheetJS entrega las celdas con formato de fecha como texto con el mes primero (`3/15/19`) y el importador lee las fechas con el día primero (`dd/mm/aaaa`): `3/15/19` se rechazaba por mes 15 y todas las filas salían omitidas por fecha inválida, y una fecha como `3/5/19` (5 de marzo) se habría leído como 3 de mayo sin avisar. `leerArchivoTabular` ahora lee el libro con `cellNF: true` y convierte las celdas con formato de fecha a `aaaa-mm-dd` (`fechasExcelAIso`, `serieAFechaIso`, `esFormatoFecha`, sin pasar por la zona horaria del navegador). Aplica a todos los importadores, aunque solo el de tiendas tiene columnas de fecha. Los CSV no cambian: siguen el día primero.
+- **Avisos del importador de tiendas que engañaban.** Si no había nada que crear, la previsualización decía siempre "todas las tiendas válidas del archivo ya existen", aunque la tabla estuviera vacía y todas las filas tuvieran errores; y tras aplicar sin crear nada salía un aviso verde "Importación aplicada". Ahora `causaSinCreaciones` distingue tres casos: ya existen, todas las filas con errores (con el conteo y la indicación de revisar «Filas con errores») y archivo sin filas utilizables; y el aviso final es informativo ("No se creó ninguna tienda") cuando no se creó nada.
+- Tests: 583 en 39 archivos (nuevos: fechas de Excel en `tests/arbol.leer-archivo.test.ts`, `tests/tiendas.excel.test.ts` de punta a punta, `tests/tiendas.mensajes.test.ts`).
+
 ## 0.7.0 · M1b — 2026-10-07
 
 Módulo nuevo pedido por Javier: "a nivel de género-mundo asignar un responsable". Cada combinación género × mundo (hoy 8 × 5 = 40) tiene un responsable que es un comprador; sirve para filtrar lo que le toca a cada uno, no para limitar permisos ("los compradores pueden ver todo, pero para filtrar").
