@@ -19,6 +19,12 @@ pg() {
   if [ "$(id -un)" = "postgres" ]; then bash -c "$1"; else su postgres -c "$1"; fi
 }
 
+# Roles que Supabase trae de fábrica y que las migraciones usan en `grant` y
+# `revoke` (0007). Son de clúster, no de base: se crean una vez si faltan.
+for rol in anon authenticated service_role; do
+  pg "psql -Atc \"select 1 from pg_roles where rolname = '$rol'\" | grep -q 1 || $PSQL -c 'create role $rol nologin;'"
+done
+
 pg "$PSQL -c 'drop database if exists $DB;' -c 'create database $DB;'"
 pg "$PSQL -d $DB -c \"create schema if not exists auth; create table if not exists auth.users (id uuid primary key default gen_random_uuid(), email text); insert into auth.users (email) values ('jperezalbela@jeruth.pe');\""
 

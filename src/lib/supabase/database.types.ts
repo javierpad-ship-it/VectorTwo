@@ -1,7 +1,7 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-07 contra `generate_typescript_types` del proyecto
+ * Verificados el 2026-10-11 (0007, M5) contra `generate_typescript_types` del proyecto
  * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
  * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
  */
@@ -147,6 +147,74 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      cargas_venta_stock: {
+        Row: {
+          archivo_nombre: string | null;
+          costo_vendido: number | null;
+          created_at: string;
+          estado: string;
+          filas: number | null;
+          id: string;
+          limpiada_at: string | null;
+          perfil_id: string | null;
+          periodo: string;
+          publicada_at: string | null;
+          reporte: Json;
+          stock_unidades: number | null;
+          stock_valorizado: number | null;
+          unidades: number | null;
+          updated_at: string;
+          usuario_nombre: string | null;
+          venta_soles: number | null;
+        };
+        Insert: {
+          archivo_nombre?: string | null;
+          costo_vendido?: number | null;
+          created_at?: string;
+          estado?: string;
+          filas?: number | null;
+          id?: string;
+          limpiada_at?: string | null;
+          perfil_id?: string | null;
+          periodo: string;
+          publicada_at?: string | null;
+          reporte?: Json;
+          stock_unidades?: number | null;
+          stock_valorizado?: number | null;
+          unidades?: number | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          venta_soles?: number | null;
+        };
+        Update: {
+          archivo_nombre?: string | null;
+          costo_vendido?: number | null;
+          created_at?: string;
+          estado?: string;
+          filas?: number | null;
+          id?: string;
+          limpiada_at?: string | null;
+          perfil_id?: string | null;
+          periodo?: string;
+          publicada_at?: string | null;
+          reporte?: Json;
+          stock_unidades?: number | null;
+          stock_valorizado?: number | null;
+          unidades?: number | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          venta_soles?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "cargas_venta_stock_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       equivalencias: {
         Row: {
@@ -512,9 +580,172 @@ export type Database = {
         };
         Relationships: [];
       };
+      venta_stock_mensual: {
+        Row: {
+          agrupacion_talla_id: string;
+          carga_id: string;
+          costo_vendido: number;
+          equivalencia_id: string;
+          marca_id: string;
+          stock_unidades: number;
+          stock_valorizado: number;
+          tienda_id: string;
+          unidades: number;
+          venta_soles: number;
+        };
+        Insert: {
+          agrupacion_talla_id: string;
+          carga_id: string;
+          costo_vendido?: number;
+          equivalencia_id: string;
+          marca_id: string;
+          stock_unidades?: number;
+          stock_valorizado?: number;
+          tienda_id: string;
+          unidades?: number;
+          venta_soles?: number;
+        };
+        Update: {
+          agrupacion_talla_id?: string;
+          carga_id?: string;
+          costo_vendido?: number;
+          equivalencia_id?: string;
+          marca_id?: string;
+          stock_unidades?: number;
+          stock_valorizado?: number;
+          tienda_id?: string;
+          unidades?: number;
+          venta_soles?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "venta_stock_mensual_agrupacion_talla_id_fkey";
+            columns: ["agrupacion_talla_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_talla";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_carga_id_fkey";
+            columns: ["carga_id"];
+            isOneToOne: false;
+            referencedRelation: "cargas_venta_stock";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_tienda_id_fkey";
+            columns: ["tienda_id"];
+            isOneToOne: false;
+            referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
-    Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Views: {
+      // Las vistas no entran en `Tables<...>`: consultas.ts declara sus alias.
+      venta_stock_vigente: {
+        Row: {
+          agrupacion_talla_id: string | null;
+          carga_id: string | null;
+          costo_vendido: number | null;
+          equivalencia_id: string | null;
+          marca_id: string | null;
+          periodo: string | null;
+          stock_unidades: number | null;
+          stock_valorizado: number | null;
+          tienda_id: string | null;
+          unidades: number | null;
+          venta_soles: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "venta_stock_mensual_agrupacion_talla_id_fkey";
+            columns: ["agrupacion_talla_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_talla";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_carga_id_fkey";
+            columns: ["carga_id"];
+            isOneToOne: false;
+            referencedRelation: "cargas_venta_stock";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_tienda_id_fkey";
+            columns: ["tienda_id"];
+            isOneToOne: false;
+            referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+    };
+    Functions: {
+      cargas_pendientes_limpieza: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          carga_id: string;
+          estado: string;
+          filas: number;
+        }[];
+      };
+      publicar_carga_venta_stock: {
+        Args: {
+          p_carga: string;
+          p_costo: number;
+          p_filas: number;
+          p_stock_unidades: number;
+          p_stock_valorizado: number;
+          p_unidades: number;
+          p_venta: number;
+        };
+        Returns: Json;
+      };
+      totales_cargas_publicadas: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          carga_id: string;
+          costo_vendido: number;
+          filas: number;
+          periodo: string;
+          stock_unidades: number;
+          stock_valorizado: number;
+          unidades: number;
+          venta_soles: number;
+        }[];
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
