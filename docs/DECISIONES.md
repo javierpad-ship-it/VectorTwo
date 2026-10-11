@@ -415,3 +415,91 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** M5 sigue siendo la carga de histórico de ventas de la Fase 2 y renombrarla confundiría los documentos ya escritos. M1b es independiente de M2–M4, así que puede construirse mientras Javier valida sus hitos, y le permite repartir las combinaciones sin esperar a la Fase 2. Lo consumirán M7, M8 y M9 (filtro "Mis combinaciones" y documento para compradores partido por responsable).
 
 **Descartado.** Renombrar la Fase 2 o llamarlo M5.
+
+## 2026-10-11 · M5: la marca se guarda al detalle y su nivel se lee del maestro; no se agrupan marcas dentro de un nivel
+
+**Decisión.** Los hechos de venta y stock referencian la marca tal como viene en el archivo (FK a `marcas`), y la agrupación de marca (uno de los cinco niveles) se lee de `marcas.agrupacion_marca_id` al agregar. No hay marca colectiva, ni lista de seguimiento, ni pantalla de marcas sugeridas, ni tabla de alias. Cada nombre normalizado es una marca distinta.
+
+**Por qué.** Javier lo descartó: con cinco niveles ya definidos, agrupar marcas dentro de un nivel "sería hacer más completo algo que no se necesita". Guardar el detalle significa que mover una marca de nivel no obliga a recargar 45 meses (Vector-One copiaba la agrupación en cada fila y se desfasaba) y que M7 puede ordenar las cinco marcas principales por equivalencia directamente por venta. También sostiene el requisito de M7 y M8 de pronosticar por separado las marcas con `tratamiento_especial` dentro de su agrupación y su línea, sin ningún campo adicional.
+
+**Descartado.** Marca colectiva para la cola larga y marcas en seguimiento (retiradas en la revisión de diseño, junto con la entrega `0.8.1`); copiar la agrupación en cada fila; tabla de alias (Javier confirmó con dos casos reales que nombres parecidos son marcas distintas). Si algún día hiciera falta agrupar la cola, se añade al leer, sin recargar.
+
+## 2026-10-11 · M5: las marcas desconocidas se crean solas como red de seguridad; la lista de marcas se carga antes
+
+**Decisión.** Una marca del archivo que no exista no bloquea la carga: se crea en la agrupación por defecto elegida al cargar (propuesta MID VALUE), con `tratamiento_especial` en falso. `VARIOS`, `OTROS` y `SIN MARCA` van siempre a MID VALUE. Orden de carga: marcas con su agrupación y tratamiento especial (importador de M2) → tiendas, con las tres que no son del sistema creadas y desactivadas → combinaciones nuevas del árbol → septiembre como piloto → resto del histórico.
+
+**Por qué.** Exigir que las ~280 marcas existan antes obligaría a un alta previa por cada mes del histórico. El riesgo real es un error de tipeo en QlikView que cree una marca basura que nadie fusiona (no hay alias); los frenos son que el reporte previo lista todas las marcas nuevas con filas, venta y stock antes de confirmar, resalta como `posible_tipeo` las de una o dos filas, ofrece la lista en el formato del importador de M2, y `marcas-nuevas` solo se llama después de confirmar. Javier confirmó que cargará la lista de marcas primero, así que el alta automática debería casi no usarse. El orden importa porque el importador de M2 no actualiza existentes: si la venta entrara primero, las marcas nacerían en MID VALUE y habría que moverlas a mano.
+
+**Descartado.** Exigir que existan antes; crear alias.
+
+## 2026-10-11 · M5: una carga es un mes completo y se publica por cambio de estado
+
+**Decisión.** Cada intento de carga de un mes es una fila de `cargas_venta_stock` con estado (`en_curso`, `publicada`, `reemplazada`, `retirada`, `abandonada`, `fallida`); los hechos van etiquetados con `carga_id`. Hay a lo sumo una carga `publicada` y una `en_curso` por mes (índices únicos parciales). Publicar es una función SQL (`publicar_carga_venta_stock`) que mide lo que hay en la base, lo compara con lo que el cliente dice haber enviado y, solo si coincide exactamente, pasa la anterior a `reemplazada` y esta a `publicada` con solo `update`. Toda lectura del histórico pasa por la vista `venta_stock_vigente`. La limpieza de filas de cargas terminales es un `delete` de handler por carga, guiado por `cargas_pendientes_limpieza()`.
+
+**Por qué.** Garantiza que un corte nunca deja un mes parcial a la vista: o se publicó el mes nuevo entero o sigue el viejo. Las migraciones no pueden contener `DELETE` (se aplican con `execute_sql` y cualquier sentencia destructiva queda esperando una confirmación), así que el borrado va por handler y fuera de la ruta crítica. Una carga que no concilia no se publica, y reimportar el mismo mes deja las mismas filas.
+
+**Descartado.** Borrar el mes e insertar el nuevo (un corte deja el mes parcial visible, y PostgREST no tiene transacciones); tabla de paso con `delete` dentro de una función (la migración no admite `delete`); particiones por mes (exigen DDL en tiempo de ejecución).
+
+## 2026-10-11 · M5: la tabla de hechos no lleva `id`, `activo` ni `updated_at`, y solo tiene dos índices de lectura
+
+**Decisión.** `venta_stock_mensual` tiene clave primaria compuesta `(carga_id, tienda_id, equivalencia_id, marca_id, agrupacion_talla_id)`, sin `id`, `activo`, `created_at` ni `updated_at`, con todas las FK `on delete restrict` y las medidas `not null default 0`. Índices extra: `(equivalencia_id, carga_id)` y `(marca_id, carga_id)`. No se indexan `tienda_id` ni `agrupacion_talla_id`.
+
+**Por qué.** Las filas son inmutables (solo se insertan y se borran en bloque por carga), así que un `id` y su índice costarían unos 70 MB sin usarse en 1,5 millones de filas. Los dos índices cubren las lecturas por valor de M6 y M7 (la serie de una equivalencia o de una marca) y evitan un escaneo completo en el compute Micro. `tienda_id` tiene unos quince valores y `agrupacion_talla_id` dos: un índice no discrimina nada y cada uno costaría unos 75 MB. Es una excepción documentada a la convención de PLAN §4 y un criterio parcial frente al "indexar toda FK" de M3.
+
+**Descartado.** Compactar con `carga_id` entero o `agrupacion_talla_id` `smallint` (ahorro de 15 % a cambio de una tabla que no se parece a ninguna otra). Con el plan Pro (8 GB) el espacio no es el límite; el compute sí.
+
+## 2026-10-11 · M5: lo desactivado se excluye en silencio informativo, lo inexistente es error, y el bloqueo es por mes
+
+**Decisión.** Las exclusiones por decisión (tienda, marca, línea, nodo o equivalencia desactivados; filas sin clasificar, de totales o en cero) son informativas y muestran su peso. Lo desconocido (tienda, combinación, talla, mes o número inválidos) es un error agrupado por valor. Un mes con errores del 2 % o más en filas, venta o stock valorizado se salta y los demás meses se cargan; la casilla "Cargar también los meses bloqueados" lo fuerza y el mes queda marcado Incompleto con su porcentaje. Las tres tiendas del archivo que no son del sistema se crean y desactivan en M4, sin tabla de exclusiones.
+
+**Por qué.** Desactivar significa "no debe volver a aparecer" en todo el sistema, así que repetir esa decisión como alarma cada mes enseñaría a ignorar la lista de errores. Bloquear por mes (y no el archivo entero) evita que un año completo se pare por un error de clasificación en un solo mes, y el marcado Incompleto evita que lo forzado pase inadvertido. Es el criterio del 2026-10-02 (avisar y dejar cargar lo válido) aplicado al grano del mes.
+
+**Descartado.** Tabla `tiendas_excluidas` con botón "Excluir siempre" (una tabla, tres endpoints y un botón para tres valores, cuando M4 ya resuelve eso con `activo = false`); bloquear el archivo entero.
+
+## 2026-10-11 · M5: el archivo se lee en el navegador por bloques, se resuelve una vez y toda agregación se hace en SQL
+
+**Decisión.** El archivo nunca se sube entero: el navegador lo lee por bloques, acumula en arreglos tipados con diccionarios y manda al servidor solo los valores distintos (tiendas, combinaciones, marcas, periodos). El servidor responde cómo se resuelve cada uno y las tandas viajan ya con ids resueltos, en filas posicionales (`TANDA_CLIENTE` 10 000 filas, `TANDA_INSERT_VENTAS` 2 000 por `upsert`). Las tandas son `upsert … ignoreDuplicates` sobre la clave primaria y se reintentan hasta tres veces. Ninguna lectura del histórico trae filas a Node.
+
+**Por qué.** Un año son unos 33 MB y el histórico unos 120 MB; un objeto por fila costaría cientos de MB en el navegador. Resolver una sola vez evita releer árbol, tiendas y marcas unas 150 veces. Una respuesta perdida en la red es el fallo más común, y con `ignoreDuplicates` reenviar la tanda no duplica ni falla; la publicación sigue conciliando contra la base, así que la idempotencia no esconde nada. Vector-One leía `ventas_mensual` entera desde Node y reventaba.
+
+**Descartado.** Subir el archivo entero; reenviar texto y reinterpretarlo en cada tanda; descartar el mes ante cualquier error de tanda.
+
+## 2026-10-11 · M5: cifras de dos decimales como máximo, cifras enteras aceptables, `Revisar` a CENTRALES y `SIN MARCA`
+
+**Decisión.** Al guardar, venta, costo y stock valorizado se redondean a 2 decimales y unidades y stock en unidades son enteros. El CSV de QlikView trae soles enteros (error máximo S/ 0,50 por fila, por debajo de 0,02 % en los totales de septiembre): el aviso de cifras enteras es informativo y nunca bloquea. La conciliación contra QlikView exige unidades y stock exactos y acepta una diferencia relativa menor al 0,1 % en soles. La talla `Revisar`, `-` y vacío se cargan como CENTRALES con aviso (~6 % de las filas y ~15 % de la venta en septiembre). El guion o vacío como marca se guardan como `SIN MARCA`, en MID VALUE como VARIOS y OTROS. El stock valorizado va a costo. Ningún mes se marca ni excluye como atípico al cargar.
+
+**Por qué.** Con soles enteros una igualdad exacta nunca se daría; la tolerancia es lo bastante estricta para detectar un archivo truncado o un mes equivocado. `Revisar` no se guarda con su valor original porque la unidad de carga es el mes: si Javier decidiera repartirlo de otra manera, recarga los meses. Los meses atípicos y el tratamiento de la liquidación son asunto de M6 y M7. Javier confirmó el nombre `SIN MARCA` (2026-10-11).
+
+**Descartado.** Exigir igualdad exacta con QlikView; guardar la talla original; adivinar la coma decimal (`12,5` es número inválido y, si más del 1 % de las celdas la usan, un diagnóstico bloqueante).
+
+## 2026-10-11 · M5: toda la API de venta y stock exige `requirePlanner`, lecturas incluidas
+
+**Decisión.** Las siete rutas de `/api/ventas/` responden `403` a un comprador, también las de lectura (`GET /api/ventas/cargas` y `GET /api/ventas/cargas/[id]`). La sección de menú Planificación y la página solo existen para admin y planner. Javier confirmó (2026-10-11) que el comprador no verá cifras de M5 antes de M8, donde el documento para compradores dirá qué cifras lleva.
+
+**Por qué.** Venta y, sobre todo, costo son los datos más sensibles del sistema, porque de ellos sale el margen. Es la primera vez que una lectura no es `requireUser`: en los maestros "los compradores ven todo" hablaba de vocabulario de planificación, no de cifras, y dejar el costo al alcance de un rol que ni siquiera ve la pantalla lo habría permitido con un simple `curl`.
+
+**Descartado.** Lecturas con `requireUser` como en M1 a M4.
+
+## 2026-10-11 · M5: lo que decidió el backend al construir
+
+**Decisión.** Cuatro ajustes respecto a la ficha. (1) `posible_tipeo` se decide solo por filas (una o dos en todo el archivo, y no comodín), sin umbral de venta, y trae la marca existente más parecida. (2) `archivo_posiblemente_truncado` no bloquea: avisa. (3) Aparecen el motivo y el diagnóstico `demasiados_valores` (más de 120 meses, 500 tiendas, 20 000 combinaciones o 5 000 marcas distintas) y la nota `fechas_con_dia` (el día se ignora y se toma el mes completo). (4) La conciliación contra QlikView compara con el total del archivo tal cual, antes de excluir nada; la identidad interna `archivo = cargado + exclusiones` sigue siendo exacta. Además, las huellas de stock de lo ya publicado se arman con un conteo `head` por la vista más las sumas que guardó la carga, y el acumulador del navegador detecta claves repetidas con una tabla hash abierta sobre `Float64Array`.
+
+**Por qué.** Una hoja de 65 536 filas puede ser casualidad, y lo que de verdad delata un archivo cortado es que no cuadre contra QlikView; bloquear por esa sospecha estorbaba más de lo que protegía. Comparar con el archivo tal cual es lo que Javier tiene en QlikView: las exclusiones son decisión de Vector2 y se ven aparte. El conteo `head` evita traer filas a Node, y la tabla hash mantiene unos 60 B por fila en lugar de un `Map` con una entrada por clave.
+
+**Descartado.** Bloquear por truncado; conciliar contra lo cargado (escondería lo que se excluyó); calcular las huellas con `leerTodo`.
+
+## 2026-10-11 · M5: lo que decidió la migración `0007`
+
+**Decisión.** (1) La vista `venta_stock_vigente` lleva `security_invoker = true` y **no** lleva `revoke` a `anon` ni `authenticated`. (2) Además del único parcial de `publicada`, hay otro de `en_curso` (`cargas_periodo_en_curso_uniq`). (3) `publicar_carga_venta_stock` devuelve `no_en_curso` también cuando la carga no existe. (4) `scripts/validar-migraciones-local.sh` crea los roles `anon`, `authenticated` y `service_role` si faltan. Las tres funciones llevan `revoke execute … from public, anon, authenticated` y `grant … to service_role`.
+
+**Por qué.** Con `security_invoker` y RLS sin políticas, `anon` y `authenticated` obtienen cero filas de la vista, no un error; un `revoke` sobre la vista solo cambiaría eso por un error de permiso que no aporta protección. El único parcial de `en_curso` es lo que impide que dos personas carguen el mismo mes a la vez. La función no necesita distinguir "no existe" de "no está en curso": el handler de publicar ya responde `404` a una carga inexistente antes de llamarla, y lo que llega a la función es una carrera, que se trata igual. Un Postgres local no trae los roles de Supabase y la `0007` los usa en `grant` y `revoke`.
+
+**Descartado.** `revoke` sobre la vista (redundante); un motivo aparte para carga inexistente.
+
+## 2026-10-11 · M5: el descarte automático nunca retira un mes publicado; el redondeo no usa épsilon relativo
+
+**Decisión.** `DELETE /api/ventas/cargas/[id]?solo=en_curso` solo descarta cargas `en_curso` y responde `409` si ya estaba publicada; el flujo de carga siempre lo usa. Si `publicar` falla de forma ambigua (red o `5xx`), el cliente consulta el estado real de la carga antes de decidir. Retirar un mes publicado es solo una acción manual de "Cargas por mes". El redondeo a céntimos limpia el ruido de coma flotante con `Number(x.toPrecision(15))`.
+
+**Por qué.** Fueron los dos hallazgos de la QA. Ante una publicación cuya respuesta se pierde, el descarte automático habría retirado un mes que sí se publicó. Y el épsilon relativo anterior (`x * 1e-9`) corrompía los montos grandes: S/ 30 000 000 salía con +S/ 0,03. Con 15 cifras significativas, que es lo que un `double` garantiza, `1.005` se redondea bien y los montos grandes no se mueven. La lección es que un redondeo se prueba con montos grandes y que ningún proceso automático debe poder deshacer una publicación.
+
+**Descartado.** Un `DELETE` sin condición de estado en el flujo de carga; un épsilon fijo.

@@ -1,6 +1,58 @@
 # M5 · Carga de venta, costo y stock (histórico mensual)
 
-> Estado: **especificado el 2026-10-11 y revisado el mismo día por el arquitecto (ver "Revisión de diseño (Fable)" al final), pendiente de aprobación de Javier** (`0.8.0 · M5`, migración `0007_venta_stock.sql`). Primer módulo de la Fase 2. Módulos anteriores: [04-tiendas](04-tiendas.md) (la plantilla de importador con reporte previo; M5 usa su código de tienda y su `activo`), [02-marcas](02-marcas.md) (M5 resuelve cada marca contra esa maestra y crea las desconocidas; no cambia `marcas`), [01-arbol-producto](01-arbol-producto.md) (la equivalencia de cada fila se resuelve con las reglas del árbol) y [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (M6 agrupará esta venta por agrupación de estacionalidad). [01b-responsables](01b-responsables.md) no interviene. Reglas de base en `docs/PLAN.md` y `docs/DECISIONES.md`. Una sola entrega, `0.8.0 · M5`.
+> Estado: **construido 2026-10-11 (`0.8.0 · M5`); hito pendiente de recorrer por Javier.** Migración `0007_venta_stock.sql` aplicada en `vector-two`. Especificado y revisado por el arquitecto el mismo día (ver "Revisión de diseño (Fable)" al final); lo que cambió al construir está en "Construido" y en "Cambios respecto a la especificación". Primer módulo de la Fase 2. Módulos anteriores: [04-tiendas](04-tiendas.md) (la plantilla de importador con reporte previo; M5 usa su código de tienda y su `activo`), [02-marcas](02-marcas.md) (M5 resuelve cada marca contra esa maestra y crea las desconocidas; no cambia `marcas`), [01-arbol-producto](01-arbol-producto.md) (la equivalencia de cada fila se resuelve con las reglas del árbol) y [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (M6 agrupará esta venta por agrupación de estacionalidad). [01b-responsables](01b-responsables.md) no interviene. Reglas de base en `docs/PLAN.md` y `docs/DECISIONES.md`. Una sola entrega, `0.8.0 · M5`.
+
+## Construido (`0.8.0 · M5`, 2026-10-11)
+
+Lo que existe hoy; el resto de la ficha es el diseño del que se partió y sigue valiendo salvo lo anotado en "Cambios respecto a la especificación".
+
+**Rutas** (todas `requirePlanner`, lecturas incluidas; los handlers están en `src/app/api/ventas/`):
+
+| Ruta | Qué hace |
+|---|---|
+| `POST /api/ventas/previsualizar` | Resuelve valores distintos (tiendas, combinaciones, marcas, periodos) contra los maestros y devuelve el estado de cada mes. No escribe |
+| `POST /api/ventas/marcas-nuevas` | Crea las marcas desconocidas tras confirmar el reporte; comodines siempre en MID VALUE |
+| `POST /api/ventas/cargas` · `GET /api/ventas/cargas` | Abre la carga de un mes · lista de 45 meses con cobertura (`?verificar=1` recalcula totales en SQL) |
+| `GET /api/ventas/cargas/[id]` | **Nueva, no estaba en el diseño.** Detalle de una carga con el reporte guardado y el historial de cargas del mismo mes; alimenta el detalle de "Cargas por mes" |
+| `POST /api/ventas/cargas/[id]/filas` | Una tanda de filas (idempotente, latido de `updated_at`) |
+| `POST /api/ventas/cargas/[id]/publicar` | Llama a `publicar_carga_venta_stock`; `no_concilia` deja la carga `fallida` |
+| `DELETE /api/ventas/cargas/[id]` | `en_curso` pasa a `abandonada`, `publicada` a `retirada`. **Con `?solo=en_curso`** (parámetro nuevo) solo descarta cargas en curso y responde `409` si ya estaba publicada; es el que usa el flujo de carga |
+| `POST /api/ventas/cargas/limpiar` | Borra por carga las filas de las cargas terminales |
+
+**Archivos principales.** Lógica pura en `src/lib/ventas/`: `periodo`, `numeros`, `talla`, `columnas`, `interpretar`, `acumulador`, `resolver`, `informe`, `cargas`, `cargar-meses`, `leer-por-bloques`, `descargas`, `esquemas`; acceso a datos en `consultas.ts` (único que nombra `venta_stock_mensual`) y `http.ts`; tipos en `tipos.ts` y `tipos-api.ts`. Pantalla en `src/app/(app)/planificacion/venta-stock/` (panel con pestañas Cargar y Cargas por mes; `use-carga-ventas.ts` orquesta lectura, previsualización y carga). Menú: sección nueva Planificación con "Carga de venta y stock", visible a admin y planner. Las rutas `DELETE` de marcas, tiendas y equivalencias cuentan los hechos antes de eliminar y `errores-db.ts` traduce las FK nuevas (ver "Cambios en la API de M2 y M4"). Pruebas: 781 en 54 archivos, 198 más que antes del módulo.
+
+**Desviaciones que tomó el backend** (las decisiones están en `docs/DECISIONES.md`):
+
+- `posible_tipeo` es solo "una o dos filas en todo el archivo y no es comodín" (`FILAS_POSIBLE_TIPEO = 2`); no se mira la venta. Lleva la marca existente más parecida (misma `aCodigo` o distancia de edición 1).
+- Existe un motivo de exclusión nuevo, `demasiados_valores`, y un diagnóstico bloqueante con el mismo nombre: la previsualización admite hasta 120 meses, 500 tiendas, 20 000 combinaciones y 5 000 marcas distintas; lo que pase de ahí se excluye con ese motivo. Con datos reales no ocurre.
+- Las fechas con día distinto de 1 se cuentan en una nota nueva, `fechas_con_dia` (el día se ignora y se toma el mes completo).
+- `archivo_posiblemente_truncado` es un diagnóstico **no bloqueante** (la ficha lo listaba entre los bloqueantes): avisa, y la identidad exacta más la conciliación contra QlikView detectan de verdad un archivo cortado.
+- La conciliación contra QlikView compara los totales que escribe Javier con el total del **archivo tal cual** (antes de excluir nada), no con lo cargado. La identidad interna `archivo = cargado + exclusiones` sigue siendo exacta.
+- Las huellas de stock de los meses ya publicados se arman con un conteo `head` por la vista (filas con stock distinto de cero, filtrado por `carga_id`) más las sumas que la carga guardó al publicar; no se trae ninguna fila a Node.
+- El acumulador del navegador usa una tabla hash abierta sobre `Float64Array` para detectar y sumar claves repetidas, con las medidas también en arreglos tipados, en vez de un `Map` con una entrada por clave; es lo que mantiene ~60 B por fila.
+
+**Desviaciones de datos** (migración `0007`):
+
+- La vista `venta_stock_vigente` **no** lleva `revoke` a `anon` ni `authenticated`. Con `security_invoker` y RLS sin políticas ya devuelven cero filas, y un `revoke` sobre la vista solo añadiría un error de permiso que la prueba de la regla 34 no espera. Las tres funciones sí llevan `revoke … from public, anon, authenticated` y `grant … to service_role`.
+- Además del índice único parcial de `publicada`, la migración crea `cargas_periodo_en_curso_uniq` (una carga `en_curso` por mes): es el que sostiene el `409 carga_en_curso` cuando dos personas cargan el mismo mes a la vez.
+- `publicar_carga_venta_stock` devuelve `no_en_curso` **también cuando la carga no existe**, no solo cuando está en otro estado.
+- `scripts/validar-migraciones-local.sh` ahora crea los roles `anon`, `authenticated` y `service_role` (de clúster, si faltan) antes de aplicar las migraciones, porque la `0007` los usa en `grant` y `revoke` y un Postgres local no los trae.
+
+**Lección de la QA.** La revisión encontró dos fallos reales antes del cierre. Primero, el redondeo a céntimos usaba un épsilon relativo (`x * 1e-9`) para limpiar el ruido de coma flotante, y en montos grandes ese épsilon movía el resultado (S/ 30 000 000 salía con +S/ 0,03); se cambió por `Number(x.toPrecision(15))`, que corrige `1.005` sin tocar los montos grandes, y hay pruebas con montos de ese orden. Segundo, ante una publicación **ambigua** (se corta la red o llega un `5xx` y no se sabe si la carga llegó a publicarse), el flujo descartaba la carga con un `DELETE` que habría retirado un mes ya publicado; ahora se consulta el estado real, y el descarte automático usa `?solo=en_curso`, de modo que retirar un mes publicado es siempre una acción manual. La lección: un redondeo se prueba con montos grandes, no solo con casos de céntimos, y un descarte automático nunca debe poder deshacer una publicación.
+
+**Lo que NO se probó.** Nada contra Supabase real: los handlers no tienen pruebas de integración (solo la lógica pura y los esquemas) y el SQL se validó únicamente con el script local de migraciones. Quedan por medir en el piloto de septiembre el `statement_timeout` del `service_role`, el tiempo real de las tandas de 2 000 filas con `upsert` (si falla, bajar `TANDA_INSERT_VENTAS` a 500), el tamaño real de la tabla y el comportamiento del límite de cuerpo con tandas de ~400 KB.
+
+**Checklist del hito para Javier** (el detalle fino está en "Criterios de aceptación"):
+
+1. Antes: marcas con agrupación y tratamiento especial cargadas con el importador de M2; tiendas en M4 (las tres que no son del sistema, desactivadas); las 263 combinaciones nuevas en el importador del árbol.
+2. Cargar septiembre de 2026 (piloto) y revisar el reporte previo.
+3. Escribir los cinco totales de QlikView y comprobar que concilian (unidades y stock exactos; soles dentro de 0,1 %).
+4. Cargar y ver el mes en "Cargas por mes"; pulsar "Verificar totales".
+5. Reemplazar el mismo mes: aparece "Idéntico a lo ya cargado"; forzar el reemplazo y comprobar que los totales no cambian y que la limpieza borra la carga vieja.
+6. Cortar una carga a medias (cerrar la pestaña) y comprobar que el mes anterior sigue visible.
+7. Retirar el mes y comprobar que deja de verse y queda "Sin cargar".
+8. Limpiar con "Limpiar ahora" hasta que no quede limpieza pendiente.
+9. Anotar tiempos y, si todo cuadra, cargar el resto del histórico, un archivo por año.
 
 ## Objetivo
 
@@ -522,7 +574,7 @@ Cómo leerlo: `[x]` lo cubren los checks automáticos y la QA; `[ ]` solo se com
 
 **Piloto (septiembre de 2026)**
 
-- [ ] `0007_venta_stock.sql` aplicada dos veces en `vector-two` sin error, sin `DROP`, `DELETE` ni `TRUNCATE`; tipos regenerados (con la vista bajo `Views` y las tres funciones bajo `Functions`); la forma de `marcas` no cambia; `APP_VERSION` = `0.8.0 · M5`.
+- [x] `0007_venta_stock.sql` aplicada en `vector-two` (sin `DROP`, `DELETE` ni `TRUNCATE`); tipos regenerados (con la vista bajo `Views` y las tres funciones bajo `Functions`); la forma de `marcas` no cambia; `APP_VERSION` = `0.8.0 · M5`.
 - [ ] Roles: el menú muestra Planificación → Carga de venta y stock a admin y planner; el comprador no la ve, la ruta lo redirige a `/` y **toda** la API de M5 (`GET /api/ventas/cargas` incluido) le responde `403`.
 - [ ] Cargar el CSV de septiembre: la codificación sale "UTF-8 con BOM", el separador "coma", el mapeo se autodetecta (14 columnas), la lectura muestra su barra y termina en segundos.
 - [ ] **Reporte previo contra los hechos conocidos**: 32.558 filas; las 3 tiendas desconocidas (13 filas, solo stock) como desconocidas, y tras crearlas desactivadas en M4 como `tienda_inactiva` informativas; las 57 filas sin clasificar como excluidas por decisión; `Revisar` ~6 % de las filas y ~15 % de la venta con su aviso; las 263 combinaciones (36 con nodo nuevo) como errores agrupados por valor con primera fila; las 2 parejas repetidas por el doble espacio como "claves repetidas que se suman"; la nota "cifras enteras" informativa; las marcas nuevas listadas con filas, venta y stock, los comodines en MID VALUE y el texto "quedarán en MID VALUE hasta que las muevas"; el CD con solo stock sin aviso de venta.
@@ -569,7 +621,7 @@ Cómo leerlo: `[x]` lo cubren los checks automáticos y la QA; `[ ]` solo se com
 
 ## Decisiones nuevas propuestas
 
-Para que el `documentador` las registre en `docs/DECISIONES.md` cuando Javier apruebe la ficha:
+Registradas en `docs/DECISIONES.md` el 2026-10-11 al cerrar la construcción (las diez, más las que tomó el backend y los datos al construir):
 
 1. **La marca se guarda al detalle, con FK a su maestra, y su agrupación se lee del maestro.** Los hechos referencian la marca tal como viene; el nivel (uno de cinco) sale de `marcas.agrupacion_marca_id` al agregar. Por qué: cambiar una marca de nivel no debe obligar a recargar 45 meses; Vector-One copiaba la agrupación en cada fila y se desfasaba. Descartado por Javier el 2026-10-11: agrupar marcas dentro de un nivel (colectiva, seguimiento, marcas sugeridas).
 2. **Las marcas desconocidas se crean solas en la agrupación por defecto, con freno en el reporte previo.** `tratamiento_especial` en falso; VARIOS, OTROS y SIN MARCA siempre en MID VALUE; la lista completa con venta y stock se ve antes de confirmar, se descarga en el formato del importador de M2 y las de una o dos filas se resaltan como posible error de tipeo. Descartado: exigir que existan antes (obligaría a un alta previa por cada mes) y crear alias (no hay).
@@ -591,7 +643,20 @@ Para que el `documentador` las registre en `docs/DECISIONES.md` cuando Javier ap
 
 ## Cambios respecto a la especificación
 
-Vacío: se completa al construir y con la QA.
+Resumen de lo que se apartó del diseño al construir; el detalle y las razones están en "Construido" al principio de la ficha y en `docs/DECISIONES.md` (entradas del 2026-10-11).
+
+1. Ruta nueva `GET /api/ventas/cargas/[id]` (detalle con reporte e historial) y parámetro nuevo `DELETE …?solo=en_curso`.
+2. `posible_tipeo` se decide solo por filas (una o dos), sin umbral de venta.
+3. Motivo de exclusión `demasiados_valores` y nota `fechas_con_dia`, que el diseño no nombraba.
+4. `archivo_posiblemente_truncado` no bloquea.
+5. La conciliación contra QlikView compara con el total del archivo tal cual.
+6. Huellas de stock con conteo `head`; acumulador con tabla hash sobre `Float64Array`.
+7. La vista no lleva `revoke` a `anon` ni `authenticated`; `publicar_carga_venta_stock` devuelve `no_en_curso` también si la carga no existe; el script de validación local crea los roles de Supabase.
+8. El redondeo a céntimos usa `toPrecision(15)` en lugar de un épsilon relativo (hallazgo de QA).
+
+## Preguntas resueltas al cerrar la construcción
+
+Javier respondió el 2026-10-11 tres de las preguntas abiertas de abajo: los campos `_LK` no cambian nada (el sufijo significa Lukers, y rige el árbol vigente para todo el histórico), `SIN MARCA` es el nombre del guion, y el comprador no ve cifras de M5 antes de M8. Queda con su valor por defecto la de las tres tiendas que no son del sistema (crearlas desactivadas en M4).
 
 ## Preguntas abiertas para Javier
 
