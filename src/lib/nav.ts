@@ -52,6 +52,13 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    // Fase 2: venta y costo son las cifras más sensibles del sistema; la
+    // sección es solo de planificación (M5 ahora; M6 a M8 después).
+    title: "Planificación",
+    roles: PLANIFICACION,
+    links: [{ href: "/planificacion/venta-stock", label: "Carga de venta y stock" }],
+  },
+  {
     title: "Administración",
     roles: ["admin"],
     links: [{ href: "/usuarios", label: "Usuarios" }],

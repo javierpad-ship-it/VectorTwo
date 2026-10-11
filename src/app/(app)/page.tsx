@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { perfilActual } from "@/lib/auth/guard";
-import { ETIQUETA_ROL } from "@/lib/auth/roles";
+import { ETIQUETA_ROL, type Rol } from "@/lib/auth/roles";
 import { puedeVerRuta } from "@/lib/nav";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,44 @@ const MODULOS: Modulo[] = [
   },
 ];
 
+const MODULOS_FASE_2: Modulo[] = [
+  {
+    id: "M5",
+    nombre: "Carga de venta, costo y stock",
+    detalle: "Histórico mensual de QlikView con reporte previo, conciliación y reemplazo mes a mes.",
+    estado: "listo",
+    href: "/planificacion/venta-stock",
+  },
+];
+
+function ListaModulos({ modulos, rol }: { modulos: Modulo[]; rol: Rol | null }) {
+  return (
+    <ul className="divide-y divide-borde">
+      {modulos.map((m) => {
+        const enlazable = m.estado === "listo" && m.href && rol !== null && puedeVerRuta(rol, m.href);
+        return (
+          <li key={m.id} className="flex items-center gap-4 py-3">
+            <span className="w-10 font-mono text-xs text-tinta-suave">{m.id}</span>
+            <div className="flex-1">
+              <div className="text-sm font-medium">
+                {enlazable && m.href ? (
+                  <Link href={m.href} className="text-marca-oscura underline-offset-2 hover:underline">
+                    {m.nombre}
+                  </Link>
+                ) : (
+                  m.nombre
+                )}
+              </div>
+              <div className="text-xs text-tinta-suave">{m.detalle}</div>
+            </div>
+            <Badge tono={m.estado === "listo" ? "exito" : "neutro"}>{m.estado === "listo" ? "Listo" : "Pendiente"}</Badge>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default async function InicioPage() {
   const r = await perfilActual();
   const nombre = r.estado === "ok" ? r.perfil.nombre || r.perfil.email : "";
@@ -51,35 +89,19 @@ export default async function InicioPage() {
       <div>
         <h1 className="text-2xl font-semibold">Hola, {nombre}</h1>
         <p className="mt-1 text-sm text-tinta-suave">
-          Entraste como <strong>{rol}</strong>. Vector2 se está construyendo módulo por módulo; este es el estado de la Fase 1.
+          Entraste como <strong>{rol}</strong>. Vector2 se está construyendo módulo por módulo; este es el estado de los módulos.
         </p>
       </div>
 
       <Card titulo="Fase 1 · Cimientos y maestros">
-        <ul className="divide-y divide-borde">
-          {MODULOS.map((m) => {
-            const enlazable = m.estado === "listo" && m.href && r.estado === "ok" && puedeVerRuta(r.rol, m.href);
-            return (
-              <li key={m.id} className="flex items-center gap-4 py-3">
-                <span className="w-10 font-mono text-xs text-tinta-suave">{m.id}</span>
-                <div className="flex-1">
-                  <div className="text-sm font-medium">
-                    {enlazable && m.href ? (
-                      <Link href={m.href} className="text-marca-oscura underline-offset-2 hover:underline">
-                        {m.nombre}
-                      </Link>
-                    ) : (
-                      m.nombre
-                    )}
-                  </div>
-                  <div className="text-xs text-tinta-suave">{m.detalle}</div>
-                </div>
-                <Badge tono={m.estado === "listo" ? "exito" : "neutro"}>{m.estado === "listo" ? "Listo" : "Pendiente"}</Badge>
-              </li>
-            );
-          })}
-        </ul>
+        <ListaModulos modulos={MODULOS} rol={r.estado === "ok" ? r.rol : null} />
       </Card>
+
+      {r.estado === "ok" && puedeVerRuta(r.rol, "/planificacion/venta-stock") && (
+        <Card titulo="Fase 2 · Datos de venta y planificación">
+          <ListaModulos modulos={MODULOS_FASE_2} rol={r.rol} />
+        </Card>
+      )}
     </div>
   );
 }

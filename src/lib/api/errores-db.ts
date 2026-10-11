@@ -55,6 +55,9 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["tiendas_nombre", "Ya existe una tienda con ese nombre."],
   // M1b. Solo alcanzable si alguien inserta a mano: la API usa `upsert`.
   ["responsables_genero_mundo_par", "Esa combinación género-mundo ya tiene responsable."],
+  // M5. La API de cargas ya las traduce con más detalle (quién y desde cuándo); esto es la red de seguridad.
+  ["cargas_periodo_en_curso_uniq", "Ya hay una carga en curso de ese mes."],
+  ["cargas_periodo_publicada_uniq", "Ese mes ya tiene una carga publicada."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -142,6 +145,46 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     {
       eliminar: FK_GENERICA,
       asignar: { status: 404, mensaje: "Usuario no encontrado." },
+    },
+  ],
+  // M5. Los hechos de venta y stock cuelgan de marca, tienda, equivalencia y
+  // agrupación de talla con `restrict`: eliminar con histórico se rechaza (los
+  // handlers lo anticipan con el conteo; esto es la red de seguridad). En la
+  // rama `asignar` (una tanda apunta a un id que ya no existe) responde 404.
+  [
+    "venta_stock_mensual_marca_id_fkey",
+    {
+      eliminar: "No se puede eliminar: tiene venta o stock cargados. Desactívala.",
+      asignar: { status: 404, mensaje: "Marca no encontrada." },
+    },
+  ],
+  [
+    "venta_stock_mensual_tienda_id_fkey",
+    {
+      eliminar: "No se puede eliminar: tiene venta o stock cargados. Desactívala.",
+      asignar: { status: 404, mensaje: "Tienda no encontrada." },
+    },
+  ],
+  [
+    "venta_stock_mensual_equivalencia_id_fkey",
+    {
+      eliminar: "No se puede eliminar: tiene venta o stock cargados. Desactívala.",
+      asignar: { status: 404, mensaje: "Equivalencia no encontrada." },
+    },
+  ],
+  [
+    "venta_stock_mensual_agrupacion_talla_id_fkey",
+    {
+      eliminar: "No se puede eliminar: tiene venta o stock cargados. Desactívala.",
+      asignar: { status: 404, mensaje: "Agrupación de talla no encontrada." },
+    },
+  ],
+  // Las cargas nunca se eliminan (cambian de estado); la FK es la red de seguridad.
+  [
+    "venta_stock_mensual_carga_id_fkey",
+    {
+      eliminar: "No se puede eliminar la carga: todavía tiene filas de venta y stock.",
+      asignar: { status: 404, mensaje: "Carga no encontrada." },
     },
   ],
 ];

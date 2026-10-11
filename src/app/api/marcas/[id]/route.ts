@@ -5,6 +5,7 @@ import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import type { TablesUpdate } from "@/lib/supabase/database.types";
 import { editarMarcaSchema } from "@/lib/marcas/esquemas";
+import { contarHechos } from "@/lib/ventas/consultas";
 import { SELECT_MARCA_CON_AGRUPACION, aMarcaFila } from "@/lib/marcas/consultas";
 import {
   AGRUPACION_NO_ENCONTRADA,
@@ -71,8 +72,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 /**
- * Elimina la marca (`requirePlanner`); `409` si tiene hijos (ninguno en M2;
- * a partir de M5 colgarán venta y stock, y el `restrict` lo garantiza).
+ * Elimina la marca (`requirePlanner`); `409` con el conteo si tiene venta o
+ * stock cargados (M5: el conteo usa el índice `(marca_id, carga_id)` y es
+ * instantáneo; el `restrict` de la FK es la red de seguridad).
  */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
@@ -86,8 +88,9 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   if (errActual) return traducirErrorDb(errActual, "buscar marca");
   if (!actual) return error(NO_ENCONTRADA, 404);
 
-  // Sin tablas hijas en M2: el conteo es 0 y la regla deja pasar.
-  const motivo = motivoRechazoEliminar("marca", 0);
+  const { cuenta, error: errCuenta } = await contarHechos(db, "marca_id", id);
+  if (errCuenta) return traducirErrorDb(errCuenta, "contar hechos de la marca");
+  const motivo = motivoRechazoEliminar("marca", cuenta);
   if (motivo) return error(motivo, 409);
 
   const { error: err } = await db.from("marcas").delete().eq("id", id);

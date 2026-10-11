@@ -8,6 +8,7 @@ import { editarTiendaSchema } from "@/lib/tiendas/esquemas";
 import { aTiendaFila } from "@/lib/tiendas/consultas";
 import { hoyLima } from "@/lib/tiendas/estado";
 import { motivoRechazoEliminar, motivoRechazoTienda } from "@/lib/tiendas/reglas";
+import { contarHechos } from "@/lib/ventas/consultas";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -44,8 +45,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 /**
- * Elimina la tienda (`requirePlanner`); `409` si tiene hijos (ninguno en M4;
- * a partir de M5 colgarán venta y stock, y el `restrict` lo garantizará).
+ * Elimina la tienda (`requirePlanner`); `409` con el conteo si tiene venta o
+ * stock cargados (M5; el `restrict` de la FK es la red de seguridad).
  */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
@@ -59,8 +60,14 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   if (errActual) return traducirErrorDb(errActual, "buscar tienda");
   if (!actual) return error(NO_ENCONTRADA, 404);
 
-  // Sin tablas hijas en M4: el conteo es 0 y la regla deja pasar.
-  const motivo = motivoRechazoEliminar("tienda", 0);
+  // M5: la venta y el stock cargados cuelgan de la tienda. El conteo por tienda
+  // escanea la tabla (≈ 0,5 a 2 s) pero solo corre al intentar eliminar. Si el
+  // conteo fallara (p. ej. por el tiempo máximo de la sentencia), no se bloquea
+  // la pantalla: el `restrict` de la FK sigue siendo la garantía y `DELETE`
+  // responde `409` por `errores-db.ts`.
+  const { cuenta, error: errCuenta } = await contarHechos(db, "tienda_id", id);
+  if (errCuenta) console.error("[db] contar hechos de la tienda", errCuenta.message);
+  const motivo = motivoRechazoEliminar("tienda", errCuenta ? 0 : cuenta);
   if (motivo) return error(motivo, 409);
 
   const { error: err } = await db.from("tiendas").delete().eq("id", id);

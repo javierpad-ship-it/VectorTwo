@@ -4,9 +4,10 @@ import { requirePlanner } from "@/lib/auth/guard";
 import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { editarEquivalenciaSchema } from "@/lib/arbol/esquemas";
-import { motivoRechazoEquivalencia } from "@/lib/arbol/reglas";
+import { motivoRechazoEliminar, motivoRechazoEquivalencia } from "@/lib/arbol/reglas";
 import { leerDestino, leerGeneros } from "@/lib/estacionalidad/agrupaciones";
 import { rechazoAsignacion } from "@/lib/estacionalidad/reglas";
+import { contarHechos } from "@/lib/ventas/consultas";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -75,7 +76,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   return ok(data);
 }
 
-/** Elimina la equivalencia (`requirePlanner`); `409` si tiene hijos (a partir de M2). */
+/**
+ * Elimina la equivalencia (`requirePlanner`); `409` con el conteo si tiene venta
+ * o stock cargados (M5: el conteo usa el índice `(equivalencia_id, carga_id)`;
+ * el `restrict` de la FK es la red de seguridad).
+ */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
   if (response) return response;
@@ -86,6 +91,11 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   const { data: actual, error: errActual } = await db.from("equivalencias").select("id").eq("id", id).maybeSingle();
   if (errActual) return traducirErrorDb(errActual);
   if (!actual) return error(NO_ENCONTRADA, 404);
+
+  const { cuenta, error: errCuenta } = await contarHechos(db, "equivalencia_id", id);
+  if (errCuenta) return traducirErrorDb(errCuenta, "contar hechos de la equivalencia");
+  const motivo = motivoRechazoEliminar("equivalencia", cuenta);
+  if (motivo) return error(motivo, 409);
 
   const { error: err } = await db.from("equivalencias").delete().eq("id", id);
   if (err) return traducirErrorDb(err);
