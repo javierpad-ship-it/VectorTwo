@@ -1,6 +1,6 @@
 # M6 · Curvas de estacionalidad
 
-> Estado: **especificación pendiente de aprobación por Javier (2026-10-12)**. No hay código ni migración. Módulo anterior: [05-venta-stock](05-venta-stock.md) (la venta real de la que salen las curvas); también dependen de aquí [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (la unidad de la curva es la agrupación), [04-tiendas](04-tiendas.md) (fechas de apertura y cierre para la "red comparable") y [02-marcas](02-marcas.md) (solo si Javier decide que la marca "afectada por el Niño" viva en la agrupación de marca; ver pregunta abierta 1). Reglas de base en `docs/PLAN.md` y `docs/DECISIONES.md`. Migración prevista: `0009_curvas_estacionalidad.sql` (renumerada el 2026-10-12: la `0008` la toma la mejora 02b de M2, `docs/modulos/02b-marcas-tratamiento-gml.md`, que se construye antes); versión prevista: `0.9.0 · M6`. Ningún dato real de Lukers en esta ficha: todos los ejemplos son sintéticos.
+> Estado: **especificación pendiente de aprobación por Javier (2026-10-12)**. No hay código ni migración. Módulo anterior: [05-venta-stock](05-venta-stock.md) (la venta real de la que salen las curvas); también dependen de aquí [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (la unidad de la curva es la agrupación), [04-tiendas](04-tiendas.md) (fechas de apertura y cierre para la "red comparable") y [02-marcas](02-marcas.md) (solo si Javier decide que la marca "afectada por el Niño" viva en la agrupación de marca; ver pregunta abierta 1). Reglas de base en `docs/PLAN.md` y `docs/DECISIONES.md`. Migración prevista: `0010_curvas_estacionalidad.sql` (renumerada dos veces el 2026-10-12: la `0008` la toma la mejora urgente 05b de M5, `docs/modulos/05b-mapeo-combinaciones.md`, y la `0009` la mejora 02b de M2, `docs/modulos/02b-marcas-tratamiento-gml.md`; ambas se construyen antes); versión prevista: `0.9.0 · M6`. Ningún dato real de Lukers en esta ficha: todos los ejemplos son sintéticos.
 
 ## Objetivo
 
@@ -142,7 +142,7 @@ Las curvas se redondean a 6 decimales y se renormalizan al guardar (`normalizarC
 
 ## Modelo de datos
 
-Migración `supabase/migrations/0009_curvas_estacionalidad.sql` (antes `0008`; ver cabecera), idempotente, sin `DROP`, `DELETE` ni `TRUNCATE` (tampoco dentro de funciones), `create or replace` para funciones y vistas, triggers con `create or replace trigger`, RLS activo sin políticas en toda tabla nueva. Convenciones de PLAN §4: `id uuid`, `activo`, `created_at`/`updated_at`.
+Migración `supabase/migrations/0010_curvas_estacionalidad.sql` (antes `0009` y `0008`; ver cabecera), idempotente, sin `DROP`, `DELETE` ni `TRUNCATE` (tampoco dentro de funciones), `create or replace` para funciones y vistas, triggers con `create or replace trigger`, RLS activo sin políticas en toda tabla nueva. Convenciones de PLAN §4: `id uuid`, `activo`, `created_at`/`updated_at`.
 
 ### `agrupaciones_estacionalidad` (columna nueva, M3)
 
@@ -435,7 +435,7 @@ Funciones puras en `src/lib/curvas/`, probadas en `tests/curvas.*.test.ts` con f
 
 **SQL y estático**
 
-30. **SQL (script de humo local)**: `0009` aplica dos veces sin error y sin `DROP`/`DELETE`/`TRUNCATE`; la MV existe y `refrescar_venta_mensual_estacionalidad()` la llena con las sumas correctas de un juego de hechos sintéticos (dos cargas del mismo mes, una `reemplazada`: solo cuenta la `publicada`); una equivalencia sin agrupación aparece con `agrupacion_estacionalidad_id null`; `anon` no puede leer la MV (error de permiso, no cero filas: no hay RLS en una MV) ni ejecutar la función; dos filas `vigente` para la misma agrupación chocan con el único parcial; el `check` de la suma rechaza una curva que suma 0,98; `afectada_por_atipicos` existe en `agrupaciones_estacionalidad` con `default false`.
+30. **SQL (script de humo local)**: `0010` aplica dos veces sin error y sin `DROP`/`DELETE`/`TRUNCATE`; la MV existe y `refrescar_venta_mensual_estacionalidad()` la llena con las sumas correctas de un juego de hechos sintéticos (dos cargas del mismo mes, una `reemplazada`: solo cuenta la `publicada`); una equivalencia sin agrupación aparece con `agrupacion_estacionalidad_id null`; `anon` no puede leer la MV (error de permiso, no cero filas: no hay RLS en una MV) ni ejecutar la función; dos filas `vigente` para la misma agrupación chocan con el único parcial; el `check` de la suma rechaza una curva que suma 0,98; `afectada_por_atipicos` existe en `agrupaciones_estacionalidad` con `default false`.
 31. **Estático**: solo `src/lib/curvas/consultas.ts` menciona `venta_mensual_estacionalidad` y `refrescar_venta_mensual_estacionalidad`; ningún archivo de `src/lib/curvas/` importa de `src/components/`; ninguna ruta de M6 usa un guard distinto de `requirePlanner`; `src/lib/curvas/modelo.ts` no importa nada de `@supabase/*`.
 
 ## Casos de prueba sintéticos
@@ -466,7 +466,7 @@ Fixture `tests/curvas.fixture.ts`, con dos agrupaciones inventadas y cifras redo
 **Automático**
 
 - [ ] `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (los 781 de M0 a M5 más `tests/curvas.*`, con los nueve casos sintéticos), `npm run build` y `scripts/validar-migraciones-local.sh` (todas las migraciones dos veces) en verde.
-- [ ] `0009_curvas_estacionalidad.sql` aplicada en `vector-two` sin `DROP`, `DELETE` ni `TRUNCATE`; tipos regenerados (la MV bajo `Views`, la función bajo `Functions`); `APP_VERSION` = `0.9.0 · M6`.
+- [ ] `0010_curvas_estacionalidad.sql` aplicada en `vector-two` sin `DROP`, `DELETE` ni `TRUNCATE`; tipos regenerados (la MV bajo `Views`, la función bajo `Functions`); `APP_VERSION` = `0.9.0 · M6`.
 
 **Prerrequisitos de Javier**
 

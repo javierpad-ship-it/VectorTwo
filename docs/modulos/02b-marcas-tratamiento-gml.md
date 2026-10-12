@@ -1,6 +1,6 @@
 # M2b · Nivel de planificación (GML/GMLE) y marcas relevantes por GML
 
-> Estado: **especificación pendiente de aprobación por Javier (2026-10-12)**. No hay código ni migración. Es una **mejora de M2** ([02-marcas](02-marcas.md)) que también toca el nodo del árbol de M1 ([01-arbol-producto](01-arbol-producto.md)); versión prevista `0.8.1 · M2b` (la entrega `0.8.1` que M5 retiró el 2026-10-11 nunca salió, así que el número está libre); migración prevista `0008_nivel_planificacion_marcas_gml.sql`, con lo que la de M6 pasa a `0009` (ver "Cambios en otras fichas"). **Aviso de nombre**: el "M2b" que `DECISIONES.md` descartó el 2026-10-06 era una tabla manual marca ↔ equivalencia y sigue descartado; esto es marca ↔ **nodo** género-mundo-línea, solo para las marcas que se trabajan aparte. Dependen de aquí [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (sin cambios en M3; cómo se agrega su curva al GML se define aquí), [05-venta-stock](05-venta-stock.md) (la venta ya llega al detalle de marca y equivalencia; M5 no cambia) y, como consumidores, M7 y M8. Ningún dato real de Lukers: marcas ALFA, BETA, GAMMA, DELTA; nodos y cifras inventados.
+> Estado: **especificación pendiente de aprobación por Javier (2026-10-12)**. No hay código ni migración. Es una **mejora de M2** ([02-marcas](02-marcas.md)) que también toca el nodo del árbol de M1 ([01-arbol-producto](01-arbol-producto.md)); versión prevista `0.8.2 · M2b`; migración prevista `0009_nivel_planificacion_marcas_gml.sql`, con lo que la de M6 pasa a `0010` (ver "Cambios en otras fichas"). **Renumeración del 2026-10-12**: la `0008` y la versión `0.8.1 · M5` las toma la mejora urgente 05b de M5 ([05b-mapeo-combinaciones](05b-mapeo-combinaciones.md)), que se construye antes; esta ficha decía `0008` y `0.8.1`. **Aviso de nombre**: el "M2b" que `DECISIONES.md` descartó el 2026-10-06 era una tabla manual marca ↔ equivalencia y sigue descartado; esto es marca ↔ **nodo** género-mundo-línea, solo para las marcas que se trabajan aparte. Dependen de aquí [03-agrupaciones-estacionalidad](03-agrupaciones-estacionalidad.md) (sin cambios en M3; cómo se agrega su curva al GML se define aquí), [05-venta-stock](05-venta-stock.md) (la venta ya llega al detalle de marca y equivalencia; M5 no cambia) y, como consumidores, M7 y M8. Ningún dato real de Lukers: marcas ALFA, BETA, GAMMA, DELTA; nodos y cifras inventados.
 
 ## Objetivo
 
@@ -67,7 +67,7 @@ Descartado: quitar la casilla y dejar solo la modalidad (rompe el importador de 
 
 ## Modelo de datos
 
-Migración `supabase/migrations/0008_nivel_planificacion_marcas_gml.sql`, idempotente, **sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`** (no hay backfill: las columnas nuevas llevan `default` o se leen con regla), sin bloques `do $$`, triggers con `create or replace trigger`, vista y función con `create or replace`, RLS activo sin políticas. Convenciones de PLAN §4. `tratamiento_especial` y `nota_tratamiento` **se conservan tal cual**.
+Migración `supabase/migrations/0009_nivel_planificacion_marcas_gml.sql` (antes `0008`; renumerada el 2026-10-12 por 05b), idempotente, **sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`** (no hay backfill: las columnas nuevas llevan `default` o se leen con regla), sin bloques `do $$`, triggers con `create or replace trigger`, vista y función con `create or replace`, RLS activo sin políticas. Convenciones de PLAN §4. `tratamiento_especial` y `nota_tratamiento` **se conservan tal cual**.
 
 ### `genero_mundo_linea` (columna nueva, M1)
 
@@ -83,7 +83,7 @@ Sin índice (dos valores, 556 filas; el filtro "abiertos a GMLE" se hace en memo
 |---|---|---|
 | `modalidad_tratamiento` | `text null` | `add column if not exists` con dos checks inline: `marcas_modalidad_valor_check (modalidad_tratamiento is null or modalidad_tratamiento in ('por_gml', 'barrido'))` y `marcas_modalidad_sin_tratamiento_check (modalidad_tratamiento is null or tratamiento_especial)`. Sin `default` |
 
-**Por qué el check es en un solo sentido** (modalidad ⇒ casilla, no casilla ⇒ modalidad). El sentido inverso exigiría rellenar las marcas ya marcadas antes del check, es decir un `update` en la migración, que conviene evitar con `execute_sql` del MCP (la `0005` solo hizo `insert … on conflict do nothing`). La garantía inversa la da la API: **toda escritura que deje la casilla encendida escribe una modalidad** (regla 2) y toda lectura pasa por `modalidadEfectiva(marca) = modalidad_tratamiento ?? 'barrido'` (regla 1): una fila con casilla y modalidad nula (solo desde el SQL Editor o heredada de antes de `0008`) se lee como `barrido`, la interpretación que Javier dio para "marcada y sin GML" (pregunta 3). La pantalla la muestra "Sin modalidad (se toma al barrer)" con un `Select` que la fija. Hoy la lista real aún no se ha cargado (PLAN §7): no habrá filas heredadas.
+**Por qué el check es en un solo sentido** (modalidad ⇒ casilla, no casilla ⇒ modalidad). El sentido inverso exigiría rellenar las marcas ya marcadas antes del check, es decir un `update` en la migración, que conviene evitar con `execute_sql` del MCP (la `0005` solo hizo `insert … on conflict do nothing`). La garantía inversa la da la API: **toda escritura que deje la casilla encendida escribe una modalidad** (regla 2) y toda lectura pasa por `modalidadEfectiva(marca) = modalidad_tratamiento ?? 'barrido'` (regla 1): una fila con casilla y modalidad nula (solo desde el SQL Editor o heredada de antes de `0009`) se lee como `barrido`, la interpretación que Javier dio para "marcada y sin GML" (pregunta 3). La pantalla la muestra "Sin modalidad (se toma al barrer)" con un `Select` que la fija. Hoy la lista real aún no se ha cargado (PLAN §7): no habrá filas heredadas.
 
 ### `marca_gml_especial` (marcas relevantes por GML)
 
@@ -390,7 +390,7 @@ Funciones puras probadas en `tests/arbol.nivel.*.test.ts` y `tests/marcas.gml.*.
 
 **SQL y estático**
 
-18. **SQL (script de humo local)**: `0008` aplica dos veces sin `DROP`/`DELETE`/`TRUNCATE`/`UPDATE`; `nivel_planificacion` existe con `default 'GML'` y rechaza `'X'`; `modalidad_tratamiento` rechaza `'otra'` y `'barrido'` sin casilla; el par repetido choca con `marca_gml_especial_par_uniq`; borrar una marca borra sus pares (cascade); borrar un nodo con pares falla (restrict); la vista devuelve sobre el fixture exactamente las unidades de la regla 10 y desactivar DENIM saca las de ALFA; `anon` obtiene cero filas de la vista y no puede ejecutar `sugerir_marcas_relevantes`; la función, sobre hechos sintéticos de dos cargas del mismo mes (una `reemplazada`), devuelve el top con `participacion` que suma 1 por (nodo, agrupación) y excluye `p_excluir`.
+18. **SQL (script de humo local)**: `0009` aplica dos veces sin `DROP`/`DELETE`/`TRUNCATE`/`UPDATE`; `nivel_planificacion` existe con `default 'GML'` y rechaza `'X'`; `modalidad_tratamiento` rechaza `'otra'` y `'barrido'` sin casilla; el par repetido choca con `marca_gml_especial_par_uniq`; borrar una marca borra sus pares (cascade); borrar un nodo con pares falla (restrict); la vista devuelve sobre el fixture exactamente las unidades de la regla 10 y desactivar DENIM saca las de ALFA; `anon` obtiene cero filas de la vista y no puede ejecutar `sugerir_marcas_relevantes`; la función, sobre hechos sintéticos de dos cargas del mismo mes (una `reemplazada`), devuelve el top con `participacion` que suma 1 por (nodo, agrupación) y excluye `p_excluir`.
 19. **Estático**: toda ruta bajo `src/app/api/marcas/gml-especial/` y `src/app/api/arbol/nodos/nivel/` usa `requirePlanner`; `gml/flujo.ts` y `gml/curva.ts` no importan de `@supabase/*` ni de `src/components/`; `gml/consultas.ts` es el único archivo de `src/` que nombra `marca_gml_especial_vigente` y `sugerir_marcas_relevantes`.
 
 ## Casos de prueba sintéticos
@@ -423,12 +423,12 @@ Fixture `tests/marcas.gml.fixture.ts` (nada real de Lukers):
 
 ## Criterios de aceptación / hito de prueba
 
-`[x]` lo cubren los checks automáticos y QA; `[ ]` lo recorre Javier en local (`INICIAR.cmd`) o en Railway con `0.8.1 · M2b`, con marcas inventadas antes de cargar la lista real.
+`[x]` lo cubren los checks automáticos y QA; `[ ]` lo recorre Javier en local (`INICIAR.cmd`) o en Railway con `0.8.2 · M2b`, con marcas inventadas antes de cargar la lista real.
 
 **Automático**
 
 - [ ] `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (los 781 de M0 a M5 más `tests/arbol.nivel.*` y `tests/marcas.gml.*` con los catorce casos), `npm run build` y `scripts/validar-migraciones-local.sh` en verde.
-- [ ] `0008_nivel_planificacion_marcas_gml.sql` aplicada en `vector-two` sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`; tipos regenerados (vista bajo `Views`, función bajo `Functions`); `APP_VERSION` = `0.8.1 · M2b`; los 63 tests de M2 y los 131 de M1 siguen en verde.
+- [ ] `0009_nivel_planificacion_marcas_gml.sql` aplicada en `vector-two` sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`; tipos regenerados (vista bajo `Views`, función bajo `Functions`); `APP_VERSION` = `0.8.2 · M2b`; los 63 tests de M2 y los 131 de M1 siguen en verde.
 
 **Hito (Javier)**
 
@@ -476,8 +476,8 @@ Fixture `tests/marcas.gml.fixture.ts` (nada real de Lukers):
 
 ## Cambios en otras fichas y en el plan
 
-- `docs/PLAN.md`: §4 (`genero_mundo_linea.nivel_planificacion`, `marcas.modalidad_tratamiento`, `marca_gml_especial`, vista y función; diagrama), §5 filas M1 y M2 (mejora 02b), M3 (no cambia; la curva del GML se mezcla en M7), M6 (migración `0009`), M7 y M8 (lo que consumen), §7 (pendientes de Javier).
-- `docs/modulos/06-curvas-estacionalidad.md`: la migración prevista pasa de `0008` a `0009` porque esta mejora (`0.8.1`) se construye antes que M6 (`0.9.0`). Nada más de M6 cambia.
+- `docs/PLAN.md`: §4 (`genero_mundo_linea.nivel_planificacion`, `marcas.modalidad_tratamiento`, `marca_gml_especial`, vista y función; diagrama), §5 filas M1 y M2 (mejora 02b), M3 (no cambia; la curva del GML se mezcla en M7), M6 (migración `0010`), M7 y M8 (lo que consumen), §7 (pendientes de Javier).
+- `docs/modulos/06-curvas-estacionalidad.md`: la migración prevista pasa a `0010` porque 05b (`0008`, `0.8.1 · M5`) y esta mejora (`0009`, `0.8.2 · M2b`) se construyen antes que M6 (`0.9.0`). Nada más de M6 cambia.
 - `docs/modulos/01-arbol-producto.md`, `02-marcas.md` y `03-agrupaciones-estacionalidad.md` no se editan aquí; al construir, el `documentador` añade el puntero (M1: columna del nodo y pestaña Importar; M2: modalidad y pestaña; M3: "la curva del GML se mezcla en M7, M3 no cambia").
 
 ## Decisiones nuevas propuestas
@@ -493,7 +493,7 @@ Para `docs/DECISIONES.md` cuando Javier apruebe; ninguna contradice una entrada 
 7. **Las sugerencias salen de la venta de M5 por una función SQL y nunca se aplican solas.**
 8. **El contrato para M7 y M8 es `claveFlujo` + `curvaUnidad` + la vista `marca_gml_especial_vigente`**; la venta de una marca relevante en los GML donde no lo es va a "otras"; las marcas al barrer quedan fuera de las unidades.
 9. **FK `marca_id` en cascade, `genero_mundo_linea_id` en restrict.**
-10. **La mejora toma la migración `0008` y M6 pasa a `0009`.**
+10. **La mejora toma la migración `0009` (renumerada el 2026-10-12: la `0008` es de 05b) y M6 pasa a `0010`.**
 
 ## Preguntas abiertas para Javier
 
@@ -504,11 +504,11 @@ Cada una con su valor por defecto si no responde antes de construir.
 3. **Marca marcada sin GML.** **Por defecto: es "al barrer"**, guardado como modalidad explícita; al recibir GML pasa a Por GML; si se queda sin GML no vuelve sola (queda pendiente). ¿Y quieres que, cargada la lista real, forcemos en la base que toda marca marcada tenga modalidad (hoy lo garantiza la API)?
 4. **Marcar antes o marcar al asignar.** Tú describiste "primero se marcan, luego se asignan". **Por defecto: no se exige**: hacer relevante a una marca sin casilla la marca en Por GML y te lo dice (`confirm` en pantalla, lista en el importador). Así la hoja de GML basta para las de tipo (a) y las sugerencias no chocan. La alternativa es rechazar con `409` hasta que la marques en Marcas.
 5. **Quién edita.** **Por defecto: admin y planner (`requirePlanner`) para todo**; el nivel de planificación se ve en el árbol para todos (como el resto del árbol); relevantes y sugerencias no se ven por el comprador hasta M8.
-6. **Migración.** Columna `nivel_planificacion` en el nodo, `modalidad_tratamiento` en marcas, tabla `marca_gml_especial` (único por par, cascade desde la marca, restrict desde el nodo), vista `marca_gml_especial_vigente`, función `sugerir_marcas_relevantes`; sin `DROP` ni `UPDATE`; la casilla se conserva. **Toma `0008` y M6 pasa a `0009`.** ¿Conforme?
+6. **Migración.** Columna `nivel_planificacion` en el nodo, `modalidad_tratamiento` en marcas, tabla `marca_gml_especial` (único por par, cascade desde la marca, restrict desde el nodo), vista `marca_gml_especial_vigente`, función `sugerir_marcas_relevantes`; sin `DROP` ni `UPDATE`; la casilla se conserva. **Toma `0009` (la `0008` es de 05b) y M6 pasa a `0010`.** ¿Conforme?
 7. **Hacer relevante a una marca al barrer la pasa a Por GML** (con `confirm`). **Por defecto: sí.**
 8. **Formato de tu hoja de GML.** `MARCA, GENERO, MUNDO, LINEA` (y `NOTA` opcional) con los nombres del árbol o sus códigos. ¿Viene así, o con códigos de QlikView o una columna por GML con una X? ¿Trae la modalidad por marca en la lista de marcas? Si sí, se añade `MODALIDAD` opcional al importador de M2.
 9. **Comprador.** **Por defecto: no ve relevantes ni sugerencias hasta M8**; sí ve el nivel GML/GMLE en el árbol.
-10. **Versión y etiqueta.** **Por defecto: `0.8.1 · M2b`**; ¿prefieres `0.8.2`?
+10. **Versión y etiqueta.** **Por defecto: `0.8.2 · M2b`** (la `0.8.1` pasó a la mejora 05b de M5 el 2026-10-12); ¿prefieres `0.8.3`?
 11. **Nombre de la tabla.** Tú propusiste `marca_gml_especial`; en pantalla se llama "marcas relevantes por GML". **Por defecto: `marca_gml_especial`**; si prefieres `marca_relevante_gml`, se cambia antes de la migración.
 12. **Las marcas al barrer y "mi flujo de Jeans".** **Por defecto: quedan fuera** del flujo del GML (su flujo es independiente) y la vista del GML lo indica ("BETA al barrer: 200 unidades fuera de este flujo"). ¿Prefieres verlas dentro como una línea más de su agrupación?
 13. **Apertura a GMLE.** **Por defecto: por nodo entero** (todas sus equivalencias activas, genérica incluida si tiene venta). ¿Necesitas abrir solo una equivalencia de un nodo y dejar el resto junto? Sería una bandera por equivalencia y un "resto del GML".
