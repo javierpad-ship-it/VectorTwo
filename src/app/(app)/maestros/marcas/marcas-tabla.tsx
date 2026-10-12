@@ -5,6 +5,7 @@ import { api } from "@/lib/api-client";
 import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
 import { mensajeError } from "@/lib/formato";
 import type { AgrupacionMarcaFila, CrearMarcaCuerpo, EditarMarcaCuerpo, MarcaFila } from "@/lib/marcas/tipos-api";
+import { alternarOrden, ORDEN_MARCA_INICIAL, ordenarMarcas, type ClaveOrdenMarca, type OrdenMarca } from "@/lib/marcas/ordenar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
@@ -76,6 +77,7 @@ export function MarcasTabla({
   const [edicion, setEdicion] = useState<Edicion | null>(null);
   const [filtroChip, setFiltroChip] = useState<string>(FILTRO_TODAS);
   const [busqueda, setBusqueda] = useState("");
+  const [orden, setOrden] = useState<OrdenMarca>(ORDEN_MARCA_INICIAL);
 
   const agrupacionesActivas = agrupaciones.filter((a) => a.activo).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
   const agrupacionesVisibles = mostrarInactivos ? [...agrupaciones].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)) : agrupacionesActivas;
@@ -101,12 +103,14 @@ export function MarcasTabla({
   const chipVigente = chips.some((c) => c.id === filtroChip) ? filtroChip : FILTRO_TODAS;
   const consulta = normalizarNombre(busqueda);
   const consultaCodigo = aCodigo(consulta);
-  const filas = base
-    .filter((m) =>
-      chipVigente === FILTRO_TODAS ? true : chipVigente === FILTRO_TRATAMIENTO ? m.tratamiento_especial : m.agrupacion_marca_id === chipVigente
-    )
-    .filter((m) => (consulta ? m.nombre.includes(consulta) || (consultaCodigo !== "" && m.codigo.includes(consultaCodigo)) : true))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const filas = ordenarMarcas(
+    base
+      .filter((m) =>
+        chipVigente === FILTRO_TODAS ? true : chipVigente === FILTRO_TRATAMIENTO ? m.tratamiento_especial : m.agrupacion_marca_id === chipVigente
+      )
+      .filter((m) => (consulta ? m.nombre.includes(consulta) || (consultaCodigo !== "" && m.codigo.includes(consultaCodigo)) : true)),
+    orden
+  );
 
   async function ejecutar(accion: () => Promise<unknown>) {
     setOcupado(true);
@@ -185,6 +189,7 @@ export function MarcasTabla({
     {
       clave: "codigo",
       titulo: "Código",
+      ordenable: true,
       render: (m) =>
         edicion?.id === m.id ? (
           <Input value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} className="h-8 w-40 font-mono" aria-label="Código" />
@@ -195,6 +200,7 @@ export function MarcasTabla({
     {
       clave: "nombre",
       titulo: "Nombre",
+      ordenable: true,
       render: (m) =>
         edicion?.id === m.id ? (
           <Input value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} className="h-8" aria-label="Nombre" autoFocus />
@@ -205,6 +211,7 @@ export function MarcasTabla({
     {
       clave: "agrupacion",
       titulo: "Agrupación",
+      ordenable: true,
       render: (m) => {
         const inactiva = !m.agrupacion_marca.activo;
         if (!puedeEditar) {
@@ -243,6 +250,7 @@ export function MarcasTabla({
     {
       clave: "tratamiento",
       titulo: "Tratamiento especial",
+      ordenable: true,
       render: (m) => (
         <span className="flex flex-wrap items-center gap-2">
           {puedeEditar && (
@@ -283,6 +291,7 @@ export function MarcasTabla({
     {
       clave: "estado",
       titulo: "Estado",
+      ordenable: true,
       render: (m) => (
         <span className="flex flex-wrap items-center gap-1">
           <Badge tono={m.activo ? "exito" : "alerta"}>{m.activo ? "Activa" : "Desactivada"}</Badge>
@@ -400,11 +409,20 @@ export function MarcasTabla({
         }
       >
         <Chips items={chips} activo={chipVigente} onCambiar={setFiltroChip} etiqueta="Filtrar por agrupación" className="mb-4" />
-        <DataTable columnas={columnas} filas={filas} claveFila={(m) => m.id} cargando={cargando} vacio={vacio} />
+        <DataTable
+          columnas={columnas}
+          filas={filas}
+          claveFila={(m) => m.id}
+          cargando={cargando}
+          vacio={vacio}
+          ordenActual={orden}
+          onOrdenar={(clave) => setOrden((actual) => alternarOrden(actual, clave as ClaveOrdenMarca))}
+        />
         {puedeEditar && (
           <p className="mt-3 text-xs text-tinta-suave">
             Cambiar la agrupación o el tratamiento especial se guarda al instante; nombre, código y nota, con Editar → Guardar. Al
-            quitar el tratamiento se borra la nota.
+            quitar el tratamiento se borra la nota. Pulsa un encabezado para ordenar; Agrupación ordena por valor de marca
+            (de menor a mayor valor), no alfabéticamente.
           </p>
         )}
       </Card>
