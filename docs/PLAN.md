@@ -108,6 +108,10 @@ La Fase 1 está completa en construcción (M0 a M4 y M1b). Al validar Javier los
 
 - **M9** Herramienta para que los compradores registren sus compras y llenen los vacíos contra la necesidad.
 
+### Transversal — PWA
+
+- **PWA** (pedido de Javier, 2026-10-12): hacer de Vector2 una aplicación web progresiva instalable (manifiesto, iconos, `display: standalone`, service worker con caché solo de la cáscara de la app y **nunca de datos ni de rutas `/api`**, página sin conexión, aviso de versión nueva y `APP_VERSION` visible). Pendiente de especificar con el arquitecto; no tiene módulo asignado. Puntos por decidir: en qué momento entra (propuesta: después de M8, antes de M9, porque es para los compradores quienes más la usarán desde el celular o la tablet), qué se permite sin conexión (propuesta: nada de escritura; solo mostrar la pantalla de "sin conexión"), y cómo interactúa con el despliegue en Railway para que una versión vieja en caché no tape una nueva.
+
 ## 6. Equipo de agentes y metodología
 
 Agentes en `.claude/agents/`:
