@@ -1,7 +1,7 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-11 (0007, M5) contra `generate_typescript_types` del proyecto
+ * Verificados el 2026-10-12 (0008, M5b) contra `generate_typescript_types` del proyecto
  * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
  * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
  */
@@ -378,6 +378,69 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      mapeos_combinacion: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          equivalencia_id: string;
+          id: string;
+          motivo_origen: string | null;
+          nota: string | null;
+          origen_equivalencia: string;
+          origen_genero: string;
+          origen_linea: string;
+          origen_mundo: string;
+          perfil_id: string | null;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          equivalencia_id: string;
+          id?: string;
+          motivo_origen?: string | null;
+          nota?: string | null;
+          origen_equivalencia: string;
+          origen_genero: string;
+          origen_linea: string;
+          origen_mundo: string;
+          perfil_id?: string | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          equivalencia_id?: string;
+          id?: string;
+          motivo_origen?: string | null;
+          nota?: string | null;
+          origen_equivalencia?: string;
+          origen_genero?: string;
+          origen_linea?: string;
+          origen_mundo?: string;
+          perfil_id?: string | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "mapeos_combinacion_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "mapeos_combinacion_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       marcas: {
         Row: {
