@@ -191,14 +191,17 @@ Todas probables con vitest salvo la 12 (script SQL local). Funciones puras en `s
 - Si la tabla de QlikView de Javier oculta más de lo previsto (ubicaciones, tallas en blanco), el comparable seguirá diciendo "difiere" en alguna medida; la tabla con las cinco cifras está pensada para que se vea cuál, y la corrección es la constante.
 - El ejemplo del encargo (54 762 frente a 54 763) **difiere en 1 unidad** con la regla de unidades exactas; no se maquilla: se muestra.
 - Renombrar `tienda_excluida` → `ubicacion_ignorada` toca `tipos.ts`, `informe.ts`, `tipos-api.ts`, `resolver.ts` y un test; QA debe verificar que ningún reporte guardado real lo contenga (no puede, pero se comprueba).
-- `0008`/`0009` y `0.8.1`/`0.8.2` se reparten entre 05b y 05c en paralelo con 02b y M6: la numeración final la fija quien integre PLAN (ver abajo).
+- **Numeración (fijada el 2026-10-12 al integrar PLAN)**: 05b toma `0008` y `0.8.1 · M5`; esta mejora, `0009` y `0.8.2 · M5`; 02b pasa a `0010` y `0.8.3 · M2b`; M6 a `0011` (`0.9.0 · M6` no cambia). Se construye después de 05b.
+- **Acumulador compartido con 05b.** Esta ficha dice que `Previsualizacion` "conserva el `acumulador` (hoy se descarta)"; 05b, que se construye antes, ya lo conserva en un `useRef` mientras `prevVigente` exista y libera al elegir otro archivo o terminar la carga. Al construir 05c se **reutiliza ese mecanismo** (no se añade un segundo) y `marcarIgnorada` se apoya en él. Por lo demás las dos mejoras no se pisan: 05b recalcula llamando de nuevo a `previsualizar` (que ya leerá las ubicaciones ignoradas) y 05c recalcula sin llamar; ambas añaden campos al reporte guardado (`reasignadas` y `base_conciliacion`/`comparable`) sin tocar los del otro.
 
 ## Decisiones nuevas propuestas (para `docs/DECISIONES.md`, 2026-10-12)
 
 1. **Las ubicaciones del archivo que no son tiendas viven en `ubicaciones_ignoradas`, no en `tiendas` desactivadas.** Sustituye a la entrada del 2026-10-11 "sin tabla de exclusiones". Por qué: Javier las definió como "espacios sin importancia", no como tiendas; el maestro de tiendas no debe llevar filas que no lo son. La tienda manda si coincide el nombre. Descartado: seguir con `tiendas.activo = false`; un botón "Excluir siempre" sin pantalla de administración.
 2. **La conciliación contra QlikView compara con el comparable (archivo menos `sin_clasificar` y `fila_total`), mostrando siempre archivo, no comparable, comparable, cargado y QlikView.** Sustituye a "compara con el archivo tal cual". Tolerancias sin cambios. Descartado: conciliar contra lo cargado; restar también ubicaciones ignoradas o géneros desconocidos sin evidencia.
 
-## Cambios que hay que hacer en PLAN.md y en otras fichas (no los hago yo)
+## Cambios que había que hacer en PLAN.md y en otras fichas
+
+> **Integrados el 2026-10-12** por el documentador: PLAN §4 (fila y diagrama), §5 (M2, M5, M6) y §7; fichas `02b`, `04`, `05`, `05b` y `06`; y las ocho propuestas de `DECISIONES.md` (seis de 05b y dos de esta ficha) como "propuesta, pendiente de construcción". `CHANGELOG.md` se escribe al construir. La lista de abajo se conserva como registro de lo pedido.
 
 - `docs/PLAN.md` §4: fila nueva `ubicaciones_ignoradas` (`nombre` único normalizado, `nota` ≤ 200, `activo` por convención sin uso, sin FKs ni seed; 05c, `0009`) y línea en el diagrama; en la fila `venta_stock_mensual`, sustituir "Las tiendas del archivo que no deben cargarse se crean desactivadas en `tiendas` (no hay tabla de exclusiones)" por "las ubicaciones que no son tiendas van en `ubicaciones_ignoradas` (05c) y se excluyen por decisión".
 - `docs/PLAN.md` §5, fila M5: añadir la mejora 05c (`0.8.2 · M5`, `0009`, pendiente de aprobación): ubicaciones ignoradas con atajo en el reporte previo y conciliación contra el comparable. Filas M2 (02b) y M6, y las fichas `02b` y `06`: renumerar sus migraciones después de `0009` (lo fija quien integre junto con 05b).

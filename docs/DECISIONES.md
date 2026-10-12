@@ -503,3 +503,67 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** Fueron los dos hallazgos de la QA. Ante una publicación cuya respuesta se pierde, el descarte automático habría retirado un mes que sí se publicó. Y el épsilon relativo anterior (`x * 1e-9`) corrompía los montos grandes: S/ 30 000 000 salía con +S/ 0,03. Con 15 cifras significativas, que es lo que un `double` garantiza, `1.005` se redondea bien y los montos grandes no se mueven. La lección es que un redondeo se prueba con montos grandes y que ningún proceso automático debe poder deshacer una publicación.
 
 **Descartado.** Un `DELETE` sin condición de estado en el flujo de carga; un épsilon fijo.
+
+## 2026-10-12 · M5b: el árbol manda; el mapeo solo entra cuando el árbol no resuelve (propuesta, pendiente de construcción)
+
+**Decisión.** La mejora 05b (`docs/modulos/05b-mapeo-combinaciones.md`) añade el mapeo persistente de combinaciones históricas a una equivalencia vigente. El resolutor consulta el mapeo solo cuando el árbol devuelve algo distinto de `ok`; exacto antes que comodín; nunca se encadena; un destino no vigente (equivalencia, nodo, línea, género o mundo inactivos) no se aplica y la fila conserva su motivo original, con aviso rojo. Un origen que después se crea en el árbol deja el mapeo "obsoleto": se muestra, no se aplica.
+
+**Por qué.** Sin encadenamiento no hay ciclos por construcción, y con el árbol por delante un mapeo viejo nunca puede tapar una combinación que ya existe. Nunca se carga a un destino que el maestro dice que no debe aparecer. Estado: propuesta de la ficha, pendiente de aprobación y de construcción.
+
+**Descartado.** Mapeo con prioridad sobre el árbol; renombres encadenados.
+
+## 2026-10-12 · M5b: el origen es la combinación exacta, con un único comodín `*` en la equivalencia (propuesta, pendiente de construcción)
+
+**Decisión.** El origen de un mapeo es la combinación género, mundo, línea y equivalencia tal como llega a `previsualizar` (normalizada, con `-` sustituido por el nombre de la línea y vacío por `SIN EQUIVALENCIA`). El único comodín es `*` en la equivalencia: "cualquier equivalencia de esa terna que no resuelva" va a una equivalencia fija. No hay comodín en género, mundo ni línea.
+
+**Por qué.** El comodín cubre "toda una línea histórica a otra" sin crear una fila por equivalencia ni esperar a que cada equivalencia vieja aparezca en otro año. Un comodín en la terna sería una regla de renombre, otro mecanismo, fuera de alcance. Estado: propuesta, pendiente de construcción.
+
+**Descartado.** Comodines en la terna; expresiones regulares.
+
+## 2026-10-12 · M5b: los hechos guardan solo el destino; cambiar un mapeo exige recargar el mes (propuesta, pendiente de construcción)
+
+**Decisión.** El hecho se guarda con la `equivalencia_id` destino, sin marca en la fila; la auditoría de qué mapeos se aplicaron y cuánto pesaron va en el `reporte` de la carga. Borrar o cambiar un mapeo no toca las cargas publicadas: el efecto se ve al recargar el mes.
+
+**Por qué.** Es el mismo criterio del árbol vigente: los hechos no copian texto y son inmutables. Un mapeo equivocado mezcla el histórico en silencio, por eso cada previsualización y cada reporte guardado muestran el detalle `ORIGEN → DESTINO`, y la recarga del mes (idempotente) es la corrección. Estado: propuesta, pendiente de construcción.
+
+**Descartado.** Aplicar mapeos con `update` sobre hechos ya publicados; mapeo con vigencia por fecha (el árbol vigente rige todo el histórico, entrada del 2026-10-11).
+
+## 2026-10-12 · M5b: `clasificacion_incompleta` es mapeable y `sin_clasificar` sigue excluida por decisión (propuesta, pendiente de construcción)
+
+**Decisión.** Una fila con uno o dos de género, mundo y línea en blanco ya no se excluye al interpretar: la decide el resolutor como `clasificacion_incompleta`, que es mapeable. Con los tres en blanco sigue siendo `sin_clasificar`, excluida por decisión y no mapeable. En la precedencia, `tienda_vacia` y `talla_desconocida` ganan a `clasificacion_incompleta`, lo que ajusta la regla 14 de M5 y su test.
+
+**Por qué.** Con uno o dos campos conocidos hay pistas para elegir un destino; con los tres en blanco no hay origen que mapear, y Javier decidió excluirlas el 2026-10-11. Estado: propuesta, pendiente de construcción (la pregunta abierta 2 de la ficha deja la puerta a un destino único para lo sin clasificar).
+
+**Descartado.** Mapear `sin_clasificar` desde ya.
+
+## 2026-10-12 · M5b: la sugerencia es Dice sobre bigramas, determinista, y nunca se aplica sola (propuesta, pendiente de construcción)
+
+**Decisión.** La sugerencia de destino es TypeScript puro (`sugerir-mapeo.ts`), calculada en el servidor porque tiene el árbol: similitud Dice sobre bigramas de `aCodigo`, se listan candidatas con puntuación de 0,50 o más, "fuerte" desde 0,80, hasta tres por origen. Nunca se aplica sola: Javier elige. El peso de la venta no entra en la puntuación.
+
+**Por qué.** Dice tolera reordenar y recortar palabras (`PANTALON DENIM` frente a `DENIM PANTALON`) y es trivial de probar, a diferencia de Levenshtein. La venta metería sesgo hacia lo grande. Es ayuda y no automatismo, el mismo criterio que 02b para sus sugerencias. Estado: propuesta, pendiente de construcción.
+
+**Descartado.** Distancia de Levenshtein; aplicar la sugerencia fuerte automáticamente.
+
+## 2026-10-12 · Numeración de migraciones y versiones de las mejoras 05b, 05c, 02b y M6 (propuesta, pendiente de construcción)
+
+**Decisión.** Orden de construcción y numeración final, fijada con Javier el 2026-10-12: 05b mapeo de combinaciones, migración `0008` y `0.8.1 · M5`; 05c ubicaciones ignoradas y conciliación, `0009_ubicaciones_ignoradas.sql` y `0.8.2 · M5`; 02b nivel de planificación y marcas relevantes por GML, `0010` y `0.8.3 · M2b`; M6 curvas de estacionalidad, `0011` (la versión `0.9.0 · M6` no cambia). Los documentos de las cinco fichas y PLAN §4, §5 y §7 se renumeraron en consecuencia.
+
+**Por qué.** Cuatro fichas se escribieron en paralelo y las tres primeras reclamaron la misma `0008` y la `0.8.1`. 05b es urgente (el histórico de 2023 en adelante trae combinaciones que ya no existen y bloquean meses) y 05c corrige dos fricciones del piloto de septiembre, así que ambas se construyen antes que 02b y M6. Una migración numerada dos veces no se detecta hasta aplicarla.
+
+**Descartado.** Mantener `0008` y `0.8.1` para 02b (ya reclamadas por la 05b, que se construye antes).
+
+## 2026-10-12 · M5c: las ubicaciones que no son tiendas viven en `ubicaciones_ignoradas`, no en `tiendas` desactivadas (propuesta, pendiente de construcción)
+
+**Decisión.** Las ubicaciones del archivo de venta que no son tiendas (la central, las oficinas) se guardan en una tabla propia, `ubicaciones_ignoradas` (nombre normalizado único, nota, sin FKs ni seed), administrada en Maestros → Tiendas y con un botón *Ignorar esta ubicación* en el reporte previo que recalcula sin releer el archivo. Sus filas se excluyen por decisión con el motivo `ubicacion_ignorada` (antes `tienda_excluida`, que nunca se usó), no pesan en el 2 % de errores y no crean tiendas. El resolutor busca tienda por nombre, tienda por código, ubicación ignorada y por último desconocida: si existe una tienda con el mismo nombre, la tienda manda y la fila ignorada queda "sin efecto". Sustituye a la entrada del 2026-10-11 "lo desactivado se excluye en silencio informativo…", en lo que dice de crear desactivadas las tres tiendas "sin tabla de exclusiones" (el resto de esa entrada sigue en pie).
+
+**Por qué.** Javier las definió como "espacios sin importancia", no como tiendas inactivas: el maestro de tiendas no debe llevar filas que no lo son, ni mostrarlas en selectores, calendario, importador o conteos de M4, ni exigir un código inventado. Estado: propuesta de la ficha `docs/modulos/05c-ubicaciones-conciliacion.md`, pendiente de aprobación y de construcción.
+
+**Descartado.** Seguir con `tiendas.activo = false`; un botón "Excluir siempre" sin pantalla de administración.
+
+## 2026-10-12 · M5c: la conciliación contra QlikView compara con el comparable, mostrando siempre las cinco cifras (propuesta, pendiente de construcción)
+
+**Decisión.** La conciliación compara los totales que escribe Javier con el **comparable** = archivo menos las exclusiones `sin_clasificar` y `fila_total`, que la tabla de QlikView de Javier no muestra (sus dimensiones son género, mundo y línea). La tabla muestra siempre archivo, no comparable, comparable, cargado y QlikView. Las tolerancias no cambian: unidades y stock en unidades exactos; soles con diferencia relativa menor al 0,1 %. Los reportes guardados con `0.8.0` se leen sin migrarlos, con una nota de que concilian contra el archivo completo. Sustituye a "compara con el total del archivo tal cual" de la entrada del 2026-10-11 sobre lo que decidió el backend.
+
+**Por qué.** Contra el archivo completo siempre decía "difiere" porque las filas sin género, mundo ni línea no existen para el objeto de QlikView. No se restan las ubicaciones ignoradas ni los géneros, mundos o líneas desconocidos sin evidencia: si el hito demuestra lo contrario, es una línea en `MOTIVOS_NO_COMPARABLES`. Estado: propuesta, pendiente de aprobación y de construcción.
+
+**Descartado.** Conciliar contra lo cargado (esconde lo excluido); restar también ubicaciones ignoradas o géneros desconocidos sin evidencia; varias bases a elegir.

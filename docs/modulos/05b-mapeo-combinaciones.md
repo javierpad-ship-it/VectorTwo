@@ -1,6 +1,6 @@
 # M5b · Mapeo de combinaciones históricas (mejora de M5)
 
-> Estado: **especificación urgente, pendiente de aprobación por Javier (2026-10-12)**. No hay código ni migración. Mejora de [05-venta-stock](05-venta-stock.md) (construido, `0.8.0 · M5`); toca el resolutor, el informe y la pantalla de carga de M5 y usa el árbol de [01-arbol-producto](01-arbol-producto.md) (nodos GML, equivalencia `-` = igual a la línea, genérica `SIN EQUIVALENCIA`). Contexto de [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md): un destino "GML" o "GMLE" es siempre, en los hechos, una `equivalencia_id`. Versión `0.8.1 · M5`, migración **`0008_mapeo_combinaciones.sql`**; por eso 02b pasa a `0009` / `0.8.2 · M2b` y M6 a `0010` (renumeración anotada en esas fichas y en `docs/PLAN.md`). Ningún dato real de Lukers: géneros, líneas y equivalencias de ejemplo son inventados.
+> Estado: **especificación urgente, pendiente de aprobación por Javier (2026-10-12)**. No hay código ni migración. Mejora de [05-venta-stock](05-venta-stock.md) (construido, `0.8.0 · M5`); toca el resolutor, el informe y la pantalla de carga de M5 y usa el árbol de [01-arbol-producto](01-arbol-producto.md) (nodos GML, equivalencia `-` = igual a la línea, genérica `SIN EQUIVALENCIA`). Contexto de [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md): un destino "GML" o "GMLE" es siempre, en los hechos, una `equivalencia_id`. Versión `0.8.1 · M5`, migración **`0008_mapeo_combinaciones.sql`**; por eso la mejora 05c ([05c-ubicaciones-conciliacion](05c-ubicaciones-conciliacion.md)) toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011` (renumeración anotada en esas fichas y en `docs/PLAN.md`). Ningún dato real de Lukers: géneros, líneas y equivalencias de ejemplo son inventados.
 
 ## Objetivo
 
@@ -14,7 +14,7 @@ Al cargar el histórico (2023 en adelante) aparecen combinaciones género/mundo/
 | Comodín | Solo `*` en `origen_equivalencia`: "cualquier equivalencia de esa terna que no resuelva" → una equivalencia fija. No hay comodín en género, mundo ni línea | Cubre "toda una línea histórica a otra" sin crear N filas y sin esperar a que cada equivalencia vieja aparezca en otro año. Un comodín en la terna sería una regla de renombre (otro mecanismo), fuera de alcance |
 | Precedencia | **El árbol manda**: el mapeo se consulta solo si el resolutor devuelve algo distinto de `ok` (inexistente o inactivo). Exacto antes que comodín. Nunca se encadena: el destino es un id del árbol, no un texto que vuelva a resolverse | Sin encadenamiento no hay ciclos por construcción. Un origen que después se crea en el árbol deja el mapeo **obsoleto** (se muestra, no se aplica) |
 | Destino no vigente | Equivalencia, nodo, línea, género o mundo del destino inactivos → el mapeo **no se aplica**, la fila conserva su motivo original y el reporte avisa (`mapeos_no_aplicables`) | Nunca se carga a un destino que el maestro dice que no debe aparecer |
-| Qué sigue siendo error | Mapeables: los cinco motivos de combinación inexistente, los cinco inactivos y `clasificacion_incompleta`. **No** mapeables: `sin_clasificar` (los tres en blanco; decisión de Javier de excluir), tienda, marca, talla, cifras, mes | Tiendas ya tienen su mecanismo (M4, desactivar); marcas no tienen alias por decisión; una fila sin ninguna clasificación no tiene origen que mapear (pregunta 2) |
+| Qué sigue siendo error | Mapeables: los cinco motivos de combinación inexistente, los cinco inactivos y `clasificacion_incompleta`. **No** mapeables: `sin_clasificar` (los tres en blanco; decisión de Javier de excluir), tienda, marca, talla, cifras, mes | Tiendas ya tienen su mecanismo (M4, desactivar) y las ubicaciones que no son tiendas el suyo (lista de ubicaciones ignoradas, mejora 05c); marcas no tienen alias por decisión; una fila sin ninguna clasificación no tiene origen que mapear (pregunta 2) |
 | Efecto en lo cargado | El hecho se guarda con la `equivalencia_id` destino, sin marca alguna en la fila; el `reporte` de la carga guarda qué mapeos se aplicaron y cuánto pesaron. Borrar o cambiar un mapeo **no toca** cargas publicadas: el efecto se ve al recargar el mes | Mismo criterio que el árbol vigente: los hechos no copian texto; la auditoría va en `reporte` |
 | Recalcular | Al guardar mapeos desde el reporte, el navegador vuelve a llamar a `previsualizar` con la **misma petición** (valores distintos, < 1 MB) y reconstruye el informe con el **acumulador que sigue en memoria**; el archivo no se relee | Es el camino que ya existe; cuesta 1 a 2 s y trae además el árbol fresco |
 | Sugerencia | TypeScript puro y determinista (`sugerir-mapeo.ts`), calculada en el servidor (tiene el árbol), **nunca aplicada sola**; 3 mejores con puntuación y razón | Ayuda, no automatismo (criterio de 02b para sugerencias) |
@@ -187,7 +187,7 @@ Admin y planner, mismas acciones; el comprador no ve nada (ruta y API `403`).
 ## Fuera de alcance
 
 - Reglas de renombre (línea vieja → línea nueva para todas sus equivalencias, resolviendo la equivalencia por nombre en el destino); mapeos con vigencia por fecha; mapeo de `sin_clasificar` (pregunta 2).
-- Mapeo de tiendas (M4: crearlas o desactivarlas), de marcas (sin alias, decisión de Javier), de tallas (`MAPEO_TALLA` es constante) y de cifras.
+- Mapeo de tiendas (M4: crearlas o desactivarlas; las que no son tiendas, ubicaciones ignoradas de la mejora 05c), de marcas (sin alias, decisión de Javier), de tallas (`MAPEO_TALLA` es constante) y de cifras.
 - Aplicar mapeos a meses ya publicados sin recargarlos (los hechos son inmutables; se recarga el mes).
 - Crear o modificar el árbol desde el modal; aplicar una sugerencia sin que Javier la elija.
 - Sugerencias que miren la venta histórica del destino o el stock (02b tiene su propia función para marcas).
@@ -207,7 +207,7 @@ Admin y planner, mismas acciones; el comprador no ve nada (ruta y API `403`).
 3. **Los hechos guardan solo el destino; la auditoría del mapeo va en el `reporte` de la carga; cambiar un mapeo exige recargar el mes.**
 4. **`clasificacion_incompleta` se decide en el resolutor y es mapeable; `sin_clasificar` sigue excluida por decisión.**
 5. **La sugerencia es Dice sobre bigramas de `aCodigo`, umbral 0,5 y "fuerte" 0,8, calculada en el servidor y nunca aplicada sola.**
-6. **La mejora toma `0008` y `0.8.1 · M5`; 02b pasa a `0009` / `0.8.2 · M2b` y M6 a `0010`.**
+6. **La mejora toma `0008` y `0.8.1 · M5`; 05c toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011`.**
 
 ## Preguntas abiertas para Javier (con valor por defecto)
 
