@@ -26,11 +26,15 @@ import {
  *
  * Precedencia de motivos (el primero que aplique gana y cada fila cuenta en
  * uno solo): `fila_total` → `mes_invalido` → `numero_invalido` →
- * `fila_en_cero` → `sin_clasificar` → `clasificacion_incompleta` → tienda
- * (`tienda_vacia`; inactiva y desconocida se deciden al resolver) →
- * `talla_desconocida` → combinación → `marca_inactiva`. Las tres últimas
- * dependen de la base: la fila sale como `cargable` (o `talla_desconocida`,
- * que debe ceder ante un error de tienda) y se decide al resolver.
+ * `fila_en_cero` → `sin_clasificar` → tienda (`tienda_vacia`; inactiva y
+ * desconocida se deciden al resolver) → `talla_desconocida` → combinación
+ * (incluida `clasificacion_incompleta`, mejora M5b) → `marca_inactiva`. Las
+ * tres últimas dependen de la base: la fila sale como `cargable` (o
+ * `talla_desconocida`, que debe ceder ante un error de tienda) y se decide al
+ * resolver. Una fila con uno o dos de género, mundo y línea en blanco ya NO se
+ * excluye aquí: entra al diccionario de combinaciones con esos campos como `""`
+ * y el resolutor decide `clasificacion_incompleta` (que un mapeo puede
+ * reasignar). Con los tres en blanco sigue siendo `sin_clasificar`.
  */
 
 // ─── Normalización con caché ───
@@ -62,11 +66,16 @@ export function normalizarMarca(valor: string): string {
   return n === "" || n === "-" ? MARCA_SIN_MARCA : n;
 }
 
-/** Regla 12: `-` → nombre de la línea; vacío o `SIN EQUIVALENCIA` → `SIN EQUIVALENCIA`; otro → el valor normalizado. */
+/**
+ * Regla 12: `-` → nombre de la línea; vacío o `SIN EQUIVALENCIA` → `SIN EQUIVALENCIA`; otro → el valor normalizado.
+ * Si la línea está en blanco (fila `clasificacion_incompleta`), `-` no tiene nombre
+ * al que sustituirse: cae en `SIN EQUIVALENCIA` para que el origen de un mapeo
+ * nunca tenga la equivalencia vacía.
+ */
 export function normalizarEquivalencia(valor: string, lineaNormalizada: string): string {
   const n = normalizarCacheado(valor);
   if (esEquivalenciaGenerica(n)) return EQUIVALENCIA_GENERICA.nombre;
-  if (esEquivalenciaIgualALinea(n)) return lineaNormalizada;
+  if (esEquivalenciaIgualALinea(n)) return lineaNormalizada === "" ? EQUIVALENCIA_GENERICA.nombre : lineaNormalizada;
   return n;
 }
 
@@ -216,21 +225,16 @@ export function interpretarFila(fila: FilaCruda): FilaInterpretada {
   // 4. fila_en_cero (las cinco medidas en cero tras redondear; solo-stock no lo es)
   if (medidasEnCero(medidas)) return excluida("fila_en_cero", "");
 
-  // 5 y 6. clasificación
+  // 5. clasificación: solo los tres en blanco se decide aquí; uno o dos en blanco
+  // (`clasificacion_incompleta`) lo decide el resolutor, después de tienda y talla.
   if (genero === "" && mundo === "" && linea === "") return excluida("sin_clasificar", "");
-  if (genero === "" || mundo === "" || linea === "") {
-    return excluida(
-      "clasificacion_incompleta",
-      `${vacioLegible(genero)} / ${vacioLegible(mundo)} / ${vacioLegible(linea)}`
-    );
-  }
 
-  // 7. tienda en blanco (inactiva y desconocida se deciden al resolver)
+  // 6. tienda en blanco (inactiva y desconocida se deciden al resolver)
   if (tienda === "") return excluida("tienda_vacia", "");
 
   const extras: ExtrasFila = { ...leidas.extras, dia_distinto_de_1: diaDistinto };
 
-  // 8. talla
+  // 7. talla
   const talla = tallaCacheada(fila.talla);
   if (talla === null) {
     return {

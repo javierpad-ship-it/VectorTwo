@@ -201,6 +201,10 @@ export const AVISOS_CODIGOS = [
   "archivo_posiblemente_truncado",
   "stock_en_cero",
   "stock_identico_a_otro_mes",
+  /** M5b: filas que pasaron de error a cargable por un mapeo (detalle `ORIGEN → DESTINO`). */
+  "reasignadas_por_mapeo",
+  /** M5b: un mapeo activo cuyo destino ya no es vigente; las filas siguen excluidas (rojo). */
+  "mapeos_no_aplicables",
 ] as const;
 
 export const NOTAS_CODIGOS = [
@@ -236,6 +240,8 @@ export const ETIQUETAS_AVISO: Record<CodigoAvisoONota, string> = {
   archivo_posiblemente_truncado: "Archivo posiblemente truncado",
   stock_en_cero: "Stock en cero en todas las filas de un mes pasado",
   stock_identico_a_otro_mes: "Stock idéntico al de otro mes",
+  reasignadas_por_mapeo: "Filas reasignadas por mapeo",
+  mapeos_no_aplicables: "Mapeos que no se aplicaron: su destino está desactivado",
   unidades_negativas: "Unidades negativas (devoluciones)",
   unidades_sin_venta: "Unidades sin venta",
   venta_sin_unidades: "Venta sin unidades",
@@ -283,7 +289,6 @@ export type MotivoLocal =
   | "numero_invalido"
   | "fila_en_cero"
   | "sin_clasificar"
-  | "clasificacion_incompleta"
   | "tienda_vacia";
 
 export type FilaInterpretada = LecturaFila &
@@ -418,6 +423,14 @@ export type InformeMes = {
   cargado: MedidasInforme;
   /** Filas que se sumaron a otra de la misma clave. */
   fusionadas: number;
+  /**
+   * M5b. Filas (del archivo) y medidas que pasaron de error a cargable por un
+   * mapeo. Ya están dentro de `cargado` (y de `fusionadas` si coincidieron en
+   * clave con otra fila).
+   */
+  reasignadas: MedidasInforme;
+  /** M5b. Ids de los mapeos que se aplicaron en este mes. */
+  mapeos_aplicados: string[];
   /** `archivo = cargado + excluido` en las cinco medidas y `archivo.filas = cargadas + fusionadas + excluidas`. */
   identidad_ok: boolean;
   conciliacion: FilaConciliacion[];

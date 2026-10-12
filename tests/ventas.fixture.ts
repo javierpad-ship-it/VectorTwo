@@ -3,7 +3,13 @@ import type { AgrupacionMarcaEstado, MarcaEstado } from "@/lib/marcas/importar";
 import { Acumulador } from "@/lib/ventas/acumulador";
 import { interpretarFila } from "@/lib/ventas/interpretar";
 import { construirInforme, type EntradaInforme } from "@/lib/ventas/informe";
-import { crearResolutorCombinaciones, crearResolutorMarcas, crearResolutorTiendas, type TiendaResolvible } from "@/lib/ventas/resolver";
+import {
+  crearResolutorCombinaciones,
+  crearResolutorMarcas,
+  crearResolutorTiendas,
+  type MapeoResolvible,
+  type TiendaResolvible,
+} from "@/lib/ventas/resolver";
 import type { FilaCruda } from "@/lib/ventas/tipos";
 import type { HuellaStock, PeriodoPrevisualizado, PrevisualizarRespuesta } from "@/lib/ventas/tipos-api";
 
@@ -94,8 +100,22 @@ export function acumular(filas: Partial<FilaCruda>[]): Acumulador {
   return acum;
 }
 
+/** Mapeo sintético: `origen` es [género, mundo, línea, equivalencia] ya normalizado (la equivalencia puede ser `*`). */
+export function mapeo(
+  id: string,
+  origen: readonly [string, string, string, string],
+  equivalencia_id: string,
+  activo = true
+): MapeoResolvible {
+  return { id, origen: { genero: origen[0], mundo: origen[1], linea: origen[2], equivalencia: origen[3] }, equivalencia_id, activo };
+}
+
 type Extras = {
   hoy?: string;
+  /** Estado del árbol (por defecto `ARBOL`). */
+  estado?: EstadoImportacion;
+  /** Mapeos que recibe el resolutor (M5b). */
+  mapeos?: MapeoResolvible[];
   periodos?: PeriodoPrevisualizado[];
   anterior?: PrevisualizarRespuesta["anterior"];
   huellas?: HuellaStock[];
@@ -107,16 +127,18 @@ type Extras = {
 export function resoluciones(acum: Acumulador, extras: Extras = {}): EntradaInforme["resoluciones"] {
   const d = acum.diccionarios;
   const rt = crearResolutorTiendas(extras.tiendas ?? TIENDAS);
-  const rc = crearResolutorCombinaciones(ARBOL);
+  const rc = crearResolutorCombinaciones(extras.estado ?? ARBOL, extras.mapeos ?? []);
   const rm = crearResolutorMarcas(extras.marcas ?? MARCAS);
+  const combinaciones = d.combinaciones.map((c) => rc({ genero: c.genero, mundo: c.mundo, linea: c.linea, equivalencia: c.equivalencia }));
   return {
     hoy: extras.hoy ?? "2026-10-11",
     tiendas: d.tiendas.map(rt),
-    combinaciones: d.combinaciones.map((c) => rc({ genero: c.genero, mundo: c.mundo, linea: c.linea, equivalencia: c.equivalencia })),
+    combinaciones,
     marcas: d.marcas.map(rm),
     periodos: extras.periodos ?? [],
     anterior: extras.anterior ?? null,
     huellas_stock: extras.huellas ?? [],
+    mapeos_no_aplicables: rc.mapeosNoAplicables(),
   };
 }
 
@@ -132,3 +154,46 @@ export function informe(filas: Partial<FilaCruda>[], extras: Extras & Partial<Om
     }),
   };
 }
+
+/**
+ * Árbol sintético de los casos de sugerencia de M5b (ficha 05b, "Casos de
+ * prueba"): géneros HOMBRE y MUJER; mundos URBANO y CASUAL; nodos
+ * HOMBRE/URBANO/DENIM (SKINNY, SLIM, DENIM, genérica), HOMBRE/URBANO/PANTALON
+ * DRILL (DRILL CLASICO, PANTALON DRILL), MUJER/URBANO/DENIM (SKINNY, MOM),
+ * HOMBRE/CASUAL/POLO (POLO BASICO) y la línea CHOMPA inactiva en HOMBRE/CASUAL.
+ */
+export const ARBOL_SUGERENCIA: EstadoImportacion = {
+  generos: [
+    { id: "g-h", codigo: "HOMBRE", nombre: "HOMBRE", activo: true },
+    { id: "g-m", codigo: "MUJER", nombre: "MUJER", activo: true },
+  ],
+  mundos: [
+    { id: "m-urb", codigo: "URBANO", nombre: "URBANO", activo: true },
+    { id: "m-cas", codigo: "CASUAL", nombre: "CASUAL", activo: true },
+  ],
+  lineas: [
+    { id: "l-den", codigo: "DENIM", nombre: "DENIM", activo: true },
+    { id: "l-dri", codigo: "PANTALON_DRILL", nombre: "PANTALON DRILL", activo: true },
+    { id: "l-pol", codigo: "POLO", nombre: "POLO", activo: true },
+    { id: "l-cho", codigo: "CHOMPA", nombre: "CHOMPA", activo: false },
+  ],
+  nodos: [
+    { id: "s1", genero_id: "g-h", mundo_id: "m-urb", linea_id: "l-den", activo: true },
+    { id: "s2", genero_id: "g-h", mundo_id: "m-urb", linea_id: "l-dri", activo: true },
+    { id: "s3", genero_id: "g-m", mundo_id: "m-urb", linea_id: "l-den", activo: true },
+    { id: "s4", genero_id: "g-h", mundo_id: "m-cas", linea_id: "l-pol", activo: true },
+    { id: "s5", genero_id: "g-h", mundo_id: "m-cas", linea_id: "l-cho", activo: true },
+  ],
+  equivalencias: [
+    { id: "s1-skinny", genero_mundo_linea_id: "s1", nombre: "SKINNY", codigo: "SKINNY", es_generica: false, activo: true },
+    { id: "s1-slim", genero_mundo_linea_id: "s1", nombre: "SLIM", codigo: "SLIM", es_generica: false, activo: true },
+    { id: "s1-denim", genero_mundo_linea_id: "s1", nombre: "DENIM", codigo: "DENIM", es_generica: false, activo: true },
+    { id: "s1-gen", genero_mundo_linea_id: "s1", nombre: "SIN EQUIVALENCIA", codigo: "SIN_EQUIVALENCIA", es_generica: true, activo: true },
+    { id: "s2-clasico", genero_mundo_linea_id: "s2", nombre: "DRILL CLASICO", codigo: "DRILL_CLASICO", es_generica: false, activo: true },
+    { id: "s2-drill", genero_mundo_linea_id: "s2", nombre: "PANTALON DRILL", codigo: "PANTALON_DRILL", es_generica: false, activo: true },
+    { id: "s3-skinny", genero_mundo_linea_id: "s3", nombre: "SKINNY", codigo: "SKINNY", es_generica: false, activo: true },
+    { id: "s3-mom", genero_mundo_linea_id: "s3", nombre: "MOM", codigo: "MOM", es_generica: false, activo: true },
+    { id: "s4-basico", genero_mundo_linea_id: "s4", nombre: "POLO BASICO", codigo: "POLO_BASICO", es_generica: false, activo: true },
+    { id: "s5-chompa", genero_mundo_linea_id: "s5", nombre: "CHOMPA", codigo: "CHOMPA", es_generica: false, activo: true },
+  ],
+};

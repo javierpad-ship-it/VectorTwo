@@ -14,7 +14,9 @@ import { nombreBase } from "@/lib/arbol/leer-archivo";
 import { tablaCombinacionesDesconocidas, tablaOmitidas } from "@/lib/ventas/descargas";
 import type { InformeCarga, InformeMes } from "@/lib/ventas/tipos";
 import type { CombinacionDesconocida } from "@/lib/ventas/informe";
-import { DetalleMes } from "./detalle-mes";
+import { AsignarMapeo } from "./asignar-mapeo";
+import { DetalleMes, type Asignacion } from "./detalle-mes";
+import { filasReasignadas, reasignadasDe, type OrigenAsignable } from "./origenes-mapeo";
 import { MarcasNuevas } from "./marcas-nuevas";
 import { formatearEntero, formatearPorcentaje, formatearSoles, nombrePeriodo } from "./comunes";
 import { ETIQUETA_SALTO, planificarCarga, type MotivoSalto } from "./plan";
@@ -23,10 +25,12 @@ import type { Previsualizacion, useCargaVentas } from "./use-carga-ventas";
 type Props = { c: ReturnType<typeof useCargaVentas>; informe: InformeCarga; prev: Previsualizacion };
 
 function EstadoDelMes({ mes, salto }: { mes: InformeMes; salto: MotivoSalto | null }) {
+  const reasignadas = reasignadasDe(mes).filas;
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-1.5">
         {mes.estado === "nuevo" && <Badge tono="exito">Nuevo</Badge>}
+        {reasignadas > 0 && <Badge tono="marca">{plural(reasignadas, "reasignada", "reasignadas")} por mapeo</Badge>}
         {mes.estado === "reemplaza" && <Badge tono="marca">Reemplazará</Badge>}
         {mes.estado === "identico" && <Badge tono="neutro">Idéntico a lo ya cargado</Badge>}
         {mes.bloqueado && <Badge tono="alerta">Bloqueado</Badge>}
@@ -102,10 +106,13 @@ function TiendasDesconocidas({ tiendas }: { tiendas: TiendaDesconocida[] }) {
 /** Paso 4: reporte previo (diagnósticos, resumen por mes, detalle con conciliación, marcas nuevas, tiendas, descargas). */
 export function ReportePrevio({ c, informe, prev }: Props) {
   const [mesElegido, setMesElegido] = useState<string>("");
+  /** Combinaciones que se están asignando en el modal (`null` = cerrado). */
+  const [asignando, setAsignando] = useState<OrigenAsignable[] | null>(null);
   const plan = useMemo(() => planificarCarga(informe, c.opciones), [informe, c.opciones]);
   const salto = useMemo(() => new Map(plan.saltados.map((s) => [s.mes.periodo, s.motivo])), [plan]);
   const tiendas = useMemo(() => tiendasDesconocidas(informe), [informe]);
   const desconocidas = prev.resultado.combinacionesDesconocidas;
+  const asignacion: Asignacion = { indice: prev.origenes, disponible: c.puedeRecalcular, onAsignar: setAsignando };
 
   const primerConProblema = informe.meses.find((m) => m.bloqueado || !m.identidad_ok)?.periodo ?? informe.meses[0]?.periodo ?? "";
   const periodoDetalle = informe.meses.some((m) => m.periodo === mesElegido) ? mesElegido : primerConProblema;
@@ -116,13 +123,17 @@ export function ReportePrevio({ c, informe, prev }: Props) {
     { clave: "estado", titulo: "Estado", render: (m) => <EstadoDelMes mes={m} salto={salto.get(m.periodo) ?? null} /> },
     {
       clave: "filas",
-      titulo: "Filas: archivo / se cargan / fuera",
+      titulo: "Filas: archivo / se cargan (reasignadas) / fuera",
       className: "text-right font-mono",
-      render: (m) => (
-        <div>
-          {formatearNumero(m.archivo.filas)} / <strong>{formatearNumero(m.cargado.filas)}</strong> / {formatearNumero(m.excluido.filas + m.fusionadas)}
-        </div>
-      ),
+      render: (m) => {
+        const reasignadas = reasignadasDe(m).filas;
+        return (
+          <div>
+            {formatearNumero(m.archivo.filas)} / <strong>{formatearNumero(m.cargado.filas)}</strong>
+            {reasignadas > 0 && <span className="text-xs text-tinta-suave"> ({formatearNumero(reasignadas)} reasignadas)</span>} / {formatearNumero(m.excluido.filas + m.fusionadas)}
+          </div>
+        );
+      },
     },
     ...(
       [
@@ -207,7 +218,7 @@ export function ReportePrevio({ c, informe, prev }: Props) {
                 </Select>
               </Field>
             </div>
-            <DetalleMes key={mesDetalle.periodo} mes={mesDetalle} textos={c.textosQlik[mesDetalle.periodo]} onTotal={(medida, texto) => c.setTotalQlik(mesDetalle.periodo, medida, texto)} />
+            <DetalleMes key={mesDetalle.periodo} mes={mesDetalle} textos={c.textosQlik[mesDetalle.periodo]} onTotal={(medida, texto) => c.setTotalQlik(mesDetalle.periodo, medida, texto)} asignacion={asignacion} />
           </div>
         )}
 
@@ -245,6 +256,8 @@ export function ReportePrevio({ c, informe, prev }: Props) {
           </p>
         </div>
       </div>
+
+      {asignando && <AsignarMapeo origenes={asignando} reasignadasAntes={filasReasignadas(informe)} bloqueadosAntes={informe.meses.filter((m) => m.bloqueado).map((m) => m.periodo)} recalcular={c.recalcularConMapeos} onCerrar={() => setAsignando(null)} />}
     </Card>
   );
 }

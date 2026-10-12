@@ -88,3 +88,83 @@ describe("regla 32: ninguna ruta de M5 pasa más de 150 ids a `.in(...)`", () =>
     for (const f of ventas) expect(f.texto, f.ruta).not.toContain("supabaseServer");
   });
 });
+
+describe("M5b regla 14: mapeos de combinación", () => {
+  const rutas = src.filter((f) => f.ruta.startsWith("src/app/api/ventas/mapeos/") && f.ruta.endsWith("route.ts"));
+
+  it("existen las cuatro rutas de la ficha con sus métodos", () => {
+    const metodos = (ruta: string) =>
+      [...(rutas.find((f) => f.ruta === ruta)?.texto.matchAll(/export async function (GET|POST|PUT|PATCH|DELETE)\(/g) ?? [])].map((m) => m[1]).sort();
+    expect(rutas.map((f) => f.ruta).sort()).toEqual([
+      "src/app/api/ventas/mapeos/[id]/route.ts",
+      "src/app/api/ventas/mapeos/importar/route.ts",
+      "src/app/api/ventas/mapeos/route.ts",
+      "src/app/api/ventas/mapeos/sugerir/route.ts",
+    ]);
+    expect(metodos("src/app/api/ventas/mapeos/route.ts")).toEqual(["GET", "POST"]);
+    expect(metodos("src/app/api/ventas/mapeos/[id]/route.ts")).toEqual(["DELETE", "PATCH"]);
+    expect(metodos("src/app/api/ventas/mapeos/sugerir/route.ts")).toEqual(["POST"]);
+    expect(metodos("src/app/api/ventas/mapeos/importar/route.ts")).toEqual(["POST"]);
+  });
+
+  it("todo handler bajo src/app/api/ventas/mapeos/ empieza con requirePlanner (nunca requireUser ni requireAdmin)", () => {
+    for (const f of rutas) {
+      const handlers = f.texto.match(/export async function (GET|POST|PUT|PATCH|DELETE)\([^)]*\)\s*\{\s*(?:const \{[^}]*\} = await (\w+)\(\);)?/g) ?? [];
+      expect(handlers.length, f.ruta).toBeGreaterThan(0);
+      for (const h of handlers) expect(h, `${f.ruta}: ${h}`).toContain("await requirePlanner()");
+      expect(f.texto, f.ruta).not.toMatch(/requireUser|requireAdmin/);
+    }
+  });
+
+  it("`previsualizar` carga los mapeos activos y se los pasa al resolutor", () => {
+    const f = src.find((x) => x.ruta === "src/app/api/ventas/previsualizar/route.ts")?.texto ?? "";
+    expect(f).toContain("leerMapeosActivos");
+    expect(f).toMatch(/crearResolutorCombinaciones\(\s*arbol\.estado,/);
+    expect(f).toContain("mapeos_no_aplicables");
+  });
+
+  it("la lógica pura (sugerir-mapeo, mapeos, origen-mapeo, resolver, informe, recalcular) no importa de @supabase/* ni de src/components/", () => {
+    for (const ruta of [
+      "src/lib/ventas/sugerir-mapeo.ts",
+      "src/lib/ventas/mapeos.ts",
+      "src/lib/ventas/origen-mapeo.ts",
+      "src/lib/ventas/resolver.ts",
+      "src/lib/ventas/informe.ts",
+      "src/lib/ventas/recalcular.ts",
+      "src/lib/ventas/tipos-mapeo.ts",
+    ]) {
+      const f = src.find((x) => x.ruta === ruta);
+      expect(f, ruta).toBeDefined();
+      const imports = [...(f?.texto.matchAll(/(?:import|export)[^;]*?from\s+["']([^"']+)["']/g) ?? [])].map((m) => m[1]);
+      for (const origen of imports) {
+        expect(origen, `${ruta} importa ${origen}`).not.toMatch(/^@supabase\//);
+        expect(origen, `${ruta} importa ${origen}`).not.toMatch(/components/);
+        expect(origen, `${ruta} importa ${origen}`).not.toMatch(/supabase\/(admin|server)/);
+      }
+      expect(f?.texto, ruta).not.toContain("supabaseAdmin");
+      expect(f?.texto, ruta).not.toMatch(/^\s*["']use client["']/);
+    }
+  });
+
+  it("solo consultas.ts (más los tipos generados y los nombres de constraint de errores-db) nombra la tabla `mapeos_combinacion`", () => {
+    const permitidos = new Set(["src/lib/ventas/consultas.ts", "src/lib/supabase/database.types.ts", "src/lib/api/errores-db.ts"]);
+    const infractores = src.filter((f) => f.texto.includes("mapeos_combinacion") && !permitidos.has(f.ruta)).map((f) => f.ruta);
+    expect(infractores).toEqual([]);
+    const consultas = src.find((x) => x.ruta === "src/lib/ventas/consultas.ts")?.texto ?? "";
+    expect(consultas).toContain("mapeos_combinacion");
+    // errores-db solo menciona constraints (`mapeos_combinacion_*`), nunca la tabla sola.
+    const errores = src.find((x) => x.ruta === "src/lib/api/errores-db.ts")?.texto ?? "";
+    for (const m of errores.match(/mapeos_combinacion\w*/g) ?? []) expect(m).toMatch(/^mapeos_combinacion_\w+$/);
+  });
+
+  it("los tipos del frontend son autocontenidos: tipos-mapeo.ts y tipos-api.ts solo importan tipos entre ellos", () => {
+    for (const ruta of ["src/lib/ventas/tipos-mapeo.ts", "src/lib/ventas/tipos-api.ts"]) {
+      const f = src.find((x) => x.ruta === ruta);
+      const imports = [...(f?.texto.matchAll(/^import[^;]*?from\s+["']([^"']+)["']/gm) ?? [])];
+      for (const m of imports) {
+        expect(m[0], ruta).toMatch(/^import type /);
+        expect(m[1], ruta).toMatch(/^\.\/tipos-(api|mapeo)$/);
+      }
+    }
+  });
+});

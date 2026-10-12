@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { formatearNumero, plural } from "@/lib/formato";
 import { AvanceCarga } from "./avance-carga";
 import { nombrePeriodo } from "./comunes";
+import { reasignadasDe } from "./origenes-mapeo";
 import { LecturaCard } from "./lectura-card";
 import { PasoArchivoVenta } from "./paso-archivo-venta";
 import { ETIQUETA_SALTO, planificarCarga, type PlanCarga } from "./plan";
@@ -35,7 +36,8 @@ export function CargarTab({ onPublicado }: { onPublicado: () => void }) {
   if (plan && plan.cargar.length === 0) razones.push("No hay ningún mes para cargar con las opciones elegidas.");
   if (sinIdentidad.length > 0) razones.push(`La identidad archivo = cargado + excluido no cierra en ${sinIdentidad.map((m) => nombrePeriodo(m.periodo)).join(", ")}.`);
   if (nuevasSinAgrupacion) razones.push("Elige la agrupación de las marcas nuevas.");
-  const puedeCargar = prevVigente !== null && plan !== null && razones.length === 0 && !c.cargando && !c.leyendo;
+  if (c.recalculando) razones.push("Se está recalculando el reporte con los mapeos nuevos.");
+  const puedeCargar = prevVigente !== null && plan !== null && razones.length === 0 && !c.cargando && !c.leyendo && !c.recalculando;
 
   function textoConfirmar(p: PlanCarga): string {
     const nombre = prevVigente?.archivoNombre ?? "el archivo";
@@ -52,6 +54,8 @@ export function CargarTab({ onPublicado }: { onPublicado: () => void }) {
     if (abiertos.length > 0) lineas.push(`\nMes todavía abierto (su venta está incompleta): ${abiertos.map((m) => nombrePeriodo(m.periodo)).join(", ")}.`);
     const forzados = p.cargar.filter((m) => m.bloqueado);
     if (forzados.length > 0) lineas.push(`\nSe cargan como Incompleto (errores de 2 % o más): ${forzados.map((m) => nombrePeriodo(m.periodo)).join(", ")}.`);
+    const reasignadas = p.cargar.reduce((s, m) => s + reasignadasDe(m).filas, 0);
+    if (reasignadas > 0) lineas.push(`\nSe cargan ${plural(reasignadas, "fila reasignada", "filas reasignadas")} por mapeo a su destino (detalle en los avisos del reporte).`);
     const fuera = p.cargar.reduce((s, m) => s + m.excluido.filas, 0);
     if (fuera > 0) lineas.push(`\nQuedan fuera ${plural(fuera, "fila", "filas")} excluidas de esos meses.`);
     if (p.saltados.length > 0) {

@@ -1,5 +1,5 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Json, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types";
 import { leerTodo } from "@/lib/arbol/consultas";
 import { cargaCaducada, esEstadoCarga } from "./cargas";
 import { recortarPeriodo } from "./periodo";
@@ -291,4 +291,68 @@ export async function limpiarPendientes(
     },
     error: null,
   };
+}
+
+// ─── Mapeos de combinación (M5b) ───
+//
+// ÚNICO archivo de `src/` que nombra la tabla de mapeos. Son cientos de filas:
+// se leen enteros (paginando) y la lógica pura (`mapeos.ts`) trabaja en memoria.
+
+export type MapeoDb = Tables<"mapeos_combinacion">;
+export type MapeoInsert = TablesInsert<"mapeos_combinacion">;
+export type MapeoUpdate = TablesUpdate<"mapeos_combinacion">;
+
+/** Único natural del mapeo: el origen completo. */
+export const CLAVE_MAPEOS = "origen_genero,origen_mundo,origen_linea,origen_equivalencia";
+
+/** Todos los mapeos (activos o no), del más reciente al más viejo; `id` desempata. */
+export function leerMapeos(db: Db) {
+  return leerTodo<MapeoDb>((d, h) =>
+    db.from("mapeos_combinacion").select("*").order("updated_at", { ascending: false }).order("id").range(d, h)
+  );
+}
+
+/** Solo los activos: los que aplica el resolutor de `previsualizar`. */
+export function leerMapeosActivos(db: Db) {
+  return leerTodo<MapeoDb>((d, h) => db.from("mapeos_combinacion").select("*").eq("activo", true).order("id").range(d, h));
+}
+
+export async function leerMapeoPorId(db: Db, id: string) {
+  const { data, error } = await db.from("mapeos_combinacion").select("*").eq("id", id).maybeSingle();
+  return { data, error };
+}
+
+/** `insert` estricto (un origen repetido es `23505`): una sola sentencia, todo o nada. */
+export async function insertarMapeos(db: Db, filas: MapeoInsert[]) {
+  return db.from("mapeos_combinacion").insert(filas).select("*");
+}
+
+/** `upsert` sobre el único del origen: actualiza destino, nota y estado de los que ya existían. Una sola sentencia. */
+export async function upsertMapeos(db: Db, filas: MapeoInsert[]) {
+  return db.from("mapeos_combinacion").upsert(filas, { onConflict: CLAVE_MAPEOS, ignoreDuplicates: false }).select("*");
+}
+
+/** Tanda idempotente de la importación: lo que ya existe no se toca; devuelve solo las filas realmente insertadas. */
+export async function insertarMapeosSiNoExisten(db: Db, filas: MapeoInsert[]) {
+  return db
+    .from("mapeos_combinacion")
+    .upsert(filas, { onConflict: CLAVE_MAPEOS, ignoreDuplicates: true })
+    .select("id");
+}
+
+export async function actualizarMapeo(db: Db, id: string, cambio: MapeoUpdate) {
+  return db.from("mapeos_combinacion").update(cambio).eq("id", id).select("*").single();
+}
+
+export async function borrarMapeo(db: Db, id: string) {
+  return db.from("mapeos_combinacion").delete().eq("id", id);
+}
+
+/**
+ * `true` si el error es el choque del único del origen (`23505` sobre
+ * `mapeos_combinacion_origen_uniq`): otra persona guardó el mismo origen entre
+ * la lectura y la escritura. El alta lo devuelve como `409 origen_repetido`.
+ */
+export function esConflictoOrigenMapeo(err: Pick<PostgrestError, "code" | "message" | "details">): boolean {
+  return err.code === "23505" && `${err.message} ${err.details ?? ""}`.includes("mapeos_combinacion_origen_uniq");
 }

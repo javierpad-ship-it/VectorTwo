@@ -14,9 +14,11 @@ import {
   leerCargasVigentes,
   leerCodigosTalla,
   leerHuellasStock,
+  leerMapeosActivos,
 } from "@/lib/ventas/consultas";
 import { mesAnterior, mesDeHoy, recortarPeriodo } from "@/lib/ventas/periodo";
 import { normalizarMarca } from "@/lib/ventas/interpretar";
+import { origenDeFila } from "@/lib/ventas/mapeos";
 import {
   agrupacionPorDefecto,
   crearResolutorCombinaciones,
@@ -32,6 +34,11 @@ import type { PeriodoPrevisualizado, PrevisualizarRespuesta } from "@/lib/ventas
  * los maestros, más el estado de cada mes (publicada, en curso), la carga del
  * mes anterior y las huellas de stock de lo ya publicado. Cada lista de la
  * respuesta tiene el mismo orden que la de la petición.
+ *
+ * M5b. Carga los mapeos activos y los pasa al resolutor de combinaciones: el
+ * árbol manda y un mapeo solo entra cuando el árbol no resuelve (una
+ * combinación puede volver `ok` con `mapeo`). Los mapeos activos cuyo destino
+ * ya no es vigente no se aplican y se listan en `mapeos_no_aplicables`.
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -43,13 +50,14 @@ export async function POST(request: NextRequest) {
   const db = supabaseAdmin();
   const hoy = hoyLima();
 
-  const [arbol, tiendas, marcas, agrupaciones, talla, cargas] = await Promise.all([
+  const [arbol, tiendas, marcas, agrupaciones, talla, cargas, mapeos] = await Promise.all([
     cargarEstadoArbol(db),
     leerTiendas(db, { soloActivas: false }),
     leerMarcas(db),
     leerAgrupacionesMarca(db),
     leerCodigosTalla(db),
     leerCargasVigentes(db),
+    leerMapeosActivos(db),
   ]);
   if (arbol.error) return traducirErrorDb(arbol.error, "previsualizar ventas: árbol");
   if (tiendas.error) return traducirErrorDb(tiendas.error, "previsualizar ventas: tiendas");
@@ -57,10 +65,14 @@ export async function POST(request: NextRequest) {
   if (agrupaciones.error) return traducirErrorDb(agrupaciones.error, "previsualizar ventas: agrupaciones de marca");
   if (talla.error) return traducirErrorDb(talla.error, "previsualizar ventas: tallas");
   if (cargas.error) return traducirErrorDb(cargas.error, "previsualizar ventas: cargas");
+  if (mapeos.error) return traducirErrorDb(mapeos.error, "previsualizar ventas: mapeos");
   if (!talla.data) return error("Faltan las agrupaciones de talla CENTRALES y EXTREMAS en el catálogo.", 500);
 
   const resolverTienda = crearResolutorTiendas(tiendas.data);
-  const resolverCombinacion = crearResolutorCombinaciones(arbol.estado);
+  const resolverCombinacion = crearResolutorCombinaciones(
+    arbol.estado,
+    mapeos.data.map((m) => ({ id: m.id, origen: origenDeFila(m), equivalencia_id: m.equivalencia_id, activo: m.activo }))
+  );
   const resolverMarca = crearResolutorMarcas(marcas.data);
 
   const publicadas = cargas.data.filter((c) => c.estado === "publicada");
@@ -97,11 +109,14 @@ export async function POST(request: NextRequest) {
   const activas = agrupaciones.data.filter((a) => a.activo);
   const defecto = agrupacionPorDefecto(agrupaciones.data);
 
+  // Las combinaciones se resuelven antes de armar el cuerpo: `mapeosNoAplicables()` lista los que se cruzaron.
+  const combinaciones = datos.combinaciones.map(resolverCombinacion);
+
   const cuerpo: PrevisualizarRespuesta = {
     hoy,
     mes_actual: mesDeHoy(hoy),
     tiendas: datos.tiendas.map(resolverTienda),
-    combinaciones: datos.combinaciones.map(resolverCombinacion),
+    combinaciones,
     marcas: datos.marcas.map((m) => resolverMarca(normalizarMarca(m))),
     agrupaciones_talla: talla.data,
     agrupaciones_marca: activas.map((a) => ({ id: a.id, codigo: a.codigo, nombre: a.nombre })),
@@ -109,6 +124,7 @@ export async function POST(request: NextRequest) {
     periodos,
     anterior,
     huellas_stock: huellas.data,
+    mapeos_no_aplicables: resolverCombinacion.mapeosNoAplicables(),
   };
   return ok(cuerpo);
 }

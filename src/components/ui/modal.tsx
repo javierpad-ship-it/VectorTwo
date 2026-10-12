@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 /**
  * Diálogo modal sobre el elemento nativo `<dialog>`: el navegador atrapa el
  * foco, pone el fondo inerte y cierra con Esc. Se monta cuando hay que
  * mostrarlo y se desmonta al cerrar (`onCerrar`). Con `cerrable=false` (por
- * ejemplo mientras se envía algo) Esc, el fondo y la X no lo cierran.
+ * ejemplo mientras se envía algo) Esc, el fondo y la X no lo cierran. Al
+ * cerrarse devuelve el foco al elemento que lo abrió; un arrastre que empieza
+ * dentro y termina en el fondo no lo cierra (hace falta pulsar y soltar en el
+ * fondo); con `descripcion`, el diálogo la anuncia (`aria-describedby`).
  */
 export function Modal({
   titulo,
@@ -29,23 +32,39 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const idTitulo = useId();
+  const idDescripcion = useId();
+  /** Dónde estaba el foco al abrir (el botón que lo pidió): se lee en el primer render, antes de que el diálogo lo tome. */
+  const [abridor] = useState<Element | null>(() => (typeof document === "undefined" ? null : document.activeElement));
+  /** El botón del ratón se pulsó sobre el fondo (no solo se soltó allí tras un arrastre). */
+  const pulsoEnFondo = useRef(false);
 
   useEffect(() => {
     const d = ref.current;
     if (d && !d.open) d.showModal();
-  }, []);
+    return () => {
+      if (abridor instanceof HTMLElement && abridor.isConnected) abridor.focus();
+    };
+  }, [abridor]);
 
   return (
     <dialog
       ref={ref}
       aria-labelledby={idTitulo}
+      aria-describedby={descripcion ? idDescripcion : undefined}
       onCancel={(e) => {
         e.preventDefault();
         if (cerrable) onCerrar();
       }}
+      onMouseDown={(e) => {
+        pulsoEnFondo.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
-        // Un clic en el fondo cae sobre el propio <dialog> (el contenido está en un div hijo).
-        if (cerrable && e.target === e.currentTarget) onCerrar();
+        // Un clic en el fondo cae sobre el propio <dialog> (el contenido está en un div hijo). Un arrastre
+        // (p. ej. seleccionar texto) que termina en el fondo también dispara `click` sobre él: se exige que
+        // el botón también se haya pulsado en el fondo.
+        const pulsoAhi = pulsoEnFondo.current;
+        pulsoEnFondo.current = false;
+        if (cerrable && pulsoAhi && e.target === e.currentTarget) onCerrar();
       }}
       className={`m-auto w-[calc(100%-2rem)] ${ancho} overflow-hidden rounded-xl border border-borde bg-superficie p-0 text-tinta shadow-xl backdrop:bg-black/40`}
     >
@@ -55,7 +74,11 @@ export function Modal({
             <h2 id={idTitulo} className="text-base font-semibold text-tinta">
               {titulo}
             </h2>
-            {descripcion && <p className="mt-0.5 text-sm text-tinta-suave">{descripcion}</p>}
+            {descripcion && (
+              <p id={idDescripcion} className="mt-0.5 text-sm text-tinta-suave">
+                {descripcion}
+              </p>
+            )}
           </div>
           <button
             type="button"

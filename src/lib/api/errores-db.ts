@@ -58,6 +58,8 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   // M5. La API de cargas ya las traduce con más detalle (quién y desde cuándo); esto es la red de seguridad.
   ["cargas_periodo_en_curso_uniq", "Ya hay una carga en curso de ese mes."],
   ["cargas_periodo_publicada_uniq", "Ese mes ya tiene una carga publicada."],
+  // M5b. La API de mapeos ya lo anticipa con el mapeo que choca; esto es la red de seguridad (carrera entre dos usuarios).
+  ["mapeos_combinacion_origen_uniq", "Ese origen ya tiene un mapeo."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -74,6 +76,11 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["tiendas_venta_solo_tienda", "Un centro de distribución no lleva venta esperada."],
   ["tiendas_zona_len", "La zona no puede superar 120 caracteres."],
   ["tiendas_razon_social_len", "La razón social no puede superar 120 caracteres."],
+  // M5b.
+  ["mapeos_combinacion_nota_len", "La nota no puede superar 200 caracteres."],
+  ["mapeos_combinacion_terna_no_vacia", "Un origen necesita al menos género, mundo o línea."],
+  ["mapeos_combinacion_origen_equivalencia", "La equivalencia de origen no puede estar vacía ni superar 120 caracteres."],
+  ["mapeos_combinacion_origen_", "Género, mundo y línea de origen no pueden superar 120 caracteres."],
   // Genéricos: cubren `*_codigo_len_check` y `*_nombre_len_check` de todas las tablas, incluidas tiendas.
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
@@ -177,6 +184,15 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     {
       eliminar: "No se puede eliminar: tiene venta o stock cargados. Desactívala.",
       asignar: { status: 404, mensaje: "Agrupación de talla no encontrada." },
+    },
+  ],
+  // M5b. El destino de un mapeo (`cascade`: eliminar la equivalencia borra sus mapeos, así que
+  // `eliminar` no debería verse). Al guardar, un destino que ya no existe responde 404.
+  [
+    "mapeos_combinacion_equivalencia_id_fkey",
+    {
+      eliminar: FK_GENERICA,
+      asignar: { status: 404, mensaje: "Equivalencia no encontrada." },
     },
   ],
   // Las cargas nunca se eliminan (cambian de estado); la FK es la red de seguridad.

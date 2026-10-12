@@ -11,6 +11,8 @@ import { crearPeticionPrevisualizar } from "@/lib/ventas/previsualizar";
 import { CAMPOS_ARCHIVO_VENTA } from "@/lib/ventas/columnas";
 import { construirInforme, marcasSinId, sustituirMarcasNuevas, type ResultadoInforme } from "@/lib/ventas/informe";
 import { interpretarFila } from "@/lib/ventas/interpretar";
+import { recalcularInforme } from "@/lib/ventas/recalcular";
+import { construirIndiceOrigenes, type IndiceOrigenes } from "./origenes-mapeo";
 import {
   crearProyector,
   detectarCodificacion,
@@ -61,6 +63,8 @@ export type Previsualizacion = {
   /** Hoja `.xls` de exactamente 65 536 filas. */
   posiblementeTruncado: boolean;
   leidoEn: number;
+  /** Combinaciones de origen asignables por mapeo, por mes y grupo de error (se rehace al recalcular). */
+  origenes: IndiceOrigenes;
 };
 
 type Lectura = { activa: boolean; progreso: Progreso | null; fase: "leyendo" | "resolviendo" | "armando" | null };
@@ -96,12 +100,21 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
   const [opciones, setOpciones] = useState<OpcionesPlan>({ saltarIdenticos: true, forzarBloqueados: false });
   const [agrupacionMarcaId, setAgrupacionMarcaId] = useState<string>("");
   const [avance, setAvance] = useState<Avance | null>(null);
+  /** Hay acumulador en memoria (espejo de `acumRef` para poder leerlo al pintar). */
+  const [acumVivo, setAcumVivo] = useState(false);
+  const [recalculando, setRecalculando] = useState(false);
 
   const abortar = useRef<AbortController | null>(null);
   const abortarCarga = useRef<AbortController | null>(null);
   /** Consolidado ya con los ids de las marcas nuevas (sirve para reintentar sin volver a crearlas). */
   const consolidadoListo = useRef<Consolidado | null>(null);
   const secuenciaCabecera = useRef(0);
+  /**
+   * Acumulador de la previsualización vigente (≈ 25 MB por año de archivo): permite recalcular el
+   * reporte tras asignar mapeos sin volver a leer el archivo. Se libera al elegir otro archivo, al
+   * cambiar la lectura o al terminar la carga.
+   */
+  const acumRef = useRef<Acumulador | null>(null);
   /** Totales de QlikView vigentes (los handlers de carga leen el último valor, no el de su cierre). */
   const textosQlikRef = useRef<TextosQlik>({});
 
@@ -113,6 +126,16 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
   const prevVigente = prev !== null && prev.firma === firmaActual ? prev : null;
   const leyendo = lectura.activa;
   const cargando = avance?.activo === true;
+  /** Se pueden asignar mapeos y recalcular: hay previsualización vigente con su acumulador y nada en marcha. */
+  const puedeRecalcular = acumVivo && prevVigente !== null && !leyendo && !cargando && !recalculando;
+
+  // Si la firma cambia por cualquier otra vía, la previsualización queda obsoleta y su acumulador sobra.
+  useEffect(() => {
+    if (prev !== null && prev.firma !== firmaActual && acumRef.current !== null) {
+      acumRef.current = null;
+      setAcumVivo(false);
+    }
+  }, [prev, firmaActual]);
 
   const totalesQlik = useMemo(() => totalesQlikPorMes(textosQlik), [textosQlik]);
   const informe = useMemo(() => (prevVigente ? informeConQlik(prevVigente.resultado.informe, totalesQlik) : null), [prevVigente, totalesQlik]);
@@ -168,7 +191,19 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
     }
   }
 
+  function liberarAcumulador() {
+    acumRef.current = null;
+    setAcumVivo(false);
+  }
+
+  /** Cambiar el mapeo de columnas invalida la previsualización (cambia la firma): también se libera el acumulador. */
+  function cambiarMapeo(valor: React.SetStateAction<Mapeo<CampoVenta>>) {
+    setMapeo(valor);
+    liberarAcumulador();
+  }
+
   function reiniciarResultados() {
+    liberarAcumulador();
     setPrev(null);
     setTextosQlik({});
     setAvance(null);
@@ -246,6 +281,8 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
       setLectura((l) => ({ ...l, fase: "armando" }));
       await new Promise<void>((r) => setTimeout(r, 0)); // deja pintar el estado antes del cálculo (síncrono)
       const resultado = construirInforme({ acumulador: acum, resoluciones: respuesta, posiblementeTruncado: res.posiblementeTruncado });
+      acumRef.current = acum;
+      setAcumVivo(true);
       setPrev({
         firma,
         resultado,
@@ -255,6 +292,7 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
         separador: res.separador,
         posiblementeTruncado: res.posiblementeTruncado,
         leidoEn: Date.now(),
+        origenes: construirIndiceOrigenes(acum, respuesta),
       });
       setAgrupacionMarcaId(respuesta.agrupacion_defecto_id ?? "");
     } catch (e) {
@@ -267,6 +305,28 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
 
   function cancelarLectura() {
     abortar.current?.abort();
+  }
+
+  /**
+   * Tras guardar mapeos: vuelve a llamar a `previsualizar` con la misma petición (valores
+   * distintos, < 1 MB) y reconstruye el informe con el acumulador que sigue en memoria, sin
+   * releer el archivo. La firma no cambia, así que la previsualización sigue vigente. Si falla,
+   * lanza (el modal muestra el error) y el reporte anterior queda intacto.
+   */
+  async function recalcularConMapeos(): Promise<ResultadoInforme> {
+    const p = prevVigente;
+    const acum = acumRef.current;
+    if (!p || !acum) throw new Error("Ya no hay una lectura en memoria: vuelve a leer el archivo para asignar mapeos.");
+    if (leyendo || cargando) throw new Error("Hay una lectura o una carga en marcha: espera a que termine.");
+    setRecalculando(true);
+    try {
+      const { respuesta, resultado } = await recalcularInforme(acum, apiVentas.previsualizar, { posiblementeTruncado: p.posiblementeTruncado });
+      const origenes = construirIndiceOrigenes(acum, respuesta);
+      setPrev((actual) => (actual && actual.firma === p.firma ? { ...actual, resultado, respuesta, origenes, leidoEn: Date.now() } : actual));
+      return resultado;
+    } finally {
+      setRecalculando(false);
+    }
   }
 
   function setTotalQlik(periodo: string, medida: MedidaVenta, texto: string) {
@@ -355,6 +415,7 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
       });
     } finally {
       abortarCarga.current = null;
+      liberarAcumulador();
       setAvance((a) => (a ? { ...a, activo: false, cancelando: false, cancelado: controlador.signal.aborted, ahora: Date.now() } : a));
       onPublicado();
     }
@@ -425,7 +486,7 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
     separador,
     hoja,
     mapeo,
-    setMapeo,
+    setMapeo: cambiarMapeo,
     mapeoCompleto: completo,
     leyendoCabecera,
     excelDemasiadoGrande,
@@ -444,6 +505,9 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
     setAgrupacionMarcaId,
     avance,
     cargando,
+    puedeRecalcular,
+    recalculando,
+    recalcularConMapeos,
     elegirArchivo,
     cambiarCodificacion,
     cambiarSeparador,

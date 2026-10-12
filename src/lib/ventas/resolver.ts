@@ -5,6 +5,8 @@ import type { AgrupacionMarcaEstado, MarcaEstado, MarcaNueva } from "@/lib/marca
 import { motivoRechazoAgrupacionDestino } from "@/lib/marcas/reglas";
 import { esTipoTienda } from "@/lib/tiendas/estado";
 import { esComodin } from "./interpretar";
+import { claveOrigen, claveTerna, esComodinOrigen, normalizarOrigen, ternaVacia, vacioLegible } from "./origen-mapeo";
+import type { DestinoMapeo, MapeoNoAplicableApi, OrigenMapeo } from "./tipos-mapeo";
 import {
   AGRUPACION_COMODINES,
   FILAS_POSIBLE_TIPEO,
@@ -98,14 +100,77 @@ function buscarActivoOInactivo(catalogo: readonly Catalogo[], valor: string): { 
   return cualquiera ? { item: cualquiera, activo: false } : null;
 }
 
+/** Un mapeo tal como lo consume el resolutor (solo se aplican los `activo`). */
+export type MapeoResolvible = { id: string; origen: OrigenMapeo; equivalencia_id: string; activo: boolean };
+
+/** Destinos posibles de un mapeo: qué equivalencia es y si hoy es vigente (M1: `nodoVigente` y su cadena). */
+export type IndiceDestinos = {
+  /** Equivalencia activa en un nodo vigente (nodo, línea, género y mundo activos). */
+  vigente(equivalenciaId: string): boolean;
+  /** `null` si la equivalencia ya no existe. */
+  describir(equivalenciaId: string): DestinoMapeo | null;
+};
+
+export function crearIndiceDestinos(estado: EstadoImportacion): IndiceDestinos {
+  const generos = new Map(estado.generos.map((g) => [g.id, g]));
+  const mundos = new Map(estado.mundos.map((m) => [m.id, m]));
+  const lineas = new Map(estado.lineas.map((l) => [l.id, l]));
+  const nodos = new Map(estado.nodos.map((n) => [n.id, n]));
+  const equivalencias = new Map(estado.equivalencias.map((e) => [e.id, e]));
+
+  const describir = (id: string): DestinoMapeo | null => {
+    const eq = equivalencias.get(id);
+    if (!eq) return null;
+    const nodo = nodos.get(eq.genero_mundo_linea_id);
+    const genero = nodo ? generos.get(nodo.genero_id) : undefined;
+    const mundo = nodo ? mundos.get(nodo.mundo_id) : undefined;
+    const linea = nodo ? lineas.get(nodo.linea_id) : undefined;
+    return {
+      equivalencia_id: eq.id,
+      genero: genero?.nombre ?? "",
+      mundo: mundo?.nombre ?? "",
+      linea: linea?.nombre ?? "",
+      equivalencia: eq.nombre,
+      es_generica: eq.es_generica,
+      vigente: Boolean(eq.activo && nodo?.activo && genero?.activo && mundo?.activo && linea?.activo),
+    };
+  };
+  return { vigente: (id) => describir(id)?.vigente ?? false, describir };
+}
+
+export const textoDestino = (d: Pick<DestinoMapeo, "genero" | "mundo" | "linea" | "equivalencia">): string =>
+  `${d.genero} / ${d.mundo} / ${d.linea} / ${d.equivalencia}`;
+
+/**
+ * Resolutor de combinaciones. Recibe el estado del árbol y, opcionalmente, los
+ * mapeos. `mapeosNoAplicables()` lista (una vez por mapeo y en el orden en que
+ * aparecieron) los mapeos activos que se cruzaron con una combinación pero cuyo
+ * destino no es vigente.
+ */
+export type ResolutorCombinaciones = ((c: CombinacionPeticion) => ResolucionCombinacionApi) & {
+  mapeosNoAplicables(): MapeoNoAplicableApi[];
+};
+
 /**
  * Regla 29. Orden género → mundo → línea → nodo → equivalencia. `-` y vacío
  * con las funciones del árbol (la genérica se resuelve por `es_generica`
  * aunque su nombre cambiara). Inactivos → motivo informativo; inexistentes →
  * motivo de error con su detalle. Una combinación cuyo nodo existe pero no la
  * equivalencia es `equivalencia_inexistente`, no `nodo_inexistente`.
+ *
+ * M5b. Antes del género, uno o dos de género, mundo y línea en blanco dan
+ * `clasificacion_incompleta` (con los tres en blanco, `sin_clasificar` ya se
+ * decidió al interpretar la fila). El árbol manda: solo si no resuelve `ok`
+ * se consulta el mapeo, exacto antes que comodín (`*` en la equivalencia,
+ * terna completa). Nunca se encadena: el destino es un id del árbol. Si el
+ * mapeo activo elegido apunta a un destino no vigente, no se aplica (la fila
+ * conserva su motivo) y se anota para `mapeosNoAplicables()`; no se prueba
+ * entonces el comodín. Un mapeo inactivo se ignora.
  */
-export function crearResolutorCombinaciones(estado: EstadoImportacion): (c: CombinacionPeticion) => ResolucionCombinacionApi {
+export function crearResolutorCombinaciones(
+  estado: EstadoImportacion,
+  mapeos: readonly MapeoResolvible[] = []
+): ResolutorCombinaciones {
   const lineasPorNombre = new Map(estado.lineas.map((l) => [normalizarNombre(l.nombre), l]));
   const nodos = new Map(estado.nodos.map((n) => [`${n.genero_id}|${n.mundo_id}|${n.linea_id}`, n]));
   const porNodo = new Map<string, { porNombre: Map<string, (typeof estado.equivalencias)[number]>; generica: (typeof estado.equivalencias)[number] | null }>();
@@ -119,10 +184,30 @@ export function crearResolutorCombinaciones(estado: EstadoImportacion): (c: Comb
     if (e.es_generica) g.generica = e;
   }
 
-  return (c: CombinacionPeticion): ResolucionCombinacionApi => {
+  // Índices de mapeos activos: exacto por origen completo, comodín por terna.
+  const exactos = new Map<string, MapeoResolvible>();
+  const comodines = new Map<string, MapeoResolvible>();
+  for (const m of mapeos) {
+    if (!m.activo) continue;
+    const origen = normalizarOrigen(m.origen);
+    if (ternaVacia(origen)) continue;
+    const indice = esComodinOrigen(origen) ? comodines : exactos;
+    const clave = esComodinOrigen(origen) ? claveTerna(origen) : claveOrigen(origen);
+    if (!indice.has(clave)) indice.set(clave, { ...m, origen });
+  }
+  const hayMapeos = exactos.size > 0 || comodines.size > 0;
+  const destinos = hayMapeos ? crearIndiceDestinos(estado) : null;
+  const noAplicables = new Map<string, MapeoNoAplicableApi>();
+
+  const resolverArbol = (c: CombinacionPeticion): ResolucionCombinacionApi => {
     const generoTxt = normalizarNombre(c.genero);
     const mundoTxt = normalizarNombre(c.mundo);
     const lineaTxt = normalizarNombre(c.linea);
+
+    const enBlanco = [generoTxt, mundoTxt, lineaTxt].filter((v) => v === "").length;
+    if (enBlanco === 1 || enBlanco === 2) {
+      return { resultado: "clasificacion_incompleta", detalle: `${vacioLegible(generoTxt)} / ${vacioLegible(mundoTxt)} / ${vacioLegible(lineaTxt)}` };
+    }
 
     const genero = buscarActivoOInactivo(estado.generos, generoTxt);
     if (!genero) return { resultado: "genero_desconocido", detalle: generoTxt };
@@ -152,10 +237,44 @@ export function crearResolutorCombinaciones(estado: EstadoImportacion): (c: Comb
     if (!eq.activo) return { resultado: "equivalencia_inactiva", detalle: detalleEq };
     return { resultado: "ok", equivalencia_id: eq.id };
   };
+
+  const resolutor = (c: CombinacionPeticion): ResolucionCombinacionApi => {
+    const base = resolverArbol(c);
+    if (base.resultado === "ok" || !destinos) return base;
+
+    const origen = normalizarOrigen(c);
+    if (ternaVacia(origen)) return base;
+    const mapeo = exactos.get(claveOrigen(origen)) ?? comodines.get(claveTerna(origen));
+    if (!mapeo) return base;
+
+    const destino = destinos.describir(mapeo.equivalencia_id);
+    if (!destino || !destino.vigente) {
+      if (!noAplicables.has(mapeo.id)) {
+        noAplicables.set(mapeo.id, {
+          id: mapeo.id,
+          origen: mapeo.origen,
+          motivo: "destino_inactivo",
+          ...(destino ? { destino: textoDestino(destino) } : {}),
+        });
+      }
+      return { ...base, mapeo_no_aplicable: mapeo.id };
+    }
+    return {
+      resultado: "ok",
+      equivalencia_id: mapeo.equivalencia_id,
+      mapeo: { id: mapeo.id, motivo_original: base.resultado, destino: textoDestino(destino) },
+    };
+  };
+
+  return Object.assign(resolutor, { mapeosNoAplicables: () => [...noAplicables.values()] });
 }
 
-export function resolverCombinacion(c: CombinacionPeticion, estado: EstadoImportacion): ResolucionCombinacionApi {
-  return crearResolutorCombinaciones(estado)(c);
+export function resolverCombinacion(
+  c: CombinacionPeticion,
+  estado: EstadoImportacion,
+  mapeos: readonly MapeoResolvible[] = []
+): ResolucionCombinacionApi {
+  return crearResolutorCombinaciones(estado, mapeos)(c);
 }
 
 // ─── Marcas ───

@@ -52,6 +52,8 @@ export function DetalleCarga({ id, periodo, onCerrar }: { id: string; periodo: s
   const resumen = lista<ResumenExclusion>(reporte.resumen_exclusiones);
   const avisos = lista<Aviso>(reporte.avisos);
   const marcas = lista<{ nombre: string }>(reporte.marcas_nuevas);
+  const reasignadas = (reporte.reasignadas ?? null) as { filas?: number; venta_soles?: number; stock_valorizado?: number } | null;
+  const filasReasignadas = typeof reasignadas?.filas === "number" ? reasignadas.filas : 0;
 
   const columnasHistorial: Columna<CargaApi>[] = [
     { clave: "estado", titulo: "Estado", render: (h) => <Badge tono={h.estado === "fallida" ? "alerta" : "neutro"}>{ETIQUETA_ESTADO[h.estado] ?? h.estado}</Badge> },
@@ -89,6 +91,13 @@ export function DetalleCarga({ id, periodo, onCerrar }: { id: string; periodo: s
             </div>
           ) : (
             <p className="text-sm text-tinta-suave">Esta carga no guardó el detalle de la conciliación.</p>
+          )}
+
+          {filasReasignadas > 0 && (
+            <Alert tono="info">
+              <strong>{formatearNumero(filasReasignadas)} filas reasignadas por mapeo</strong> (venta {formatearSoles(reasignadas?.venta_soles)}, stock a costo {formatearSoles(reasignadas?.stock_valorizado)}): iban a errores
+              y se cargaron al destino de un mapeo. El detalle origen → destino está en los avisos de abajo. Si cambias o eliminas el mapeo, este mes no cambia hasta que lo recargues.
+            </Alert>
           )}
 
           {resumen.length > 0 && (

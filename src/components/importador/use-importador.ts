@@ -12,12 +12,13 @@ export const MAX_FILAS_IMPORTACION = 10_000;
 /**
  * Estado y acciones del flujo de cuatro pasos (archivo → mapeo →
  * previsualizar → aplicar) contra un endpoint que recibe
- * `{ modo, filas }` y devuelve un reporte `R` en los dos modos.
+ * `{ modo, filas }` y devuelve un reporte `R` en los dos modos (el reporte no
+ * tiene por qué traer `modo`: el hook sabe en cuál llamó).
  *
  * Aplicar solo se habilita con una previsualización vigente: la firma del
  * archivo, la hoja y el mapeo no cambiaron desde que se previsualizó.
  */
-export function useImportador<C extends string, R extends { modo: ModoImportacion }>({
+export function useImportador<C extends string, R extends object>({
   campos,
   url,
   confirmarAplicar,

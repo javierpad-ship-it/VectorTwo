@@ -15,6 +15,8 @@
  *   - Toda la API de M5, lecturas incluidas, exige rol admin o planner.
  */
 
+import type { MapeoNoAplicableApi, MotivoMapeable } from "./tipos-mapeo";
+
 // ─── Piezas comunes ───
 
 /** Periodo `aaaa-mm`. */
@@ -109,7 +111,9 @@ export type ResultadoCombinacionError =
   | "mundo_desconocido"
   | "linea_desconocida"
   | "nodo_inexistente"
-  | "equivalencia_inexistente";
+  | "equivalencia_inexistente"
+  /** Uno o dos de género, mundo y línea en blanco (los tres en blanco es `sin_clasificar` y no llega aquí). */
+  | "clasificacion_incompleta";
 
 export type ResultadoCombinacionInactiva =
   | "genero_inactivo"
@@ -118,10 +122,24 @@ export type ResultadoCombinacionInactiva =
   | "nodo_inactivo"
   | "equivalencia_inactiva";
 
-/** Misma posición que en la petición. `detalle` dice qué pieza falta o está inactiva. */
+/**
+ * Misma posición que en la petición. `detalle` dice qué pieza falta o está
+ * inactiva.
+ *
+ * `ok` con `mapeo`: el árbol no resolvía (por `motivo_original`) y un mapeo
+ * activo reasignó la combinación a `equivalencia_id` (M5b). `destino` es el
+ * destino como `GENERO / MUNDO / LINEA / EQUIVALENCIA`.
+ *
+ * Un motivo con `mapeo_no_aplicable`: había un mapeo activo para ese origen
+ * pero su destino ya no es vigente; la fila conserva su motivo original.
+ */
 export type ResolucionCombinacionApi =
-  | { resultado: "ok"; equivalencia_id: string }
-  | { resultado: ResultadoCombinacionError | ResultadoCombinacionInactiva; detalle?: string };
+  | { resultado: "ok"; equivalencia_id: string; mapeo?: { id: string; motivo_original: MotivoMapeable; destino?: string } }
+  | {
+      resultado: ResultadoCombinacionError | ResultadoCombinacionInactiva;
+      detalle?: string;
+      mapeo_no_aplicable?: string;
+    };
 
 /**
  * Misma posición que en la petición. `parecida` (solo en `nueva`) es el nombre
@@ -165,6 +183,8 @@ export type PrevisualizarRespuesta = {
   anterior: { periodo: Periodo; filas: number; venta_soles: number; stock_valorizado: number } | null;
   /** Huellas de stock de todos los meses ya publicados. */
   huellas_stock: HuellaStock[];
+  /** Mapeos activos con los que se cruzó el archivo pero cuyo destino ya no es vigente (una vez por mapeo). */
+  mapeos_no_aplicables: MapeoNoAplicableApi[];
 };
 
 // ─── POST /api/ventas/marcas-nuevas ───

@@ -70,13 +70,31 @@ describe("interpretarFila: precedencia de motivos (reglas 14 a 16)", () => {
     expect(motivo({ venta_soles: "12,5", unidades: "0", costo_vendido: "0", stock_unidades: "0", stock_valorizado: "0" })).toBe("numero_invalido");
   });
 
-  it("fila_en_cero gana a sin_clasificar; sin_clasificar a clasificacion_incompleta; esta a tienda_vacia", () => {
+  it("fila_en_cero gana a sin_clasificar; sin_clasificar a tienda_vacia", () => {
     const ceros = { unidades: "0", venta_soles: "0", costo_vendido: "0", stock_unidades: "0", stock_valorizado: "0" };
     expect(motivo({ ...ceros, genero: "", mundo: "", linea: "" })).toBe("fila_en_cero");
     expect(motivo({ genero: "", mundo: "", linea: "", tienda: "" })).toBe("sin_clasificar");
-    expect(motivo({ genero: "HOMBRE", mundo: "", linea: "", tienda: "" })).toBe("clasificacion_incompleta");
-    expect(motivo({ mundo: "", tienda: "" })).toBe("clasificacion_incompleta");
     expect(motivo({ tienda: "" })).toBe("tienda_vacia");
+  });
+
+  it("M5b (regla 6): uno o dos de género, mundo y línea en blanco ya no se excluyen aquí (decide el resolutor) y ceden ante tienda y talla", () => {
+    // Antes salían como clasificacion_incompleta; ahora son `cargable` con el campo vacío y entran al diccionario de combinaciones.
+    const f = interpretarFila(fila({ genero: "HOMBRE", mundo: "", linea: "DENIM", equivalencia: "-" }));
+    expect(f.tipo).toBe("cargable");
+    if (f.tipo === "cargable") {
+      expect(f.combinacion).toMatchObject({ genero: "HOMBRE", mundo: "", linea: "DENIM", equivalencia: "DENIM", equivalencia_original: "-" });
+    }
+    expect(motivo({ genero: "HOMBRE", mundo: "", linea: "" })).toBe("cargable");
+    expect(motivo({ mundo: "" })).toBe("cargable");
+    // tienda_vacia y talla_desconocida ganan a la clasificación incompleta.
+    expect(motivo({ genero: "HOMBRE", mundo: "", linea: "", tienda: "" })).toBe("tienda_vacia");
+    expect(motivo({ mundo: "", tienda: "" })).toBe("tienda_vacia");
+    expect(motivo({ mundo: "", talla: "XL" })).toBe("talla_desconocida");
+  });
+
+  it("M5b: con la línea en blanco, `-` en la equivalencia no tiene nombre al que sustituirse y cae en SIN EQUIVALENCIA", () => {
+    const f = interpretarFila(fila({ genero: "HOMBRE", mundo: "CASUAL", linea: "", equivalencia: "-" }));
+    expect(f.tipo === "cargable" && f.combinacion.equivalencia).toBe("SIN EQUIVALENCIA");
   });
 
   it("una fila con talla desconocida y tienda válida queda para resolver (cede ante un error de tienda)", () => {

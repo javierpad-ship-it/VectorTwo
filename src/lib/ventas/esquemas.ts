@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { normalizarNombre } from "@/lib/arbol/normalizar";
+import { MAX_NOTA_MAPEO, MOTIVOS_MAPEABLES } from "./mapeos";
 import { LIMITES_PREVISUALIZAR, MAX_DICCIONARIO_TANDA, MAX_REPORTE_BYTES, TANDA_CLIENTE } from "./tipos";
 
 /**
@@ -121,3 +123,90 @@ export const tandaSchema = z
 // ─── POST /api/ventas/cargas/[id]/publicar ───
 
 export const publicarSchema = z.object({ esperado: medidasSchema });
+
+// ─── Mapeo de combinaciones (M5b): /api/ventas/mapeos ───
+
+const MAX_PIEZA_MAPEO = 120;
+const MSG_COMODIN = "El comodín * solo se admite en la equivalencia de un origen.";
+
+const piezaTerna = (nombre: string) =>
+  z
+    .string(`${nombre} debe ser texto.`)
+    .max(MAX_PIEZA_MAPEO, `${nombre} supera los ${MAX_PIEZA_MAPEO} caracteres.`)
+    .refine((v) => !v.includes("*"), MSG_COMODIN);
+
+const noTodasVacias = (o: { genero: string; mundo: string; linea: string }) =>
+  normalizarNombre(o.genero) !== "" || normalizarNombre(o.mundo) !== "" || normalizarNombre(o.linea) !== "";
+
+const MSG_TERNA_VACIA = "Un origen necesita al menos género, mundo o línea.";
+
+/** Origen de un mapeo: la terna sin comodines y la equivalencia con o sin el comodín `*` (solo, no mezclado con texto). */
+export const origenMapeoSchema = z
+  .object({
+    genero: piezaTerna("El género"),
+    mundo: piezaTerna("El mundo"),
+    linea: piezaTerna("La línea"),
+    equivalencia: z
+      .string("La equivalencia debe ser texto.")
+      .trim()
+      .min(1, "La equivalencia no puede quedar vacía.")
+      .max(MAX_PIEZA_MAPEO, `La equivalencia supera los ${MAX_PIEZA_MAPEO} caracteres.`)
+      .refine((v) => !v.includes("*") || v === "*", "El comodín * debe ir solo, sin otro texto."),
+  })
+  .refine(noTodasVacias, MSG_TERNA_VACIA);
+
+const nota = z.string("La nota debe ser texto.").max(MAX_NOTA_MAPEO, `La nota no puede superar ${MAX_NOTA_MAPEO} caracteres.`);
+
+export const crearMapeoItemSchema = z.object({
+  origen: origenMapeoSchema,
+  equivalencia_id: uuid,
+  motivo_origen: z.enum(MOTIVOS_MAPEABLES, "El motivo de origen no es válido.").optional(),
+  nota: nota.optional(),
+});
+
+export const crearMapeosSchema = z.object({
+  mapeos: z.array(crearMapeoItemSchema).min(1, "No hay mapeos que guardar.").max(500, "Se admiten hasta 500 mapeos por petición."),
+  reemplazar: z.boolean("reemplazar debe ser verdadero o falso.").default(false),
+});
+
+export const editarMapeoSchema = z
+  .object({
+    equivalencia_id: uuid.optional(),
+    nota: nota.nullable().optional(),
+    activo: z.boolean("activo debe ser verdadero o falso.").optional(),
+  })
+  .refine((d) => Object.values(d).some((v) => v !== undefined), "No hay nada que cambiar.");
+
+/** Orígenes a sugerir: sin comodín en ninguna pieza (la equivalencia puede venir vacía o `-`, se sustituye al sugerir). */
+export const sugerirSchema = z.object({
+  combinaciones: z
+    .array(
+      z.object({
+        genero: piezaTerna("El género"),
+        mundo: piezaTerna("El mundo"),
+        linea: piezaTerna("La línea"),
+        equivalencia: piezaTerna("La equivalencia"),
+      })
+    )
+    .min(1, "No hay combinaciones para sugerir.")
+    .max(500, "Se admiten hasta 500 combinaciones por petición."),
+});
+
+const celdaCsv = (nombre: string) => z.string(`${nombre} debe ser texto.`).max(MAX_PIEZA_MAPEO, `${nombre} supera los ${MAX_PIEZA_MAPEO} caracteres.`);
+
+export const filaMapeoCsvSchema = z.object({
+  ORIGEN_GENERO: celdaCsv("ORIGEN_GENERO"),
+  ORIGEN_MUNDO: celdaCsv("ORIGEN_MUNDO"),
+  ORIGEN_LINEA: celdaCsv("ORIGEN_LINEA"),
+  ORIGEN_EQUIVALENCIA: celdaCsv("ORIGEN_EQUIVALENCIA"),
+  DESTINO_GENERO: celdaCsv("DESTINO_GENERO"),
+  DESTINO_MUNDO: celdaCsv("DESTINO_MUNDO"),
+  DESTINO_LINEA: celdaCsv("DESTINO_LINEA"),
+  DESTINO_EQUIVALENCIA: celdaCsv("DESTINO_EQUIVALENCIA"),
+  NOTA: z.string("NOTA debe ser texto.").max(1_000, "Una nota supera los 1 000 caracteres.").optional(),
+});
+
+export const importarMapeosSchema = z.object({
+  modo: z.enum(["previsualizar", "aplicar"], "El modo debe ser previsualizar o aplicar."),
+  filas: z.array(filaMapeoCsvSchema).min(1, "El archivo no trae filas.").max(5_000, "Se admiten hasta 5 000 filas por importación."),
+});

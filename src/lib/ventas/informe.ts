@@ -41,11 +41,14 @@ import {
   type ResumenExclusion,
   type TotalesQlik,
   esMotivoError,
+  type Combinacion,
   type Consolidado,
   type DetalleAviso,
 } from "./tipos";
 import { planificarMarcasNuevas, type CandidataMarcaNueva } from "./resolver";
+import { describirOrigen } from "./origen-mapeo";
 import type { PrevisualizarRespuesta, ResolucionCombinacionApi } from "./tipos-api";
+import type { MapeoNoAplicableApi } from "./tipos-mapeo";
 
 /**
  * Informe del reporte previo (docs/modulos/05-venta-stock.md, reglas 20–27).
@@ -159,12 +162,33 @@ export type EntradaInforme = {
   resoluciones: Pick<
     PrevisualizarRespuesta,
     "hoy" | "tiendas" | "combinaciones" | "marcas" | "periodos" | "anterior" | "huellas_stock"
-  >;
+  > & {
+    /** M5b. Se omite en las respuestas anteriores a los mapeos (equivale a ninguno). */
+    mapeos_no_aplicables?: MapeoNoAplicableApi[];
+  };
   /** Totales de QlikView que escribió el usuario, por periodo `aaaa-mm` (opcionales). */
   totalesQlik?: Record<string, TotalesQlik>;
   /** Hoja `.xls` de exactamente 65 536 filas. */
   posiblementeTruncado?: boolean;
 };
+
+/**
+ * El `valor` con que el informe agrupa una exclusión de combinación: el
+ * `detalle` del resolutor si lo trae (`HOMBRE / (vacío) / PANTALON`, la línea
+ * sola, la terna…); si no, `GENERO / MUNDO / LINEA / EQUIVALENCIA`; y sin
+ * resolución (la respuesta no cubre esa posición), `GENERO / MUNDO / LINEA`.
+ * ÚNICA fuente de esa expresión: el informe y quien deba casar un grupo de
+ * exclusión con sus combinaciones (derivación de orígenes de la pantalla) la
+ * usan igual.
+ */
+export function valorGrupoCombinacion(
+  k: Pick<Combinacion, "genero" | "mundo" | "linea" | "equivalencia">,
+  r: ResolucionCombinacionApi | undefined
+): string {
+  if (!r) return `${k.genero} / ${k.mundo} / ${k.linea}`;
+  if (r.resultado !== "ok" && r.detalle) return r.detalle;
+  return `${k.genero} / ${k.mundo} / ${k.linea} / ${k.equivalencia}`;
+}
 
 export type CombinacionDesconocida = {
   motivo: MotivoExclusion;
@@ -229,7 +253,15 @@ const NUEVO_MEDIDAS = (e: Entradas, i: number) => ({
   stock_valorizado: e.stockValorizado[i],
 });
 
-type Bucket = { e: Entradas; tabla: TablaClaves; fusionadas: number; repetidas: number; muestraRepetidas: DetalleAviso[] };
+type Bucket = {
+  e: Entradas;
+  tabla: TablaClaves;
+  fusionadas: number;
+  repetidas: number;
+  muestraRepetidas: DetalleAviso[];
+  /** Entradas (por posición) a las que aportó al menos una fila reasignada por mapeo. */
+  conReasignadas: Set<number>;
+};
 
 export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
   const describirClave = (b: Bucket, i: number): string => {
@@ -274,16 +306,25 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
     });
   }
 
-  const detalleCombo = (c: number, r: ResolucionCombinacionApi): string => {
-    if (r.resultado !== "ok" && r.detalle) return r.detalle;
-    const k = dic.combinaciones[c];
-    return `${k.genero} / ${k.mundo} / ${k.linea} / ${k.equivalencia}`;
-  };
   const comboMotivo: (MotivoExclusion | null)[] = dic.combinaciones.map((_, c) => {
     const r = res.combinaciones[c];
     if (!r) return "nodo_inexistente";
     return r.resultado === "ok" ? null : (r.resultado as MotivoExclusion);
   });
+  // M5b: combinaciones reasignadas por un mapeo y combinaciones con un mapeo que no se pudo aplicar.
+  const comboMapeo = dic.combinaciones.map((_, c) => {
+    const r = res.combinaciones[c];
+    return r && r.resultado === "ok" && r.mapeo ? r.mapeo : null;
+  });
+  const noAplicablesPorId = new Map((res.mapeos_no_aplicables ?? []).map((m) => [m.id, m]));
+  const comboNoAplicable = dic.combinaciones.map((_, c) => {
+    const r = res.combinaciones[c];
+    return r && r.resultado !== "ok" && r.mapeo_no_aplicable ? (noAplicablesPorId.get(r.mapeo_no_aplicable) ?? null) : null;
+  });
+  const textoOrigenCombo = (c: number) => {
+    const k = dic.combinaciones[c];
+    return describirOrigen({ genero: k.genero, mundo: k.mundo, linea: k.linea, equivalencia: k.equivalencia });
+  };
   const eqOrd = new Int32Array(dic.combinaciones.length).fill(-1);
   const equivalenciasIds: string[] = [];
   {
@@ -361,6 +402,10 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
   // ── Primera pasada: entradas del acumulador → exclusión o clave final ──
   const buckets: Bucket[] = [];
   const revisar = new Map<number, GrupoAviso>();
+  // M5b: por mes, lo reasignado por mapeo (con su detalle ORIGEN → DESTINO), los mapeos aplicados y los que no se pudieron aplicar.
+  const reasignadasPorMes = new Map<number, GrupoAviso>();
+  const mapeosAplicadosPorMes = new Map<number, Set<string>>();
+  const noAplicadosPorMes = new Map<number, GrupoAviso>();
   const ETIQUETA_REVISAR: Record<number, string> = { 2: "Revisar", 3: "-", 4: "(vacío)" };
 
   for (let i = 0; i < E.n; i++) {
@@ -380,7 +425,7 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
     const mc = comboMotivo[c];
     if (mc) {
       const r = res.combinaciones[c];
-      const valor = r ? detalleCombo(c, r) : `${dic.combinaciones[c].genero} / ${dic.combinaciones[c].mundo} / ${dic.combinaciones[c].linea}`;
+      const valor = valorGrupoCombinacion(dic.combinaciones[c], r);
       const k = dic.combinaciones[c];
       const conPieza = mc === "equivalencia_inexistente" || mc === "equivalencia_inactiva";
       sumarExclusion(
@@ -393,6 +438,15 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
         conPieza ? { genero: k.genero, mundo: k.mundo, linea: k.linea, equivalencia: k.equivalencia_original } : undefined
       );
       if (MOTIVOS_COMBINACION_ERROR.includes(mc)) sumarDesconocida(mc, c, med, filas, primera);
+      const noAplicable = comboNoAplicable[c];
+      if (noAplicable) {
+        let ga = noAplicadosPorMes.get(p);
+        if (!ga) {
+          ga = new GrupoAviso();
+          noAplicadosPorMes.set(p, ga);
+        }
+        ga.agregar(med, `${textoOrigenCombo(c)} → ${noAplicable.destino ?? "destino desactivado"} (destino desactivado)`, filas);
+      }
       continue;
     }
     const mm = marcaMotivo[m];
@@ -420,9 +474,26 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
       sumarEn(s, med, filas);
     }
 
+    // Reasignada por un mapeo: pasó de error a cargable con la equivalencia destino.
+    const mapeo = comboMapeo[c];
+    if (mapeo) {
+      let gr = reasignadasPorMes.get(p);
+      if (!gr) {
+        gr = new GrupoAviso();
+        reasignadasPorMes.set(p, gr);
+      }
+      gr.agregar(med, `${textoOrigenCombo(c)} → ${mapeo.destino ?? equivalenciasIds[eqOrd[c]]}`, filas);
+      let ids = mapeosAplicadosPorMes.get(p);
+      if (!ids) {
+        ids = new Set();
+        mapeosAplicadosPorMes.set(p, ids);
+      }
+      ids.add(mapeo.id);
+    }
+
     let b = buckets[p];
     if (!b) {
-      b = { e: new Entradas(256), tabla: new TablaClaves(256), fusionadas: 0, repetidas: 0, muestraRepetidas: [] };
+      b = { e: new Entradas(256), tabla: new TablaClaves(256), fusionadas: 0, repetidas: 0, muestraRepetidas: [], conReasignadas: new Set() };
       buckets[p] = b;
     }
     const talla = cat === 1 ? 1 : 0;
@@ -431,11 +502,13 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
     if (existente === -1) {
       b.e.nueva(p, tiendaOrd[t], eqOrd[c], m, talla, primera, med);
       b.e.filas[b.e.n - 1] = filas;
+      if (mapeo) b.conReasignadas.add(b.e.n - 1);
     } else {
       const antes = b.e.filas[existente];
       b.e.sumar(existente, med);
       b.e.filas[existente] = antes + filas;
       if (primera < b.e.primera[existente]) b.e.primera[existente] = primera;
+      if (mapeo) b.conReasignadas.add(existente);
     }
   }
 
@@ -595,17 +668,29 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
     }
 
     // Claves repetidas: la suma ya está hecha; esto es lo que se informa.
+    let fusionadasConReasignadas = false;
+    if (b && fusionadas > 0) {
+      for (const i of b.conReasignadas) if (b.e.filas[i] > 1) fusionadasConReasignadas = true;
+    }
     if (fusionadas > 0) {
       rep.total.filas = fusionadas;
       grupoAviso.set("claves_repetidas_se_suman", rep);
     }
+    const reasig = reasignadasPorMes.get(p);
+    if (reasig) grupoAviso.set("reasignadas_por_mapeo", reasig);
+    const noAplicados = noAplicadosPorMes.get(p);
     const rv = revisar.get(p);
     if (rv) grupoAviso.set("talla_revisar_a_centrales", rv);
     if (st.filas_decimales_unidades > 0) g("unidades_con_decimales").total.filas = st.filas_decimales_unidades;
 
     const abierto = !esMesCerrado(periodo, hoy);
     const avisos: Aviso[] = [];
-    const agregarAviso = (codigo: CodigoAvisoONota, mensaje: string, gr: GrupoAviso, opciones: { rojo?: boolean; detalle?: DetalleAviso[] } = {}) => {
+    const agregarAviso = (
+      codigo: CodigoAvisoONota,
+      mensaje: string,
+      gr: GrupoAviso,
+      opciones: { rojo?: boolean; detalle?: DetalleAviso[]; maxDetalle?: number } = {}
+    ) => {
       const t = gr.total;
       const pv = st.archivo.venta !== 0 ? pct(t.venta, st.archivo.venta) : 0;
       const ps = st.archivo.stock_valorizado !== 0 ? pct(t.stock_valorizado, st.archivo.stock_valorizado) : 0;
@@ -621,7 +706,7 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
             stock_valorizado: centimosASoles(d.stock_valorizado),
           }))
           .sort((x, y) => Math.abs(y.venta_soles) + Math.abs(y.stock_valorizado) - (Math.abs(x.venta_soles) + Math.abs(x.stock_valorizado)) || y.filas - x.filas)
-          .slice(0, 50);
+          .slice(0, opciones.maxDetalle ?? 50);
       avisos.push({
         codigo,
         severidad: severidadDe(codigo),
@@ -642,12 +727,34 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
 
     for (const [codigo, gr] of grupoAviso) {
       if (codigo === "claves_repetidas_se_suman") {
-        agregarAviso(codigo, `${fusionadas} filas se sumaron a otra con la misma clave tras normalizar.`, gr);
+        agregarAviso(
+          codigo,
+          `${fusionadas} filas se sumaron a otra con la misma clave tras normalizar.${
+            fusionadasConReasignadas ? " Incluye filas reasignadas por mapeo que coincidieron con otras del árbol." : ""
+          }`,
+          gr
+        );
+      } else if (codigo === "reasignadas_por_mapeo") {
+        agregarAviso(
+          codigo,
+          `${gr.total.filas} filas se reasignaron por mapeo: no existían en el árbol y se cargan en la equivalencia que elegiste.`,
+          gr,
+          { maxDetalle: MAX_ENTRADAS_REPORTE }
+        );
       } else if (codigo === "unidades_con_decimales") {
         agregarAviso(codigo, `${gr.total.filas} filas traían unidades con decimales y se redondearon.`, gr);
       } else {
         agregarAviso(codigo, mensajeAviso(codigo, gr.total.filas), gr);
       }
+    }
+
+    if (noAplicados) {
+      agregarAviso(
+        "mapeos_no_aplicables",
+        `${noAplicados.total.filas} filas tienen un mapeo, pero su destino está desactivado: no se reasignaron y siguen excluidas.`,
+        noAplicados,
+        { rojo: true, maxDetalle: MAX_ENTRADAS_REPORTE }
+      );
     }
 
     if (abierto) agregarAviso("mes_abierto", `${periodo} todavía no cerró: su venta está incompleta.`, new GrupoAviso());
@@ -751,6 +858,8 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
       excluido: medidasInforme(excluido),
       cargado: medidasInforme(cargado),
       fusionadas,
+      reasignadas: medidasInforme(reasig ? reasig.total : tallyVacio()),
+      mapeos_aplicados: [...(mapeosAplicadosPorMes.get(p) ?? [])].sort(),
       identidad_ok: identidadOk,
       conciliacion: conciliarMes(st.archivo, excluido, cargado, entrada.totalesQlik?.[periodo]),
       resumen_exclusiones: resumen,
@@ -949,12 +1058,17 @@ export function armarReporteMes(informe: InformeCarga, periodo: string, opciones
       excluido: mes.excluido,
       cargado: mes.cargado,
       fusionadas: mes.fusionadas,
+      reasignadas: mes.reasignadas,
+      mapeos_aplicados: mes.mapeos_aplicados,
       identidad_ok: mes.identidad_ok,
       conciliacion: mes.conciliacion,
       totales_qlik: opciones.totalesQlik ?? null,
       resumen_exclusiones: mes.resumen_exclusiones,
       exclusiones,
-      avisos: mes.avisos.map((a) => ({ ...a, detalle: recortar(a.detalle, Math.min(tope, 50)) })),
+      avisos: mes.avisos.map((a) => ({
+        ...a,
+        detalle: recortar(a.detalle, a.codigo === "reasignadas_por_mapeo" || a.codigo === "mapeos_no_aplicables" ? tope : Math.min(tope, 50)),
+      })),
       marcas_nuevas: recortar(informe.marcas_nuevas, tope),
       huella_stock: mes.huella_stock,
       errores: mes.errores,

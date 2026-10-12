@@ -121,11 +121,11 @@ Entrada: un origen y el `EstadoImportacion` del árbol (solo piezas activas y no
 
 | Origen (G / M / L / E) | Esperado |
 |---|---|
-| HOMBRE / URBANO / DENIM / SKINY | caso 1: SKINNY 0,86 fuerte ("similar 0,86"), SLIM 0,25 fuera; 1 sugerencia |
+| HOMBRE / URBANO / DENIM / SKINY | caso 1: SKINNY 0,89 fuerte ("similar 0,89", 8/9), SLIM 0,00 fuera; 1 sugerencia |
 | HOMBRE / URBANO / DENIM / SKÍNNY | SKINNY 1,00 "mismo nombre sin tildes ni signos" |
 | HOMBRE / URBANO / DENIM / BOOTCUT | nada ≥ 0,5 → genérica 0,50 "única opción: genérica del nodo", no fuerte |
 | HOMBRE / URBANO / JEAN / JEAN (venía `-`) | caso 2: `similitud(JEAN, DENIM)` < 0,5 y `similitud(JEAN, PANTALON DRILL)` < 0,5 → sin sugerencia (`[]`) |
-| HOMBRE / URBANO / PANTALÓN DRIL / PANTALÓN DRIL | caso 2: línea PANTALON DRILL 0,91; `e === l` → equivalencia PANTALON DRILL; puntuación 0,91 fuerte |
+| HOMBRE / URBANO / PANTALÓN DRIL / PANTALÓN DRIL | caso 2: línea PANTALON DRILL 0,96 (22/23); `e === l` → equivalencia PANTALON DRILL; puntuación 0,96 fuerte |
 | HOMBRES / URBANO / DENIM / SLIM | caso 3: HOMBRE 0,91; luego caso 1 SLIM 1,00 → 0,91 fuerte, razón "género HOMBRES → HOMBRE (0,91) · mismo nombre" |
 | HOMBRE / (vacío) / DENIM / SKINNY | caso 4: HOMBRE/URBANO/DENIM → SKINNY, puntuación 1 · 2/3 = 0,67 (no fuerte, razón "línea igual · 2 de 3 piezas conocidas"); MUJER/URBANO/DENIM queda fuera (contradice el género conocido) |
 | (vacío) / (vacío) / DENIM / MOM | caso 4: MUJER/URBANO/DENIM → MOM 0,33; HOMBRE/URBANO/DENIM → genérica… ambos < 0,5 → `[]` |
