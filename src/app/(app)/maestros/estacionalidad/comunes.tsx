@@ -1,7 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
+import {
+  FILTRO_ARBOL_VACIO,
+  filtrarPorArbol,
+  lineasVigentes,
+  resumenLineas,
+  type FiltroArbol,
+} from "@/lib/estacionalidad/filtro-arbol";
 import type {
   CatalogoPlanoEstacionalidad,
   EquivalenciaPlana,
@@ -9,6 +15,7 @@ import type {
   LineaPlana,
 } from "@/lib/estacionalidad/tipos-api";
 import { Field, Input, Select } from "@/components/ui/form";
+import { Checkbox } from "@/components/ui/checkbox";
 import { descargarCsv } from "@/components/importador/csv";
 
 /** Piezas compartidas por las pestañas Asignación y Faltantes. */
@@ -17,27 +24,9 @@ export type Catalogos = Pick<EquivalenciasEstacionalidadRespuesta, "generos" | "
 
 export const CATALOGOS_VACIOS: Catalogos = { generos: [], mundos: [], lineas: [] };
 
-// ─── Filtros de árbol (género · mundo · línea · texto) ───
+// ─── Filtros de árbol (género · mundo · líneas · texto) ───
 
-export type FiltroArbol = { generoId: string; mundoId: string; lineaId: string; texto: string };
-
-export const FILTRO_ARBOL_VACIO: FiltroArbol = { generoId: "", mundoId: "", lineaId: "", texto: "" };
-
-/** Filtro en memoria; el texto busca en nombre y código de la equivalencia y en la ruta. */
-export function filtrarPorArbol(filas: EquivalenciaPlana[], f: FiltroArbol): EquivalenciaPlana[] {
-  const consulta = normalizarNombre(f.texto);
-  const consultaCodigo = aCodigo(consulta);
-  return filas.filter(
-    (e) =>
-      (f.generoId === "" || e.genero_id === f.generoId) &&
-      (f.mundoId === "" || e.mundo_id === f.mundoId) &&
-      (f.lineaId === "" || e.linea_id === f.lineaId) &&
-      (consulta === "" ||
-        e.nombre.includes(consulta) ||
-        e.ruta.includes(consulta) ||
-        (consultaCodigo !== "" && e.codigo.includes(consultaCodigo)))
-  );
-}
+export { FILTRO_ARBOL_VACIO, filtrarPorArbol, type FiltroArbol } from "@/lib/estacionalidad/filtro-arbol";
 
 function ordenCatalogo(a: CatalogoPlanoEstacionalidad, b: CatalogoPlanoEstacionalidad) {
   return a.orden - b.orden || a.nombre.localeCompare(b.nombre);
@@ -61,10 +50,11 @@ export function useFiltroArbol(base: EquivalenciaPlana[], lineas: LineaPlana[]) 
     return lineas.filter((l) => ids.has(l.id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [base, lineas, generoId, mundoId]);
 
-  const lineaId = lineasDisponibles.some((l) => l.id === filtro.lineaId) ? filtro.lineaId : "";
-  const filas = useMemo(() => filtrarPorArbol(base, { generoId, mundoId, lineaId, texto }), [base, generoId, mundoId, lineaId, texto]);
+  // Las líneas marcadas que dejan de existir en el género-mundo elegido se descartan sin efectos.
+  const lineaIds = useMemo(() => lineasVigentes(filtro.lineaIds, lineasDisponibles), [filtro.lineaIds, lineasDisponibles]);
+  const filas = useMemo(() => filtrarPorArbol(base, { generoId, mundoId, lineaIds, texto }), [base, generoId, mundoId, lineaIds, texto]);
 
-  return { filtro: { generoId, mundoId, lineaId, texto }, setFiltro, lineasDisponibles, filas };
+  return { filtro: { generoId, mundoId, lineaIds, texto }, setFiltro, lineasDisponibles, filas };
 }
 
 export function FiltrosArbol({
@@ -104,16 +94,12 @@ export function FiltrosArbol({
           ))}
         </Select>
       </Field>
-      <Field label="Línea">
-        <Select value={filtro.lineaId} onChange={(e) => onCambiar({ ...filtro, lineaId: e.target.value })} className="h-9">
-          <option value="">Todas</option>
-          {lineasDisponibles.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.nombre}
-              {l.activo ? "" : " (inactiva)"}
-            </option>
-          ))}
-        </Select>
+      <Field label="Líneas" hint={filtro.lineaIds.length > 1 ? `${filtro.lineaIds.length} marcadas` : undefined}>
+        <SelectorLineas
+          lineas={lineasDisponibles}
+          valor={filtro.lineaIds}
+          onCambiar={(lineaIds) => onCambiar({ ...filtro, lineaIds })}
+        />
       </Field>
       <Field label="Buscar">
         <Input
@@ -125,6 +111,68 @@ export function FiltrosArbol({
         />
       </Field>
     </div>
+  );
+}
+
+/**
+ * Selector de varias líneas a la vez (p. ej. ABRIGOS y CASACAS) para asignar
+ * más rápido. Menú con casillas, búsqueda y atajos "Todas" / "Limpiar".
+ */
+function SelectorLineas({
+  lineas,
+  valor,
+  onCambiar,
+}: {
+  lineas: LineaPlana[];
+  valor: string[];
+  onCambiar: (ids: string[]) => void;
+}) {
+  const [texto, setTexto] = useState("");
+  const consulta = texto.trim().toLowerCase();
+  const visibles = consulta === "" ? lineas : lineas.filter((l) => l.nombre.toLowerCase().includes(consulta));
+  const elegidas = lineasVigentes(valor, lineas);
+  const alternar = (id: string) => onCambiar(elegidas.includes(id) ? elegidas.filter((v) => v !== id) : [...elegidas, id]);
+  return (
+    <details className="group relative">
+      <summary className="flex h-9 cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-borde bg-superficie px-3 text-sm text-tinta [&::-webkit-details-marker]:hidden">
+        <span className="truncate">{resumenLineas(elegidas, lineas)}</span>
+        <span aria-hidden className="text-xs text-tinta-suave group-open:rotate-180">
+          ▾
+        </span>
+      </summary>
+      <div className="absolute z-20 mt-1 w-full min-w-64 rounded-md border border-borde bg-superficie p-2 shadow-lg">
+        <Input
+          type="search"
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder="Buscar línea…"
+          className="mb-2 h-8"
+          aria-label="Buscar línea"
+        />
+        <div className="mb-1 flex gap-3 text-xs">
+          <button type="button" className="text-marca hover:underline" onClick={() => onCambiar(visibles.map((l) => l.id))}>
+            Marcar {consulta === "" ? "todas" : "las visibles"}
+          </button>
+          <button type="button" className="text-tinta-suave hover:underline" onClick={() => onCambiar([])}>
+            Limpiar
+          </button>
+        </div>
+        <ul className="max-h-64 overflow-y-auto">
+          {visibles.length === 0 && <li className="px-1 py-2 text-xs text-tinta-suave">Ninguna línea coincide.</li>}
+          {visibles.map((l) => (
+            <li key={l.id}>
+              <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-neutro-suave">
+                <Checkbox checked={elegidas.includes(l.id)} onChange={() => alternar(l.id)} label={`Línea ${l.nombre}`} />
+                <span className="truncate">
+                  {l.nombre}
+                  {l.activo ? "" : " (inactiva)"}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
   );
 }
 
