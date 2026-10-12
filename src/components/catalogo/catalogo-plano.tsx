@@ -12,6 +12,7 @@ import { DataTable, type Columna } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { ChipsMultiples } from "@/components/ui/chips-multiples";
+import { Modal } from "@/components/ui/modal";
 import { VistaPreviaNombre } from "./vista-previa-nombre";
 
 /** Lo mínimo que devuelve cualquier catálogo plano (`generos`, `mundos`, `agrupaciones_marca`…). */
@@ -83,7 +84,7 @@ function capitalizar(s: string) {
 
 /**
  * Mantenimiento de un catálogo plano (orden · código · nombre · [descripción] ·
- * hijos · estado) contra `/api/{recurso}`: alta arriba, edición en línea abajo,
+ * hijos · estado) contra `/api/{recurso}`: alta arriba, edición en un diálogo con el formulario completo,
  * desactivar/reactivar y eliminar (bloqueado con hijos).
  *
  * La columna de hijos y el bloqueo de Eliminar usan `fila[hijos.clave]`
@@ -229,32 +230,17 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
       clave: "orden",
       titulo: "Orden",
       className: "w-20",
-      render: (f) =>
-        edicion?.id === f.id ? (
-          <Input type="number" min={0} value={edicion.orden} onChange={(e) => setEdicion({ ...edicion, orden: e.target.value })} className="h-8 w-20" aria-label="Orden" />
-        ) : (
-          <span className="font-mono text-xs text-tinta-suave">{f.orden}</span>
-        ),
+      render: (f) => <span className="font-mono text-xs text-tinta-suave">{f.orden}</span>,
     },
     {
       clave: "codigo",
       titulo: "Código",
-      render: (f) =>
-        edicion?.id === f.id ? (
-          <Input value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} className="h-8 w-40 font-mono" aria-label="Código" />
-        ) : (
-          <code className="font-mono text-xs">{f.codigo}</code>
-        ),
+      render: (f) => <code className="font-mono text-xs">{f.codigo}</code>,
     },
     {
       clave: "nombre",
       titulo: "Nombre",
-      render: (f) =>
-        edicion?.id === f.id ? (
-          <Input value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} className="h-8" aria-label="Nombre" autoFocus />
-        ) : (
-          <span className="font-medium">{f.nombre}</span>
-        ),
+      render: (f) => <span className="font-medium">{f.nombre}</span>,
     },
     ...(generos
       ? [
@@ -262,17 +248,6 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
             clave: "generos",
             titulo: "Géneros",
             render: (f: F) => {
-              if (edicion?.id === f.id) {
-                return (
-                  <SelectorGeneros
-                    generos={generos}
-                    valor={edicion.generoIds}
-                    onCambiar={(generoIds) => setEdicion({ ...edicion, generoIds })}
-                    disabled={ocupado}
-                    etiqueta={`Géneros de ${f.nombre}`}
-                  />
-                );
-              }
               const lista = generos.obtener(f);
               return lista.length > 0 ? (
                 <ul className="flex flex-wrap gap-1" aria-label={`Géneros de ${f.nombre}`}>
@@ -297,18 +272,6 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
             clave: "descripcion",
             titulo: "Descripción",
             render: (f: F) => {
-              if (edicion?.id === f.id) {
-                return (
-                  <Input
-                    value={edicion.descripcion}
-                    maxLength={descripcion.max}
-                    onChange={(e) => setEdicion({ ...edicion, descripcion: e.target.value })}
-                    className="h-8 w-64"
-                    aria-label="Descripción"
-                    placeholder="Para qué sirve"
-                  />
-                );
-              }
               const texto = descripcion.obtener(f);
               return texto ? (
                 <span className="block max-w-64 truncate text-tinta-suave" title={texto}>
@@ -344,21 +307,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
       className: "text-right",
       render: (f) => {
         const tieneHijos = contarHijos(f) > 0;
-        return edicion?.id === f.id ? (
-          <div className="flex justify-end gap-1">
-            <Button
-              tamano="sm"
-              disabled={ocupado || (generos !== undefined && edicion.generoIds.length === 0)}
-              title={generos !== undefined && edicion.generoIds.length === 0 ? MOTIVO_SIN_GENERO : undefined}
-              onClick={guardarEdicion}
-            >
-              {ocupado ? "Guardando…" : "Guardar"}
-            </Button>
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => setEdicion(null)}>
-              Cancelar
-            </Button>
-          </div>
-        ) : (
+        return (
           <div className="flex justify-end gap-1">
             <Button
               variante="fantasma"
@@ -398,7 +347,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
 
   return (
     <div className="space-y-6">
-      {error && <Alert onCerrar={() => setError(null)}>{error}</Alert>}
+      {error && !edicion && <Alert onCerrar={() => setError(null)}>{error}</Alert>}
       {aviso && (
         <Alert tono="exito" onCerrar={() => setAviso(null)}>
           {aviso}
@@ -481,6 +430,96 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         />
         {notaPie && <p className="mt-3 text-xs text-tinta-suave">{notaPie}</p>}
       </Card>
+
+      {edicion && (
+        <Modal
+          titulo={`Editar ${singular}`}
+          descripcion="El nombre y el código se guardan normalizados. Los cambios se aplican al pulsar Guardar."
+          onCerrar={() => {
+            setError(null);
+            setEdicion(null);
+          }}
+          cerrable={!ocupado}
+          ancho="max-w-2xl"
+          pie={
+            <>
+              <Button
+                variante="fantasma"
+                disabled={ocupado}
+                onClick={() => {
+                  setError(null);
+                  setEdicion(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                form="form-edicion-catalogo"
+                disabled={ocupado || (generos !== undefined && edicion.generoIds.length === 0)}
+                title={generos !== undefined && edicion.generoIds.length === 0 ? MOTIVO_SIN_GENERO : undefined}
+              >
+                {ocupado ? "Guardando…" : "Guardar"}
+              </Button>
+            </>
+          }
+        >
+          <form
+            id="form-edicion-catalogo"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void guardarEdicion();
+            }}
+            className="grid gap-4 md:grid-cols-4"
+          >
+            {error && (
+              <div className="md:col-span-4">
+                <Alert onCerrar={() => setError(null)}>{error}</Alert>
+              </div>
+            )}
+            <Field label="Nombre" className="md:col-span-3">
+              <Input required autoFocus value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} />
+            </Field>
+            <Field label="Orden" hint="Posición en las listas.">
+              <Input type="number" min={0} value={edicion.orden} onChange={(e) => setEdicion({ ...edicion, orden: e.target.value })} />
+            </Field>
+            <Field label="Código" hint="Solo letras, números y _." className="md:col-span-4">
+              <Input value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} className="font-mono" />
+            </Field>
+            {descripcion && (
+              <Field
+                label="Descripción"
+                hint={`${edicion.descripcion.length}/${descripcion.max}.${descripcion.hint ? ` ${descripcion.hint}` : ""}`}
+                className="md:col-span-4"
+              >
+                <Input
+                  value={edicion.descripcion}
+                  maxLength={descripcion.max}
+                  onChange={(e) => setEdicion({ ...edicion, descripcion: e.target.value })}
+                  placeholder="Para qué sirve"
+                />
+              </Field>
+            )}
+            {generos && (
+              <div className="md:col-span-4">
+                <span className="mb-1 block text-sm font-medium text-tinta">Géneros</span>
+                <SelectorGeneros
+                  generos={generos}
+                  valor={edicion.generoIds}
+                  onCambiar={(generoIds) => setEdicion({ ...edicion, generoIds })}
+                  disabled={ocupado}
+                  etiqueta={`Géneros de ${edicion.nombre}`}
+                />
+                <span className={`mt-1 block text-xs ${edicion.generoIds.length === 0 ? "text-alerta" : "text-tinta-suave"}`}>
+                  {edicion.generoIds.length === 0
+                    ? `${MOTIVO_SIN_GENERO} Solo recibirá equivalencias de los géneros que marques.`
+                    : "Solo recibirá equivalencias de los géneros marcados."}
+                </span>
+              </div>
+            )}
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

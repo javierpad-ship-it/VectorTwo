@@ -18,7 +18,7 @@ const DESCRIPCION: DescripcionCatalogo<AgrupacionEstacionalidadFila> = {
 
 /**
  * Pestaña Agrupaciones: el catálogo plano (orden · código · nombre · géneros ·
- * descripción · equivalencias · estado) con alta y edición en línea. Cada
+ * descripción · equivalencias · estado) con alta y edición en un diálogo. Cada
  * agrupación pertenece a uno o más géneros (obligatorio); la que no tiene
  * ninguno sale resaltada con "Sin género". Se presenta por nombre. El conteo
  * de equivalencias enlaza a la vista Por agrupación de Asignación.
