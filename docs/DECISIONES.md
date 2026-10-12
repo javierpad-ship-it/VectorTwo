@@ -504,53 +504,65 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Descartado.** Un `DELETE` sin condición de estado en el flujo de carga; un épsilon fijo.
 
-## 2026-10-12 · M5b: el árbol manda; el mapeo solo entra cuando el árbol no resuelve (propuesta, pendiente de construcción)
+## 2026-10-12 · M5b: el árbol manda; el mapeo solo entra cuando el árbol no resuelve (construido 2026-10-12)
 
 **Decisión.** La mejora 05b (`docs/modulos/05b-mapeo-combinaciones.md`) añade el mapeo persistente de combinaciones históricas a una equivalencia vigente. El resolutor consulta el mapeo solo cuando el árbol devuelve algo distinto de `ok`; exacto antes que comodín; nunca se encadena; un destino no vigente (equivalencia, nodo, línea, género o mundo inactivos) no se aplica y la fila conserva su motivo original, con aviso rojo. Un origen que después se crea en el árbol deja el mapeo "obsoleto": se muestra, no se aplica.
 
-**Por qué.** Sin encadenamiento no hay ciclos por construcción, y con el árbol por delante un mapeo viejo nunca puede tapar una combinación que ya existe. Nunca se carga a un destino que el maestro dice que no debe aparecer. Estado: propuesta de la ficha, pendiente de aprobación y de construcción.
+**Por qué.** Sin encadenamiento no hay ciclos por construcción, y con el árbol por delante un mapeo viejo nunca puede tapar una combinación que ya existe. Nunca se carga a un destino que el maestro dice que no debe aparecer. Estado: construido el 2026-10-12 (`0.8.1 · M5`); hito pendiente de recorrer por Javier.
+
+**Estado de la construcción (2026-10-12).** Se cumple tal cual, con una precisión que la propuesta no decía: si el mapeo exacto de un origen apunta a un destino no vigente, no se prueba el comodín de su terna (la fila conserva su motivo y el aviso rojo nombra el mapeo exacto), para que un comodín no tape una decisión más concreta que quedó rota.
 
 **Descartado.** Mapeo con prioridad sobre el árbol; renombres encadenados.
 
-## 2026-10-12 · M5b: el origen es la combinación exacta, con un único comodín `*` en la equivalencia (propuesta, pendiente de construcción)
+## 2026-10-12 · M5b: el origen es la combinación exacta, con un único comodín `*` en la equivalencia (construido 2026-10-12)
 
 **Decisión.** El origen de un mapeo es la combinación género, mundo, línea y equivalencia tal como llega a `previsualizar` (normalizada, con `-` sustituido por el nombre de la línea y vacío por `SIN EQUIVALENCIA`). El único comodín es `*` en la equivalencia: "cualquier equivalencia de esa terna que no resuelva" va a una equivalencia fija. No hay comodín en género, mundo ni línea.
 
-**Por qué.** El comodín cubre "toda una línea histórica a otra" sin crear una fila por equivalencia ni esperar a que cada equivalencia vieja aparezca en otro año. Un comodín en la terna sería una regla de renombre, otro mecanismo, fuera de alcance. Estado: propuesta, pendiente de construcción.
+**Por qué.** El comodín cubre "toda una línea histórica a otra" sin crear una fila por equivalencia ni esperar a que cada equivalencia vieja aparezca en otro año. Un comodín en la terna sería una regla de renombre, otro mecanismo, fuera de alcance. Estado: construido el 2026-10-12.
+
+**Estado de la construcción (2026-10-12).** QA encontró que el importador aceptaba `*` en género, mundo o línea; ahora se rechaza (`origen_con_comodin_invalido`, `400` en el POST y fila omitida en el importador). El origen `*` nunca se marca obsoleto, porque no es una combinación real que el árbol pueda llegar a resolver.
 
 **Descartado.** Comodines en la terna; expresiones regulares.
 
-## 2026-10-12 · M5b: los hechos guardan solo el destino; cambiar un mapeo exige recargar el mes (propuesta, pendiente de construcción)
+## 2026-10-12 · M5b: los hechos guardan solo el destino; cambiar un mapeo exige recargar el mes (construido 2026-10-12)
 
 **Decisión.** El hecho se guarda con la `equivalencia_id` destino, sin marca en la fila; la auditoría de qué mapeos se aplicaron y cuánto pesaron va en el `reporte` de la carga. Borrar o cambiar un mapeo no toca las cargas publicadas: el efecto se ve al recargar el mes.
 
-**Por qué.** Es el mismo criterio del árbol vigente: los hechos no copian texto y son inmutables. Un mapeo equivocado mezcla el histórico en silencio, por eso cada previsualización y cada reporte guardado muestran el detalle `ORIGEN → DESTINO`, y la recarga del mes (idempotente) es la corrección. Estado: propuesta, pendiente de construcción.
+**Por qué.** Es el mismo criterio del árbol vigente: los hechos no copian texto y son inmutables. Un mapeo equivocado mezcla el histórico en silencio, por eso cada previsualización y cada reporte guardado muestran el detalle `ORIGEN → DESTINO`, y la recarga del mes (idempotente) es la corrección. Estado: construido el 2026-10-12.
+
+**Estado de la construcción (2026-10-12).** El reporte guardado lleva `reasignadas`, el aviso con el detalle `ORIGEN → DESTINO` y los ids de los mapeos aplicados. Si dos usuarios guardan el mismo origen a la vez, sin `reemplazar` el segundo recibe `409 origen_repetido` y con `reemplazar` gana el último que escribe.
 
 **Descartado.** Aplicar mapeos con `update` sobre hechos ya publicados; mapeo con vigencia por fecha (el árbol vigente rige todo el histórico, entrada del 2026-10-11).
 
-## 2026-10-12 · M5b: `clasificacion_incompleta` es mapeable y `sin_clasificar` sigue excluida por decisión (propuesta, pendiente de construcción)
+## 2026-10-12 · M5b: `clasificacion_incompleta` es mapeable y `sin_clasificar` sigue excluida por decisión (construido 2026-10-12)
 
 **Decisión.** Una fila con uno o dos de género, mundo y línea en blanco ya no se excluye al interpretar: la decide el resolutor como `clasificacion_incompleta`, que es mapeable. Con los tres en blanco sigue siendo `sin_clasificar`, excluida por decisión y no mapeable. En la precedencia, `tienda_vacia` y `talla_desconocida` ganan a `clasificacion_incompleta`, lo que ajusta la regla 14 de M5 y su test.
 
-**Por qué.** Con uno o dos campos conocidos hay pistas para elegir un destino; con los tres en blanco no hay origen que mapear, y Javier decidió excluirlas el 2026-10-11. Estado: propuesta, pendiente de construcción (la pregunta abierta 2 de la ficha deja la puerta a un destino único para lo sin clasificar).
+**Por qué.** Con uno o dos campos conocidos hay pistas para elegir un destino; con los tres en blanco no hay origen que mapear, y Javier decidió excluirlas el 2026-10-11. Estado: construido el 2026-10-12 (la pregunta abierta 2 de la ficha deja la puerta a un destino único para lo sin clasificar).
+
+**Estado de la construcción (2026-10-12).** Un `-` con la línea en blanco no tiene nombre de línea al que sustituirse y se normaliza a `SIN EQUIVALENCIA`, para que el origen de un mapeo nunca tenga la equivalencia vacía.
 
 **Descartado.** Mapear `sin_clasificar` desde ya.
 
-## 2026-10-12 · M5b: la sugerencia es Dice sobre bigramas, determinista, y nunca se aplica sola (propuesta, pendiente de construcción)
+## 2026-10-12 · M5b: la sugerencia es Dice sobre bigramas, determinista, y nunca se aplica sola (construido 2026-10-12)
 
 **Decisión.** La sugerencia de destino es TypeScript puro (`sugerir-mapeo.ts`), calculada en el servidor porque tiene el árbol: similitud Dice sobre bigramas de `aCodigo`, se listan candidatas con puntuación de 0,50 o más, "fuerte" desde 0,80, hasta tres por origen. Nunca se aplica sola: Javier elige. El peso de la venta no entra en la puntuación.
 
-**Por qué.** Dice tolera reordenar y recortar palabras (`PANTALON DENIM` frente a `DENIM PANTALON`) y es trivial de probar, a diferencia de Levenshtein. La venta metería sesgo hacia lo grande. Es ayuda y no automatismo, el mismo criterio que 02b para sus sugerencias. Estado: propuesta, pendiente de construcción.
+**Por qué.** Dice tolera reordenar y recortar palabras (`PANTALON DENIM` frente a `DENIM PANTALON`) y es trivial de probar, a diferencia de Levenshtein. La venta metería sesgo hacia lo grande. Es ayuda y no automatismo, el mismo criterio que 02b para sus sugerencias. Estado: construido el 2026-10-12.
+
+**Estado de la construcción (2026-10-12).** Dos puntuaciones de ejemplo de la propuesta estaban mal calculadas: la fórmula da 0,89 para `SKINY` frente a `SKINNY` y 0,96 para `PANTALÓN DRIL` frente a `PANTALON DRILL` (no 0,86 ni 0,91). La fórmula no cambió; se corrigieron la tabla de casos de la ficha y el test.
 
 **Descartado.** Distancia de Levenshtein; aplicar la sugerencia fuerte automáticamente.
 
-## 2026-10-12 · Numeración de migraciones y versiones de las mejoras 05b, 05c, 02b y M6 (propuesta, pendiente de construcción)
+## 2026-10-12 · Numeración de migraciones y versiones de las mejoras 05b, 05c, 02b y M6 (05b construida 2026-10-12; las otras, pendientes de construcción)
 
 **Decisión.** Orden de construcción y numeración final, fijada con Javier el 2026-10-12: 05b mapeo de combinaciones, migración `0008` y `0.8.1 · M5`; 05c ubicaciones ignoradas y conciliación, `0009_ubicaciones_ignoradas.sql` y `0.8.2 · M5`; 02b nivel de planificación y marcas relevantes por GML, `0010` y `0.8.3 · M2b`; M6 curvas de estacionalidad, `0011` (la versión `0.9.0 · M6` no cambia). Los documentos de las cinco fichas y PLAN §4, §5 y §7 se renumeraron en consecuencia.
 
 **Por qué.** Cuatro fichas se escribieron en paralelo y las tres primeras reclamaron la misma `0008` y la `0.8.1`. 05b es urgente (el histórico de 2023 en adelante trae combinaciones que ya no existen y bloquean meses) y 05c corrige dos fricciones del piloto de septiembre, así que ambas se construyen antes que 02b y M6. Una migración numerada dos veces no se detecta hasta aplicarla.
 
 **Descartado.** Mantener `0008` y `0.8.1` para 02b (ya reclamadas por la 05b, que se construye antes).
+
+**Estado (2026-10-12).** La 05b se construyó con `0008_mapeo_combinaciones.sql` y `0.8.1 · M5`, como estaba previsto. 05c (`0009`, `0.8.2`), 02b (`0010`, `0.8.3`) y M6 (`0011`) siguen sin construir.
 
 ## 2026-10-12 · M5c: las ubicaciones que no son tiendas viven en `ubicaciones_ignoradas`, no en `tiendas` desactivadas (propuesta, pendiente de construcción)
 

@@ -1,6 +1,52 @@
 # M5b · Mapeo de combinaciones históricas (mejora de M5)
 
-> Estado: **especificación urgente, pendiente de aprobación por Javier (2026-10-12)**. No hay código ni migración. Mejora de [05-venta-stock](05-venta-stock.md) (construido, `0.8.0 · M5`); toca el resolutor, el informe y la pantalla de carga de M5 y usa el árbol de [01-arbol-producto](01-arbol-producto.md) (nodos GML, equivalencia `-` = igual a la línea, genérica `SIN EQUIVALENCIA`). Contexto de [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md): un destino "GML" o "GMLE" es siempre, en los hechos, una `equivalencia_id`. Versión `0.8.1 · M5`, migración **`0008_mapeo_combinaciones.sql`**; por eso la mejora 05c ([05c-ubicaciones-conciliacion](05c-ubicaciones-conciliacion.md)) toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011` (renumeración anotada en esas fichas y en `docs/PLAN.md`). Ningún dato real de Lukers: géneros, líneas y equivalencias de ejemplo son inventados.
+> Estado: **construido 2026-10-12 (`0.8.1 · M5`); hito pendiente de recorrer por Javier.** Lo que existe hoy está en "Construido" y en "Cambios respecto a la especificación"; el resto de la ficha es el diseño del que se partió y sigue valiendo salvo lo anotado ahí. Mejora de [05-venta-stock](05-venta-stock.md) (construido, `0.8.0 · M5`); toca el resolutor, el informe y la pantalla de carga de M5 y usa el árbol de [01-arbol-producto](01-arbol-producto.md) (nodos GML, equivalencia `-` = igual a la línea, genérica `SIN EQUIVALENCIA`). Contexto de [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md): un destino "GML" o "GMLE" es siempre, en los hechos, una `equivalencia_id`. Versión `0.8.1 · M5`, migración **`0008_mapeo_combinaciones.sql`**; por eso la mejora 05c ([05c-ubicaciones-conciliacion](05c-ubicaciones-conciliacion.md)) toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011` (renumeración anotada en esas fichas y en `docs/PLAN.md`). Ningún dato real de Lukers: géneros, líneas y equivalencias de ejemplo son inventados.
+
+## Construido (`0.8.1 · M5`, 2026-10-12)
+
+**Rutas** (todas `requirePlanner`; handlers en `src/app/api/ventas/mapeos/`): `GET` y `POST /api/ventas/mapeos` (listar con `?q=` y `?estado=`; crear 1 a 500, todo o nada), `PATCH` y `DELETE /api/ventas/mapeos/[id]`, `POST /api/ventas/mapeos/sugerir` y `POST /api/ventas/mapeos/importar`. `POST /api/ventas/previsualizar` no cambió de ruta: ahora lee los mapeos activos y devuelve `mapeos_no_aplicables`. Migración `0008_mapeo_combinaciones.sql` (tabla `mapeos_combinacion`, único sobre el origen, `on delete cascade` hacia la equivalencia, RLS sin políticas, sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`).
+
+**Archivos principales.** Lógica pura en `src/lib/ventas/`: `mapeos.ts` (estado de cada mapeo, `planificarCrearMapeos`, `planificarImportacionMapeos`), `origen-mapeo.ts` (normalización y claves del origen, validación del comodín), `sugerir-mapeo.ts`, `resolver.ts` (`crearResolutorCombinaciones(estado, mapeos)`), `informe.ts` (`reasignadas`, avisos y reporte guardado) y `recalcular.ts`; tipos en `tipos-mapeo.ts`; acceso a datos en `consultas.ts`, que sigue siendo el único archivo que nombra la tabla. Pantalla en `src/app/(app)/planificacion/venta-stock/`: pestaña `mapeos-tab.tsx`, modal `asignar-mapeo.tsx` con `selector-destino.tsx`, `importar-mapeos.tsx`, altas y ediciones a mano en `formularios-mapeo.tsx`, `origenes-mapeo.ts` (qué combinaciones exactas forman cada grupo de error) y `use-carga-ventas.ts`, que conserva el acumulador mientras la previsualización siga vigente.
+
+**`recalcularInforme`** (`recalcular.ts`) es una función pura salvo por la llamada que recibe: `previsualizar(crearPeticionPrevisualizar(acumulador))` y después `construirInforme`. Si `previsualizar` falla, el error sube y el informe anterior queda intacto. Es lo que permite asignar y ver el mes desbloqueado sin releer el archivo.
+
+**`valorGrupoCombinacion`** (`informe.ts`) es la única fuente del texto con que el informe agrupa un error de combinación (el `detalle` del resolutor, o `GENERO / MUNDO / LINEA / EQUIVALENCIA`, o la terna). El informe y `origenes-mapeo.ts` la usan por igual. Importa porque el botón Asignar de un grupo solo aparece si la pantalla logra casar el grupo con sus combinaciones exactas; si las dos expresiones se separaran, los botones desaparecerían sin que nada fallara. `tests/ventas.origenes-mapeo.test.ts` lo protege: fija la expresión y comprueba la ida y vuelta (mapear todos los orígenes derivados vacía los grupos de error y la identidad sigue cerrando).
+
+**Pruebas.** 914 en 63 archivos (781 en 54 antes de la mejora): `tests/ventas.mapeos.*` (resolutor, informe, recálculo, esquemas y la lógica de mapeos), `tests/ventas.origenes-mapeo.test.ts`, `tests/ventas.sugerir-mapeo.test.ts`, la regla estática 14 en `tests/ventas.estatico.test.ts` y el ajuste de la regla 6 (`clasificacion_incompleta` la decide el resolutor) en `tests/ventas.interpretar.test.ts`.
+
+**Lecciones de QA** (los tres hallazgos se corrigieron antes del cierre):
+
+1. El importador aceptaba `*` en género, mundo o línea, lo que habría creado una regla de renombre disfrazada. Ahora `comodinInvalido` lo rechaza en el POST (`400 origen_con_comodin_invalido`) y el importador omite la fila con el mismo motivo.
+2. La derivación de orígenes del frontend repetía la expresión del informe y no tenía prueba. Se movió a `valorGrupoCombinacion` y se escribió el test de arriba.
+3. Al cambiar el mapeo de columnas, la pantalla invalidaba la previsualización pero el acumulador (decenas de MB) seguía retenido. `cambiarMapeo` ahora lo libera.
+
+**Lo que no se probó.** Nada contra Supabase real ni en un navegador con los tres roles: los handlers no tienen pruebas de integración y la regla "el comprador recibe `403`" se verificó solo por la prueba estática de que cada ruta empieza con `requirePlanner`. Tampoco el rendimiento ni la memoria con datos reales: el acumulador pesa entre 25 y 42 MB por año de archivo (la ficha estimaba 25), así que conservarlo para recalcular con el histórico entero abierto puede pasar de los 100 MB; el piloto debe medirlo. Y no se comprobó contra el proyecto real que `anon` obtenga cero filas de `mapeos_combinacion` (RLS activo sin políticas, como el resto de las tablas).
+
+**Checklist del hito para Javier** (con `0.8.1 · M5`, un mes con combinaciones históricas):
+
+- [ ] Cargar un mes con combinaciones históricas y ver los errores de combinación agrupados, con su casilla y su botón **Asignar**.
+- [ ] Abrir **Asignar** con un grupo: ver hasta tres sugerencias con puntuación y razón; asignar con la sugerencia (o eligiendo el destino a mano) y pulsar **Guardar y recalcular**.
+- [ ] Comprobar que el reporte se rehace sin volver a elegir el archivo, que el grupo sale de Errores y que aparece "N reasignadas por mapeo" con el detalle `ORIGEN → DESTINO`.
+- [ ] Confirmar que, si el mes estaba bloqueado solo por esos errores, se desbloquea.
+- [ ] Cargar el mes; en Cargas por mes, el detalle muestra las filas reasignadas y el aviso guardado.
+- [ ] Recargar el mismo mes y comprobar que el reemplazo no duplica ni deja filas viejas.
+- [ ] En la pestaña Mapeos: buscar, cambiar el destino, editar la nota, desactivar y reactivar, eliminar. Comprobar que **no cambia lo ya publicado** hasta recargar el mes.
+- [ ] **Descargar CSV**, editarlo en Excel e **Importar** el archivo: ver la previsualización con las omitidas por motivo, aplicar y reimportar sin duplicar.
+- [ ] Anotar cuántas veces la sugerencia fuerte no coincidió con lo que Javier habría elegido (sirve para ajustar los umbrales).
+
+## Cambios respecto a la especificación
+
+El detalle de las decisiones del diseño sigue en "Decisiones de diseño" y en `docs/DECISIONES.md` (entradas del 2026-10-12). Lo que se apartó al construir:
+
+1. **Puntuaciones de la sugerencia.** Una versión anterior de la tabla de casos daba 0,86 para `SKINY` → `SKINNY` y 0,91 para `PANTALÓN DRIL` → `PANTALON DRILL`. La fórmula que la propia ficha define (Dice sobre bigramas) da **0,89** (8/9) y **0,96** (22/23); la tabla de esta ficha y el test ya llevan esos valores, y el comentario del test deja constancia de la corrección.
+2. **Campos opcionales nuevos** en `tipos-api.ts`: `mapeo.destino` (el destino como texto `GENERO / MUNDO / LINEA / EQUIVALENCIA`) en la resolución `ok` reasignada, y `mapeo_no_aplicable` (el id del mapeo) en la resolución de una fila que conserva su error. `MapeoNoAplicableApi` también trae `destino` opcional. Sirven para el aviso del informe sin volver a consultar.
+3. **`normalizarEquivalencia`**: un `-` con la línea en blanco (fila `clasificacion_incompleta`) no tiene nombre de línea al que sustituirse y cae en `SIN EQUIVALENCIA`; así el origen de un mapeo nunca queda con la equivalencia vacía. El vacío y `-` siguen siendo `SIN EQUIVALENCIA` y el nombre de la línea, como antes.
+4. **Destino no vigente y comodín.** Si el mapeo exacto de un origen apunta a un destino no vigente, no se prueba el comodín de su terna: la fila conserva su motivo, el mapeo exacto se anota en `mapeos_no_aplicables` y el aviso rojo lo nombra. La ficha no lo decía; así un comodín no tapa una decisión más concreta que quedó rota.
+5. **El comodín nunca es obsoleto.** `estadoMapeo` marca `obsoleto` solo a los orígenes exactos que hoy resuelven `ok`; el origen `*` no es una combinación real, sigue sirviendo para cualquier equivalencia de su terna que no resuelva, y `planificarCrearMapeos` no le aplica `origen_existe_en_arbol`.
+6. **Nota de más de 200 caracteres.** El POST y el PATCH la rechazan (`400` de zod, como dice la ficha); el importador acepta hasta 1 000 caracteres en `NOTA` y **la recorta** a 200 al crear el mapeo en vez de omitir la fila, porque una nota larga de Excel no justifica perder el mapeo.
+7. **Motivo de rechazo nuevo, `origen_con_comodin_invalido`.** `*` en género, mundo o línea, o `*` mezclado con texto en la equivalencia. El POST responde `400` con ese código; el importador omite la fila con ese motivo (se añade a `MotivoOmisionMapeo`). El POST también expone `origen_sin_clasificar` y `origen_repetido_en_peticion` como códigos, ambos `400`.
+8. **Carrera entre dos usuarios.** Sin actualizaciones en la petición, el POST usa un `insert` estricto: si otra persona guardó el mismo origen justo antes, responde `409 origen_repetido`. Con `reemplazar` usa `upsert` sobre el único y **gana el último** que escribe. El importador usa `ignoreDuplicates` (no actualiza nunca).
+9. **`GET /api/ventas/mapeos?q=`** busca también en la nota, no solo en origen y destino.
 
 ## Objetivo
 
@@ -171,10 +217,11 @@ Admin y planner, mismas acciones; el comprador no ve nada (ruta y API `403`).
 
 ## Criterios de aceptación / hito de prueba
 
-`[x]` lo cubren los checks automáticos y QA; `[ ]` lo recorre Javier con `0.8.1 · M5`, con un archivo sintético o con el histórico real.
+`[x]` lo cubren los checks automáticos y QA; `[ ]` lo recorre Javier con `0.8.1 · M5`, con un archivo sintético o con el histórico real. La lista corta para recorrer está en "Construido".
 
-- [ ] `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (los 781 de M5 ajustados por la regla 6 más `tests/ventas.mapeos.*` y `tests/ventas.sugerir-mapeo.*`), `npm run build` y `scripts/validar-migraciones-local.sh` en verde; `0008_mapeo_combinaciones.sql` aplicada en `vector-two`; tipos regenerados; `APP_VERSION` = `0.8.1 · M5`.
-- [ ] Roles: el comprador recibe `403` en `GET /api/ventas/mapeos` y no ve la pestaña.
+- [x] `vitest` en verde (914 pruebas en 63 archivos: las 781 de M5 con la regla 6 ajustada más `tests/ventas.mapeos.*`, `tests/ventas.origenes-mapeo.test.ts` y `tests/ventas.sugerir-mapeo.test.ts`); `lint`, `tsc`, `build` y `scripts/validar-migraciones-local.sh` pasaron en la puerta de QA; tipos con la tabla nueva; `APP_VERSION` = `0.8.1 · M5`.
+- [ ] `0008_mapeo_combinaciones.sql` aplicada en `vector-two` y comprobada con la base real (ver "Lo que no se probó").
+- [ ] Roles: el comprador recibe `403` en `GET /api/ventas/mapeos` y no ve la pestaña (hoy solo lo prueba el test estático de `requirePlanner`).
 - [ ] Previsualizar un año del histórico: los grupos de error de combinación muestran casilla y **Asignar**; abrir el modal con un grupo muestra hasta 3 sugerencias con puntuación y razón; la fuerte coincide con lo que Javier habría elegido en la mayoría de los casos (anotar cuántos no).
 - [ ] Asignar un grupo a su GMLE actual y **Guardar y recalcular**: el reporte se rehace sin volver a elegir el archivo (segundos), el grupo desaparece de Errores, aparece "N reasignadas por mapeo" con el detalle `ORIGEN → DESTINO`, la identidad cierra y, si el mes estaba bloqueado solo por eso, deja de estarlo.
 - [ ] Seleccionar varios grupos de la misma línea vieja y asignarlos a la vez a un destino con la casilla de terna (`*`): un solo mapeo; al previsualizar otro año con una equivalencia vieja distinta de esa misma línea, también se reasigna.
@@ -201,6 +248,8 @@ Admin y planner, mismas acciones; el comprador no ve nada (ruta y API `403`).
 - **02b no construido**: el selector muestra GML/GMLE por la forma de la equivalencia, no por `nivel_planificacion`; cuando exista, se añade el badge (aditivo).
 
 ## Decisiones nuevas propuestas (para `docs/DECISIONES.md` al aprobar)
+
+Registradas en `docs/DECISIONES.md` el 2026-10-12 y marcadas "construido 2026-10-12". Las desviaciones de la construcción están arriba, en "Cambios respecto a la especificación".
 
 1. **El árbol manda; el mapeo solo entra cuando el árbol no resuelve, nunca se encadena y nunca apunta a un destino no vigente.** Descartado: mapeo con prioridad sobre el árbol; renombres encadenados.
 2. **El origen del mapeo es la combinación exacta del archivo (normalizada y sustituida) con un único comodín `*` en la equivalencia.** Descartado: comodines en la terna, expresiones regulares.
