@@ -57,7 +57,7 @@ Migraciones en `supabase/migrations/`, numeradas e idempotentes. Se aplican con 
 
 `scripts/validar-migraciones-local.sh` crea una base `vector_two_local` en un Postgres local, aplica todas las migraciones dos veces (la segunda pasada prueba que son idempotentes) y lista las tablas con RLS. No toca ningún proyecto Supabase; sirve para validar SQL antes de aplicarlo de verdad.
 
-Proyecto Supabase: **Vector2** (ref `tzjsxzmsvvhxyiooihyq`, región ca-central-1). Las migraciones 0000 a 0007 están aplicadas; la 0008 (mapeo de combinaciones) está escrita e idempotente, con los tipos ya regenerados, y debe confirmarse que esté aplicada en `vector-two` antes del hito de la 05b. La 0009 (ubicaciones ignoradas) se aplicó en `vector-two` el 2026-10-13 y se verificó. Nota operativa: desde Claude Code las sentencias `DROP` quedan esperando una confirmación que no llega; las migraciones se aplican por `execute_sql` sin `DROP` (por eso usan `create or replace trigger`), y cualquier borrado de tabla se hace desde el dashboard.
+Proyecto Supabase: **Vector2** (ref `tzjsxzmsvvhxyiooihyq`, región ca-central-1). Las migraciones 0000 a 0009 están aplicadas (la 0008, mapeo de combinaciones, y la 0009, ubicaciones ignoradas, se verificaron en `vector-two` el 2026-10-13). Nota operativa: desde Claude Code las sentencias `DROP` quedan esperando una confirmación que no llega; las migraciones se aplican por `execute_sql` sin `DROP` (por eso usan `create or replace trigger`), y cualquier borrado de tabla se hace desde el dashboard.
 
 ## Estructura funcional
 
