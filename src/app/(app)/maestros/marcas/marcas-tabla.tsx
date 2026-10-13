@@ -14,15 +14,13 @@ import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Chips, type ChipItem } from "@/components/ui/chips";
 import { VistaPreviaNombre } from "@/components/catalogo/vista-previa-nombre";
-
-const MAX_NOTA = 200;
+import { EditarMarcaDialogo, MAX_NOTA } from "./editar-marca-dialogo";
 
 /** Filtro de chips: todas, una agrupación por id, o solo con tratamiento especial. */
 const FILTRO_TODAS = "todas";
 const FILTRO_TRATAMIENTO = "tratamiento";
 
 type Form = { nombre: string; codigo: string; codigoTocado: boolean; agrupacionId: string; tratamiento: boolean; nota: string };
-type Edicion = { id: string; nombre: string; codigo: string; nota: string };
 
 const FORM_VACIO: Form = { nombre: "", codigo: "", codigoTocado: false, agrupacionId: "", tratamiento: false, nota: "" };
 
@@ -50,9 +48,9 @@ function Casilla({
 }
 
 /**
- * Pestaña Marcas: alta, filtros (agrupación · tratamiento · texto) y tabla con
- * edición en línea. Agrupación y tratamiento se guardan al instante; nombre,
- * código y nota con Editar → Guardar.
+ * Pestaña Marcas: alta, filtros (agrupación · tratamiento · texto) y tabla.
+ * Agrupación y tratamiento se guardan al instante desde la fila; nombre, código
+ * y nota se editan en un diálogo (Editar → Guardar).
  */
 export function MarcasTabla({
   marcas,
@@ -74,7 +72,7 @@ export function MarcasTabla({
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
-  const [edicion, setEdicion] = useState<Edicion | null>(null);
+  const [editando, setEditando] = useState<MarcaFila | null>(null);
   const [filtroChip, setFiltroChip] = useState<string>(FILTRO_TODAS);
   const [busqueda, setBusqueda] = useState("");
   const [orden, setOrden] = useState<OrdenMarca>(ORDEN_MARCA_INICIAL);
@@ -147,19 +145,20 @@ export function MarcasTabla({
     setGuardando(false);
   }
 
-  async function guardarEdicion(m: MarcaFila) {
-    if (!edicion) return;
-    const nombre = normalizarNombre(edicion.nombre);
-    const codigo = aCodigo(edicion.codigo);
-    if (!nombre || !codigo) {
-      setError("El nombre y el código no pueden quedar vacíos.");
-      return;
-    }
-    const cuerpo: EditarMarcaCuerpo = { nombre, codigo };
-    // La nota solo viaja si la marca tiene la bandera: sin ella la API la rechaza.
-    if (m.tratamiento_especial) cuerpo.nota_tratamiento = edicion.nota.trim() === "" ? null : edicion.nota.trim();
-    const ok = await ejecutar(() => api.patch<MarcaFila>(`/api/marcas/${m.id}`, cuerpo));
-    if (ok) setEdicion(null);
+  async function guardarEdicion(cuerpo: EditarMarcaCuerpo) {
+    if (!editando) return;
+    const ok = await ejecutar(() => api.patch<MarcaFila>(`/api/marcas/${editando.id}`, cuerpo));
+    if (ok) setEditando(null);
+  }
+
+  function abrirEdicion(m: MarcaFila) {
+    setError(null);
+    setEditando(m);
+  }
+
+  function cerrarEdicion() {
+    setError(null);
+    setEditando(null);
   }
 
   function cambiarAgrupacion(m: MarcaFila, agrupacion_marca_id: string) {
@@ -171,8 +170,6 @@ export function MarcasTabla({
     if (!tratamiento_especial && m.nota_tratamiento) {
       if (!confirm(`¿Quitar el tratamiento especial de ${m.nombre}? Se borrará la nota "${m.nota_tratamiento}".`)) return;
     }
-    // Si se está editando esta fila, la nota en edición también se vacía para no reenviarla.
-    if (!tratamiento_especial && edicion?.id === m.id) setEdicion({ ...edicion, nota: "" });
     void ejecutar(() => api.patch<MarcaFila>(`/api/marcas/${m.id}`, { tratamiento_especial } satisfies EditarMarcaCuerpo));
   }
 
@@ -190,23 +187,13 @@ export function MarcasTabla({
       clave: "codigo",
       titulo: "Código",
       ordenable: true,
-      render: (m) =>
-        edicion?.id === m.id ? (
-          <Input value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} className="h-8 w-40 font-mono" aria-label="Código" />
-        ) : (
-          <code className="font-mono text-xs">{m.codigo}</code>
-        ),
+      render: (m) => <code className="font-mono text-xs">{m.codigo}</code>,
     },
     {
       clave: "nombre",
       titulo: "Nombre",
       ordenable: true,
-      render: (m) =>
-        edicion?.id === m.id ? (
-          <Input value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} className="h-8" aria-label="Nombre" autoFocus />
-        ) : (
-          <span className={`font-medium ${m.vigente ? "" : "opacity-60"}`}>{m.nombre}</span>
-        ),
+      render: (m) => <span className={`font-medium ${m.vigente ? "" : "opacity-60"}`}>{m.nombre}</span>,
     },
     {
       clave: "agrupacion",
@@ -269,18 +256,7 @@ export function MarcasTabla({
       clave: "nota",
       titulo: "Nota",
       render: (m) =>
-        edicion?.id === m.id ? (
-          <Input
-            value={edicion.nota}
-            maxLength={MAX_NOTA}
-            disabled={!m.tratamiento_especial}
-            title={m.tratamiento_especial ? undefined : "Marca el tratamiento especial para agregar una nota."}
-            onChange={(e) => setEdicion({ ...edicion, nota: e.target.value })}
-            className="h-8 w-56"
-            aria-label="Nota de tratamiento"
-            placeholder={m.tratamiento_especial ? "Por qué se trata aparte" : ""}
-          />
-        ) : m.nota_tratamiento ? (
+        m.nota_tratamiento ? (
           <span className="block max-w-56 truncate text-tinta-suave" title={m.nota_tratamiento}>
             {m.nota_tratamiento}
           </span>
@@ -306,34 +282,19 @@ export function MarcasTabla({
       clave: "acciones",
       titulo: "",
       className: "text-right",
-      render: (m) =>
-        edicion?.id === m.id ? (
-          <div className="flex justify-end gap-1">
-            <Button tamano="sm" disabled={ocupado} onClick={() => guardarEdicion(m)}>
-              {ocupado ? "Guardando…" : "Guardar"}
-            </Button>
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => setEdicion(null)}>
-              Cancelar
-            </Button>
-          </div>
-        ) : (
-          <div className="flex justify-end gap-1">
-            <Button
-              variante="fantasma"
-              tamano="sm"
-              disabled={ocupado}
-              onClick={() => setEdicion({ id: m.id, nombre: m.nombre, codigo: m.codigo, nota: m.nota_tratamiento ?? "" })}
-            >
-              Editar
-            </Button>
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(m)}>
-              {m.activo ? "Desactivar" : "Reactivar"}
-            </Button>
-            <Button variante="peligro" tamano="sm" disabled={ocupado} onClick={() => eliminar(m)}>
-              Eliminar
-            </Button>
-          </div>
-        ),
+      render: (m) => (
+        <div className="flex justify-end gap-1">
+          <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => abrirEdicion(m)}>
+            Editar
+          </Button>
+          <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(m)}>
+            {m.activo ? "Desactivar" : "Reactivar"}
+          </Button>
+          <Button variante="peligro" tamano="sm" disabled={ocupado} onClick={() => eliminar(m)}>
+            Eliminar
+          </Button>
+        </div>
+      ),
     });
   }
 
@@ -341,7 +302,7 @@ export function MarcasTabla({
 
   return (
     <div className="space-y-6">
-      {error && <Alert onCerrar={() => setError(null)}>{error}</Alert>}
+      {error && !editando && <Alert onCerrar={() => setError(null)}>{error}</Alert>}
       {aviso && (
         <Alert tono="exito" onCerrar={() => setAviso(null)}>
           {aviso}
@@ -420,12 +381,23 @@ export function MarcasTabla({
         />
         {puedeEditar && (
           <p className="mt-3 text-xs text-tinta-suave">
-            Cambiar la agrupación o el tratamiento especial se guarda al instante; nombre, código y nota, con Editar → Guardar. Al
+            Cambiar la agrupación o el tratamiento especial se guarda al instante; nombre, código y nota, con Editar (abre un diálogo). Al
             quitar el tratamiento se borra la nota. Pulsa un encabezado para ordenar; Agrupación ordena por valor de marca
             (de menor a mayor valor), no alfabéticamente.
           </p>
         )}
       </Card>
+
+      {editando && (
+        <EditarMarcaDialogo
+          marca={editando}
+          ocupado={ocupado}
+          error={error}
+          onCerrarError={() => setError(null)}
+          onGuardar={guardarEdicion}
+          onCerrar={cerrarEdicion}
+        />
+      )}
     </div>
   );
 }

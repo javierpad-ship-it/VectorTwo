@@ -40,7 +40,13 @@ export function Modal({
 
   useEffect(() => {
     const d = ref.current;
-    if (d && !d.open) d.showModal();
+    if (d && !d.open) {
+      d.showModal();
+      // `autoFocus` de React corre antes de abrir el <dialog> y el navegador deja el foco en la X:
+      // se pasa al primer campo del cuerpo (si no hay, queda donde el navegador lo puso).
+      const primero = d.querySelector<HTMLElement>("[data-modal-cuerpo] input:not([type=hidden]):not([disabled]), [data-modal-cuerpo] select:not([disabled]), [data-modal-cuerpo] textarea:not([disabled])");
+      primero?.focus();
+    }
     return () => {
       if (abridor instanceof HTMLElement && abridor.isConnected) abridor.focus();
     };
@@ -90,7 +96,7 @@ export function Modal({
             ×
           </button>
         </header>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div data-modal-cuerpo className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {pie && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-borde px-5 py-3">{pie}</footer>}
       </div>
     </dialog>

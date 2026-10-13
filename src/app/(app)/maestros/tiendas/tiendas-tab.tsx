@@ -5,7 +5,6 @@ import { api } from "@/lib/api-client";
 import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
 import { mensajeError } from "@/lib/formato";
 import { estadoTienda } from "@/lib/tiendas/estado";
-import { motivoRechazoTienda } from "@/lib/tiendas/reglas";
 import {
   ESTADOS_TIENDA_API,
   TIPOS_TIENDA_API,
@@ -17,12 +16,14 @@ import {
 } from "@/lib/tiendas/tipos-api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/form";
+import { Input, Select } from "@/components/ui/form";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import { Alert } from "@/components/ui/alert";
 import { Chips, type ChipItem } from "@/components/ui/chips";
 import { VistaPreviaNombre } from "@/components/catalogo/vista-previa-nombre";
-import { BadgeEstado, BadgeTipo, formatearFecha, formatearMonto, leerMontoInput } from "./comunes";
+import { BadgeEstado, BadgeTipo, formatearFecha, formatearMonto } from "./comunes";
+import { EditarTiendaDialogo } from "./editar-tienda-dialogo";
+import { aFila, cambiosDeEdicion, CamposTienda, FORM_VACIO, motivoNoGuardar, type Campos } from "./formulario-tienda";
 
 export type FiltroEstado = "todos" | EstadoTienda;
 type FiltroTipo = "todas" | TipoTienda;
@@ -30,79 +31,9 @@ type FiltroTipo = "todas" | TipoTienda;
 const ZONA_TODAS = "__todas";
 const ZONA_SIN = "__sin_zona";
 
-/** Lo que el usuario escribe (fechas ISO del `type="date"`, venta como texto). */
-type Campos = {
-  codigo: string;
-  nombre: string;
-  tipo: TipoTienda;
-  zona: string;
-  razon_social: string;
-  fecha_apertura: string;
-  fecha_cierre: string;
-  venta: string;
-};
-
-type Edicion = Campos & { id: string };
-
-const FORM_VACIO: Campos = {
-  codigo: "",
-  nombre: "",
-  tipo: "Tienda",
-  zona: "",
-  razon_social: "",
-  fecha_apertura: "",
-  fecha_cierre: "",
-  venta: "",
-};
-
-/** Fila resultante (alta o actual más cambio) tal como la ven `estadoTienda` y `motivoRechazoTienda`. */
-type FilaResultante = {
-  codigo: string;
-  nombre: string;
-  tipo: TipoTienda;
-  zona: string | null;
-  razon_social: string | null;
-  fecha_apertura: string | null;
-  fecha_cierre: string | null;
-  venta_esperada_promedio: number | null;
-};
-
-function aFila(c: Campos): FilaResultante {
-  const venta = leerMontoInput(c.venta);
-  return {
-    codigo: aCodigo(c.codigo),
-    nombre: normalizarNombre(c.nombre),
-    tipo: c.tipo,
-    zona: normalizarNombre(c.zona) || null,
-    razon_social: normalizarNombre(c.razon_social) || null,
-    fecha_apertura: c.fecha_apertura || null,
-    fecha_cierre: c.fecha_cierre || null,
-    venta_esperada_promedio: Number.isNaN(venta) ? null : venta,
-  };
-}
-
-/** Motivo por el que no se puede guardar (cliente), o `null`. Corre antes que la API. */
-function motivoNoGuardar(c: Campos): string | null {
-  const fila = aFila(c);
-  if (!fila.codigo) return "El código es obligatorio (letras o números).";
-  if (!fila.nombre) return "El nombre es obligatorio.";
-  if (Number.isNaN(leerMontoInput(c.venta))) return "La venta esperada debe ser un número.";
-  return motivoRechazoTienda(fila)?.mensaje ?? null;
-}
-
-/** Al pasar a CD se vacía la venta esperada (el campo queda deshabilitado). */
-function conTipo<T extends Campos>(c: T, tipo: TipoTienda): T {
-  return { ...c, tipo, venta: tipo === "Centro de Distribución" ? "" : c.venta };
-}
-
-/** Al quitar la apertura se vacía el cierre (sin apertura no hay cierre). */
-function conApertura<T extends Campos>(c: T, fecha_apertura: string): T {
-  return { ...c, fecha_apertura, fecha_cierre: fecha_apertura ? c.fecha_cierre : "" };
-}
-
 /**
- * Pestaña Tiendas: alta, filtros (tipo · estado · zona · texto) y tabla con
- * edición en línea Editar → Guardar (un PATCH con los campos cambiados).
+ * Pestaña Tiendas: alta, filtros (tipo · estado · zona · texto) y tabla. Editar
+ * abre un diálogo con todos los campos; Guardar envía un PATCH con los cambiados.
  */
 export function TiendasTab({
   tiendas,
@@ -130,7 +61,7 @@ export function TiendasTab({
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
-  const [edicion, setEdicion] = useState<Edicion | null>(null);
+  const [editando, setEditando] = useState<TiendaFila | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>("todas");
   const [filtroZona, setFiltroZona] = useState<string>(ZONA_TODAS);
   const [busqueda, setBusqueda] = useState("");
@@ -150,8 +81,6 @@ export function TiendasTab({
   const filaForm = aFila(form);
   const motivoForm = motivoNoGuardar(form);
   const estadoPrevisto = estadoTienda(filaForm, hoy);
-  const esCdForm = form.tipo === "Centro de Distribución";
-  const cierreAntes = Boolean(form.fecha_apertura && form.fecha_cierre && form.fecha_cierre < form.fecha_apertura);
 
   // ─── Filtros en memoria ───
   const base = useMemo(() => (mostrarInactivos ? tiendas : tiendas.filter((t) => t.activo)), [tiendas, mostrarInactivos]);
@@ -225,49 +154,30 @@ export function TiendasTab({
     setGuardando(false);
   }
 
-  function empezarEdicion(t: TiendaFila) {
-    setEdicion({
-      id: t.id,
-      codigo: t.codigo,
-      nombre: t.nombre,
-      tipo: t.tipo,
-      zona: t.zona ?? "",
-      razon_social: t.razon_social ?? "",
-      fecha_apertura: t.fecha_apertura ?? "",
-      fecha_cierre: t.fecha_cierre ?? "",
-      venta: t.venta_esperada_promedio === null ? "" : String(t.venta_esperada_promedio),
-    });
+  function abrirEdicion(t: TiendaFila) {
+    setError(null);
+    setEditando(t);
   }
 
-  /** Solo los campos que cambiaron respecto a la fila; `null` si no cambió nada. */
-  function cambiosDeEdicion(t: TiendaFila, ed: Edicion): EditarTiendaCuerpo | null {
-    const fila = aFila(ed);
-    const cuerpo: EditarTiendaCuerpo = {};
-    if (fila.codigo !== t.codigo) cuerpo.codigo = fila.codigo;
-    if (fila.nombre !== t.nombre) cuerpo.nombre = fila.nombre;
-    if (fila.tipo !== t.tipo) cuerpo.tipo = fila.tipo;
-    if (fila.zona !== t.zona) cuerpo.zona = fila.zona;
-    if (fila.razon_social !== t.razon_social) cuerpo.razon_social = fila.razon_social;
-    if (fila.fecha_apertura !== t.fecha_apertura) cuerpo.fecha_apertura = fila.fecha_apertura;
-    if (fila.fecha_cierre !== t.fecha_cierre) cuerpo.fecha_cierre = fila.fecha_cierre;
-    if (fila.venta_esperada_promedio !== t.venta_esperada_promedio) cuerpo.venta_esperada_promedio = fila.venta_esperada_promedio;
-    return Object.keys(cuerpo).length === 0 ? null : cuerpo;
+  function cerrarEdicion() {
+    setError(null);
+    setEditando(null);
   }
 
-  async function guardarEdicion(t: TiendaFila) {
-    if (!edicion) return;
-    const motivo = motivoNoGuardar(edicion);
+  async function guardarEdicion(campos: Campos) {
+    if (!editando) return;
+    const motivo = motivoNoGuardar(campos);
     if (motivo) {
       setError(motivo);
       return;
     }
-    const cuerpo = cambiosDeEdicion(t, edicion);
+    const cuerpo = cambiosDeEdicion(editando, campos);
     if (!cuerpo) {
-      setEdicion(null);
+      setEditando(null);
       return;
     }
-    const r = await ejecutar(() => api.patch<TiendaFila>(`/api/tiendas/${t.id}`, cuerpo));
-    if (r.ok) setEdicion(null);
+    const r = await ejecutar(() => api.patch<TiendaFila>(`/api/tiendas/${editando.id}`, cuerpo));
+    if (r.ok) setEditando(null);
   }
 
   function alternarActivo(t: TiendaFila) {
@@ -288,133 +198,21 @@ export function TiendasTab({
   }
 
   // ─── Tabla ───
-  const motivoEdicion = edicion ? motivoNoGuardar(edicion) : null;
-  const estadoEdicion = edicion ? estadoTienda(aFila(edicion), hoy) : null;
-  const esCdEdicion = edicion?.tipo === "Centro de Distribución";
-
   const columnas: Columna<TiendaFila>[] = [
-    {
-      clave: "codigo",
-      titulo: "Código",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Input value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} className="h-8 w-28 font-mono" aria-label="Código" />
-        ) : (
-          <code className="font-mono text-xs">{t.codigo}</code>
-        ),
-    },
-    {
-      clave: "nombre",
-      titulo: "Nombre",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Input value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} className="h-8 min-w-48" aria-label="Nombre" autoFocus />
-        ) : (
-          <span className={`font-medium ${t.activo ? "" : "opacity-60"}`}>{t.nombre}</span>
-        ),
-    },
-    {
-      clave: "tipo",
-      titulo: "Tipo",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Select value={edicion.tipo} onChange={(e) => setEdicion(conTipo(edicion, e.target.value as TipoTienda))} className="h-8 w-44" aria-label="Tipo">
-            {TIPOS_TIENDA_API.map((tipo) => (
-              <option key={tipo} value={tipo}>
-                {tipo}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <BadgeTipo tipo={t.tipo} />
-        ),
-    },
-    {
-      clave: "zona",
-      titulo: "Zona",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Input value={edicion.zona} list={`${idLista}-zonas`} onChange={(e) => setEdicion({ ...edicion, zona: e.target.value })} className="h-8 w-44" aria-label="Zona" />
-        ) : (
-          <Celda valor={t.zona} />
-        ),
-    },
-    {
-      clave: "razon_social",
-      titulo: "Razón social",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Input
-            value={edicion.razon_social}
-            list={`${idLista}-razones`}
-            onChange={(e) => setEdicion({ ...edicion, razon_social: e.target.value })}
-            className="h-8 w-44"
-            aria-label="Razón social"
-          />
-        ) : (
-          <Celda valor={t.razon_social} />
-        ),
-    },
-    {
-      clave: "apertura",
-      titulo: "Apertura",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Input type="date" value={edicion.fecha_apertura} onChange={(e) => setEdicion(conApertura(edicion, e.target.value))} className="h-8 w-40" aria-label="Fecha de apertura" />
-        ) : (
-          <Celda valor={t.fecha_apertura ? formatearFecha(t.fecha_apertura) : null} mono />
-        ),
-    },
-    {
-      clave: "cierre",
-      titulo: "Cierre",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Input
-            type="date"
-            value={edicion.fecha_cierre}
-            min={edicion.fecha_apertura || undefined}
-            disabled={!edicion.fecha_apertura}
-            title={edicion.fecha_apertura ? undefined : "Para registrar un cierre, la tienda necesita fecha de apertura."}
-            onChange={(e) => setEdicion({ ...edicion, fecha_cierre: e.target.value })}
-            className="h-8 w-40"
-            aria-label="Fecha de cierre"
-          />
-        ) : (
-          <Celda valor={t.fecha_cierre ? formatearFecha(t.fecha_cierre) : null} mono />
-        ),
-    },
+    { clave: "codigo", titulo: "Código", render: (t) => <code className="font-mono text-xs">{t.codigo}</code> },
+    { clave: "nombre", titulo: "Nombre", render: (t) => <span className={`font-medium ${t.activo ? "" : "opacity-60"}`}>{t.nombre}</span> },
+    { clave: "tipo", titulo: "Tipo", render: (t) => <BadgeTipo tipo={t.tipo} /> },
+    { clave: "zona", titulo: "Zona", render: (t) => <Celda valor={t.zona} /> },
+    { clave: "razon_social", titulo: "Razón social", render: (t) => <Celda valor={t.razon_social} /> },
+    { clave: "apertura", titulo: "Apertura", render: (t) => <Celda valor={t.fecha_apertura ? formatearFecha(t.fecha_apertura) : null} mono /> },
+    { clave: "cierre", titulo: "Cierre", render: (t) => <Celda valor={t.fecha_cierre ? formatearFecha(t.fecha_cierre) : null} mono /> },
     {
       clave: "venta",
       titulo: "Venta esp.",
       className: "text-right",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <Input
-            type="number"
-            step="0.01"
-            min="0"
-            value={edicion.venta}
-            disabled={esCdEdicion}
-            title={esCdEdicion ? "Un centro de distribución no lleva venta esperada." : undefined}
-            onChange={(e) => setEdicion({ ...edicion, venta: e.target.value })}
-            className="h-8 w-32 text-right"
-            aria-label="Venta esperada (S/ por mes)"
-          />
-        ) : (
-          <Celda valor={t.venta_esperada_promedio === null ? null : formatearMonto(t.venta_esperada_promedio)} mono />
-        ),
+      render: (t) => <Celda valor={t.venta_esperada_promedio === null ? null : formatearMonto(t.venta_esperada_promedio)} mono />,
     },
-    {
-      clave: "estado",
-      titulo: "Estado",
-      render: (t) =>
-        edicion?.id === t.id && estadoEdicion ? (
-          <BadgeEstado estado={estadoEdicion} activo={t.activo} prefijo="Quedará" />
-        ) : (
-          <BadgeEstado estado={t.estado} activo={t.activo} />
-        ),
-    },
+    { clave: "estado", titulo: "Estado", render: (t) => <BadgeEstado estado={t.estado} activo={t.activo} /> },
   ];
 
   if (puedeEditar) {
@@ -422,29 +220,19 @@ export function TiendasTab({
       clave: "acciones",
       titulo: "",
       className: "text-right",
-      render: (t) =>
-        edicion?.id === t.id ? (
-          <div className="flex justify-end gap-1">
-            <Button tamano="sm" disabled={ocupado || motivoEdicion !== null} title={motivoEdicion ?? undefined} onClick={() => guardarEdicion(t)}>
-              {ocupado ? "Guardando…" : "Guardar"}
-            </Button>
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => setEdicion(null)}>
-              Cancelar
-            </Button>
-          </div>
-        ) : (
-          <div className="flex justify-end gap-1">
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => empezarEdicion(t)}>
-              Editar
-            </Button>
-            <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(t)}>
-              {t.activo ? "Desactivar" : "Reactivar"}
-            </Button>
-            <Button variante="peligro" tamano="sm" disabled={ocupado} onClick={() => eliminar(t)}>
-              Eliminar
-            </Button>
-          </div>
-        ),
+      render: (t) => (
+        <div className="flex justify-end gap-1">
+          <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => abrirEdicion(t)}>
+            Editar
+          </Button>
+          <Button variante="fantasma" tamano="sm" disabled={ocupado} onClick={() => alternarActivo(t)}>
+            {t.activo ? "Desactivar" : "Reactivar"}
+          </Button>
+          <Button variante="peligro" tamano="sm" disabled={ocupado} onClick={() => eliminar(t)}>
+            Eliminar
+          </Button>
+        </div>
+      ),
     });
   }
 
@@ -452,7 +240,7 @@ export function TiendasTab({
 
   return (
     <div className="space-y-6">
-      {/* Listas de valores ya usados: las comparten el formulario de alta y la edición en línea. */}
+      {/* Listas de valores ya usados: las comparten el formulario de alta y el diálogo de edición. */}
       <datalist id={`${idLista}-zonas`}>
         {zonas.map((z) => (
           <option key={z} value={z} />
@@ -464,7 +252,7 @@ export function TiendasTab({
         ))}
       </datalist>
 
-      {error && <Alert onCerrar={() => setError(null)}>{error}</Alert>}
+      {error && !editando && <Alert onCerrar={() => setError(null)}>{error}</Alert>}
       {aviso && (
         <Alert tono="exito" onCerrar={() => setAviso(null)}>
           {aviso}
@@ -477,66 +265,7 @@ export function TiendasTab({
           descripcion="El código es el real de la tienda (el que traen venta y stock); nombre, zona y razón social se guardan normalizados en mayúsculas."
         >
           <form onSubmit={crear} className="grid gap-4 md:grid-cols-4">
-            <Field
-              label="Código"
-              hint={form.codigo.trim() === "" ? "Obligatorio. Ej. R401, RD50." : filaForm.codigo ? `Se guardará como ${filaForm.codigo}` : "El código es obligatorio (letras o números)."}
-            >
-              <Input required value={form.codigo} onChange={(e) => setForm({ ...form, codigo: e.target.value })} className="font-mono" placeholder="R401" />
-            </Field>
-            <Field label="Nombre" className="md:col-span-2">
-              <Input required value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="Lukers Iquitos Lores" />
-            </Field>
-            <Field label="Tipo">
-              <Select value={form.tipo} onChange={(e) => setForm(conTipo(form, e.target.value as TipoTienda))}>
-                {TIPOS_TIENDA_API.map((tipo) => (
-                  <option key={tipo} value={tipo}>
-                    {tipo}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Zona" hint="Opcional. Se autocompleta con las zonas ya usadas.">
-              <Input value={form.zona} list={`${idLista}-zonas`} onChange={(e) => setForm({ ...form, zona: e.target.value })} />
-            </Field>
-            <Field label="Razón social" hint="Opcional.">
-              <Input value={form.razon_social} list={`${idLista}-razones`} onChange={(e) => setForm({ ...form, razon_social: e.target.value })} />
-            </Field>
-            <Field label="Fecha de apertura" hint="Sin fecha, la tienda queda Planificada.">
-              <Input type="date" value={form.fecha_apertura} onChange={(e) => setForm(conApertura(form, e.target.value))} />
-            </Field>
-            <Field
-              label="Fecha de cierre"
-              hint={
-                cierreAntes
-                  ? "La fecha de cierre no puede ser anterior a la de apertura."
-                  : form.fecha_apertura
-                    ? "Último día con venta (inclusive)."
-                    : "Primero registra la apertura."
-              }
-            >
-              <Input
-                type="date"
-                value={form.fecha_cierre}
-                min={form.fecha_apertura || undefined}
-                disabled={!form.fecha_apertura}
-                onChange={(e) => setForm({ ...form, fecha_cierre: e.target.value })}
-              />
-            </Field>
-            <Field
-              label="Venta esperada (S/ por mes)"
-              hint={esCdForm ? "Un centro de distribución no vende." : "Solo para tiendas que aún no abren: M7 la usa en lugar del histórico."}
-              className="md:col-span-2"
-            >
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.venta}
-                disabled={esCdForm}
-                onChange={(e) => setForm({ ...form, venta: e.target.value })}
-                placeholder="85000"
-              />
-            </Field>
+            <CamposTienda valor={form} onCambio={setForm} idLista={idLista} />
             <div className="flex flex-wrap items-center gap-4 md:col-span-4">
               <Button type="submit" disabled={guardando || ocupado || motivoForm !== null} title={motivoForm ?? undefined}>
                 {guardando ? "Creando…" : "Crear tienda"}
@@ -577,11 +306,24 @@ export function TiendasTab({
         <DataTable columnas={columnas} filas={filas} claveFila={(t) => t.id} cargando={cargando} vacio={vacio} />
         {puedeEditar && (
           <p className="mt-3 text-xs text-tinta-suave">
-            Todo se edita con Editar → Guardar; el estado previsto se ve antes de confirmar. Una tienda que cerró no se desactiva: lleva
+            Todo se edita con Editar (abre un diálogo con todos los campos); el estado previsto se ve antes de confirmar. Una tienda que cerró no se desactiva: lleva
             fecha de cierre y conserva su histórico. Desactivar es para filas creadas por error.
           </p>
         )}
       </Card>
+
+      {editando && (
+        <EditarTiendaDialogo
+          tienda={editando}
+          hoy={hoy}
+          idLista={idLista}
+          ocupado={ocupado}
+          error={error}
+          onCerrarError={() => setError(null)}
+          onGuardar={guardarEdicion}
+          onCerrar={cerrarEdicion}
+        />
+      )}
     </div>
   );
 }
