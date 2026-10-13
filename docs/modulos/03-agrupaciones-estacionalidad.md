@@ -4,6 +4,8 @@
 
 > **Mejora posterior (2026-10-13, `0.9.0 · M6`)**: `agrupaciones_estacionalidad` gana la columna `temporada` (`invierno`, `verano` o `todo_el_ano`; por defecto `todo_el_ano`; migración `0011`), con selector en la pestaña Agrupaciones, sugerida desde las líneas de M1 y columna opcional `TEMPORADA` en el importador; decide a qué agrupaciones afecta un periodo atípico de alcance invierno. Cierra la pregunta de la temporada de más abajo. M3 sigue sin guardar ni calcular curvas, y **02b no la cambia**: la agrupación sigue por equivalencia y la curva de un nodo a nivel GML la mezcla M7. Detalle en [06-curvas-estacionalidad](06-curvas-estacionalidad.md).
 
+> **Mejora posterior (2026-10-13, `0.9.1 · M3`)**: un segundo importador, el **masivo de agrupaciones**, que crea agrupaciones nuevas desde un archivo (`POST /api/agrupaciones-estacionalidad/importar`, selector Equivalencias · Agrupaciones en la pestaña Importar), y el botón **Descargar faltantes (Excel)** junto al del CSV. Sin migración ni cambio de modelo. Detalle en "Importador masivo de agrupaciones (0.9.1)", más abajo.
+
 ## Objetivo
 
 En la Fase 2 cada curva de estacionalidad (M6) se calcula por **agrupación de estacionalidad**, no por equivalencia: muchas de las 1 956 equivalencias del árbol real venden poco y una curva propia sería ruido. M3 construye el catálogo de agrupaciones (nombres del negocio, mantenidos por el planner) y la asignación de **cada equivalencia a una agrupación**, con un reporte de faltantes que diga qué equivalencias activas y vigentes todavía no tienen curva: **una equivalencia sin agrupación no se puede proyectar** en M7. Las curvas en sí (cálculo a partir de la venta histórica) son M6 y quedan fuera.
@@ -308,10 +310,12 @@ La misma tabla de "Por árbol", alimentada por las filas con `faltante: true` de
 - `Chips` de motivo: Todas (N) · Sin agrupación (N) · Agrupación inactiva (N); y otro grupo: Reales (N) · Genéricas (N). Los mismos filtros de género, mundo, línea y texto.
 - Resumen por género encima de la tabla ("HOMBRE 410 · MUJER 520 · …") como chips que filtran.
 - La misma barra de asignación en bloque, con el mismo **filtro de género** y el mismo orden alfabético que en Asignación (el selector "Asignar a" solo ofrece las agrupaciones que aplican, y los mensajes de "no hay ninguna" enlazan a Agrupaciones): el flujo esperado es "filtrar género + línea → seleccionar todo → asignar a X" hasta que la pestaña quede vacía.
-- Botón **Descargar faltantes (CSV)**: genera en el navegador, con BOM, un archivo con las columnas `GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION` (esta última vacía; la equivalencia genérica sale como celda vacía y la que se llama como la línea sale con su nombre literal). Exporta las filas que pasan los filtros vigentes (género, mundo, línea, texto, motivo y tipo), así se puede bajar "solo MUJER" para trabajarlo por partes. Es exactamente el formato del importador: Javier lo completa en Excel y lo sube en la pestaña Importar. Junto al botón, "Importar" salta a esa pestaña.
+- Botón **Descargar faltantes (CSV)**: genera en el navegador, con BOM, un archivo con las columnas `GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION` (esta última vacía; la equivalencia genérica sale como celda vacía y la que se llama como la línea sale con su nombre literal). Exporta las filas que pasan los filtros vigentes (género, mundo, línea, texto, motivo y tipo), así se puede bajar "solo MUJER" para trabajarlo por partes. Es exactamente el formato del importador: Javier lo completa en Excel y lo sube en la pestaña Importar. Junto al botón, "Importar" salta a esa pestaña. **Desde `0.9.1`** el archivo trae una sexta columna, `TEMPORADA` (vacía; opcional, solo aplica a las agrupaciones que cree la importación), y junto al botón hay otro, **Descargar faltantes (Excel)**: las mismas seis columnas y las mismas filas en un `.xlsx` con una hoja llamada `ASIGNAR`, para quien prefiere abrirlo directo en Excel sin pasar por el CSV. Ver "Excel de faltantes", más abajo.
 - `EmptyState` cuando no hay faltantes: "Toda equivalencia activa tiene agrupación. Listo para M6." Ese es el hito.
 
 ### Pestaña Importar
+
+Desde `0.9.1` la pestaña ofrece dos importadores con un selector de chips, **Equivalencias** (el que sigue, el de las cinco columnas, que asigna) y **Agrupaciones** (el masivo que crea agrupaciones nuevas, descrito en "Importador masivo de agrupaciones (0.9.1)"). Cada uno se remonta al cambiar de chip, así que no comparten archivo ni mapeo. Lo que sigue describe el de Equivalencias.
 
 Mismo flujo y mismos componentes que Importar CSV del árbol (`importar-csv.tsx` se generaliza o se duplica con el campo extra; decisión del frontend, pero la pantalla se ve igual):
 
@@ -398,6 +402,101 @@ Funciones puras en `src/lib/estacionalidad/`, probadas en `tests/estacionalidad.
 
 29. `cargarEstadoEstacionalidad` lee también `agrupacion_generos` (los vínculos); `agrupacionesConGeneros(estado)` los anexa a cada agrupación como `genero_ids` para el importador y para la lista plana.
 
+## Importador masivo de agrupaciones (0.9.1)
+
+**Por qué existe.** El 2026-10-13 Javier pidió "una carga masiva" de agrupaciones: un Excel para descargar las equivalencias que siguen sin agrupación y otro para crear las agrupaciones de una vez, en vez de darlas de alta una por una en la pestaña Agrupaciones. Hasta entonces la única carga en bloque era la de equivalencias (cinco columnas), que crea agrupaciones **sin descripción, sin orden y con los géneros que deduce de las filas**: sirve para asignar, no para definir bien una agrupación. El importador nuevo define la agrupación completa y no asigna ninguna equivalencia; después se asigna con Asignación o con el importador de Equivalencias. Sin migración: usa las tablas de `0003`, `0005` y `0011`.
+
+**Ruta.** `POST /api/agrupaciones-estacionalidad/importar` · `requirePlanner` · cuerpo `{ modo: "previsualizar" | "aplicar", filas: [...] }` con de 1 a **5 000** filas (`importarAgrupacionesSchema`; con más, `400` "Se admiten hasta 5 000 filas por importación."; la pantalla lo avisa antes de enviar). Las reglas de contenido no devuelven `400` por fila: cada fila mala sale como omitida con su motivo y el resto sigue. La lógica pura está en `src/lib/estacionalidad/importar-agrupaciones.ts` (`planificarImportacionAgrupaciones`, `aplicarPlanAgrupaciones`), el estado se lee con `cargarEstadoImportacionAgrupaciones` y la escritura es `crearAgrupacionesConGeneros` (ambas en `consultas.ts`).
+
+### Columnas del archivo
+
+CSV o Excel con la cabecera en la primera fila; la pantalla autodetecta las columnas por nombre y deja corregir el mapeo. La plantilla descargable (`plantilla-agrupaciones-estacionalidad.csv`) trae una fila de ejemplo inventada, `ABRIGO EJEMPLO`, que **hay que borrar antes de subir el archivo**.
+
+| Columna | Obligatoria | Qué lleva |
+|---|---|---|
+| `NOMBRE` | sí | Se normaliza como todo nombre del sistema (NFC, espacios, mayúsculas); hasta 120 caracteres. Alias que se reconocen: `AGRUPACION`, `AGRUPACIONES`, `NOMBRE_AGRUPACION`, `AGRUPACION_ESTACIONALIDAD`, `ESTACIONALIDAD` |
+| `GENEROS` | sí | Uno o más géneros por nombre o por código, solo activos. Separadores: coma, punto y coma, barra `/` y barra vertical `\|` (`HOMBRE; MUJER`). Los repetidos se quitan. Alias: `GENERO`, `GENEROS_LK`, `GENERO_LK` |
+| `CODIGO` | no | Hasta 40 caracteres, se normaliza con `aCodigo`; vacío, se deriva del nombre |
+| `TEMPORADA` | no | `Invierno`, `Verano`, `Todo el año` o `Toda temporada` (y los códigos `invierno`, `verano`, `todo_el_ano`), sin importar mayúsculas ni acentos; vacío, `todo_el_ano` |
+| `DESCRIPCION` | no | Hasta 500 caracteres; vacío, sin descripción. Alias: `DESC`, `NOTA`, `NOTAS`, `COMENTARIO`, `COMENTARIOS`, `OBSERVACION` |
+| `ORDEN` | no | Entero 0 o mayor (`30`, `30.0` y `30,0` valen); vacío, se asigna solo. Alias: `POSICION`, `SECUENCIA` |
+
+Una columna opcional que no se mapea simplemente no viaja. Las celdas numéricas del Excel (un `ORDEN` escrito como número) se leen como texto.
+
+### Reglas
+
+1. **Solo crea.** Una agrupación que ya existe nunca se actualiza, no se reactiva si estaba inactiva y no cambia de géneros, temporada ni orden: su fila sale como `ya_existe` y es informativa. Se considera que existe si coincide el nombre normalizado o, cuando el archivo **no** trae `CODIGO`, el código derivado del nombre. Si el archivo trae un código explícito distinto que ya está en uso por otra agrupación, la fila es un error (`codigo_en_uso`), no una existente. Para cambiar algo de una agrupación que ya existe se usa la pestaña Agrupaciones. Es la decisión registrada en `DECISIONES.md` ("El importador masivo de agrupaciones solo crea").
+2. **Orden de las comprobaciones de una fila** (la primera que falla manda): nombre vacío, fila `TOTAL`, nombre largo, ya existe, nombre repetido en el archivo, géneros (vacío, desconocido, inactivo), temporada, orden, descripción, código inválido, código en uso, código repetido en el archivo y, al final, agotamiento del orden automático. Una fila rechazada no reserva nada: no ocupa el nombre ni el código ni consume un número de orden, así que si la segunda fila de un nombre es la buena, gana ella.
+3. **Filas repetidas dentro del archivo.** Gana la primera aparición de cada nombre y de cada código. Una repetida de nombre es informativa solo si es **idéntica** (mismo código, mismos géneros ya resueltos, misma temporada, descripción y orden); si difiere, es un error y el detalle dice en qué campos ("Difiere de la fila 3 en géneros, orden; se usa la de la fila 3"). Dos nombres distintos con el mismo código (el del archivo o el derivado) también son error para la segunda (`codigo_repetido_en_archivo`): a diferencia del importador de Equivalencias, aquí **no** se agrega `_2`, porque el archivo define las agrupaciones y un código duplicado casi siempre es un descuido.
+4. **Orden automático.** Con `ORDEN` vacío, la agrupación recibe el siguiente múltiplo de 10 mayor que el mayor `orden` actual (agrupaciones existentes, activas e inactivas, y filas ya aceptadas del archivo, incluidas las que traen `ORDEN` explícito), creciente fila a fila: `0` da 10, `20` da 30, `25` da 30. Si el siguiente ya no cabe en un `integer` de Postgres (2 147 483 647), la fila sale como `orden_invalido` y se pide el número a mano.
+5. **Géneros.** Cada pedazo se resuelve por nombre o código normalizado entre los géneros **activos** (las mismas funciones que el importador de Equivalencias). Si algún pedazo no existe, la fila entera es `genero_desconocido` y el detalle lista los desconocidos; si existe pero está inactivo, `genero_inactivo`. Nunca se crea un género. La agrupación nace con los géneros ya resueltos, en el orden del catálogo de géneros, y siempre con al menos uno (si la celda queda sin ningún género, `genero_vacio`).
+6. **Géneros con barra en el nombre.** Como la barra también separa, un género del catálogo cuyo nombre la lleva (en los ejemplos de las pruebas, `HOMBRE/MUJER`) no se parte: en cada tramo se busca primero la corrida más larga de pedazos unidos por `/` que coincida con el nombre completo de un género y solo lo que no coincide con ninguno se separa por `/`. Si ese género no está en el catálogo, `HOMBRE/MUJER` se lee como dos géneros.
+7. **Idempotencia.** Reimportar el mismo archivo da cero creadas y todas sus filas como `ya_existe`. La prueba la comprueba aplicando el plan en memoria (`aplicarPlanAgrupaciones`) y volviendo a planificar.
+8. **Previsualizar y aplicar usan el mismo plan.** `aplicar` vuelve a leer el estado y a planificar, no confía en lo que mostró la previsualización: si entre las dos alguien creó una agrupación del mismo nombre, esa fila pasa a `ya_existe`. La pantalla solo deja aplicar tras previsualizar el mismo archivo y el mismo mapeo.
+
+### Escritura
+
+`crearAgrupacionesConGeneros` crea en **tandas de 500** con `upsert … onConflict: "nombre", ignoreDuplicates: true` y lee de vuelta solo las filas que realmente insertó; los vínculos de género se escriben únicamente para esas (si otra sesión creó el mismo nombre en el medio, no se le tocan los géneros). Sin transacción (supabase-js no las expone), con esta compensación: si falla el insert de los vínculos de una tanda, se borran las agrupaciones recién creadas de **esa** tanda (el `cascade` se lleva los vínculos) para que no queden "sin género"; las tandas anteriores quedan completas. Desde la corrección de QA, el borrado de compensación **sí se comprueba**: si también falla, la respuesta es `500` y el mensaje (`mensajeFalloCrearAgrupaciones`) dice cuántas se crearon antes y cuántas quedaron sin género, para asignarles géneros desde la pestaña Agrupaciones antes de reimportar (porque un reimport las vería como `ya_existe`). En cualquier fallo, reimportar el mismo archivo completa el resto sin duplicar. `totales.creadas` cuenta solo las completas, es decir, las que quedaron con sus géneros.
+
+### Reporte
+
+Misma forma en los dos modos (`ReporteImportacionAgrupaciones`, en `tipos-api.ts`); en `aplicar`, `creadas` es lo realmente escrito.
+
+```jsonc
+{ "data": {
+  "modo": "previsualizar",
+  "totales": { "filas": 40, "a_crear": 31, "creadas": 0, "ya_existen": 4, "omitidas": 9, "con_error": 5 },
+  "agrupaciones_nuevas": [ { "fila": 1, "nombre": "ABRIGO EJEMPLO", "codigo": "ABRIGO_EJEMPLO", "generos": ["HOMBRE", "MUJER"], "temporada": "invierno", "orden": 10, "descripcion": null } ],
+  "omitidas": [ { "fila": 7, "motivo": "genero_desconocido", "detalle": "NIÑOS", "informativa": false, "nombre": "…", "codigo": "", "generos": "NIÑOS", "temporada": "", "descripcion": "", "orden": "" } ]
+} }
+```
+
+`filas` son las recibidas; `omitidas` incluye las informativas (`ya_existe` y repetidas idénticas) y las que son errores; `con_error` solo cuenta las segundas. Cada omitida lleva la fila ya normalizada (los seis campos) para poder corregir el archivo, y a veces `detalle` y `fila_original`. Las agrupaciones nuevas salen **todas** en la respuesta, con su fila de origen, para detectar tipeos antes de aplicar.
+
+### Motivos de omisión
+
+Son **14** (`MotivoOmisionAgrupaciones`, con etiquetas en `ETIQUETA_MOTIVO_OMISION_AGRUPACIONES`). Informativos, sin nada que corregir: `ya_existe` y `nombre_repetido_en_archivo` cuando la fila repite exactamente a otra. El resto son errores del archivo; el chip de motivo de la pantalla y el CSV de omitidas los listan.
+
+| Motivo | Cuándo |
+|---|---|
+| `nombre_vacio` | La celda `NOMBRE` está vacía |
+| `fila_total` | El nombre es `TOTAL` (la fila de totales que dejan las tablas dinámicas) |
+| `nombre_largo` | Más de 120 caracteres |
+| `ya_existe` | La agrupación ya existe (informativa; el detalle avisa si el nombre coincide por código o si está inactiva y no se reactiva) |
+| `nombre_repetido_en_archivo` | El nombre ya apareció antes en el archivo (error si difiere; informativa si es idéntica) |
+| `genero_vacio` | La celda `GENEROS` no trae ningún género |
+| `genero_desconocido` | Algún género no existe en el catálogo (el detalle los lista) |
+| `genero_inactivo` | Algún género existe pero está inactivo |
+| `temporada_invalida` | La temporada no es ninguna de las reconocidas |
+| `orden_invalido` | `ORDEN` no es un entero 0 o mayor dentro de `integer`, o no queda un orden automático disponible |
+| `descripcion_larga` | Más de 500 caracteres |
+| `codigo_invalido` | El código del archivo pasa de 40 caracteres, no tiene letras ni números, o el nombre no permite derivar uno |
+| `codigo_en_uso` | Otra agrupación existente ya tiene ese código (el detalle dice cuál) |
+| `codigo_repetido_en_archivo` | Otra fila anterior del archivo ya usa ese código (el detalle dice cuál) |
+
+### Pantalla
+
+Estacionalidad → Importar → chip **Agrupaciones** (`importar-panel.tsx` y `importar-agrupaciones.tsx`), con el mismo flujo de cuatro pasos que los demás importadores (archivo, mapeo, previsualización, resultado) y los componentes compartidos de `src/components/importador/`. Encima, un aviso con el formato y el botón **Descargar plantilla (CSV)**. La previsualización muestra tres tarjetas (Agrupaciones a crear · Ya existen · Con errores), la tabla de **todas las agrupaciones que se crearán** (fila, nombre, código, géneros, temporada y orden), los errores con la fila completa, chips por motivo y descarga de omitidas, y aparte la tabla informativa "Ya existen o repetidas". Si no hay nada que crear lo dice ("Nada que crear: todas las agrupaciones del archivo ya existen" o, si hay errores, "Ninguna fila crea una agrupación: revisa los errores de abajo"). El `confirm` de Aplicar repite cuántas se crearán, que las existentes no se modifican y cuántas filas quedan fuera. Tras aplicar, el botón **Ver agrupaciones** salta a la pestaña Agrupaciones con la lista recargada.
+
+### Excel de faltantes
+
+`Descargar faltantes (Excel)` (pestaña Faltantes) genera en el navegador un `.xlsx` (`faltantes-estacionalidad.xlsx`) de una hoja `ASIGNAR` con las **mismas seis columnas y las mismas filas que el CSV**: `GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION, TEMPORADA`. Exporta lo que pasa los filtros vigentes, igual que el CSV; la genérica sale con `EQUIVALENCIA` vacía y la que se llama como la línea con su nombre literal. Se llena `AGRUPACION` (y, si se quiere, `TEMPORADA`) y se sube en Importar → Equivalencias. Las dos descargas salen de la misma función (`filasFaltantes`, en `comunes.tsx`), así que no pueden diferir; la prueba lo comprueba. La generación (`src/components/importador/excel.ts`) carga SheetJS bajo demanda al pulsar, con anchos de columna ajustados al texto más largo (entre 10 y 60 caracteres). Si falla, un `Alert` lo dice y el CSV sigue disponible. La `TEMPORADA` se añadió también al CSV para que los dos archivos sean idénticos; el importador de Equivalencias la acepta como opcional desde `0.9.0`.
+
+### Hito para Javier
+
+Solo se puede recorrer con la base real. Los dos Excel que Javier recibió el 2026-10-13 (equivalencias sin asignación y plantilla para crear agrupaciones) se generaron fuera del repositorio con sus datos reales; aquí no hay copia ni cifras.
+
+- [x] Checks automáticos: `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (1 479 pruebas en 97 archivos) y `npm run build` en verde; QA aprobó con dos hallazgos importantes corregidos (la compensación no comprobaba el resultado del borrado, y la descarga de faltantes no tenía pruebas) y algunos menores.
+- [x] `APP_VERSION` = `0.9.1 · M3`. Sin migración.
+- [ ] **Plantilla**: Estacionalidad → Importar → Agrupaciones → "Descargar plantilla (CSV)"; abre en Excel con la cabecera `NOMBRE, CODIGO, GENEROS, TEMPORADA, DESCRIPCION, ORDEN` y la fila `ABRIGO EJEMPLO`.
+- [ ] **Llenar y previsualizar**: completar el Excel de agrupaciones (borrando la fila de ejemplo), subirlo y **Previsualizar**. Revisar con calma la tabla "Agrupaciones que se crearán": dos nombres casi iguales suelen ser un tipeo. Las filas con error aparecen con su motivo (por ejemplo `Género desconocido` si escribió un género que no existe) y no frenan al resto; corregirlas en el archivo y volver a previsualizar.
+- [ ] **Aplicar**: confirmar; el resultado dice cuántas se crearon, y "Ver agrupaciones" las muestra en su pestaña con los géneros y la temporada que escribió. Ninguna debe aparecer con el badge "Sin género".
+- [ ] **Reimportar** el mismo archivo: cero creadas y todas las filas en "Ya existen"; nada cambia en la base.
+- [ ] **Una existente no se toca**: poner en el archivo una agrupación que ya existe con otra temporada u otros géneros; sale como "Ya existe" y la agrupación queda igual.
+- [ ] **Excel de faltantes**: en Faltantes, filtrar (por ejemplo un género) y "Descargar faltantes (Excel)"; el archivo trae la hoja `ASIGNAR`, seis columnas y las mismas filas que el CSV con el mismo filtro. Llenar `AGRUPACION`, subirlo en Importar → Equivalencias y comprobar que Faltantes baja en las filas procesadas.
+- [ ] **Solo con la base real** (lo que las pruebas, con dobles de Supabase, no cubren): que el `upsert … ignoreDuplicates` por nombre inserte y devuelva solo las nuevas, que la ventana en que una agrupación existe sin sus géneros (entre su insert y el de los vínculos) no se note, y que 5 000 filas se previsualicen y apliquen en un tiempo razonable.
+- [ ] Probar la importación con los tres roles en el navegador: el comprador no ve la pantalla ni el endpoint (`403`); nada de esto se ha recorrido en navegador todavía.
+
 ## Hito de prueba
 
 Con el árbol real cargado en `vector-two` (8 géneros · 5 mundos · 86 líneas · 556 nodos · 1 691 equivalencias reales + 265 genéricas = 1 956). Los conteos suponen que Javier no desactivó nada desde el cierre de M1; si lo hizo, los faltantes iniciales son 1 956 menos las equivalencias inactivas o en nodos no vigentes.
@@ -469,6 +568,11 @@ Registradas el 2026-10-06 con el cambio de géneros (`0.6.0`), también en `docs
 9. **Las listas de agrupaciones van en orden alfabético**; `orden` ya no manda ahí, pero los colores siguen por `orden, nombre`.
 10. **Los filtros `.in(...)` van en tandas de 150 ids.**
 
+Registradas el 2026-10-13 con el importador masivo (`0.9.1`), también en `docs/DECISIONES.md`:
+
+11. **El importador masivo de agrupaciones solo crea**; lo existente se reporta como informativo y se edita en la pantalla.
+12. **El Excel de faltantes lleva las mismas seis columnas que el CSV**, incluida `TEMPORADA`, generado por la misma función.
+
 ## Preguntas abiertas para Javier
 
 1. **La lista.** ¿Ya tienes las agrupaciones de estacionalidad y a qué equivalencias va cada una? Si sí, ¿en qué formato (¿una columna más en el archivo del árbol?)? El importador acepta `GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION`, con las mismas reglas que el árbol (`-` = igual a la línea, vacío = genérica). Si no la tienes, la pestaña Faltantes y el CSV descargable están pensados para armarla.
@@ -519,7 +623,21 @@ El cuerpo de la ficha ya describe lo construido; aquí queda lo que se apartó d
 26. **Los chips de género de cada agrupación van por el `orden` del género**, no alfabéticos, como el resto de listas de géneros del sistema; solo las agrupaciones se ordenan por nombre. El segmento de cobertura por género del Mapa sigue `orden, nombre`.
 27. **Piezas nuevas compartidas.** `src/components/ui/chips-multiples.tsx` (selector múltiple de chips), `CatalogoPlano` con las props opcionales `generos` y `ordenar`, `DataTable` con la prop opcional `claseFila` (resaltado de las filas sin género), y la lógica pura de `generos.ts`. Ninguna cambia el comportamiento de M1 ni M2.
 
+### Del importador masivo (`0.9.1`)
+
+28. **No estaba en la especificación original**: lo pidió Javier el 2026-10-13 ("necesito una carga masiva"). Es un segundo importador con su propio endpoint (`/api/agrupaciones-estacionalidad/importar`), no una ampliación del de las cinco columnas, que sigue igual.
+29. **El CSV de faltantes pasó de cinco a seis columnas** (se añade `TEMPORADA`, vacía). Sigue exportando lo filtrado (punto 5 de la lista anterior). Así el CSV y el Excel son el mismo archivo en dos formatos, y el que se llene sirve tanto para asignar como para fijar la temporada de las agrupaciones que cree la importación.
+30. **Un código repetido en el archivo es error, no `_2`.** El importador de Equivalencias deriva y desambigua el código de las agrupaciones que crea porque el usuario no lo definió; en el masivo el archivo es la definición, así que un código repetido se rechaza.
+
 ## Limitaciones conocidas
+
+Del importador masivo y la descarga en Excel (`0.9.1`):
+
+- **No se probó en navegador con los tres roles ni contra Supabase real.** El `upsert … ignoreDuplicates` por nombre, la ventana en que una agrupación existe sin sus géneros (entre el insert de la agrupación y el de sus vínculos) y la compensación solo se probaron con dobles de Supabase (`tests/estacionalidad.crear-agrupaciones-con-generos.test.ts`).
+- **Sin transacción.** Ante un fallo a mitad quedan creadas las tandas anteriores (completas, con sus géneros); reimportar completa el resto. Si además falla el borrado de compensación, quedan agrupaciones sin género que el reimport reportaría como `ya_existe`: el mensaje de error las cuenta y hay que asignarles géneros a mano.
+- **El Excel que genera el navegador no lleva el encabezado en negrita.** La edición comunitaria de SheetJS (0.18.5) no escribe estilos; se compensa con anchos de columna. El CSV y el Excel tienen el mismo contenido.
+- **Tope de 5 000 filas por importación**, y las 500 por tanda de escritura; con más filas hay que partir el archivo.
+- **No actualiza.** Corregir el género, la temporada, la descripción o el orden de una agrupación existente exige la pestaña Agrupaciones, una por una. Si hace falta una carga de actualización, es otro importador con otra regla (qué pisa y qué no) y una decisión de Javier.
 
 Del cambio de géneros (`0.6.0`). Ninguna bloquea el hito; se anotan para que nadie las descubra por sorpresa.
 

@@ -701,3 +701,31 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** La `0012` que M6 y M7 reclamaban la tomó la función de sugerencias v2 al construir 02b, que no estaba prevista; el desfase de versiones viene de que la decisión de Javier sobre la regla de carga llegó el 2026-10-13, cuando 02b ya tenía reservada la `0.8.3`. Una migración numerada dos veces no se detecta hasta aplicarla, así que se corrigieron todos los documentos a la vez.
 
 **Descartado.** Conservar `0012` para M6 y M7: chocaría con la función v2 ya construida.
+
+## 2026-10-13 · M3: el importador masivo de agrupaciones solo crea; lo que ya existe no se actualiza (construido 2026-10-13)
+
+**Decisión.** Javier pidió "una carga masiva" de agrupaciones de estacionalidad. El importador nuevo (`POST /api/agrupaciones-estacionalidad/importar`, columnas `NOMBRE`, `CODIGO`, `GENEROS`, `TEMPORADA`, `DESCRIPCION`, `ORDEN`) solo crea agrupaciones nuevas, activas y con al menos un género. Una que ya existe (mismo nombre normalizado, o mismo código derivado cuando el archivo no trae `CODIGO`) no se actualiza, no se reactiva y no cambia de géneros, temporada, descripción ni orden: su fila sale como informativa (`ya_existe`). Nunca asigna equivalencias, nunca crea géneros y nunca quita nada. Es un importador aparte del de Equivalencias, que no cambia.
+
+**Por qué.** Es la misma regla que ya rige a los demás importadores (marcas, tiendas, conjuntos): una carga masiva no pisa lo que el planner ajustó en la pantalla, y reimportar el mismo archivo debe dar cero cambios. Un archivo que actualizara obligaría a decidir qué campo vacío borra y cuál conserva, y un error de Excel cambiaría géneros o temporadas de agrupaciones con equivalencias asignadas, con la regla de género (decisión del 2026-10-06) en medio. Como crear es la única operación, la previsualización puede mostrar todas las agrupaciones nuevas con sus géneros y detectar tipeos antes de aplicar. Un código repetido dentro del archivo se rechaza en lugar de desambiguarse con `_2` (como hace el importador de Equivalencias): aquí el archivo es la definición y un código duplicado casi siempre es un descuido.
+
+**Descartado.** Actualizar las existentes (más riesgo que beneficio para la primera carga); ampliar los géneros de las existentes (ya descartado el 2026-10-06 para el importador de Equivalencias); reactivar las inactivas; desambiguar códigos con sufijo. Si Javier necesita una carga de actualización, será otra entrada con su propia regla.
+
+**Estado de la construcción (2026-10-13).** Construido en `0.9.1 · M3`, sin migración. Escritura en tandas de 500 con `upsert … ignoreDuplicates` y compensación (borrar las agrupaciones de la tanda cuyo vínculo de géneros falló); sin transacción, y reimportar completa lo que faltó. No se probó contra Supabase real.
+
+## 2026-10-13 · M3: el Excel de faltantes lleva las mismas seis columnas que el CSV, incluida `TEMPORADA`, y sale de la misma función (construido 2026-10-13)
+
+**Decisión.** La pestaña Faltantes gana el botón "Descargar faltantes (Excel)", un `.xlsx` generado en el navegador (SheetJS cargado bajo demanda) con una hoja `ASIGNAR` y las columnas `GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION, TEMPORADA`. El CSV, que tenía cinco columnas, pasa a las mismas seis. Los dos salen de `filasFaltantes`, respetan los mismos filtros y se pueden subir en Importar → Equivalencias, que acepta `TEMPORADA` como opcional desde `0.9.0`.
+
+**Por qué.** Javier pidió un Excel para descargar las equivalencias sin asignación y completarlas; el CSV, que ya existía, obliga a abrirlo con la codificación y el separador correctos. Que sea el mismo contenido, de la misma función, garantiza que ninguno de los dos se desfase del formato del importador, y una prueba lo comprueba. `TEMPORADA` va vacía y opcional porque el mismo archivo que asigna puede fijar la temporada de las agrupaciones que cree.
+
+**Descartado.** Un Excel con otras columnas o una hoja por género (se rompería la regla de que lo descargado se sube tal cual); generarlo en el servidor (el navegador ya tiene la lista plana y los filtros); reemplazar el CSV (se conserva: no depende de ninguna librería y ya lo usaban).
+
+**Limitación.** El encabezado no sale en negrita: la edición comunitaria de SheetJS (0.18.5) no escribe estilos. Se compensa con anchos de columna ajustados al contenido; no justifica cambiar de librería.
+
+## 2026-10-13 · La etiqueta `0.9.1` pasa a M3; el paso 2 de M6 se desplaza
+
+**Decisión.** La entrega `0.9.1 · M3` (importador masivo de agrupaciones y Excel de faltantes) tomó la versión `0.9.1`, que el plan reservaba al paso 2 de M6 (curvas). Se registra el desplazamiento: el paso 2 de M6 llevará la siguiente etiqueta libre (previsiblemente `0.9.2 · M6`), a confirmar al construirlo; M7 sigue después. Las fichas de M6 y M7 todavía dicen `0.9.1` para el paso 2 y se corregirán al abrirlo.
+
+**Por qué.** Mismo caso que la renumeración del 2026-10-13: la versión se asigna en el orden en que cierran las entregas, no en el que se planearon. Una mejora pequeña pedida por Javier no debía esperar al paso 2.
+
+**Descartado.** Etiquetar esta entrega `0.9.0 · M3` (chocaría con la de M6 ya desplegada) o dejarla sin versión (el pie del menú es lo que Javier compara con Railway).
