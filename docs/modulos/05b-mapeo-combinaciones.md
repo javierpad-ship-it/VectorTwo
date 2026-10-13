@@ -1,6 +1,6 @@
 # M5b · Mapeo de combinaciones históricas (mejora de M5)
 
-> Estado: **construido 2026-10-12 (`0.8.1 · M5`); hito pendiente de recorrer por Javier.** Lo que existe hoy está en "Construido" y en "Cambios respecto a la especificación"; el resto de la ficha es el diseño del que se partió y sigue valiendo salvo lo anotado ahí. Mejora de [05-venta-stock](05-venta-stock.md) (construido, `0.8.0 · M5`); toca el resolutor, el informe y la pantalla de carga de M5 y usa el árbol de [01-arbol-producto](01-arbol-producto.md) (nodos GML, equivalencia `-` = igual a la línea, genérica `SIN EQUIVALENCIA`). Contexto de [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md): un destino "GML" o "GMLE" es siempre, en los hechos, una `equivalencia_id`. Versión `0.8.1 · M5`, migración **`0008_mapeo_combinaciones.sql`**; por eso la mejora 05c ([05c-ubicaciones-conciliacion](05c-ubicaciones-conciliacion.md)) toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011` (renumeración anotada en esas fichas y en `docs/PLAN.md`). Ningún dato real de Lukers: géneros, líneas y equivalencias de ejemplo son inventados.
+> Estado: **construido 2026-10-12 (`0.8.1 · M5`); hito pendiente de recorrer por Javier.** Lo que existe hoy está en "Construido" y en "Cambios respecto a la especificación"; el resto de la ficha es el diseño del que se partió y sigue valiendo salvo lo anotado ahí. Mejora de [05-venta-stock](05-venta-stock.md) (construido, `0.8.0 · M5`); toca el resolutor, el informe y la pantalla de carga de M5 y usa el árbol de [01-arbol-producto](01-arbol-producto.md) (nodos GML, equivalencia `-` = igual a la línea, genérica `SIN EQUIVALENCIA`). Contexto de [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md): un destino "GML" o "GMLE" es siempre, en los hechos, una `equivalencia_id`. Versión `0.8.1 · M5`, migración **`0008_mapeo_combinaciones.sql`**; por eso la mejora 05c ([05c-ubicaciones-conciliacion](05c-ubicaciones-conciliacion.md)) toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011` (renumeración anotada en esas fichas y en `docs/PLAN.md`). Ningún dato real de Lukers: géneros, líneas y equivalencias de ejemplo son inventados. **Ampliación posterior (`0.8.3 · M5`, 2026-10-13)**: una regla de carga nueva decidida por Javier envía a la GML sin equivalencia las filas de un nodo vigente cuya equivalencia ya no existe; se describe en la sección "Regla 0.8.3" de abajo y no cambia ni la tabla ni la API de mapeos, pero sí la precedencia del resolutor (el mapeo explícito sigue ganando).
 
 ## Construido (`0.8.1 · M5`, 2026-10-12)
 
@@ -47,6 +47,31 @@ El detalle de las decisiones del diseño sigue en "Decisiones de diseño" y en `
 7. **Motivo de rechazo nuevo, `origen_con_comodin_invalido`.** `*` en género, mundo o línea, o `*` mezclado con texto en la equivalencia. El POST responde `400` con ese código; el importador omite la fila con ese motivo (se añade a `MotivoOmisionMapeo`). El POST también expone `origen_sin_clasificar` y `origen_repetido_en_peticion` como códigos, ambos `400`.
 8. **Carrera entre dos usuarios.** Sin actualizaciones en la petición, el POST usa un `insert` estricto: si otra persona guardó el mismo origen justo antes, responde `409 origen_repetido`. Con `reemplazar` usa `upsert` sobre el único y **gana el último** que escribe. El importador usa `ignoreDuplicates` (no actualiza nunca).
 9. **`GET /api/ventas/mapeos?q=`** busca también en la nota, no solo en origen y destino.
+
+## Regla 0.8.3 · envío a la GML sin equivalencia (`0.8.3 · M5`, 2026-10-13)
+
+Decisión de Javier, el 2026-10-13: "si la equivalencia no está creada porque es data antigua que no tiene la misma clasificación que la actual, se clasifica a la GML sin equivalencia". Es la salida para el caso más común del histórico, que el mapeo de esta ficha obligaba a resolver una combinación a la vez: el nodo género-mundo-línea existe, pero la equivalencia que traía el archivo ya no.
+
+**Qué hace.** Si el nodo de la fila existe y es vigente (género, mundo, línea y nodo activos) pero la equivalencia **no existe** (`equivalencia_inexistente`) o **está inactiva** (`equivalencia_inactiva`), la fila se carga en la equivalencia de nivel GML del nodo: **1.º la genérica activa** (`SIN EQUIVALENCIA`, `es_generica`); **2.º** si el nodo no tiene genérica activa, la **equivalencia activa que se llama como la línea** (el `-` de M1); si no hay ninguna de las dos, la fila conserva su error original y se resuelve como antes (con un mapeo, o creando la equivalencia en el árbol). Con el árbol de hoy, 286 de 590 nodos tienen genérica, 403 tienen la igual a la línea y 117 no tienen ninguna de las dos. No hay envío si el nodo no existe o no es vigente, ni si el género, el mundo o la línea no están vigentes: ahí la clasificación sí es desconocida.
+
+**Precedencia.** Árbol exacto → mapeo explícito (exacto antes que comodín) → envío a la GML → error. Un mapeo a un destino concreto **gana** al envío, que es lo que permite corregir una fila que el envío mandó a la GML cuando Javier sabe a qué equivalencia vigente va. Un mapeo activo cuyo destino ya no es vigente **tampoco** deja pasar al envío: sigue siendo el aviso rojo `mapeos_no_aplicables`, porque es una decisión rota que debe verse y no taparse en silencio. Los mapeos y el comodín `*` no cambian.
+
+**Solo `previsualizar` lo activa.** `crearResolutorCombinaciones(estado, mapeos, { enviarAGml: true })`, opt-in; el valor por defecto es sin envío. Los demás usos del resolutor (el estado de un mapeo Vigente u Obsoleto, el alta y la importación de mapeos, la sugerencia de destino) preguntan "¿resuelve el árbol?" y necesitan la respuesta sin fallback: con el envío siempre activo, todo origen de un nodo vigente "resolvería" y no se podría crear ningún mapeo, ni siquiera el que corrige un envío.
+
+**En el informe.** Las filas enviadas se cargan como cualquier otra: la identidad `archivo = cargadas + fusionadas + excluidas` no cambia, **no suman al porcentaje de errores y no bloquean el mes**. El código `enviadas_a_gml` es una **nota informativa** (en `NOTAS_CODIGOS`, no en los avisos); el reporte lleva `enviadas_a_gml` (medidas del mes) y `enviadas_a_gml_detalle` (por valor, de la que más pesa a la que menos: origen, motivo original, tipo de destino `generica` o `igual_a_linea`, destino y medidas). Los reportes guardados antes de `0.8.3` no traen esos campos y se leen como cero. Una fila enviada que coincide en clave con una fila nativa se suma y cuenta como fusionada, como cualquier clave repetida.
+
+**En la pantalla.** Bloque **"Equivalencias enviadas a la GML sin equivalencia"** en el reporte previo y en el detalle de una carga guardada (`enviadas-gml.tsx`), con filas, venta y peso por valor y el destino. En el reporte previo cada valor tiene el botón **Asignar**, que abre el mismo modal de esta ficha: el mapeo que se guarde gana al envío y el reporte se recalcula sin releer el archivo (`origenesDeEnviada` en `origenes-mapeo.ts` deriva los orígenes exactos de cada valor). En el detalle guardado la tabla es de solo lectura. La nota no se repite en la lista de avisos.
+
+**Qué no hace.** No crea equivalencias ni mapeos, no cambia el árbol y no toca los meses ya publicados: un mes cargado con la regla anterior tiene esas filas excluidas, y para que entren hay que recargarlo (la recarga reemplaza el mes entero). Tampoco decide por Javier si conviene mantener el nodo sin genérica: los 117 sin ninguna equivalencia de nivel GML requieren un mapeo o una equivalencia nueva.
+
+**Pruebas.** `tests/ventas.enviar-gml.test.ts` (37) más casos añadidos en `tests/ventas.fixture.ts`.
+
+**Checklist del hito para Javier** (con `0.8.3 · M5`):
+
+- [ ] Cargar un mes con equivalencias antiguas (nodo vigente, equivalencia que ya no existe): salen en el bloque "Equivalencias enviadas a la GML sin equivalencia" con su destino, no en Errores, y el mes no se bloquea por ellas.
+- [ ] Comprobar que la fila va a la genérica del nodo y, en un nodo sin genérica, a la equivalencia igual a la línea; y que un nodo con ninguna de las dos sigue como error.
+- [ ] Pulsar **Asignar** en un valor enviado, elegir una equivalencia vigente y **Guardar y recalcular**: el valor sale del bloque y aparece en "reasignadas por mapeo" (el mapeo gana al envío).
+- [ ] Cargar el mes; en Cargas por mes, el detalle guarda el bloque (solo lectura). Anotar cuántas filas y qué peso se enviaron a la GML en septiembre.
 
 ## Objetivo
 
@@ -256,7 +281,7 @@ Registradas en `docs/DECISIONES.md` el 2026-10-12 y marcadas "construido 2026-10
 3. **Los hechos guardan solo el destino; la auditoría del mapeo va en el `reporte` de la carga; cambiar un mapeo exige recargar el mes.**
 4. **`clasificacion_incompleta` se decide en el resolutor y es mapeable; `sin_clasificar` sigue excluida por decisión.**
 5. **La sugerencia es Dice sobre bigramas de `aCodigo`, umbral 0,5 y "fuerte" 0,8, calculada en el servidor y nunca aplicada sola.**
-6. **La mejora toma `0008` y `0.8.1 · M5`; 05c toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011`.**
+6. **La mejora toma `0008` y `0.8.1 · M5`; 05c toma `0009` / `0.8.2 · M5`, 02b pasa a `0010` / `0.8.3 · M2b` y M6 a `0011`.** *(Estado, 2026-10-13: la numeración final cambió; 02b salió como `0.8.4 · M2b`, porque `0.8.3 · M5` es la regla de este apartado, y M6 paso 1 como `0011` y `0.9.0`; ver `docs/DECISIONES.md`, "Renumeración final".)*
 
 ## Preguntas abiertas para Javier (con valor por defecto)
 

@@ -2,6 +2,8 @@
 
 > Estado: **construido (2026-10-05, `0.3.0 · M2`); hito pendiente de recorrer por Javier**. Módulo anterior: [01-arbol-producto](01-arbol-producto.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final; la ficha describe lo que hay en el código.
 
+> **Mejora posterior (2026-10-13, `0.8.4 · M2b`)**: `marcas` gana `modalidad_tratamiento` (`por_gml` o `barrido`, solo con la casilla de tratamiento especial) y `conjunto_marca_id` (conjuntos de marcas, la cabeza manda en el flujo); hay dos pestañas nuevas (Conjuntos y Marcas relevantes por GML), la pestaña Importar se desdobló en tres importadores y la edición de nombre, código y nota pasó a un diálogo (migraciones `0010` y `0012`). La casilla y su importador siguen valiendo; la regla "no se agrupan marcas dentro de un nivel" del 2026-10-11 queda matizada por los conjuntos, que se aplican al leer. Detalle en [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md).
+
 ## Objetivo
 
 Dar al planner el maestro de marcas con el que Lukers planifica: cada marca pertenece a **una** agrupación de marca (Ultra Low · Mid Value · Valor · Reconocido · Premium, nombres todavía no oficiales y por eso editables) y puede llevar la bandera **tratamiento especial**, que la Fase 2 usará para tratarla aparte al elaborar los flujos. Javier pidió dos mantenimientos separados ("uno de agrupación de marcas y otro para asignar las marcas a cada grupo") y todavía no entregó la lista de marcas, así que el módulo tiene que quedar usable con alta manual desde el primer día y con un importador CSV/Excel para cuando llegue el archivo.

@@ -200,6 +200,8 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Descartado.** M2b (tabla manual con pestaña Equivalencias en la pantalla de marcas). Un híbrido "derivada de la venta más ajustes a mano": si en Fase 2 hace falta forzar una marca en una equivalencia sin venta, se decidirá entonces con el `analista-planeamiento`, no se reserva estructura ahora.
 
+**Estado (2026-10-13).** Sigue en pie. La mejora 02b (construida) usa el nombre "M2b" para otra cosa: marca × **nodo** género-mundo-línea, solo para las marcas que se trabajan aparte (`marca_gml_especial`). No es una relación marca ↔ equivalencia y no se mantiene a mano para todas las marcas.
+
 ## 2026-10-06 · Las agrupaciones de estacionalidad y su asignación las construye Javier dentro del sistema
 
 **Decisión.** No hay una lista previa de agrupaciones de estacionalidad ni de qué equivalencia va en cada una. Javier la va a construir en Vector2 ("la agrupación de género-mundo-línea-equivalencias la voy a construir en tu modelo") usando la pantalla de M3: crea las agrupaciones en la pestaña Agrupaciones, asigna en bloque desde Asignación y cierra la lista con Faltantes hasta que quede vacía. Con esto la especificación de M3 queda aprobada y el módulo pasa a construcción. El importador de asignaciones se mantiene tal como está especificado, pero como apoyo opcional (por ejemplo, para completar en Excel el CSV de faltantes), no como la vía principal de carga.
@@ -215,6 +217,8 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** Una curva tecleada a mano no tiene de dónde validarse y habría que rehacerla cuando llegue la venta. Separar "agrupar" (M3, maestro) de "calcular" (M6, planificación) deja a M3 con un hito verificable sin datos de venta, "toda equivalencia activa tiene agrupación", y evita que la Fase 1 cargue estructura de curvas que la Fase 2 podría cambiar al definir fórmulas con el `analista-planeamiento`.
 
 **Descartado.** Curvas manuales provisionales en M3 para "ir viendo" (datos sin respaldo que luego hay que borrar). Calcular curvas desde M3 con un archivo de venta parcial (la carga de venta es M5 y tiene su propia validación contra el árbol).
+
+**Estado (2026-10-13).** Sigue en pie: M3 no guarda curvas ni calcula nada. Lo único que M6 le añadió es la columna `temporada` de la agrupación (migración `0011`, `0.9.0 · M6`), que es un atributo de clasificación, no una curva. Ver la entrada del 2026-10-13 sobre la temporada.
 
 ## 2026-10-06 · Agrupaciones de estacionalidad sin seed; los nombres son del negocio
 
@@ -424,6 +428,8 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Descartado.** Marca colectiva para la cola larga y marcas en seguimiento (retiradas en la revisión de diseño, junto con la entrega `0.8.1`); copiar la agrupación en cada fila; tabla de alias (Javier confirmó con dos casos reales que nombres parecidos son marcas distintas). Si algún día hiciera falta agrupar la cola, se añade al leer, sin recargar.
 
+**Estado (2026-10-13).** Matizada en parte por la mejora 02b: la cola larga sigue sin colectiva, sin lista de seguimiento y sin alias (eso se cumple tal cual), pero ahora existen **conjuntos de marcas** por casa o licencia, que Javier pidió el 2026-10-12 por otra razón (comprar como una sola marca a ALFA, ALFA JEANS y ALFA KIDS). Se aplican al leer, así que M5 sigue guardando el detalle y nada se recarga. Ver la entrada del 2026-10-12 "M2b: los conjuntos de marcas…".
+
 ## 2026-10-11 · M5: las marcas desconocidas se crean solas como red de seguridad; la lista de marcas se carga antes
 
 **Decisión.** Una marca del archivo que no exista no bloquea la carga: se crea en la agrupación por defecto elegida al cargar (propuesta MID VALUE), con `tratamiento_especial` en falso. `VARIOS`, `OTROS` y `SIN MARCA` van siempre a MID VALUE. Orden de carga: marcas con su agrupación y tratamiento especial (importador de M2) → tiendas, con las tres que no son del sistema creadas y desactivadas → combinaciones nuevas del árbol → septiembre como piloto → resto del histórico.
@@ -566,6 +572,8 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Estado (2026-10-13).** La 05c se construyó con `0009_ubicaciones_ignoradas.sql` y `0.8.2 · M5`, como estaba previsto. 02b (`0010`, `0.8.3`) y M6 (`0011`) siguen sin construir.
 
+**Estado (2026-10-13, cierre).** 02b y el paso 1 de M6 se construyeron, con dos cambios sobre lo previsto aquí: se intercaló una migración (`0012`, función de sugerencias v2) y una versión (`0.8.3 · M5`, regla de carga de M5), así que 02b salió como `0010` y `0.8.4 · M2b`, M6 paso 1 como `0011` y `0.9.0 · M6`, el paso 2 de M6 pasa a `0013` y M7 a `0014`. Ver la entrada "Renumeración final" del 2026-10-13.
+
 ## 2026-10-12 · M5c: las ubicaciones que no son tiendas viven en `ubicaciones_ignoradas`, no en `tiendas` desactivadas (construido 2026-10-13)
 
 **Decisión.** Las ubicaciones del archivo de venta que no son tiendas (la central, las oficinas) se guardan en una tabla propia, `ubicaciones_ignoradas` (nombre normalizado único, nota, sin FKs ni seed), administrada en Maestros → Tiendas y con un botón *Ignorar esta ubicación* en el reporte previo que recalcula sin releer el archivo. Sus filas se excluyen por decisión con el motivo `ubicacion_ignorada` (antes `tienda_excluida`, que nunca se usó), no pesan en el 2 % de errores y no crean tiendas. El resolutor busca tienda por nombre, tienda por código, ubicación ignorada y por último desconocida: si existe una tienda con el mismo nombre, la tienda manda y la fila ignorada queda "sin efecto". Sustituye a la entrada del 2026-10-11 "lo desactivado se excluye en silencio informativo…", en lo que dice de crear desactivadas las tres tiendas "sin tabla de exclusiones" (el resto de esa entrada sigue en pie).
@@ -585,3 +593,111 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Descartado.** Conciliar contra lo cargado (esconde lo excluido); restar también ubicaciones ignoradas o géneros desconocidos sin evidencia; varias bases a elegir.
 
 **Estado de la construcción (2026-10-13).** Construido en `0.8.2 · M5`: el "Estado: propuesta" de arriba queda superado por esta línea. Hito pendiente de recorrer por Javier. Se cumple tal cual, con una precisión: el porcentaje de la diferencia se **trunca** en vez de redondear, para que 0,099996 % no se lea "0,1" dentro de un "Coincide". Sigue abierta una pregunta que esta entrada daba por cerrada: `TOLERANCIA_UNIDADES` vale 0 (unidades exactas), definida solo en `src/lib/ventas/tipos.ts`, y Javier debe decidir si deja las unidades exactas o admite unas pocas unidades (se habló de ±5); la recomendación es una tolerancia pequeña. Mientras no responda, rige 0. Si se cambia, irá en una entrada nueva que referencie a esta.
+
+## 2026-10-12 · M2b: el nivel de planificación (GML o GMLE) es una columna del nodo (construido 2026-10-13)
+
+**Decisión.** `genero_mundo_linea.nivel_planificacion` vale `GML` por defecto o `GMLE`. Un nodo `GML` es una sola unidad de planificación; uno `GMLE` se abre y cada equivalencia activa es una unidad. Se edita en el Árbol (uno a uno, en bloque, por línea y por archivo). Cambiarlo no borra nada: M5 sigue al detalle y la estacionalidad (M3) sigue asignándose por equivalencia; la curva de un nodo `GML` la calcula M7 como mezcla ponderada de las curvas de sus equivalencias (`curvaUnidad`).
+
+**Por qué.** Javier: la mayoría de los flujos se trabaja a nivel GML y solo algunos se abren a GMLE, y necesita "un lugar donde definamos qué se planifica a nivel de equivalencia". Es una propiedad del maestro y se guarda en el maestro, como `lineas.temporada` o `tiendas.tipo`; una columna con `default` evita tablas y `UPDATE`.
+
+**Descartado.** Bandera por equivalencia (crea un tercer grano, el "resto del GML", que M7, M8 y las pantallas tendrían que entender); tabla aparte de niveles (nada que la columna no dé); asignar agrupación de estacionalidad directamente al nodo (dos lugares para la misma cosa). Si Javier necesita abrir una sola equivalencia de un nodo, es una columna más y una fila más en `claveFlujo` (pregunta 13 de la ficha, que sigue abierta).
+
+**Estado de la construcción (2026-10-13).** Construido en `0.8.4 · M2b` con la migración `0010`. El hito de M3 ("toda equivalencia activa tiene agrupación") no se relaja para los nodos `GML`; al abrir un nodo a GMLE con equivalencias sin agrupación, el Árbol avisa y no bloquea.
+
+## 2026-10-12 · M2b: las marcas relevantes se definen por marca × GML con una modalidad explícita; la casilla se conserva (construido 2026-10-13)
+
+**Decisión.** El tratamiento especial de una marca se define por marca × GML (`marca_gml_especial`, nivel B), con dos modalidades guardadas en `marcas.modalidad_tratamiento`: `por_gml` (la marca es relevante en los GML que se le asignan: dentro de su agrupación se ve aparte y las demás son "otras de la agrupación") y `barrido` (flujo propio sin detalle por GML). La casilla `tratamiento_especial` de M2 se conserva y la API la mantiene coherente: hacer relevante a una marca la marca en `por_gml` y lo informa; desmarcarla conserva sus GML como **ignorados**; quitar el último GML no la devuelve sola a `barrido` (queda "pendiente: sin GML"). Una casilla con modalidad nula se lee como `barrido`. Las asignaciones se calculan vigentes o ignoradas según el árbol y la marca, y nunca se borran solas. `marca_id` va en cascada y el nodo en `restrict`.
+
+**Por qué.** ALFA es fuerte en jeans y no en ternos: la relevancia es por GML, no de la marca entera. La modalidad explícita evita que un estado intermedio (marca recién marcada, GML desactivado por otra pantalla) cambie un flujo en silencio, y permite pasar una marca a `barrido` conservando sus GML por si vuelve. La casilla sigue haciendo falta para el tipo `barrido`, que no tiene GML, y la trae el importador de M2. El `check` de la base va en un solo sentido (modalidad exige casilla) porque el inverso exigiría un `UPDATE` en la migración; la API cubre el otro (toda escritura que enciende la casilla escribe modalidad).
+
+**Descartado.** Deducir el tipo de la ausencia de GML; exigir marcar antes de asignar (`409`) o quitar la casilla; borrar las asignaciones al desmarcar o al desactivar un GML.
+
+**Estado de la construcción (2026-10-13).** Construido en `0.8.4 · M2b`. QA encontró que el importador de marcas dejaba la casilla encendida sin modalidad; ahora escribe `barrido`, que es lo que la regla ya decía. Las veinticuatro preguntas de la ficha siguen con su valor por defecto, que es lo construido.
+
+## 2026-10-12 · M2b: los conjuntos de marcas son una marca cabeza y se aplican al leer; cambia la decisión del 2026-10-11 (construido 2026-10-13)
+
+**Decisión.** Un conjunto es una marca **cabeza** (`marcas.conjunto_marca_id` apunta a ella) más sus miembros: ALFA + ALFA JEANS + ALFA KIDS = ALFA. La **unidad de marca** (`marcas_unidad`) es la cabeza si el conjunto es efectivo (la cabeza está activa) y la marca misma si no. En el flujo mandan la agrupación, la casilla, la modalidad y la relevancia de la cabeza; la configuración propia de un miembro se conserva ignorada mientras pertenezca al conjunto. Una marca está en a lo sumo un conjunto y no hay cadenas (lo hace cumplir la API); VARIOS, OTROS y SIN MARCA no entran. Si se desactiva la cabeza, los miembros vuelven a contar como ellos mismos (con aviso) y al reactivarla el conjunto vuelve. M7 y M8 agregan **siempre** por `unidad_marca_id`, nunca por la agrupación del miembro.
+
+**Por qué.** Javier, justificado el 2026-10-12: "algunas marcas, más allá de la agrupación por valor, requieren convertirse en un conjunto de marcas para ver el flujo". Esto sustituye en parte la decisión del 2026-10-11 de no agrupar marcas dentro de un nivel: aquella apuntaba a reducir la cola larga y esta agrupa por casa o licencia, a elección del planner. Lo que hace barata la excepción es que M5 sigue guardando la venta al detalle de marca, sin alias: el conjunto es un mapeo de lectura y armarlo, cambiarlo o deshacerlo nunca obliga a recargar un mes. Una cabeza que es una marca (y no una entidad aparte) evita duplicar agrupación, casilla, modalidad y nota, y no vuelve polimórfica la relevancia.
+
+**Descartado.** Tabla `conjuntos_marca` aparte; alias que renombren al cargar; conjuntos anidados y una marca en varios conjuntos (si hiciera falta, sería por marca × GML, no por conjunto).
+
+**Estado de la construcción (2026-10-13).** Construido en `0.8.4 · M2b`: pestaña Conjuntos, sugerencia de conjuntos por nombre (primera palabra común o similitud de 05b, solo lista, nunca se aplica sola), importador `MARCA, CONJUNTO` y columna opcional `CONJUNTO` en el de marcas. Falta que Javier entregue la lista real de conjuntos.
+
+## 2026-10-12 · M2b: contrato para M7 y M8, y las sugerencias nunca se aplican solas (construido 2026-10-13)
+
+**Decisión.** M7 y M8 consumen tres piezas en `src/lib/marcas/gml/`: `claveFlujo(hecho, config)`, que reparte cada hecho de M5 en una y solo una fila (partición completa y disjunta, evaluada siempre sobre la unidad de marca); `curvaUnidad`, que da la curva de una unidad; y la vista `marca_gml_especial_vigente`, con `GET /api/marcas/gml-especial/vigentes`. La venta de una marca relevante en los GML donde no lo es va a "otras de la agrupación"; las marcas al barrer quedan **fuera** de las unidades de planificación y tienen un flujo propio. Las sugerencias de marcas relevantes salen de la venta de M5 por una función SQL, son ayuda y se aplican solo cuando el planner las elige. Los importadores de nivel y de relevantes comparten `resolverGml` y nunca crean árbol; el de nivel deja que el archivo mande y el de relevantes no quita lo ausente.
+
+**Por qué.** M7 y M8 no están construidos y definirlos sin este contrato los obligaría a reescribir la partición de la venta cada uno por su lado. Una sugerencia aplicada sola marcaría marcas sin que nadie lo decida.
+
+**Descartado.** Un "resto de la marca" como tercer flujo (por ahora cae en "otras"); tope duro de cuatro relevantes por agrupación y GML (hoy es un aviso suave).
+
+**Estado de la construcción (2026-10-13).** Construido en `0.8.4 · M2b`. Lo consumirá M7 (`docs/modulos/07-proyeccion-anual.md`).
+
+## 2026-10-13 · M2b: las sugerencias de marcas relevantes usan una función SQL nueva, `sugerir_marcas_relevantes_v2` (migración `0012`)
+
+**Decisión.** Se añade `sugerir_marcas_relevantes_v2` (migración `0012_sugerir_marcas_relevantes_v2.sql`) y la de `0010` queda en la base **sin uso**: no se elimina porque las migraciones no admiten `DROP`. La v2 aplica el orden, el tope por (nodo, agrupación) y la participación mínima dentro de SQL, y mide con la misma medida que ordena (`venta_soles` o `unidades`) sobre el total completo de la agrupación en el nodo. La `0012` se aplicó **a mano** en Vector2 el 2026-10-13, tras un reinicio del agente de datos.
+
+**Por qué.** La QA midió que las sugerencias paginadas con `range` eran lentas: cada página re-ejecutaba la agregación completa de `venta_stock_vigente` (unas 400 mil filas, alrededor de 0,65 s) y con top 4 la función devolvía unas 11 mil filas, de 12 a 58 páginas, minutos en el compute Micro. Además, con `medida = unidades` el cliente recalculaba la participación sobre una cola ya recortada por soles, que daba un número inexacto. Cambiar el tipo de argumentos de la función existente con `create or replace` habría creado un overload ambiguo; un nombre nuevo no.
+
+**Descartado.** Seguir paginando; recortar en el cliente; alterar la función de `0010`.
+
+## 2026-10-13 · M2b: las vistas y la función nuevas son `security invoker` y se cierran a `anon` y `authenticated` con `revoke`
+
+**Decisión.** `marcas_unidad`, `marca_gml_especial_vigente` y las funciones de sugerencias son `security invoker`, con `search_path` vacío, y la migración revoca el acceso de `public`, `anon` y `authenticated` y lo concede solo a `service_role`. Corrige dos detalles de la ficha: decía que las vistas no llevarían `revoke` (el criterio de `venta_stock_vigente` en `0007`) y que la función sería `security definer`.
+
+**Por qué.** Por defecto Supabase deja `select` y `execute` abiertos a esos roles sobre lo nuevo de `public`. Con RLS sin políticas ya obtendrían cero filas (el criterio por el que `0007` no revocó nada sobre `venta_stock_vigente`), pero `0010` prefirió cerrar además el acceso directo; solo el backend las lee. `security invoker` evita que la función corra con privilegios de su dueño.
+
+**Descartado.** Dejar los privilegios por defecto; `security definer` en la función.
+
+## 2026-10-13 · Los controles de formulario compartidos no imponen ancho ni alto si quien los usa ya pide uno; la edición de Marcas y Tiendas va en diálogo
+
+**Decisión.** `clasesControl` (`src/components/ui/form.tsx`) añade `w-full` y `h-10` solo si el `className` recibido no trae una clase de ancho ni de alto (con variantes como `md:w-1/2` permitidas). Test en `tests/ui.form-clases.test.ts`. Además, la edición de una marca y de una tienda pasó de la fila de la tabla a un diálogo que enfoca el primer campo al abrir (commit `fb168ad`, ya subido).
+
+**Por qué.** En la QA de 02b el `Select` de nivel del Árbol, que pedía `w-44`, colapsaba la columna de líneas porque `w-full` ganaba: Tailwind ordena las utilidades del mismo grupo por nombre, no por el orden en `className`, así que dejar las dos clases hacía que el resultado dependiera del valor. El cambio a diálogo no altera ninguna regla de edición: solo cambia dónde se edita.
+
+## 2026-10-13 · M5 0.8.3: la equivalencia inexistente o inactiva de un nodo vigente se envía a la GML sin equivalencia
+
+**Decisión.** Decisión de Javier: "si la equivalencia no está creada porque es data antigua que no tiene la misma clasificación que la actual, se clasifica a la GML sin equivalencia". Si el nodo género-mundo-línea de la fila existe y es vigente pero su equivalencia no existe o está inactiva, la fila se carga en la equivalencia de nivel GML del nodo: primero la genérica activa, si no la equivalencia activa que se llama como la línea, y si no hay ninguna queda el error original (hoy 286 de 590 nodos tienen genérica, 403 tienen la igual a la línea y 117 ninguna de las dos). Precedencia: árbol exacto, mapeo explícito, envío a la GML, error. Solo `previsualizar` lo activa (`enviarAGml`, opt-in). No suma al porcentaje de errores ni bloquea el mes. El reporte lo muestra en el bloque "Equivalencias enviadas a la GML sin equivalencia", con un botón Asignar que crea un mapeo que gana al envío; `enviadas_a_gml` es una nota informativa.
+
+**Por qué.** La data de 2023 en adelante trae equivalencias que ya no existen con la misma clasificación; mandar esos meses a "error" los bloquea por algo que no es un error de datos sino un cambio de árbol. Javier prefirió cargar la venta en el nivel GML a perderla o mapear una por una. El envío es opt-in porque los demás usos del resolutor (estado de un mapeo, alta e importación de mapeos, sugerencias) necesitan saber si el árbol resuelve sin fallback; con el envío siempre activo ningún mapeo se podría crear. Un mapeo activo cuyo destino ya no es vigente no deja pasar al envío: es una decisión rota que debe verse en rojo.
+
+**Descartado.** Que el envío fuera el comportamiento por defecto del resolutor; enviar a la GML también cuando el nodo no existe o no es vigente (ahí la clasificación sí es desconocida).
+
+**Estado de la construcción (2026-10-13).** Construido en `0.8.3 · M5`, sin migración. Complementa, sin cambiarla, la entrada del 2026-10-12 "M5b: el árbol manda; el mapeo solo entra cuando el árbol no resuelve".
+
+## 2026-10-13 · M6: la temporada de la agrupación de estacionalidad es invierno, verano o toda temporada, y el Niño solo afecta a las de invierno (construido 2026-10-13)
+
+**Decisión.** Javier: "en las agrupaciones de estacionalidad deberíamos marcar si es una estacionalidad de invierno, verano o toda temporada; las de invierno se afectan por el Niño". La temporada es la columna `agrupaciones_estacionalidad.temporada` (`invierno`, `verano`, `todo_el_ano`, por defecto `todo_el_ano`) y la fija el planner; el sistema solo sugiere la mayoritaria entre las líneas de sus equivalencias (`lineas.temporada` de M1). Un periodo atípico de alcance `invierno` solo aplica a agrupaciones de invierno. No vive en la agrupación de marca ni es una casilla booleana.
+
+**Por qué.** Las curvas se calculan por agrupación de estacionalidad, así que ahí es donde se decide qué meses se descuentan; en la agrupación de marca no cambiaría la forma de ninguna curva. Las agrupaciones existentes nacen como "toda temporada" sin `UPDATE` porque clasificarlas sería inventar; Javier las marca desde la pantalla. Cierra la pregunta 6 de M3 y la 1 de M6.
+
+**Descartado.** Casilla booleana `afectada_por_atipicos`; heredar la temporada de la línea; marcarlo en la agrupación de marca; un botón para aplicar la sugerida a todas (queda como pregunta 12 de M6, con valor por defecto "solo sugerencia").
+
+**Estado de la construcción (2026-10-13).** Construido en `0.9.0 · M6` (migración `0011`): selector en M3, columna en el importador (`TEMPORADA`) y tabla editable en la pantalla de M6. El chip de temporada en las tarjetas del Mapa de M3 no se construyó.
+
+## 2026-10-13 · M6: los periodos atípicos son un catálogo editable y también el dato que M7 lee; la premisa del Niño se mide, no se asume (construido 2026-10-13)
+
+**Decisión.** Los meses atípicos (El Niño costero 2023 y 2026) viven en la tabla `periodos_atipicos` (rango de meses, motivo, alcance `invierno` o `todas`, sin seed), editable por el planner, y no en el código. Javier: "al momento de proyectar unidades sí sirve saber si el año fue Niño o no", así que el catálogo es el dato que M7 lee, por año y por agrupación, para saber si un año fue atípico y cuántos meses. El contrato estable es la función pura `claseDeAnio` (`normal` o `atipico`, con `meses_atipicos` y `completo`) y `GET /api/periodos-atipicos/anios`. La premisa de Javier, "el Niño cambia el volumen, no la forma de la curva", **se mide en el paso 2**: M6 comparará por agrupación de invierno la curva con y sin los años de Niño; el efecto sobre el volumen (`ratio_volumen`) se entrega a M7.
+
+**Por qué.** Los meses del Niño los decide Javier (marzo a mayo de 2023 es una propuesta por confirmar y los de 2026 no están definidos) y cambian con cada evento. Un catálogo permite usarlos antes de que exista el cálculo y sustituye la columna `es_nino` por año de Vector-One, que obligaba a descartar años enteros. Medir la premisa en vez de asumirla convierte un riesgo (pocos años completos) en un dato por agrupación.
+
+**Descartado.** Columna por año; meses fijos en el código; asumir sin medir que el Niño solo mueve el volumen.
+
+**Estado de la construcción (2026-10-13).** El catálogo, `claseDeAnio` y `/anios` están construidos (`0.9.0 · M6`); la comparación de forma, `ratio_volumen` y el ajuste de volumen son del paso 2 y de M7. Las demás decisiones propuestas por la ficha de M6 (curva como participación del mes en el año, candidatas con backtesting, vista materializada, curva versionada) siguen como propuesta hasta construir el paso 2.
+
+## 2026-10-13 · M6: el paso 1 se entrega recortado, sin `GET /api/curvas`, y con una migración parcial
+
+**Decisión.** El paso 1 de M6 (`0.9.0`) entrega el mantenimiento (periodos atípicos y temporada) y deja fuera `GET /api/curvas`, la pestaña Corridas y el chip de temporada del Mapa. La pestaña Curvas se alimenta de `GET /api/agrupaciones-estacionalidad`, `GET /api/periodos-atipicos` y `/anios`; `GET /api/curvas` llega en el paso 2. La migración se parte: `0011` lleva solo la temporada y los periodos atípicos; la vista materializada, la función de refresco, las corridas y las curvas irán en `0013`.
+
+**Por qué.** Sin corridas ni vista materializada, `GET /api/curvas` no tendría nada que resumir, y una vista materializada sin refrescar sería un objeto sin dueño. Partir la migración evita dejar en la base objetos sin uso mientras Javier solo mantiene el catálogo.
+
+**Descartado.** Una sola migración con todo, que era lo que preveía la ficha original.
+
+## 2026-10-13 · Renumeración final de migraciones y versiones (M2b y M6 paso 1 construidos)
+
+**Decisión.** Numeración final: `0008` mapeo de combinaciones (`0.8.1 · M5`), `0009` ubicaciones ignoradas (`0.8.2 · M5`), regla de carga a la GML sin equivalencia (sin migración, `0.8.3 · M5`), `0010` M2b (`0.8.4 · M2b`), `0011` M6 paso 1 (`0.9.0 · M6`), `0012` sugerencias v2 de M2b (sin versión propia: se desplegó con `0.8.4`), `0013` M6 paso 2 (vista materializada, corridas y curvas; antes "`0012`", versión prevista `0.9.1 · M6`) y `0014` M7 (antes "`0012`", `0.10.0 · M7`). Las tres entregas `0.8.3`, `0.8.4` y `0.9.0` se despliegan juntas y el pie del menú en Railway muestra `0.9.0 · M6`. Las fichas 06 y 07 y PLAN se renumeraron en consecuencia.
+
+**Por qué.** La `0012` que M6 y M7 reclamaban la tomó la función de sugerencias v2 al construir 02b, que no estaba prevista; el desfase de versiones viene de que la decisión de Javier sobre la regla de carga llegó el 2026-10-13, cuando 02b ya tenía reservada la `0.8.3`. Una migración numerada dos veces no se detecta hasta aplicarla, así que se corrigieron todos los documentos a la vez.
+
+**Descartado.** Conservar `0012` para M6 y M7: chocaría con la función v2 ya construida.

@@ -2,6 +2,8 @@
 
 > Estado: **hito recorrido en producción el 2026-10-05** (árbol real importado por Javier en Railway; ver "Verificación en producción"). Lint, typecheck, 131 tests, build y `scripts/validar-migraciones-local.sh` en verde. Módulo anterior: [00-cimientos](00-cimientos.md). Reglas de base en `docs/PLAN.md` §4 y `docs/DECISIONES.md`. Lo que se construyó distinto de lo especificado está en "Cambios respecto a la especificación", al final; las dos últimas entradas de esa sección (toda línea tiene mundo; revisión previa detallada) son ajustes que Javier confirmó después del cierre del módulo.
 
+> **Mejora posterior (2026-10-13, `0.8.4 · M2b`)**: cada nodo género-mundo-línea gana la columna `nivel_planificacion` (`GML` por defecto, `GMLE`), editable en el Árbol una a una, en bloque y por línea, y con un importador de niveles en la pestaña Importar (migración `0010`). Detalle en [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md). Nada del resto de M1 cambia.
+
 ## Objetivo
 
 Dar al planner el árbol real con el que Lukers planifica —Género → Mundo → Línea → Equivalencia— como maestro editable y navegable, cargado de una vez desde el archivo que entregó Javier (`datos/arbol-lineas.csv`, 2 002 filas) y mantenido después desde la pantalla. Todo lo que viene (marcas, estacionalidad, ventas, proyección) cuelga de este árbol, así que M1 fija el grano y el vocabulario. Las agrupaciones de talla entran como catálogo fijo de dos valores: Javier entregará venta y stock ya consolidados por agrupación, así que no hay tallas individuales que modelar.
