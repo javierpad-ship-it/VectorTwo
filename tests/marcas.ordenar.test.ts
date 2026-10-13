@@ -22,6 +22,15 @@ function marca(nombre: string, agr: keyof typeof AGR, extra: Partial<MarcaFila> 
     updated_at: "",
     agrupacion_marca: AGR[agr],
     vigente: true,
+    modalidad_tratamiento: null,
+    modalidad_efectiva: null,
+    gml_asignados: 0,
+    gml_vigentes: 0,
+    conjunto_marca_id: null,
+    conjunto: null,
+    unidad_marca_id: nombre,
+    miembros: 0,
+    avisos_conjunto: [],
     ...extra,
   };
 }

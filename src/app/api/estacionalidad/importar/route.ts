@@ -27,7 +27,9 @@ import type { ConteosAsignar, ReporteImportacionEstacionalidad } from "@/lib/est
  * id in (…)` por agrupación destino en tandas de 500. Las agrupaciones nuevas
  * nacen con los géneros de las filas que apuntan a ellas (se insertan sus
  * vínculos justo después de crearlas); las existentes nunca amplían sus
- * géneros. Nunca crea líneas, nodos ni equivalencias, ni quita agrupaciones.
+ * géneros ni su temporada (la sexta columna opcional `temporada` solo se escribe
+ * al crear: el `upsert … ignoreDuplicates` nunca toca una fila que ya existe).
+ * Nunca crea líneas, nodos ni equivalencias, ni quita agrupaciones.
  * Sin transacción: si una tanda falla, `500` con lo escrito hasta ahí y
  * reimportar completa el resto sin duplicar ni cambiar nada más (regla 12). Si
  * fallan los vínculos de género de las agrupaciones nuevas, se borran esas
@@ -81,7 +83,11 @@ export async function POST(request: NextRequest) {
   const generosPorNombre = new Map(plan.agrupaciones_nuevas.map((a) => [a.nombre, a.genero_ids]));
   const creadasIds: string[] = [];
   for (const tanda of enTandas(plan.agrupaciones_nuevas)) {
-    const filas: TablesInsert<"agrupaciones_estacionalidad">[] = tanda.map((a) => ({ nombre: a.nombre, codigo: a.codigo }));
+    const filas: TablesInsert<"agrupaciones_estacionalidad">[] = tanda.map((a) => ({
+      nombre: a.nombre,
+      codigo: a.codigo,
+      temporada: a.temporada,
+    }));
     const { data, error: err } = await db
       .from("agrupaciones_estacionalidad")
       .upsert(filas, { onConflict: "nombre", ignoreDuplicates: true })

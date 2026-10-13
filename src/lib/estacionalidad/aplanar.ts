@@ -11,7 +11,9 @@ import {
   type NodoEntrada,
 } from "@/lib/arbol/armar-arbol";
 import { esTemporada } from "@/lib/arbol/normalizar";
-import { motivoFaltante } from "./reglas";
+import { temporadaSugerida } from "@/lib/curvas/atipicos";
+import { temporadaDeFila } from "@/lib/curvas/tipos";
+import { motivoFaltante, temporadasDeLineasPorAgrupacion } from "./reglas";
 import type { EquivalenciaPlana, ReporteEstacionalidad, ResumenEstacionalidad } from "./tipos";
 
 /**
@@ -25,7 +27,11 @@ import type { EquivalenciaPlana, ReporteEstacionalidad, ResumenEstacionalidad } 
 export type AgrupacionPlanaEntrada = Pick<
   Tables<"agrupaciones_estacionalidad">,
   "id" | "codigo" | "nombre" | "orden" | "activo"
-> & { genero_ids: string[] };
+> & {
+  genero_ids: string[];
+  /** M6: sin ella (estados de prueba antiguos) se trata como `todo_el_ano`. */
+  temporada?: string;
+};
 
 /** Las cinco tablas del árbol, planas (el `EstadoArbol` de `cargarEstadoArbol` encaja aquí). */
 export type EstadoAplanar = {
@@ -60,6 +66,9 @@ export function aplanarEquivalencias(
   const posicionGenero = new Map(generosOrdenados.map((g, i) => [g.id, i]));
   const generoIdsOrdenados = (ids: string[]) =>
     [...ids].sort((a, b) => (posicionGenero.get(a) ?? Infinity) - (posicionGenero.get(b) ?? Infinity));
+
+  // M6: temporada sugerida de cada agrupación, desde las líneas de sus equivalencias activas.
+  const temporadasDeLineas = temporadasDeLineasPorAgrupacion(estado.equivalencias, estado.nodos, estado.lineas);
 
   const lineasPorId = new Map(estado.lineas.map((l) => [l.id, l]));
   const agrupacionPorId = new Map(agrupaciones.map((a) => [a.id, a]));
@@ -158,6 +167,8 @@ export function aplanarEquivalencias(
       orden: a.orden,
       activo: a.activo,
       genero_ids: generoIdsOrdenados(a.genero_ids),
+      temporada: temporadaDeFila(a.temporada),
+      temporada_sugerida: temporadaSugerida(temporadasDeLineas.get(a.id) ?? []),
     })),
     resumen,
   };

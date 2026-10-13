@@ -15,7 +15,7 @@ import type { InformeCarga, InformeMes } from "@/lib/ventas/tipos";
 import type { CombinacionDesconocida } from "@/lib/ventas/informe";
 import { AsignarMapeo } from "./asignar-mapeo";
 import { DetalleMes, type Asignacion } from "./detalle-mes";
-import { filasReasignadas, reasignadasDe, type OrigenAsignable } from "./origenes-mapeo";
+import { enviadasGmlDe, filasReasignadas, reasignadasDe, type OrigenAsignable } from "./origenes-mapeo";
 import { MarcasNuevas } from "./marcas-nuevas";
 import { agruparPorTienda, IgnorarUbicacion, notasDeIgnoradas, TiendasDesconocidas, UbicacionesIgnoradas, type GrupoTienda } from "./ubicaciones-ignoradas";
 import { formatearEntero, formatearPorcentaje, formatearSoles, nombrePeriodo } from "./comunes";
@@ -26,11 +26,13 @@ type Props = { c: ReturnType<typeof useCargaVentas>; informe: InformeCarga; prev
 
 function EstadoDelMes({ mes, salto }: { mes: InformeMes; salto: MotivoSalto | null }) {
   const reasignadas = reasignadasDe(mes).filas;
+  const enviadas = enviadasGmlDe(mes).filas;
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-1.5">
         {mes.estado === "nuevo" && <Badge tono="exito">Nuevo</Badge>}
         {reasignadas > 0 && <Badge tono="marca">{plural(reasignadas, "reasignada", "reasignadas")} por mapeo</Badge>}
+        {enviadas > 0 && <Badge tono="neutro">{plural(enviadas, "enviada", "enviadas")} a la GML sin equivalencia</Badge>}
         {mes.estado === "reemplaza" && <Badge tono="marca">Reemplazará</Badge>}
         {mes.estado === "identico" && <Badge tono="neutro">Idéntico a lo ya cargado</Badge>}
         {mes.bloqueado && <Badge tono="alerta">Bloqueado</Badge>}

@@ -125,6 +125,7 @@ describe("armarArbol · regla 13: vigencia", () => {
       activo_linea: true,
       activo_nodo: true,
       vigente: true,
+      nivel_planificacion: "GML",
       equivalencias: [
         { id: "e3", codigo: "JOGGER", nombre: "JOGGER", es_generica: false, activo: true, agrupacion_estacionalidad: null },
         { id: "e2", codigo: "VARIOS", nombre: "VARIOS", es_generica: false, activo: true, agrupacion_estacionalidad: null },
@@ -168,6 +169,8 @@ describe("armarArbol · regla 15: resumen cuenta lo devuelto", () => {
       nodos: 4, // n1, n2, n3, n8
       equivalencias: 4, // e1, e2, e3, e5
       equivalencias_sin_agrupacion: 4, // M3: sin agrupaciones, todas las activas y vigentes son faltantes
+      nodos_gmle: 0, // 02b: todos los nodos nacen GML
+      equivalencias_en_gmle: 0,
     });
   });
   it("con inactivos", () => {
@@ -178,16 +181,20 @@ describe("armarArbol · regla 15: resumen cuenta lo devuelto", () => {
       nodos: 8,
       equivalencias: 5,
       equivalencias_sin_agrupacion: 4, // e4 está inactiva: nunca es faltante
+      nodos_gmle: 0,
+      equivalencias_en_gmle: 0,
     });
   });
   it("el resumen no trae claves de mundos especiales", () => {
     expect(Object.keys(activos().resumen).sort()).toEqual([
       "equivalencias",
+      "equivalencias_en_gmle",
       "equivalencias_sin_agrupacion",
       "generos",
       "lineas",
       "mundos",
       "nodos",
+      "nodos_gmle",
     ]);
   });
   it("no muta las entradas", () => {

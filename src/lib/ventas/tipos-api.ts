@@ -137,9 +137,24 @@ export type ResultadoCombinacionInactiva =
  *
  * Un motivo con `mapeo_no_aplicable`: había un mapeo activo para ese origen
  * pero su destino ya no es vigente; la fila conserva su motivo original.
+ *
+ * `ok` con `a_gml` (0.8.3): el nodo género-mundo-línea del archivo existe y es
+ * vigente pero la equivalencia no existe o está inactiva (datos antiguos), y
+ * ningún mapeo la cubría: se envió a la equivalencia de nivel GML de ese nodo
+ * (la genérica SIN EQUIVALENCIA o, si no hay, la que se llama como la línea).
+ * `valor` es el texto con que el informe agrupa el origen (el `detalle` que
+ * habría tenido el error) y `destino` el destino como `GENERO / MUNDO / LINEA /
+ * EQUIVALENCIA`. Solo aparece si el servidor activó el envío a la GML.
  */
+export type EnviadaAGmlApi = {
+  motivo_original: "equivalencia_inexistente" | "equivalencia_inactiva";
+  tipo: "generica" | "igual_a_linea";
+  valor: string;
+  destino: string;
+};
+
 export type ResolucionCombinacionApi =
-  | { resultado: "ok"; equivalencia_id: string; mapeo?: { id: string; motivo_original: MotivoMapeable; destino?: string } }
+  | { resultado: "ok"; equivalencia_id: string; mapeo?: { id: string; motivo_original: MotivoMapeable; destino?: string }; a_gml?: EnviadaAGmlApi }
   | {
       resultado: ResultadoCombinacionError | ResultadoCombinacionInactiva;
       detalle?: string;

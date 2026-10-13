@@ -7,7 +7,7 @@ import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
 import { mensajeError } from "@/lib/formato";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/form";
+import { Field, Input, Select } from "@/components/ui/form";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
@@ -64,6 +64,31 @@ export type GenerosCatalogo<F> = {
   cargando?: boolean;
 };
 
+/**
+ * Campo de lista cerrada opcional del catálogo (p. ej. la Temporada de una
+ * agrupación de estacionalidad): `Select` en el alta y en el diálogo de edición,
+ * columna con badge y, si la API sugiere otro valor, aviso con botón para
+ * aplicarlo (de una en una). Viaja en el cuerpo bajo `clave`.
+ */
+export type SelectorCatalogo<F> = {
+  /** Nombre del campo en el cuerpo del `POST`/`PATCH` (p. ej. `temporada`). */
+  clave: string;
+  /** Etiqueta del campo y título de la columna. */
+  etiqueta: string;
+  opciones: { valor: string; etiqueta: string }[];
+  /** Valor del alta mientras no se toque el `Select`. */
+  porDefecto: string;
+  obtener: (fila: F) => string;
+  /** Valor que sugiere el sistema para la fila (`null` si no hay sugerencia). */
+  sugerida?: (fila: F) => string | null;
+  /** Cómo se llama la sugerencia en los textos. Por defecto, «Sugerida». */
+  etiquetaSugerida?: string;
+  /** Ayuda bajo el campo del formulario de alta. */
+  hint?: string;
+  /** Tono del badge de la columna por valor; ausente, neutro. */
+  tonos?: Record<string, "marca" | "exito" | "alerta" | "neutro">;
+};
+
 type Genero = "m" | "f";
 
 const ARTICULO: Record<Genero, { el: string; los: string; lo: string; los_: string; o: string; nuevo: string }> = {
@@ -71,9 +96,10 @@ const ARTICULO: Record<Genero, { el: string; los: string; lo: string; los_: stri
   f: { el: "la", los: "Las", lo: "la", los_: "las", o: "a", nuevo: "Nueva" },
 };
 
-type Edicion = { id: string; nombre: string; codigo: string; orden: string; descripcion: string; generoIds: string[] };
+type Edicion = { id: string; nombre: string; codigo: string; orden: string; descripcion: string; generoIds: string[]; selector: string };
 
-const FORM_VACIO = { nombre: "", codigo: "", codigoTocado: false, orden: "", descripcion: "", generoIds: [] as string[] };
+/** `selector` vacío = el valor por defecto del campo de lista cerrada (si lo hay). */
+const FORM_VACIO = { nombre: "", codigo: "", codigoTocado: false, orden: "", descripcion: "", generoIds: [] as string[], selector: "" };
 
 const MOTIVO_SIN_GENERO = "Elige al menos un género.";
 const TITLE_SIN_GENERO = "Asígnale al menos un género para poder usarla";
@@ -101,6 +127,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   vigentes,
   descripcion,
   generos,
+  selector,
   ordenar,
   columnasExtra = [],
   notaPie,
@@ -122,6 +149,8 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   descripcion?: DescripcionCatalogo<F>;
   /** Si el catálogo se asigna a uno o más géneros (obligatorio): selector, columna Géneros y resaltado de las filas sin género. */
   generos?: GenerosCatalogo<F>;
+  /** Si el catálogo tiene un campo de lista cerrada (p. ej. Temporada): `Select` en el alta y la edición, y columna con badge. */
+  selector?: SelectorCatalogo<F>;
   /** Orden de presentación de las filas; ausente, el de la API. */
   ordenar?: (a: F, b: F) => number;
   /** Columnas adicionales, entre el conteo de hijos y el estado. */
@@ -149,6 +178,9 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
   const filas = useMemo(() => (ordenar ? [...visibles].sort(ordenar) : visibles), [visibles, ordenar]);
   const sinGeneroForm = generos !== undefined && form.generoIds.length === 0;
   const contarHijos = (f: F) => f[hijos.clave] as unknown as number;
+  // Sugerencia del campo de lista cerrada para la fila que se está editando (si la API la da).
+  const filaEdicion = edicion ? datos.find((f) => f.id === edicion.id) : undefined;
+  const sugeridaEdicion = selector && filaEdicion ? (selector.sugerida?.(filaEdicion) ?? null) : null;
 
   async function ejecutar(accion: () => Promise<unknown>) {
     setOcupado(true);
@@ -176,6 +208,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         ...(form.orden.trim() !== "" ? { orden: Number(form.orden) } : {}),
         ...(descripcion && form.descripcion.trim() !== "" ? { descripcion: form.descripcion.trim() } : {}),
         ...(generos ? { genero_ids: form.generoIds } : {}),
+        ...(selector ? { [selector.clave]: form.selector || selector.porDefecto } : {}),
       })
     );
     if (ok) {
@@ -205,9 +238,16 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
         // Vacía viaja como null: así se puede borrar una descripción existente.
         ...(descripcion ? { descripcion: edicion.descripcion.trim() === "" ? null : edicion.descripcion.trim() } : {}),
         ...(generos ? { genero_ids: edicion.generoIds } : {}),
+        ...(selector ? { [selector.clave]: edicion.selector } : {}),
       })
     );
     if (ok) setEdicion(null);
+  }
+
+  /** Aplica a una fila el valor que sugiere el sistema (de una en una). */
+  function aplicarSugerida(f: F, valor: string) {
+    if (!selector) return;
+    void ejecutar(() => api.patch<F>(`/api/${recurso}/${f.id}`, { [selector.clave]: valor }));
   }
 
   function alternarActivo(f: F) {
@@ -261,6 +301,44 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
                 <span title={TITLE_SIN_GENERO} className="whitespace-nowrap">
                   <Badge tono="alerta">Sin género</Badge>
                 </span>
+              );
+            },
+          } satisfies Columna<F>,
+        ]
+      : []),
+    ...(selector
+      ? [
+          {
+            clave: selector.clave,
+            titulo: selector.etiqueta,
+            render: (f: F) => {
+              const valor = selector.obtener(f);
+              const sugerida = selector.sugerida?.(f) ?? null;
+              const distinta = sugerida !== null && sugerida !== valor;
+              const etiquetaDe = (v: string) => selector.opciones.find((o) => o.valor === v)?.etiqueta ?? v;
+              return (
+                <div className="space-y-1">
+                  <Badge tono={selector.tonos?.[valor] ?? "neutro"}>{etiquetaDe(valor)}</Badge>
+                  {distinta && (
+                    <p className="flex flex-wrap items-center gap-x-2 text-xs text-alerta">
+                      <span>
+                        {selector.etiquetaSugerida ?? "Sugerida"}: {etiquetaDe(sugerida)}
+                      </span>
+                      {puedeEditar && (
+                        <Button
+                          variante="secundario"
+                          tamano="sm"
+                          className="h-6! px-2! text-xs"
+                          disabled={ocupado}
+                          onClick={() => aplicarSugerida(f, sugerida)}
+                          title={`Cambiar ${selector.etiqueta.toLowerCase()} de ${f.nombre} a ${etiquetaDe(sugerida)}`}
+                        >
+                          Aplicar
+                        </Button>
+                      )}
+                    </p>
+                  )}
+                </div>
               );
             },
           } satisfies Columna<F>,
@@ -322,6 +400,7 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
                   orden: String(f.orden),
                   descripcion: descripcion ? (descripcion.obtener(f) ?? "") : "",
                   generoIds: generos ? generos.obtener(f).map((g) => g.id) : [],
+                  selector: selector ? selector.obtener(f) : "",
                 })
               }
             >
@@ -370,6 +449,21 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
             <Field label="Orden" hint="Posición en las listas.">
               <Input type="number" min={0} value={form.orden} onChange={(e) => setForm({ ...form, orden: e.target.value })} />
             </Field>
+            {selector && (
+              <Field label={selector.etiqueta} hint={selector.hint} className="md:col-span-2">
+                <Select
+                  value={form.selector || selector.porDefecto}
+                  onChange={(e) => setForm({ ...form, selector: e.target.value })}
+                  disabled={guardando || ocupado}
+                >
+                  {selector.opciones.map((o) => (
+                    <option key={o.valor} value={o.valor}>
+                      {o.etiqueta}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             {descripcion && (
               <Field
                 label="Descripción"
@@ -486,6 +580,25 @@ export function CatalogoPlano<F extends FilaCatalogoPlano>({
             <Field label="Código" hint="Solo letras, números y _." className="md:col-span-4">
               <Input value={edicion.codigo} onChange={(e) => setEdicion({ ...edicion, codigo: e.target.value })} className="font-mono" />
             </Field>
+            {selector && (
+              <Field
+                label={selector.etiqueta}
+                hint={
+                  sugeridaEdicion
+                    ? `${selector.etiquetaSugerida ?? "Sugerida"}: ${selector.opciones.find((o) => o.valor === sugeridaEdicion)?.etiqueta ?? sugeridaEdicion}.`
+                    : undefined
+                }
+                className="md:col-span-4"
+              >
+                <Select value={edicion.selector} onChange={(e) => setEdicion({ ...edicion, selector: e.target.value })} disabled={ocupado}>
+                  {selector.opciones.map((o) => (
+                    <option key={o.valor} value={o.valor}>
+                      {o.etiqueta}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             {descripcion && (
               <Field
                 label="Descripción"

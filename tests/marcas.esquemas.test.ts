@@ -19,6 +19,7 @@ describe("crearMarcaSchema (regla 16)", () => {
       agrupacion_marca_id: UUID,
       tratamiento_especial: false,
       nota_tratamiento: null,
+      modalidad_tratamiento: null,
     });
   });
   it("respeta el código enviado (a ASCII) y H&M → H_M", () => {
@@ -104,6 +105,7 @@ describe("importarMarcasSchema", () => {
       marca: "A",
       agrupacion: "B",
       tratamiento_especial: "",
+      conjunto: "",
     });
   });
   it("exige modo válido y entre 1 y 10 000 filas", () => {

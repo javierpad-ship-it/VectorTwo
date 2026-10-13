@@ -110,6 +110,8 @@ describe("aplanarEquivalencias · regla 9: ruta, ids y agrupación", () => {
       orden: 10,
       activo: true,
       genero_ids: ["g-h", "g-m"],
+      temporada: "todo_el_ano",
+      temporada_sugerida: "todo_el_ano",
     });
   });
   it("cada agrupación del catálogo trae genero_ids en el orden del catálogo de géneros", () => {

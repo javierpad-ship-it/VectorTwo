@@ -9,7 +9,9 @@ type Modulo = {
   id: string;
   nombre: string;
   detalle: string;
-  estado: "listo" | "pendiente";
+  estado: "listo" | "parcial" | "pendiente";
+  /** Texto del badge cuando no basta "Listo" / "Pendiente" (p. ej. "Paso 1 listo"). */
+  etiqueta?: string;
   /** Pantalla principal del módulo; se enlaza si el rol puede verla. */
   href?: string;
 };
@@ -49,13 +51,21 @@ const MODULOS_FASE_2: Modulo[] = [
     estado: "listo",
     href: "/planificacion/venta-stock",
   },
+  {
+    id: "M6",
+    nombre: "Curvas de estacionalidad",
+    detalle: "Periodos atípicos (El Niño) y temporada de cada agrupación. El cálculo de las curvas llega en el paso 2.",
+    estado: "parcial",
+    etiqueta: "Paso 1 listo",
+    href: "/planificacion/curvas-estacionalidad",
+  },
 ];
 
 function ListaModulos({ modulos, rol }: { modulos: Modulo[]; rol: Rol | null }) {
   return (
     <ul className="divide-y divide-borde">
       {modulos.map((m) => {
-        const enlazable = m.estado === "listo" && m.href && rol !== null && puedeVerRuta(rol, m.href);
+        const enlazable = m.estado !== "pendiente" && m.href && rol !== null && puedeVerRuta(rol, m.href);
         return (
           <li key={m.id} className="flex items-center gap-4 py-3">
             <span className="w-10 font-mono text-xs text-tinta-suave">{m.id}</span>
@@ -71,7 +81,9 @@ function ListaModulos({ modulos, rol }: { modulos: Modulo[]; rol: Rol | null }) 
               </div>
               <div className="text-xs text-tinta-suave">{m.detalle}</div>
             </div>
-            <Badge tono={m.estado === "listo" ? "exito" : "neutro"}>{m.estado === "listo" ? "Listo" : "Pendiente"}</Badge>
+            <Badge tono={m.estado === "listo" ? "exito" : m.estado === "parcial" ? "marca" : "neutro"}>
+              {m.etiqueta ?? (m.estado === "listo" ? "Listo" : "Pendiente")}
+            </Badge>
           </li>
         );
       })}

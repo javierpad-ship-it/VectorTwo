@@ -1,6 +1,6 @@
 import type { Acumulador } from "@/lib/ventas/acumulador";
 import { valorGrupoCombinacion } from "@/lib/ventas/informe";
-import type { Exclusion, InformeCarga, InformeMes } from "@/lib/ventas/tipos";
+import type { EnviadaGmlInforme, Exclusion, InformeCarga, InformeMes } from "@/lib/ventas/tipos";
 import type { MedidasCarga, PrevisualizarRespuesta } from "@/lib/ventas/tipos-api";
 import type { MotivoMapeable, OrigenMapeo } from "@/lib/ventas/tipos-mapeo";
 
@@ -14,6 +14,12 @@ import type { MotivoMapeable, OrigenMapeo } from "@/lib/ventas/tipos-mapeo";
  * que `construirInforme`: una fila con tienda no válida ya salió antes de
  * llegar a la combinación. Si el informe trajera `origenes` en la exclusión
  * (el backend no lo exige), se usaría en su lugar.
+ *
+ * 0.8.3. Las combinaciones que el resolutor envió a la GML sin equivalencia
+ * (`a_gml`) también son orígenes asignables: se indexan bajo el motivo ficticio
+ * `enviadas_a_gml` (así no se mezclan con los grupos de error) y con el mismo
+ * `valor` que usa el informe (`valorGrupoCombinacion`); su `motivo` (el del
+ * mapeo que se cree) es el original. Un mapeo explícito gana al envío.
  *
  * Funciones puras, sin React ni servidor.
  */
@@ -31,6 +37,9 @@ export const MOTIVOS_MAPEABLES: readonly MotivoMapeable[] = [
   "equivalencia_inactiva",
   "clasificacion_incompleta",
 ];
+
+/** Motivo con que se indexan los orígenes de lo enviado a la GML (no es un motivo de exclusión). */
+export const GRUPO_ENVIADAS_GML = "enviadas_a_gml";
 
 export function esMotivoMapeable(motivo: string): motivo is MotivoMapeable {
   return (MOTIVOS_MAPEABLES as readonly string[]).includes(motivo);
@@ -62,19 +71,27 @@ const aSoles = (centimos: number): number => Math.round(centimos) / 100;
  * motivo y `valor` tal como los agrupa el informe), las combinaciones exactas
  * que lo forman con sus filas y medidas.
  */
-export function construirIndiceOrigenes(acum: Acumulador, res: Pick<PrevisualizarRespuesta, "tiendas" | "combinaciones">): IndiceOrigenes {
+export function construirIndiceOrigenes(
+  acum: Acumulador,
+  res: Pick<PrevisualizarRespuesta, "tiendas" | "combinaciones"> & Partial<Pick<PrevisualizarRespuesta, "marcas">>
+): IndiceOrigenes {
   const dic = acum.diccionarios;
   const E = acum.entradas;
 
   const tiendaOk = dic.tiendas.map((_, t) => res.tiendas[t]?.resultado === "ok");
+  /** Una marca desactivada excluye la fila DESPUÉS de la combinación: solo importa para lo enviado a la GML (que sí llega a cargable). */
+  const marcaInactiva = dic.marcas.map((_, m) => res.marcas?.[m]?.resultado === "inactiva");
   /** Motivo de la combinación y el `valor` con que el informe agrupa su exclusión (`detalle` del resolutor). */
   const motivo: (MotivoMapeable | null)[] = [];
   const valor: string[] = [];
+  /** Motivo con que se indexa el grupo: el del error o `enviadas_a_gml`. */
+  const grupo: string[] = [];
   dic.combinaciones.forEach((k, c) => {
     const r = res.combinaciones[c];
-    const m: string | null = r ? (r.resultado === "ok" ? null : r.resultado) : "nodo_inexistente";
+    const m: string | null = r ? (r.resultado === "ok" ? (r.a_gml?.motivo_original ?? null) : r.resultado) : "nodo_inexistente";
     motivo[c] = m !== null && esMotivoMapeable(m) ? m : null;
     valor[c] = valorGrupoCombinacion(k, r);
+    grupo[c] = r && r.resultado === "ok" && r.a_gml ? GRUPO_ENVIADAS_GML : (motivo[c] ?? "");
   });
 
   const indice: IndiceOrigenes = new Map();
@@ -84,6 +101,7 @@ export function construirIndiceOrigenes(acum: Acumulador, res: Pick<Previsualiza
     const c = E.combo[i];
     const m = motivo[c];
     if (m === null || m === undefined) continue;
+    if (grupo[c] === GRUPO_ENVIADAS_GML && marcaInactiva[E.marca[i]]) continue;
     const k = dic.combinaciones[c];
     // Un origen sin equivalencia (línea vacía con `-`) no se puede guardar: la API exige una equivalencia.
     if (k.equivalencia === "") continue;
@@ -101,7 +119,7 @@ export function construirIndiceOrigenes(acum: Acumulador, res: Pick<Previsualiza
         stock_valorizado: 0,
       };
       porOrigen.set(clave, o);
-      const claveGr = claveGrupo(periodo, m, valor[c]);
+      const claveGr = claveGrupo(periodo, grupo[c], valor[c]);
       const lista = indice.get(claveGr);
       if (lista) lista.push(o);
       else indice.set(claveGr, [o]);
@@ -123,6 +141,11 @@ export function construirIndiceOrigenes(acum: Acumulador, res: Pick<Previsualiza
 /** Combinaciones de origen de un grupo de error de un mes (vacío si no hay o no es mapeable). */
 export function origenesDeGrupo(indice: IndiceOrigenes, periodo: string, e: Exclusion): OrigenAsignable[] {
   return esMotivoMapeable(e.motivo) ? (indice.get(claveGrupo(periodo, e.motivo, e.valor)) ?? []) : [];
+}
+
+/** Combinaciones de origen de un valor enviado a la GML en un mes (vacío si no hay). */
+export function origenesDeEnviada(indice: IndiceOrigenes, periodo: string, e: Pick<EnviadaGmlInforme, "valor">): OrigenAsignable[] {
+  return indice.get(claveGrupo(periodo, GRUPO_ENVIADAS_GML, e.valor)) ?? [];
 }
 
 /** Une orígenes de varios grupos sin repetir la misma combinación (suma sus pesos) y los ordena por peso. */
@@ -162,6 +185,11 @@ export function textoTerna(o: { genero: string; mundo: string; linea: string }):
 /** `reasignadas` de un mes: filas y medidas que pasaron de error a cargable por mapeo (0 si el informe no lo trae). */
 export function reasignadasDe(mes: InformeMes): MedidasCarga {
   return mes.reasignadas ?? { filas: 0, unidades: 0, venta_soles: 0, costo_vendido: 0, stock_unidades: 0, stock_valorizado: 0 };
+}
+
+/** `enviadas_a_gml` de un mes: filas y medidas enviadas a la GML sin equivalencia (0 en informes y reportes anteriores a 0.8.3). */
+export function enviadasGmlDe(mes: Pick<InformeMes, "enviadas_a_gml"> | { enviadas_a_gml?: undefined }): MedidasCarga {
+  return mes.enviadas_a_gml ?? { filas: 0, unidades: 0, venta_soles: 0, costo_vendido: 0, stock_unidades: 0, stock_valorizado: 0 };
 }
 
 /** Filas del informe que pasaron de error a cargables por un mapeo (suma de `reasignadas` de todos los meses). */

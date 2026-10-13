@@ -6,8 +6,9 @@
  * `@/components`: el backend no depende de la pantalla.
  */
 import type { ModoImportacion, Temporada } from "@/lib/arbol/tipos";
+import type { TemporadaAgrupacion, TemporadaDeAgrupacionApi } from "@/lib/curvas/tipos-api";
 
-export type { ModoImportacion, Temporada };
+export type { ModoImportacion, Temporada, TemporadaAgrupacion, TemporadaDeAgrupacionApi };
 
 // ─── Catálogo (GET /api/agrupaciones-estacionalidad) ───
 
@@ -19,6 +20,8 @@ export type GeneroDeAgrupacion = { id: string; codigo: string; nombre: string };
  * POST/PATCH, con el conteo de equivalencias asignadas (activas o no) y sus
  * géneros. Una agrupación pertenece a uno o más géneros; las heredadas de antes
  * de ese cambio pueden tener cero ("sin género") y no aceptan asignaciones.
+ * Desde M6 (paso 1) lleva además `temporada`, `temporada_sugerida` y el aviso
+ * `temporada_sugerida_distinta` (`TemporadaDeAgrupacionApi`).
  */
 export type AgrupacionEstacionalidadFila = {
   id: string;
@@ -38,12 +41,12 @@ export type AgrupacionEstacionalidadFila = {
   genero_ids: string[];
   /** Sus géneros ordenados por `orden, nombre` del género. */
   generos: GeneroDeAgrupacion[];
-};
+} & TemporadaDeAgrupacionApi;
 
-/** La agrupación tal como viaja en los catálogos de la lista plana (con `genero_ids`). */
+/** La agrupación tal como viaja en los catálogos de la lista plana (con `genero_ids` y su temporada). */
 export type AgrupacionEstacionalidadCatalogo = Pick<
   AgrupacionEstacionalidadFila,
-  "id" | "codigo" | "nombre" | "orden" | "activo" | "genero_ids"
+  "id" | "codigo" | "nombre" | "orden" | "activo" | "genero_ids" | "temporada" | "temporada_sugerida"
 >;
 
 /** La agrupación embebida en cada equivalencia de la lista plana. */
@@ -126,13 +129,19 @@ export type ReporteEstacionalidad = {
 
 // ─── Importador (POST /api/estacionalidad/importar) ───
 
-/** Una fila del archivo ya mapeada por el cliente a las cinco columnas. */
+/**
+ * Una fila del archivo ya mapeada por el cliente a las cinco columnas, más la
+ * sexta opcional `temporada` (M6): texto libre (`Invierno`, `Verano`,
+ * `Todo el año` o sus códigos; vacía = `todo_el_ano`). Solo se aplica a las
+ * agrupaciones que el archivo crea.
+ */
 export type FilaImportacionEstacionalidad = {
   genero: string;
   mundo: string;
   linea: string;
   equivalencia: string;
   agrupacion: string;
+  temporada?: string | null;
 };
 
 /**
@@ -160,11 +169,14 @@ export type MotivoOmisionEstacionalidad =
   | "agrupacion_inactiva"
   | "contradictoria_en_archivo"
   | "genero_no_incluido"
-  | "agrupacion_sin_genero";
+  | "agrupacion_sin_genero"
+  // De la sexta columna `temporada` (M6).
+  | "temporada_invalida"
+  | "temporada_contradictoria_en_archivo";
 
 /**
- * Fila omitida con su contenido normalizado (los cinco campos) para corregir
- * el archivo. `fila` y `fila_original` son 1-based sobre las `filas` enviadas.
+ * Fila omitida con su contenido normalizado (los cinco campos, y `temporada`
+ * solo si la fila la traía) para corregir el archivo. `fila` y `fila_original` son 1-based sobre las `filas` enviadas.
  */
 export type FilaOmitidaEstacionalidad = FilaImportacionEstacionalidad & {
   fila: number;
@@ -172,7 +184,10 @@ export type FilaOmitidaEstacionalidad = FilaImportacionEstacionalidad & {
   /**
    * El valor que no se reconoció; en `contradictoria_en_archivo`, la agrupación
    * de la primera aparición; en `genero_no_incluido`, el nombre del género de la
-   * fila; en `agrupacion_sin_genero`, el nombre de la agrupación.
+   * fila; en `agrupacion_sin_genero`, el nombre de la agrupación; en
+   * `temporada_invalida`, el texto que no se reconoció; en
+   * `temporada_contradictoria_en_archivo`, la temporada que ya había fijado la
+   * primera fila de esa agrupación nueva.
    */
   detalle?: string;
   /** En `duplicada_en_archivo` y `contradictoria_en_archivo`: la primera aparición de la misma equivalencia. */
@@ -194,7 +209,14 @@ export type Reasignacion = {
  * archivo apuntan a ella y los géneros (nombres) de esas filas, que serán los
  * suyos al crearla (distintos, al menos uno).
  */
-export type AgrupacionAImportar = { nombre: string; codigo: string; equivalencias: number; generos: string[] };
+export type AgrupacionAImportar = {
+  nombre: string;
+  codigo: string;
+  equivalencias: number;
+  generos: string[];
+  /** Con la que se creará: la del archivo o `todo_el_ano` si ninguna fila la trae. */
+  temporada: TemporadaAgrupacion;
+};
 
 export type ConteosAsignar = { nuevas: number; reasignadas: number; sin_cambio: number };
 

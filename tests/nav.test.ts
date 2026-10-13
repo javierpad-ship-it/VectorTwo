@@ -34,6 +34,18 @@ describe("puedeVerRuta", () => {
     expect(puedeVerRuta("planner", "/maestros/tiendas")).toBe(true);
     expect(puedeVerRuta("comprador", "/maestros/tiendas")).toBe(false);
   });
+  it("admin y planner entran a Planificación (carga de venta y curvas de estacionalidad); el comprador no, ni por URL", () => {
+    for (const ruta of ["/planificacion/venta-stock", "/planificacion/curvas-estacionalidad"]) {
+      expect(puedeVerRuta("admin", ruta)).toBe(true);
+      expect(puedeVerRuta("planner", ruta)).toBe(true);
+      expect(puedeVerRuta("comprador", ruta)).toBe(false);
+    }
+  });
+  it("el menú del comprador no muestra la sección Planificación; admin y planner sí", () => {
+    expect(seccionesVisibles("comprador").some((s) => s.title === "Planificación")).toBe(false);
+    expect(seccionesVisibles("planner").some((s) => s.title === "Planificación")).toBe(true);
+    expect(seccionesVisibles("admin").some((s) => s.title === "Planificación")).toBe(true);
+  });
   it("un item marcado pendiente no se puede abrir aunque el rol lo vea en el menú (ya no queda ninguno en la Fase 1)", () => {
     const pendientes = NAV_SECTIONS.flatMap((s) => s.links).filter((l) => l.pendiente);
     expect(pendientes).toHaveLength(0);

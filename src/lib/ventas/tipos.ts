@@ -240,6 +240,12 @@ export const NOTAS_CODIGOS = [
   "cifras_enteras",
   /** Fechas con día distinto de 1 en el archivo: el día se ignora. */
   "fechas_con_dia",
+  /**
+   * 0.8.3: filas de datos antiguos cuya equivalencia ya no existe, cargadas en la equivalencia
+   * de nivel GML de su línea. Es una nota (informativa): el dato va en el reporte guardado y la
+   * pantalla lo muestra en su propio bloque, no en la lista de avisos.
+   */
+  "enviadas_a_gml",
 ] as const;
 
 export type CodigoAviso = (typeof AVISOS_CODIGOS)[number];
@@ -266,6 +272,7 @@ export const ETIQUETAS_AVISO: Record<CodigoAvisoONota, string> = {
   stock_identico_a_otro_mes: "Stock idéntico al de otro mes",
   reasignadas_por_mapeo: "Filas reasignadas por mapeo",
   mapeos_no_aplicables: "Mapeos que no se aplicaron: su destino está desactivado",
+  enviadas_a_gml: "Filas enviadas a la GML sin equivalencia",
   unidades_negativas: "Unidades negativas (devoluciones)",
   unidades_sin_venta: "Unidades sin venta",
   venta_sin_unidades: "Venta sin unidades",
@@ -460,6 +467,15 @@ export type InformeMes = {
   reasignadas: MedidasInforme;
   /** M5b. Ids de los mapeos que se aplicaron en este mes. */
   mapeos_aplicados: string[];
+  /**
+   * 0.8.3. Filas (del archivo) y medidas que el resolutor envió a la
+   * equivalencia de nivel GML de su nodo porque su equivalencia ya no existe
+   * (datos antiguos). Son filas cargadas, no errores: ya están dentro de
+   * `cargado` (y de `fusionadas` si coincidieron en clave con otra).
+   */
+  enviadas_a_gml: MedidasInforme;
+  /** 0.8.3. Lo anterior por valor de origen, de la que más pesa a la que menos (completo; se recorta al guardar el reporte). */
+  enviadas_a_gml_detalle: EnviadaGmlInforme[];
   /** `archivo = cargado + excluido` en las cinco medidas y `archivo.filas = cargadas + fusionadas + excluidas`. */
   identidad_ok: boolean;
   conciliacion: FilaConciliacion[];
@@ -472,6 +488,24 @@ export type InformeMes = {
   /** Errores >= 2 % en filas, venta o stock valorizado. */
   bloqueado: boolean;
   huella_stock: HuellaMes;
+};
+
+/** 0.8.3. Cómo se llama en pantalla la equivalencia de nivel GML a la que se envió un valor. */
+export const ETIQUETA_DESTINO_GML: Record<"generica" | "igual_a_linea", string> = {
+  generica: "SIN EQUIVALENCIA",
+  igual_a_linea: "igual a la línea",
+};
+
+/** 0.8.3. Un valor de origen (`GENERO / MUNDO / LINEA / EQUIVALENCIA`) enviado a la GML sin equivalencia de su nodo, con su peso. */
+export type EnviadaGmlInforme = MedidasInforme & {
+  /** Texto con que el informe agrupa el origen (`valorGrupoCombinacion`; el mismo que tendría el error). */
+  valor: string;
+  /** Con qué motivo habría sido error: la equivalencia no existe o está inactiva. */
+  motivo: "equivalencia_inexistente" | "equivalencia_inactiva";
+  /** `generica` = SIN EQUIVALENCIA; `igual_a_linea` = la equivalencia que se llama como la línea. */
+  destino_tipo: "generica" | "igual_a_linea";
+  /** Destino como `GENERO / MUNDO / LINEA / EQUIVALENCIA`. */
+  destino: string;
 };
 
 export type MarcaNuevaInforme = {

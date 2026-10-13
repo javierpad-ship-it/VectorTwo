@@ -44,6 +44,8 @@ import {
   type Combinacion,
   type Consolidado,
   type DetalleAviso,
+  type EnviadaGmlInforme,
+  ETIQUETA_DESTINO_GML,
 } from "./tipos";
 import { planificarMarcasNuevas, type CandidataMarcaNueva } from "./resolver";
 import { describirOrigen } from "./origen-mapeo";
@@ -189,6 +191,11 @@ export type EntradaInforme = {
  * ÚNICA fuente de esa expresión: el informe y quien deba casar un grupo de
  * exclusión con sus combinaciones (derivación de orígenes de la pantalla) la
  * usan igual.
+ *
+ * 0.8.3. Una combinación `ok` enviada a la GML (`a_gml`) se agrupa con el
+ * texto que habría tenido su error (`a_gml.valor`, el `detalle` del resolutor
+ * que el envío sustituyó): así el grupo "enviadas a la GML" y el origen del
+ * botón Asignar salen de esta misma expresión.
  */
 export function valorGrupoCombinacion(
   k: Pick<Combinacion, "genero" | "mundo" | "linea" | "equivalencia">,
@@ -196,6 +203,7 @@ export function valorGrupoCombinacion(
 ): string {
   if (!r) return `${k.genero} / ${k.mundo} / ${k.linea}`;
   if (r.resultado !== "ok" && r.detalle) return r.detalle;
+  if (r.resultado === "ok" && r.a_gml) return r.a_gml.valor;
   return `${k.genero} / ${k.mundo} / ${k.linea} / ${k.equivalencia}`;
 }
 
@@ -270,6 +278,18 @@ type Bucket = {
   muestraRepetidas: DetalleAviso[];
   /** Entradas (por posición) a las que aportó al menos una fila reasignada por mapeo. */
   conReasignadas: Set<number>;
+  /** Entradas (por posición) a las que aportó al menos una fila enviada a la GML. */
+  conEnviadas: Set<number>;
+  /** Entradas (por posición) a las que aportó al menos una fila nativa (ni reasignada por mapeo ni enviada a la GML). */
+  conNativas: Set<number>;
+};
+
+/** Un valor de origen enviado a la GML en un mes: su peso y a dónde fue. */
+type EntradaEnviadaGml = {
+  tally: Tally;
+  motivo: EnviadaGmlInforme["motivo"];
+  tipo: EnviadaGmlInforme["destino_tipo"];
+  destino: string;
 };
 
 export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
@@ -324,6 +344,11 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
   const comboMapeo = dic.combinaciones.map((_, c) => {
     const r = res.combinaciones[c];
     return r && r.resultado === "ok" && r.mapeo ? r.mapeo : null;
+  });
+  // 0.8.3: combinaciones enviadas a la equivalencia de nivel GML de su nodo (equivalencia antigua que ya no existe).
+  const comboGml = dic.combinaciones.map((_, c) => {
+    const r = res.combinaciones[c];
+    return r && r.resultado === "ok" && r.a_gml ? r.a_gml : null;
   });
   const noAplicablesPorId = new Map((res.mapeos_no_aplicables ?? []).map((m) => [m.id, m]));
   const comboNoAplicable = dic.combinaciones.map((_, c) => {
@@ -415,6 +440,8 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
   const reasignadasPorMes = new Map<number, GrupoAviso>();
   const mapeosAplicadosPorMes = new Map<number, Set<string>>();
   const noAplicadosPorMes = new Map<number, GrupoAviso>();
+  // 0.8.3: por mes y valor de origen, lo enviado a la GML (cargable, no es error).
+  const enviadasPorMes = new Map<number, Map<string, EntradaEnviadaGml>>();
   const ETIQUETA_REVISAR: Record<number, string> = { 2: "Revisar", 3: "-", 4: "(vacío)" };
 
   for (let i = 0; i < E.n; i++) {
@@ -500,9 +527,35 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
       ids.add(mapeo.id);
     }
 
+    // Enviada a la GML: la equivalencia del archivo ya no existe y se carga en la de nivel GML del nodo.
+    const aGml = comboGml[c];
+    if (aGml) {
+      let porValor = enviadasPorMes.get(p);
+      if (!porValor) {
+        porValor = new Map();
+        enviadasPorMes.set(p, porValor);
+      }
+      const valor = valorGrupoCombinacion(dic.combinaciones[c], res.combinaciones[c]);
+      let en = porValor.get(valor);
+      if (!en) {
+        en = { tally: tallyVacio(), motivo: aGml.motivo_original, tipo: aGml.tipo, destino: aGml.destino };
+        porValor.set(valor, en);
+      }
+      sumarEn(en.tally, med, filas);
+    }
+
     let b = buckets[p];
     if (!b) {
-      b = { e: new Entradas(256), tabla: new TablaClaves(256), fusionadas: 0, repetidas: 0, muestraRepetidas: [], conReasignadas: new Set() };
+      b = {
+        e: new Entradas(256),
+        tabla: new TablaClaves(256),
+        fusionadas: 0,
+        repetidas: 0,
+        muestraRepetidas: [],
+        conReasignadas: new Set(),
+        conEnviadas: new Set(),
+        conNativas: new Set(),
+      };
       buckets[p] = b;
     }
     const talla = cat === 1 ? 1 : 0;
@@ -512,12 +565,16 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
       b.e.nueva(p, tiendaOrd[t], eqOrd[c], m, talla, primera, med);
       b.e.filas[b.e.n - 1] = filas;
       if (mapeo) b.conReasignadas.add(b.e.n - 1);
+      if (aGml) b.conEnviadas.add(b.e.n - 1);
+      if (!mapeo && !aGml) b.conNativas.add(b.e.n - 1);
     } else {
       const antes = b.e.filas[existente];
       b.e.sumar(existente, med);
       b.e.filas[existente] = antes + filas;
       if (primera < b.e.primera[existente]) b.e.primera[existente] = primera;
       if (mapeo) b.conReasignadas.add(existente);
+      if (aGml) b.conEnviadas.add(existente);
+      if (!mapeo && !aGml) b.conNativas.add(existente);
     }
   }
 
@@ -679,8 +736,11 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
 
     // Claves repetidas: la suma ya está hecha; esto es lo que se informa.
     let fusionadasConReasignadas = false;
+    let fusionadasConEnviadas = false;
     if (b && fusionadas > 0) {
       for (const i of b.conReasignadas) if (b.e.filas[i] > 1) fusionadasConReasignadas = true;
+      // Solo si una fila enviada a la GML se fusionó de verdad con una clave que también tiene filas nativas.
+      for (const i of b.conEnviadas) if (b.conNativas.has(i)) fusionadasConEnviadas = true;
     }
     if (fusionadas > 0) {
       rep.total.filas = fusionadas;
@@ -688,6 +748,21 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
     }
     const reasig = reasignadasPorMes.get(p);
     if (reasig) grupoAviso.set("reasignadas_por_mapeo", reasig);
+    // Enviadas a la GML: detalle estructurado (por valor, de la que más pesa a la que menos) y aviso informativo.
+    const enviadas = new GrupoAviso();
+    const enviadasDetalle: EnviadaGmlInforme[] = [];
+    for (const [valor, en] of enviadasPorMes.get(p) ?? []) {
+      enviadas.agregar(en.tally, `${valor} → ${ETIQUETA_DESTINO_GML[en.tipo]}`, en.tally.filas);
+      enviadasDetalle.push({
+        valor,
+        motivo: en.motivo,
+        destino_tipo: en.tipo,
+        destino: en.destino,
+        ...medidasInforme(en.tally),
+      });
+    }
+    enviadasDetalle.sort((x, y) => peso(y) - peso(x) || y.filas - x.filas || x.valor.localeCompare(y.valor, "es"));
+    if (enviadasDetalle.length > 0) grupoAviso.set("enviadas_a_gml", enviadas);
     const noAplicados = noAplicadosPorMes.get(p);
     const rv = revisar.get(p);
     if (rv) grupoAviso.set("talla_revisar_a_centrales", rv);
@@ -741,13 +816,20 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
           codigo,
           `${fusionadas} filas se sumaron a otra con la misma clave tras normalizar.${
             fusionadasConReasignadas ? " Incluye filas reasignadas por mapeo que coincidieron con otras del árbol." : ""
-          }`,
+          }${fusionadasConEnviadas ? " Incluye filas enviadas a la GML sin equivalencia que coincidieron con otras del árbol." : ""}`,
           gr
         );
       } else if (codigo === "reasignadas_por_mapeo") {
         agregarAviso(
           codigo,
           `${gr.total.filas} filas se reasignaron por mapeo: no existían en el árbol y se cargan en la equivalencia que elegiste.`,
+          gr,
+          { maxDetalle: MAX_ENTRADAS_REPORTE }
+        );
+      } else if (codigo === "enviadas_a_gml") {
+        agregarAviso(
+          codigo,
+          `${gr.total.filas} filas son datos antiguos cuya equivalencia ya no existe: se cargan en la equivalencia de nivel GML (SIN EQUIVALENCIA o igual a la línea) de su línea.`,
           gr,
           { maxDetalle: MAX_ENTRADAS_REPORTE }
         );
@@ -870,6 +952,8 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
       fusionadas,
       reasignadas: medidasInforme(reasig ? reasig.total : tallyVacio()),
       mapeos_aplicados: [...(mapeosAplicadosPorMes.get(p) ?? [])].sort(),
+      enviadas_a_gml: medidasInforme(enviadas.total),
+      enviadas_a_gml_detalle: enviadasDetalle,
       identidad_ok: identidadOk,
       conciliacion: conciliarMes(st.archivo, excluido, cargado, noComparable, entrada.totalesQlik?.[periodo]),
       resumen_exclusiones: resumen,
@@ -1070,6 +1154,8 @@ export function armarReporteMes(informe: InformeCarga, periodo: string, opciones
       fusionadas: mes.fusionadas,
       reasignadas: mes.reasignadas,
       mapeos_aplicados: mes.mapeos_aplicados,
+      enviadas_a_gml: mes.enviadas_a_gml,
+      enviadas_a_gml_detalle: recortar(mes.enviadas_a_gml_detalle, tope),
       identidad_ok: mes.identidad_ok,
       conciliacion: mes.conciliacion,
       base_conciliacion: BASE_CONCILIACION,
@@ -1078,7 +1164,7 @@ export function armarReporteMes(informe: InformeCarga, periodo: string, opciones
       exclusiones,
       avisos: mes.avisos.map((a) => ({
         ...a,
-        detalle: recortar(a.detalle, a.codigo === "reasignadas_por_mapeo" || a.codigo === "mapeos_no_aplicables" ? tope : Math.min(tope, 50)),
+        detalle: recortar(a.detalle, a.codigo === "reasignadas_por_mapeo" || a.codigo === "mapeos_no_aplicables" || a.codigo === "enviadas_a_gml" ? tope : Math.min(tope, 50)),
       })),
       marcas_nuevas: recortar(informe.marcas_nuevas, tope),
       huella_stock: mes.huella_stock,

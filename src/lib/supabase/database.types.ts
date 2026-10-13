@@ -985,6 +985,25 @@ export type Database = {
           venta_soles: number;
         }[];
       };
+      sugerir_marcas_relevantes_v2: {
+        Args: {
+          p_desde: string;
+          p_excluir?: string[];
+          p_hasta: string;
+          p_medida?: string;
+          p_min_participacion?: number;
+          p_top?: number;
+        };
+        Returns: {
+          agrupacion_marca_id: string;
+          genero_mundo_linea_id: string;
+          marca_id: string;
+          participacion: number;
+          rango: number;
+          unidades: number;
+          venta_soles: number;
+        }[];
+      };
       totales_cargas_publicadas: {
         Args: Record<PropertyKey, never>;
         Returns: {

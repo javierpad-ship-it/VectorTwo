@@ -1,7 +1,13 @@
 import type { Tables } from "@/lib/supabase/database.types";
 import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
 import { MUESTRA_MAX, buscarEnCatalogo, codigoUnico, resolverCatalogo } from "@/lib/arbol/importar";
+import {
+  planificarConjuntos,
+  type AsignacionConjunto,
+  type CabezaNueva,
+} from "./conjuntos/importar";
 import type {
+  ConjuntoOmitidoMarca,
   ConteosCrearMarcas,
   ConteosExistentesMarcas,
   DiferenciaImportacionMarca,
@@ -19,7 +25,14 @@ import type {
  *                                                 probar idempotencia sin base.
  *
  * Nunca crea agrupaciones (son raíz y de admin) ni modifica, reactiva o
- * desactiva marcas existentes: solo las reporta en `diferencias`. El handler
+ * desactiva marcas existentes: solo las reporta en `diferencias`.
+ *
+ * Columna opcional `CONJUNTO` (02b, pregunta 20): las marcas NUEVAS entran con
+ * su conjunto (la cabeza se crea con la agrupación de la fila si no existe) y las
+ * existentes con otro conjunto van a `diferencias` (campo `conjunto`). Usa el
+ * mismo núcleo que el importador de conjuntos (`planificarConjuntos`); un
+ * conjunto que no se puede aplicar no omite la fila: la marca se crea sin
+ * conjunto y el motivo se lista en `conjuntos.omitidos`. El handler
  * ejecuta el plan con `upsert … onConflict: "nombre", ignoreDuplicates` en
  * tandas de 500 (`enTandas` de M1); si falla a mitad, reimportar completa el
  * resto sin duplicar.
@@ -31,7 +44,8 @@ export type AgrupacionMarcaEstado = Pick<Tables<"agrupaciones_marca">, "id" | "c
 export type MarcaEstado = Pick<
   Tables<"marcas">,
   "id" | "codigo" | "nombre" | "agrupacion_marca_id" | "tratamiento_especial" | "activo"
->;
+> &
+  Partial<Pick<Tables<"marcas">, "conjunto_marca_id" | "modalidad_tratamiento">>;
 
 /** Ambas tablas completas (activas e inactivas), leídas planas de la base o fabricadas en los tests. */
 export type EstadoImportacionMarcas = {
@@ -44,11 +58,15 @@ export type MarcaNueva = {
   codigo: string;
   agrupacion_marca_id: string;
   tratamiento_especial: boolean;
+  /** Regla 2 de 02b: con casilla se escribe `barrido` (como `POST /api/marcas`); sin casilla, `null`. */
+  modalidad_tratamiento?: "barrido" | null;
 };
 
 export type PlanImportacionMarcas = {
   reporte: ReporteImportacionMarcasBase;
   marcas: MarcaNueva[];
+  /** 02b: cabezas que se crearán y marcas nuevas que entran a un conjunto (se resuelven por nombre al escribir). */
+  conjuntos: { cabezas_nuevas: CabezaNueva[]; asignaciones: AsignacionConjunto[] };
 };
 
 const SI = new Set(["SI", "S", "X", "1", "TRUE", "VERDADERO", "YES", "Y"]);
@@ -88,18 +106,22 @@ export function planificarImportacionMarcas(
   filas: FilaImportacionMarca[],
   estado: EstadoImportacionMarcas
 ): PlanImportacionMarcas {
-  const crear: ConteosCrearMarcas = { marcas: 0, con_tratamiento_especial: 0 };
+  const crear: ConteosCrearMarcas = { marcas: 0, con_tratamiento_especial: 0, con_conjunto: 0 };
   const existentes: ConteosExistentesMarcas = { marcas: 0 };
   const existentesInactivos: ConteosExistentesMarcas = { marcas: 0 };
   const diferencias: DiferenciaImportacionMarca[] = [];
   const omitidas: FilaOmitidaMarca[] = [];
   const muestra = { marcas: [] as string[] };
   const nuevas: MarcaNueva[] = [];
+  /** Filas aceptadas con `CONJUNTO` de una marca nueva, a evaluar cuando ya se conocen todas las marcas nuevas del archivo. */
+  const conjuntosPendientes: { fila: number; marca: string; conjunto: string; agrupacion: { id: string; nombre: string } }[] = [];
 
   // Índices del estado actual.
   const marcasPorNombre = new Map(estado.marcas.map((m) => [normalizarNombre(m.nombre), m]));
   const agrupacionPorId = new Map(estado.agrupaciones.map((a) => [a.id, a]));
   const codigosUsados = new Set(estado.marcas.map((m) => m.codigo.toUpperCase()));
+  const marcaPorId = new Map(estado.marcas.map((m) => [m.id, m]));
+  const marcaPorCodigo = new Map(estado.marcas.map((m) => [m.codigo.toUpperCase(), m]));
 
   // Lo visto dentro del archivo: nombre de marca → fila de su primera aparición y agrupación.
   const vistas = new Map<string, { fila: number; agrupacion: string }>();
@@ -111,6 +133,7 @@ export function planificarImportacionMarcas(
     const marcaTxt = normalizarNombre(cruda.marca);
     const agrupacionTxt = normalizarNombre(cruda.agrupacion);
     const tratamientoTxt = typeof cruda.tratamiento_especial === "string" ? cruda.tratamiento_especial : "";
+    const conjuntoTxt = normalizarNombre(cruda.conjunto);
 
     /** Anota la omisión con la fila completa, para que se pueda corregir el archivo. */
     const omitir = (
@@ -124,6 +147,7 @@ export function planificarImportacionMarcas(
         marca: marcaTxt,
         agrupacion: agrupacionTxt,
         tratamiento_especial: tratamientoTxt,
+        ...(conjuntoTxt ? { conjunto: conjuntoTxt } : {}),
       });
     };
 
@@ -182,17 +206,91 @@ export function planificarImportacionMarcas(
           en_archivo: siNo(tratamiento),
         });
       }
+      if (conjuntoTxt) {
+        const nombreEnArchivo = conjuntoTxt;
+        const enArchivo = marcasPorNombre.get(nombreEnArchivo) ?? marcaPorCodigo.get(aCodigo(conjuntoTxt));
+        const mismo = enArchivo !== undefined && enArchivo.id === existente.conjunto_marca_id;
+        if (!mismo) {
+          const actual = existente.conjunto_marca_id ? marcaPorId.get(existente.conjunto_marca_id) : undefined;
+          diferencias.push({
+            fila,
+            marca: marcaTxt,
+            campo: "conjunto",
+            en_base: actual?.nombre ?? "(ninguno)",
+            en_archivo: nombreEnArchivo,
+          });
+        }
+      }
       return;
     }
 
     // Marca nueva: código único sobre los de la base más los del archivo.
     const codigo = codigoUnico(aCodigo(marcaTxt), codigosUsados, "MARCA");
     codigosUsados.add(codigo);
-    nuevas.push({ nombre: marcaTxt, codigo, agrupacion_marca_id: agrupacion.id, tratamiento_especial: tratamiento });
+    nuevas.push({
+      nombre: marcaTxt,
+      codigo,
+      agrupacion_marca_id: agrupacion.id,
+      tratamiento_especial: tratamiento,
+      modalidad_tratamiento: tratamiento ? "barrido" : null,
+    });
     crear.marcas += 1;
     if (tratamiento) crear.con_tratamiento_especial += 1;
     if (muestra.marcas.length < MUESTRA_MAX) muestra.marcas.push(`${marcaTxt} → ${agrupacion.nombre}`);
+    if (conjuntoTxt) {
+      conjuntosPendientes.push({
+        fila,
+        marca: marcaTxt,
+        conjunto: conjuntoTxt,
+        agrupacion: { id: agrupacion.id, nombre: agrupacion.nombre },
+      });
+    }
   });
+
+  // Columna CONJUNTO de las marcas nuevas (02b): se evalúa con todas las marcas nuevas del archivo ya conocidas.
+  const conjuntosOmitidos: ConjuntoOmitidoMarca[] = [];
+  const planificador = planificarConjuntos({
+    agrupaciones: estado.agrupaciones,
+    marcas: estado.marcas.map((m) => ({
+      id: m.id,
+      nombre: m.nombre,
+      codigo: m.codigo,
+      activo: m.activo,
+      agrupacion_marca_id: m.agrupacion_marca_id,
+      conjunto_marca_id: m.conjunto_marca_id ?? null,
+    })),
+  });
+  for (const n of nuevas) {
+    planificador.registrarMarcaNueva({
+      id: null,
+      nombre: n.nombre,
+      agrupacion_marca_id: n.agrupacion_marca_id,
+      activo: true,
+      conjunto_marca_id: null,
+    });
+  }
+  const asignacionesConjunto: AsignacionConjunto[] = [];
+  for (const p of conjuntosPendientes) {
+    const nueva = nuevas.find((n) => n.nombre === p.marca);
+    if (!nueva) continue;
+    const resultado = planificador.evaluar({
+      marca: { id: null, nombre: p.marca, agrupacion_marca_id: nueva.agrupacion_marca_id, activo: true, conjunto_marca_id: null },
+      conjunto: p.conjunto,
+      agrupacion_cabeza: p.agrupacion,
+    });
+    if (resultado.tipo === "omitida") {
+      conjuntosOmitidos.push({
+        fila: p.fila,
+        marca: p.marca,
+        conjunto: p.conjunto,
+        motivo: resultado.motivo,
+        ...(resultado.detalle === undefined ? {} : { detalle: resultado.detalle }),
+      });
+    } else if (resultado.tipo === "asignar" || resultado.tipo === "cambio") {
+      asignacionesConjunto.push(resultado.asignacion);
+      crear.con_conjunto += 1;
+    }
+  }
 
   const reporte: ReporteImportacionMarcasBase = {
     totales: { recibidas: filas.length, procesadas, omitidas: omitidas.length },
@@ -202,8 +300,13 @@ export function planificarImportacionMarcas(
     diferencias,
     omitidas,
     muestra,
+    conjuntos: { a_crear: planificador.conjuntosACrear(), omitidos: conjuntosOmitidos },
   };
-  return { reporte, marcas: nuevas };
+  return {
+    reporte,
+    marcas: nuevas,
+    conjuntos: { cabezas_nuevas: planificador.cabezasNuevas(), asignaciones: asignacionesConjunto },
+  };
 }
 
 /**
@@ -212,7 +315,7 @@ export function planificarImportacionMarcas(
  * un estado nuevo; no muta el recibido. Los ids generados son deterministas.
  */
 export function aplicarPlanMarcas(estado: EstadoImportacionMarcas, plan: PlanImportacionMarcas): EstadoImportacionMarcas {
-  const marcas = [...estado.marcas];
+  const marcas: MarcaEstado[] = [...estado.marcas];
   const nombres = new Set(marcas.map((m) => normalizarNombre(m.nombre)));
   plan.marcas.forEach((m, i) => {
     if (nombres.has(m.nombre)) return;
@@ -222,9 +325,35 @@ export function aplicarPlanMarcas(estado: EstadoImportacionMarcas, plan: PlanImp
       codigo: m.codigo,
       agrupacion_marca_id: m.agrupacion_marca_id,
       tratamiento_especial: m.tratamiento_especial,
+      modalidad_tratamiento: m.modalidad_tratamiento ?? null,
       activo: true,
+      conjunto_marca_id: null,
     });
     nombres.add(m.nombre);
   });
-  return { agrupaciones: estado.agrupaciones, marcas };
+  // 02b: cabezas nuevas y marcas que entran a un conjunto (se resuelven por nombre, como al escribir).
+  plan.conjuntos.cabezas_nuevas.forEach((c, i) => {
+    if (nombres.has(c.nombre)) return;
+    marcas.push({
+      id: `plan-cabeza-${i + 1}`,
+      nombre: c.nombre,
+      codigo: c.codigo,
+      agrupacion_marca_id: c.agrupacion_marca_id,
+      tratamiento_especial: false,
+      activo: true,
+      conjunto_marca_id: null,
+    });
+    nombres.add(c.nombre);
+  });
+  const idPorNombre = new Map(marcas.map((m) => [normalizarNombre(m.nombre), m.id]));
+  const conjuntoDe = new Map<string, string>();
+  for (const a of plan.conjuntos.asignaciones) {
+    const marcaId = a.marca_id ?? idPorNombre.get(normalizarNombre(a.marca_nombre));
+    const cabezaId = a.cabeza_id ?? idPorNombre.get(normalizarNombre(a.cabeza_nombre));
+    if (marcaId && cabezaId) conjuntoDe.set(marcaId, cabezaId);
+  }
+  return {
+    agrupaciones: estado.agrupaciones,
+    marcas: marcas.map((m) => (conjuntoDe.has(m.id) ? { ...m, conjunto_marca_id: conjuntoDe.get(m.id) ?? null } : m)),
+  };
 }

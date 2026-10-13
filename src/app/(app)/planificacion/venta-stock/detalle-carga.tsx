@@ -11,6 +11,7 @@ import type { Aviso, ResumenExclusion } from "@/lib/ventas/tipos";
 import { leerConciliacionGuardada } from "@/lib/ventas/conciliacion";
 import type { CargaApi, DetalleCargaRespuesta, EstadoCarga } from "@/lib/ventas/tipos-api";
 import { ConciliacionGuardada, ListaAvisos, TablaResumenExclusiones } from "./detalle-mes";
+import { EnviadasGml, leerEnviadasGuardadas } from "./enviadas-gml";
 import { formatearEntero, formatearFechaHora, formatearSoles, nombrePeriodo } from "./comunes";
 
 const ETIQUETA_ESTADO: Record<EstadoCarga, string> = {
@@ -55,6 +56,9 @@ export function DetalleCarga({ id, periodo, onCerrar }: { id: string; periodo: s
   const marcas = lista<{ nombre: string }>(reporte.marcas_nuevas);
   const reasignadas = (reporte.reasignadas ?? null) as { filas?: number; venta_soles?: number; stock_valorizado?: number } | null;
   const filasReasignadas = typeof reasignadas?.filas === "number" ? reasignadas.filas : 0;
+  const enviadas = leerEnviadasGuardadas(reporte);
+  const archivoGuardado = (reporte.archivo ?? null) as { filas?: number } | null;
+  const filasArchivoGuardado = typeof archivoGuardado?.filas === "number" ? archivoGuardado.filas : undefined;
 
   const columnasHistorial: Columna<CargaApi>[] = [
     { clave: "estado", titulo: "Estado", render: (h) => <Badge tono={h.estado === "fallida" ? "alerta" : "neutro"}>{ETIQUETA_ESTADO[h.estado] ?? h.estado}</Badge> },
@@ -99,6 +103,10 @@ export function DetalleCarga({ id, periodo, onCerrar }: { id: string; periodo: s
               <strong>{formatearNumero(filasReasignadas)} filas reasignadas por mapeo</strong> (venta {formatearSoles(reasignadas?.venta_soles)}, stock a costo {formatearSoles(reasignadas?.stock_valorizado)}): iban a errores
               y se cargaron al destino de un mapeo. El detalle origen → destino está en los avisos de abajo. Si cambias o eliminas el mapeo, este mes no cambia hasta que lo recargues.
             </Alert>
+          )}
+
+          {enviadas.detalle.length > 0 && (
+            <EnviadasGml periodo={periodo} resumen={enviadas.resumen} detalle={enviadas.detalle} filasArchivo={filasArchivoGuardado} />
           )}
 
           {resumen.length > 0 && (

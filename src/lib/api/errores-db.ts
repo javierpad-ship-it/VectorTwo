@@ -62,6 +62,8 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["mapeos_combinacion_origen_uniq", "Ese origen ya tiene un mapeo."],
   // M5c. La API ya lo anticipa solo para tiendas; el repetido lo detecta el único.
   ["ubicaciones_ignoradas_nombre", "Esa ubicación ya está en la lista."],
+  // M2b. La API lo anticipa con el par que choca; esto es la red de seguridad (carrera entre dos usuarios).
+  ["marca_gml_especial_par", "Esa marca ya es relevante en ese GML."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -86,6 +88,20 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   // M5c. Los dos checks de las ubicaciones ignoradas (el esquema zod los atrapa antes; esto es la red de seguridad).
   ["ubicaciones_ignoradas_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
   ["ubicaciones_ignoradas_nota_len", "La nota no puede superar 200 caracteres."],
+  // M2b.
+  ["genero_mundo_linea_nivel", "El nivel de planificación debe ser GML o GMLE."],
+  ["marcas_modalidad_valor", "La modalidad debe ser por_gml o barrido."],
+  ["marcas_modalidad_sin_tratamiento", "La modalidad solo se guarda si la marca tiene tratamiento especial."],
+  ["marcas_conjunto_no_propio", "Una marca no puede ser su propio conjunto."],
+  ["marca_gml_especial_nota_len", "La nota no puede superar 200 caracteres."],
+  // M6 paso 1. La API ya los valida con zod; esto es la red de seguridad.
+  ["agrupaciones_estacionalidad_temporada", "La temporada debe ser invierno, verano o todo_el_ano."],
+  ["periodos_atipicos_desde_dia1", "El mes inicial debe ser el primer día del mes."],
+  ["periodos_atipicos_hasta_dia1", "El mes final debe ser el primer día del mes."],
+  ["periodos_atipicos_rango", "El mes final no puede ser anterior al inicial."],
+  ["periodos_atipicos_motivo_len", "El motivo debe tener entre 1 y 120 caracteres."],
+  ["periodos_atipicos_descripcion_len", "La descripción no puede superar 500 caracteres."],
+  ["periodos_atipicos_alcance", "El alcance debe ser invierno o todas."],
   // Genéricos: cubren `*_codigo_len_check` y `*_nombre_len_check` de todas las tablas, incluidas tiendas.
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
@@ -198,6 +214,29 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     {
       eliminar: FK_GENERICA,
       asignar: { status: 404, mensaje: "Equivalencia no encontrada." },
+    },
+  ],
+  // M2b. Un nodo con marcas relevantes no se elimina (`restrict`); la marca arrastra sus GML (`cascade`, así que
+  // su rama `eliminar` no debería verse). La cabeza de un conjunto con miembros tampoco se elimina (`restrict`).
+  [
+    "marca_gml_especial_gml_id_fkey",
+    {
+      eliminar: "No se puede eliminar el nodo: tiene marcas relevantes asignadas. Quítalas o desactívalo.",
+      asignar: { status: 404, mensaje: "Nodo género-mundo-línea no encontrado." },
+    },
+  ],
+  [
+    "marca_gml_especial_marca_id_fkey",
+    {
+      eliminar: FK_GENERICA,
+      asignar: { status: 404, mensaje: "Marca no encontrada." },
+    },
+  ],
+  [
+    "marcas_conjunto_marca_id_fkey",
+    {
+      eliminar: "No se puede eliminar la marca: es cabeza de un conjunto con marcas. Quítalas o desactívala.",
+      asignar: { status: 404, mensaje: "Marca cabeza no encontrada." },
     },
   ],
   // Las cargas nunca se eliminan (cambian de estado); la FK es la red de seguridad.

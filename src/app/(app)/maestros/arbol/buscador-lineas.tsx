@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { Input } from "@/components/ui/form";
 import { normalizarNombre } from "@/lib/arbol/normalizar";
-import type { ArbolRespuesta } from "@/lib/arbol/tipos-api";
+import type { ArbolRespuesta, NivelPlanificacion } from "@/lib/arbol/tipos-api";
+import { Button } from "@/components/ui/button";
 
 type Coincidencia = {
   linea_id: string;
@@ -14,6 +15,7 @@ type Coincidencia = {
     nodoId: string;
     etiqueta: string;
     equivalencias: number;
+    nivel: NivelPlanificacion;
   }[];
 };
 
@@ -35,6 +37,7 @@ function indexar(arbol: ArbolRespuesta | null): Coincidencia[] {
           nodoId: l.nodo_id,
           etiqueta: `${g.nombre} / ${m.nombre}`,
           equivalencias: l.equivalencias.length,
+          nivel: l.nivel_planificacion,
         });
       }
     }
@@ -47,11 +50,19 @@ export function BuscadorLineas({
   valor,
   onCambiar,
   onElegir,
+  puedeEditar = false,
+  ocupadoNivel = false,
+  onCambiarNivelLinea,
 }: {
   arbol: ArbolRespuesta | null;
   valor: string;
   onCambiar: (v: string) => void;
   onElegir: (sel: { generoId: string; mundoId: string; nodoId: string }) => void;
+  /** 02b: admin y planner ven el resumen de niveles de la línea y pueden cambiarlos todos de una vez. */
+  puedeEditar?: boolean;
+  ocupadoNivel?: boolean;
+  /** 02b: cambia el nivel de todos los nodos de la línea (los ids vienen del árbol cargado). */
+  onCambiarNivelLinea?: (nodoIds: string[], nivel: NivelPlanificacion) => Promise<void>;
 }) {
   const indice = useMemo(() => indexar(arbol), [arbol]);
   const consulta = normalizarNombre(valor);
@@ -77,6 +88,37 @@ export function BuscadorLineas({
               <div className="text-sm font-medium text-tinta">
                 {c.nombre} <span className="font-normal text-tinta-suave">· en {c.nodos.length} nodo{c.nodos.length === 1 ? "" : "s"}</span>
               </div>
+              {(() => {
+                const abiertos = c.nodos.filter((n) => n.nivel === "GMLE").length;
+                const cerrados = c.nodos.length - abiertos;
+                return (
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-tinta-suave">
+                    <span>
+                      {c.nombre} está en {c.nodos.length} nodo{c.nodos.length === 1 ? "" : "s"}: {cerrados} GML · {abiertos} GMLE
+                    </span>
+                    {puedeEditar && onCambiarNivelLinea && (
+                      <>
+                        <Button
+                          variante="secundario"
+                          tamano="sm"
+                          disabled={ocupadoNivel || cerrados === 0}
+                          onClick={() => void onCambiarNivelLinea(c.nodos.map((n) => n.nodoId), "GMLE")}
+                        >
+                          Abrir todos a GMLE
+                        </Button>
+                        <Button
+                          variante="secundario"
+                          tamano="sm"
+                          disabled={ocupadoNivel || abiertos === 0}
+                          onClick={() => void onCambiarNivelLinea(c.nodos.map((n) => n.nodoId), "GML")}
+                        >
+                          Volver todos a GML
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="mt-1 flex flex-wrap gap-1">
                 {c.nodos.map((n) => (
                   <button
@@ -85,7 +127,7 @@ export function BuscadorLineas({
                     onClick={() => onElegir({ generoId: n.generoId, mundoId: n.mundoId, nodoId: n.nodoId })}
                     className="rounded-md border border-borde px-2 py-0.5 text-xs text-tinta-suave hover:border-marca hover:text-marca-oscura"
                   >
-                    {n.etiqueta} <span className="opacity-70">({n.equivalencias} eq.)</span>
+                    {n.etiqueta} <span className="opacity-70">({n.equivalencias} eq.{n.nivel === "GMLE" ? " · GMLE" : ""})</span>
                   </button>
                 ))}
               </div>

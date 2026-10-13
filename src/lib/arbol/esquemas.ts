@@ -4,6 +4,7 @@ import {
   MARCA_IGUAL_A_LINEA,
   MAX_CODIGO,
   MAX_NOMBRE,
+  NIVELES_PLANIFICACION,
   TEMPORADAS,
   aCodigo,
   esEquivalenciaGenerica,
@@ -85,8 +86,11 @@ export const editarLineaSchema = z
 
 export const crearNodoSchema = z.object({ genero_id: uuid, mundo_id: uuid, linea_id: uuid });
 
+/** 02b: nivel de planificación del nodo. */
+export const nivelPlanificacion = z.enum(NIVELES_PLANIFICACION, "El nivel de planificación debe ser GML o GMLE.");
+
 export const editarNodoSchema = z
-  .object({ activo, mundo_id: uuid })
+  .object({ activo, mundo_id: uuid, nivel_planificacion: nivelPlanificacion })
   .partial()
   .refine(tieneAlgo, noVacio);
 

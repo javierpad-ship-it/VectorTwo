@@ -271,3 +271,35 @@ export function planificarAsignacion(
   }
   return plan;
 }
+
+// ─── Temporada sugerida (M6 paso 1) ───
+
+/**
+ * Para cada agrupación, la `temporada` (M1: `Verano` / `Invierno` / `Todo el
+ * año`) de la línea de cada una de sus equivalencias ACTIVAS, una entrada por
+ * equivalencia. Es la entrada de `temporadaSugerida` (mayoritaria por conteo).
+ * Una equivalencia cuyo nodo o línea no aparece en las listas no aporta nada.
+ */
+export function temporadasDeLineasPorAgrupacion(
+  equivalencias: ReadonlyArray<{
+    agrupacion_estacionalidad_id: string | null;
+    genero_mundo_linea_id: string;
+    activo: boolean;
+  }>,
+  nodos: ReadonlyArray<{ id: string; linea_id: string }>,
+  lineas: ReadonlyArray<{ id: string; temporada: string }>
+): Map<string, string[]> {
+  const lineaDeNodo = new Map(nodos.map((n) => [n.id, n.linea_id]));
+  const temporadaDeLinea = new Map(lineas.map((l) => [l.id, l.temporada]));
+  const porAgrupacion = new Map<string, string[]>();
+  for (const e of equivalencias) {
+    if (!e.activo || e.agrupacion_estacionalidad_id === null) continue;
+    const lineaId = lineaDeNodo.get(e.genero_mundo_linea_id);
+    const temporada = lineaId === undefined ? undefined : temporadaDeLinea.get(lineaId);
+    if (temporada === undefined) continue;
+    const lista = porAgrupacion.get(e.agrupacion_estacionalidad_id) ?? [];
+    lista.push(temporada);
+    porAgrupacion.set(e.agrupacion_estacionalidad_id, lista);
+  }
+  return porAgrupacion;
+}

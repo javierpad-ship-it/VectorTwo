@@ -6,7 +6,7 @@ import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { describirErrorDb, registrarErrorDb, traducirErrorDb } from "@/lib/api/errores-db";
 import type { TablesInsert } from "@/lib/supabase/database.types";
 import { importarMarcasSchema } from "@/lib/marcas/esquemas";
-import { cargarEstadoMarcas } from "@/lib/marcas/consultas";
+import { cargarEstadoMarcas, escribirConjuntos } from "@/lib/marcas/consultas";
 import { enTandas, planificarImportacionMarcas } from "@/lib/marcas/importar";
 import type { ConteosCrearMarcas, ReporteImportacionMarcas } from "@/lib/marcas/tipos";
 
@@ -14,8 +14,9 @@ import type { ConteosCrearMarcas, ReporteImportacionMarcas } from "@/lib/marcas/
  * Importador de marcas (`requirePlanner`). `previsualizar` devuelve el
  * reporte sin escribir; `aplicar` inserta las marcas nuevas en tandas de 500
  * con `upsert … onConflict: "nombre", ignoreDuplicates` y cuenta lo realmente
- * insertado. Nunca crea agrupaciones ni modifica marcas existentes. Sin
- * transacción: si una tanda falla, `500` con lo creado hasta ahí y reimportar
+ * insertado. Nunca crea agrupaciones ni modifica marcas existentes. Con la
+ * columna opcional `CONJUNTO` (02b) las marcas nuevas entran a su conjunto
+ * (creando la cabeza si no existe). Sin transacción: si una tanda falla, `500` con lo creado hasta ahí y reimportar
  * completa el resto sin duplicar.
  */
 export async function POST(request: NextRequest) {
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     return ok(reporte);
   }
 
-  const creados: ConteosCrearMarcas = { marcas: 0, con_tratamiento_especial: 0 };
+  const creados: ConteosCrearMarcas = { marcas: 0, con_tratamiento_especial: 0, con_conjunto: 0 };
 
   const fallo = (err: PostgrestError) => {
     const descrito = describirErrorDb(err.code, err.message, err.details);
@@ -55,6 +56,8 @@ export async function POST(request: NextRequest) {
       codigo: m.codigo,
       agrupacion_marca_id: m.agrupacion_marca_id,
       tratamiento_especial: m.tratamiento_especial,
+      // Regla 2 de 02b: toda escritura que enciende la casilla escribe modalidad. `ignoreDuplicates` no pisa las existentes.
+      modalidad_tratamiento: m.modalidad_tratamiento,
     }));
     const { data, error: err } = await db
       .from("marcas")
@@ -64,6 +67,21 @@ export async function POST(request: NextRequest) {
     for (const fila of data ?? []) {
       creados.marcas += 1;
       if (fila.tratamiento_especial) creados.con_tratamiento_especial += 1;
+    }
+  }
+
+  // 02b: cabezas nuevas y marcas nuevas que entran a su conjunto (por nombre, ya con ids).
+  if (plan.conjuntos.asignaciones.length > 0 || plan.conjuntos.cabezas_nuevas.length > 0) {
+    const { resultado, error: errConjuntos } = await escribirConjuntos(db, plan.conjuntos.cabezas_nuevas, plan.conjuntos.asignaciones);
+    creados.con_conjunto = resultado.asignadas;
+    if (errConjuntos) {
+      const descrito = describirErrorDb(errConjuntos.code, errConjuntos.message, errConjuntos.details);
+      if (descrito.status >= 500) registrarErrorDb(errConjuntos, "importar marcas: conjuntos");
+      return error(
+        `Las marcas se crearon (${creados.marcas}), pero la importación se detuvo al armar los conjuntos: ${descrito.mensaje} ` +
+          "Vuelve a importar el mismo archivo para completar el resto sin duplicar.",
+        500
+      );
     }
   }
 

@@ -123,7 +123,7 @@ describe("planificarImportacionMarcas · agrupación (regla 9)", () => {
       omitida(filas[4], 5, "agrupacion_desconocida", { detalle: "1" }),
     ]);
     expect(marcas).toHaveLength(1);
-    expect(reporte.crear).toEqual({ marcas: 1, con_tratamiento_especial: 0 });
+    expect(reporte.crear).toEqual({ marcas: 1, con_tratamiento_especial: 0, con_conjunto: 0 });
     expect(reporte.crear).not.toHaveProperty("agrupaciones");
   });
 });
@@ -136,7 +136,14 @@ describe("planificarImportacionMarcas · tratamiento especial (regla 10)", () =>
     const { reporte, marcas } = planificarImportacionMarcas(filas, estadoSeed());
     expect(reporte.omitidas).toEqual([omitida(filas[0], 1, "tratamiento_invalido", { detalle: "tal vez" })]);
     expect(marcas.map((m) => m.tratamiento_especial)).toEqual([false, true]);
-    expect(reporte.crear).toEqual({ marcas: 2, con_tratamiento_especial: 1 });
+    expect(reporte.crear).toEqual({ marcas: 2, con_tratamiento_especial: 1, con_conjunto: 0 });
+  });
+  it("02b regla 2: con casilla se escribe modalidad barrido; sin casilla, null (nunca casilla sin modalidad)", () => {
+    const { marcas } = planificarImportacionMarcas([fila("ACME", "VALOR"), fila("ADIDAS", "PREMIUM", "SI")], estadoSeed());
+    expect(marcas.map((m) => m.modalidad_tratamiento)).toEqual([null, "barrido"]);
+    for (const m of marcas) expect(m.tratamiento_especial ? m.modalidad_tratamiento : null).toBe(m.modalidad_tratamiento);
+    const despues = aplicarPlanMarcas(estadoSeed(), planificarImportacionMarcas([fila("ADIDAS", "PREMIUM", "SI")], estadoSeed()));
+    expect(despues.marcas.find((m) => m.nombre === "ADIDAS")).toMatchObject({ tratamiento_especial: true, modalidad_tratamiento: "barrido" });
   });
 });
 
@@ -245,14 +252,14 @@ describe("planificarImportacionMarcas · idempotencia (regla 14)", () => {
   it("reimportar tras aplicar no crea nada, cuenta las mismas existentes y no tiene diferencias", () => {
     const estado = estadoSeed();
     const plan1 = planificarImportacionMarcas(filas, estado);
-    expect(plan1.reporte.crear).toEqual({ marcas: 3, con_tratamiento_especial: 1 });
+    expect(plan1.reporte.crear).toEqual({ marcas: 3, con_tratamiento_especial: 1, con_conjunto: 0 });
 
     const estado2 = aplicarPlanMarcas(estado, plan1);
     expect(estado2.marcas).toHaveLength(3);
     expect(estado.marcas).toHaveLength(0); // no muta
 
     const plan2 = planificarImportacionMarcas(filas, estado2);
-    expect(plan2.reporte.crear).toEqual({ marcas: 0, con_tratamiento_especial: 0 });
+    expect(plan2.reporte.crear).toEqual({ marcas: 0, con_tratamiento_especial: 0, con_conjunto: 0 });
     expect(plan2.reporte.existentes.marcas).toBe(3);
     expect(plan2.reporte.existentes_inactivos.marcas).toBe(0);
     expect(plan2.reporte.diferencias).toEqual([]);
@@ -291,7 +298,7 @@ describe("planificarImportacionMarcas · conteos consistentes (regla 15)", () =>
     expect(totales.recibidas).toBe(totales.procesadas + totales.omitidas);
     expect(totales.procesadas).toBe(crear.marcas + existentes.marcas + existentes_inactivos.marcas);
     expect(crear.con_tratamiento_especial).toBeLessThanOrEqual(crear.marcas);
-    expect(crear).toEqual({ marcas: 2, con_tratamiento_especial: 2 });
+    expect(crear).toEqual({ marcas: 2, con_tratamiento_especial: 2, con_conjunto: 0 });
     expect(totales.omitidas).toBe(reporte.omitidas.length);
   });
 

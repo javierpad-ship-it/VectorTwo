@@ -34,6 +34,8 @@ describe("armarArbol con agrupaciones (regla 18)", () => {
       nodos: 3,
       equivalencias: 7,
       equivalencias_sin_agrupacion: 5, // e1, e3 (inactiva), e12, e5, e7
+      nodos_gmle: 0, // 02b: sin nivel en la entrada, todos los nodos son GML
+      equivalencias_en_gmle: 0,
     });
     // Con inactivos salen 12 equivalencias, pero e4 (inactiva) y las de nodos no vigentes nunca son faltantes.
     expect(armar(true, true).resumen).toMatchObject({ equivalencias: 12, equivalencias_sin_agrupacion: 5 });

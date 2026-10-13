@@ -9,7 +9,7 @@
 -- NO crea todavía la vista materializada `venta_mensual_estacionalidad`, ni la
 -- función `refrescar_venta_mensual_estacionalidad`, ni `corridas_estacionalidad`,
 -- ni `curvas_estacionalidad`: son del PASO 2 (cálculo, versión 0.9.1) y se harán
--- en una migración posterior, `0012`. Se parten así para no dejar objetos sin
+-- en una migración posterior (prevista `0012`; la tomó `sugerir_marcas_relevantes_v2` de M2b, así que será `0013`). Se parten así para no dejar objetos sin
 -- uso (y una vista materializada sin refrescar) mientras Javier solo mantiene el
 -- catálogo.
 --

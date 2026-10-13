@@ -1,4 +1,5 @@
 import { compararNombre, compararOrdenNombre } from "@/lib/arbol/armar-arbol";
+import type { TemporadaAgrupacion } from "@/lib/curvas/tipos-api";
 import type { CatalogoPlanoEstacionalidad, EquivalenciaPlana, LineaPlana } from "./tipos-api";
 
 /**
@@ -23,6 +24,8 @@ export type AgrupacionMapaEntrada = {
   activo: boolean;
   /** Géneros de la agrupación (si el catálogo los trae); la tarjeta los pinta o marca "Sin género". */
   generos?: readonly { id: string; codigo?: string; nombre: string }[];
+  /** M6: temporada de la agrupación, para el chip de la tarjeta (se conserva tal cual en `TarjetaMapa.agrupacion`). */
+  temporada?: TemporadaAgrupacion;
 };
 
 export type ConteoGenero = { id: string; nombre: string; conteo: number };

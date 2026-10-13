@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { BadgeTemporada } from "@/components/estacionalidad/temporada";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import type { CampoImportador, ColumnaOmitida } from "@/components/importador/tipos";
 import { useImportador } from "@/components/importador/use-importador";
@@ -21,9 +22,10 @@ import { BotonesImportar, PasoMapeo } from "@/components/importador/paso-mapeo";
 import { TablaDuplicadas, TablaErrores, Tarjeta, descripcionTotales, separarOmitidas } from "@/components/importador/reporte";
 import { formatearNumero, plural } from "@/lib/formato";
 
+/** Las cinco columnas de siempre más la temporada opcional de M6 (la sexta columna). */
 type Campo = keyof FilaImportacionEstacionalidad;
 
-/** Las cuatro del árbol con los mismos alias que M1, más la agrupación. Las cinco son obligatorias. */
+/** Las cuatro del árbol con los mismos alias que M1, más la agrupación (las cinco obligatorias) y la temporada (opcional). */
 const CAMPOS: CampoImportador<Campo>[] = [
   { campo: "genero", etiqueta: "Género", alias: ["GENERO_LK", "GENERO", "GENEROS"] },
   { campo: "mundo", etiqueta: "Mundo", alias: ["MUNDO", "GRUPO_PRODUCTO", "MUNDOS"] },
@@ -33,6 +35,13 @@ const CAMPOS: CampoImportador<Campo>[] = [
     campo: "agrupacion",
     etiqueta: "Agrupación",
     alias: ["AGRUPACION", "AGRUPACION_ESTACIONALIDAD", "ESTACIONALIDAD", "CURVA"],
+  },
+  {
+    campo: "temporada",
+    etiqueta: "Temporada",
+    alias: ["TEMPORADA", "TEMPORADA_AGRUPACION"],
+    opcional: true,
+    hint: "Sin mapear, las agrupaciones nuevas nacen como Toda temporada.",
   },
 ];
 
@@ -47,6 +56,7 @@ const COLUMNAS_FILA: ColumnaOmitida<FilaOmitidaEstacionalidad>[] = [
   { clave: "linea", titulo: "Línea", valor: (f) => f.linea },
   { clave: "equivalencia", titulo: "Equivalencia", valor: (f) => f.equivalencia },
   { clave: "agrupacion", titulo: "Agrupación", valor: (f) => f.agrupacion },
+  { clave: "temporada", titulo: "Temporada", valor: (f) => f.temporada ?? "" },
 ];
 
 function nadaQueCambiar(r: ReporteImportacionEstacionalidad): boolean {
@@ -89,7 +99,7 @@ export function ImportarEstacionalidad({ onAplicado }: { onAplicado: () => void 
       {imp.error && <Alert onCerrar={() => imp.setError(null)}>{imp.error}</Alert>}
 
       <Alert tono="info">
-        Formato: las cuatro columnas del árbol más AGRUPACION (descárgalo listo desde Faltantes). Equivalencia vacía = la genérica del nodo; «-»
+        Formato: las cuatro columnas del árbol más AGRUPACION (descárgalo listo desde Faltantes) y, opcional, TEMPORADA (Invierno, Verano o Toda temporada; vacía = Toda temporada): solo se aplica a las agrupaciones que el archivo crea y nunca cambia la de una que ya existe (se cambia en la pestaña Agrupaciones). Equivalencia vacía = la genérica del nodo; «-»
         = la que se llama como la línea. Las agrupaciones que no existan se crean con los géneros de sus filas; una equivalencia solo se asigna a una
         agrupación que incluya su género. Las filas que no casen con el árbol o con los géneros de la agrupación se reportan y no se cargan. Nunca se quita una agrupación por archivo.
       </Alert>
@@ -97,7 +107,7 @@ export function ImportarEstacionalidad({ onAplicado }: { onAplicado: () => void 
       <PasoArchivo
         archivo={archivo}
         leyendo={imp.leyendo}
-        descripcion="CSV o Excel (.xlsx, .xls) con la cabecera en la primera fila. Se lee en tu navegador; solo se envían las cinco columnas mapeadas."
+        descripcion="CSV o Excel (.xlsx, .xls) con la cabecera en la primera fila. Se lee en tu navegador; solo se envían las columnas mapeadas."
         hintHoja="El libro tiene varias hojas; elige la que contiene las asignaciones."
         onElegir={imp.elegirArchivo}
         onCambiarHoja={imp.cambiarHoja}
@@ -109,7 +119,7 @@ export function ImportarEstacionalidad({ onAplicado }: { onAplicado: () => void 
           columnas={archivo.columnas}
           mapeo={imp.mapeo}
           onCambiar={imp.setMapeo}
-          descripcion="Detectado por nombre; corrígelo si hace falta. Las cinco columnas son obligatorias."
+          descripcion="Detectado por nombre; corrígelo si hace falta. Las cinco primeras son obligatorias; Temporada es opcional."
         >
           <BotonesImportar
             mapeoCompleto={imp.mapeoCompleto}
@@ -221,6 +231,7 @@ function TablaAgrupacionesNuevas({ agrupaciones, aplicado }: { agrupaciones: Agr
           <span className="text-tinta-suave">—</span>
         ),
     },
+    { clave: "temporada", titulo: "Temporada", render: (g) => <BadgeTemporada temporada={g.temporada} /> },
     { clave: "equivalencias", titulo: "Equivalencias en el archivo", render: (g) => <span className="font-mono text-xs">{formatearNumero(g.equivalencias)}</span> },
   ];
   return (

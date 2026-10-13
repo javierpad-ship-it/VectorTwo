@@ -41,6 +41,12 @@ import type { PeriodoPrevisualizado, PrevisualizarRespuesta } from "@/lib/ventas
  * combinación puede volver `ok` con `mapeo`). Los mapeos activos cuyo destino
  * ya no es vigente no se aplican y se listan en `mapeos_no_aplicables`.
  *
+ * 0.8.3. El resolutor se crea con `enviarAGml`: si el nodo género-mundo-línea
+ * del archivo existe y es vigente pero su equivalencia no existe o está inactiva
+ * (datos antiguos) y ningún mapeo la cubre, la combinación vuelve `ok` con
+ * `a_gml` (la equivalencia de nivel GML del nodo) en lugar de un error. Orden:
+ * árbol → mapeo explícito → envío a la GML → error.
+ *
  * M5c. Carga las ubicaciones ignoradas activas y las pasa al resolutor de
  * tiendas. Orden: tienda por nombre → tienda por código → ubicación ignorada
  * (`resultado: "ignorada"`, con `id` y `nota`) → desconocida. La tienda manda.
@@ -78,7 +84,8 @@ export async function POST(request: NextRequest) {
   const resolverTienda = crearResolutorTiendas(tiendas.data, indiceUbicacionesIgnoradas(ignoradas.data));
   const resolverCombinacion = crearResolutorCombinaciones(
     arbol.estado,
-    mapeos.data.map((m) => ({ id: m.id, origen: origenDeFila(m), equivalencia_id: m.equivalencia_id, activo: m.activo }))
+    mapeos.data.map((m) => ({ id: m.id, origen: origenDeFila(m), equivalencia_id: m.equivalencia_id, activo: m.activo })),
+    { enviarAGml: true }
   );
   const resolverMarca = crearResolutorMarcas(marcas.data);
 

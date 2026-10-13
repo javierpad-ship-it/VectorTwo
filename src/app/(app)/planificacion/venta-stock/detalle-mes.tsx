@@ -26,6 +26,7 @@ import {
 } from "@/lib/ventas/tipos";
 import { formatearEntero, formatearPorcentaje, formatearSoles, formatearSoles2 } from "./comunes";
 import { useContextoMapeos } from "./contexto-mapeos";
+import { EnviadasGml } from "./enviadas-gml";
 import { origenesDeGrupo, reasignadasDe, unirOrigenes, type IndiceOrigenes, type OrigenAsignable } from "./origenes-mapeo";
 import { textoQlikInvalido } from "./plan";
 
@@ -487,7 +488,9 @@ function ItemAviso({ aviso }: { aviso: Aviso }) {
 }
 
 /** Avisos y notas ya armados (del reporte previo o del reporte guardado con una carga). */
-export function ListaAvisos({ avisos }: { avisos: Aviso[] }) {
+export function ListaAvisos({ avisos: todos }: { avisos: Aviso[] }) {
+  // `enviadas_a_gml` tiene su propio bloque (con todos los valores y el botón Asignar): aquí duplicaría la tabla.
+  const avisos = todos.filter((a) => (a.codigo as string) !== "enviadas_a_gml");
   if (avisos.length === 0) return <p className="text-sm text-tinta-suave">Sin avisos ni notas para este mes.</p>;
   const importantes = avisos.filter((a) => a.severidad === "aviso" || a.rojo);
   const notas = avisos.filter((a) => !(a.severidad === "aviso" || a.rojo));
@@ -579,6 +582,14 @@ export function DetalleMes({
         asignacion={asignacion}
       />
       {mes.resumen_exclusiones.length === 0 && <p className="text-sm text-tinta-suave">No se excluye ninguna fila de este mes.</p>}
+
+      <EnviadasGml
+        periodo={mes.periodo}
+        resumen={mes.enviadas_a_gml ?? null}
+        detalle={mes.enviadas_a_gml_detalle ?? []}
+        filasArchivo={mes.archivo.filas}
+        asignacion={asignacion}
+      />
 
       <div className="space-y-2">
         <h4 className="text-sm font-semibold">Avisos y notas (se carga igual)</h4>

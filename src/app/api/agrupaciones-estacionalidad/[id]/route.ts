@@ -6,7 +6,7 @@ import { catalogoAgrupacionesEstacionalidad } from "@/lib/estacionalidad/catalog
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * Edita nombre, código, descripción, orden, activo y/o `genero_ids`
+ * Edita nombre, código, descripción, orden, activo, `temporada` y/o `genero_ids`
  * (`requirePlanner`); `404`; `409` repetido, género inactivo o género quitado
  * con equivalencias. Desactivar con equivalencias está permitido: pasan a
  * faltantes por "agrupación inactiva" y vuelven al reactivarla.

@@ -117,6 +117,8 @@ type Extras = {
   estado?: EstadoImportacion;
   /** Mapeos que recibe el resolutor (M5b). */
   mapeos?: MapeoResolvible[];
+  /** 0.8.3. Envío a la equivalencia de nivel GML (lo activa `previsualizar`; apagado por defecto en los tests anteriores). */
+  enviarAGml?: boolean;
   periodos?: PeriodoPrevisualizado[];
   anterior?: PrevisualizarRespuesta["anterior"];
   huellas?: HuellaStock[];
@@ -130,7 +132,7 @@ type Extras = {
 export function resoluciones(acum: Acumulador, extras: Extras = {}): EntradaInforme["resoluciones"] {
   const d = acum.diccionarios;
   const rt = crearResolutorTiendas(extras.tiendas ?? TIENDAS, extras.ignoradas);
-  const rc = crearResolutorCombinaciones(extras.estado ?? ARBOL, extras.mapeos ?? []);
+  const rc = crearResolutorCombinaciones(extras.estado ?? ARBOL, extras.mapeos ?? [], { enviarAGml: extras.enviarAGml ?? false });
   const rm = crearResolutorMarcas(extras.marcas ?? MARCAS);
   const combinaciones = d.combinaciones.map((c) => rc({ genero: c.genero, mundo: c.mundo, linea: c.linea, equivalencia: c.equivalencia }));
   return {

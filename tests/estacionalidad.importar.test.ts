@@ -189,17 +189,17 @@ describe("regla 14: agrupaciones nuevas y existentes", () => {
       hup("JOGGER", " curva  nueva "),
       fila("MUJER", "URBANO", "BLUSA", "MANGA LARGA", "CURVA NUEVA"),
     ]);
-    expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h", "g-m"] }]);
+    expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h", "g-m"], temporada: "todo_el_ano" }]);
     expect(plan.reporte.muestra.agrupaciones).toEqual([
-      { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", equivalencias: 3, generos: ["HOMBRE", "MUJER"] },
+      { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", equivalencias: 3, generos: ["HOMBRE", "MUJER"], temporada: "todo_el_ano" },
     ]);
     expect(plan.reporte.crear.agrupaciones).toBe(1);
   });
   it("dos nombres distintos que derivan al mismo código reciben _2", () => {
     const plan = planificar([hup("", "PANTALON INVIERNO"), hup("JOGGER", "PANTALON-INVIERNO")]);
     expect(plan.agrupaciones_nuevas).toEqual([
-      { nombre: "PANTALON INVIERNO", codigo: "PANTALON_INVIERNO", genero_ids: ["g-h"] },
-      { nombre: "PANTALON-INVIERNO", codigo: "PANTALON_INVIERNO_2", genero_ids: ["g-h"] },
+      { nombre: "PANTALON INVIERNO", codigo: "PANTALON_INVIERNO", genero_ids: ["g-h"], temporada: "todo_el_ano" },
+      { nombre: "PANTALON-INVIERNO", codigo: "PANTALON_INVIERNO_2", genero_ids: ["g-h"], temporada: "todo_el_ano" },
     ]);
   });
   it("el código nuevo no choca con los existentes", () => {
@@ -220,7 +220,7 @@ describe("regla 14: agrupaciones nuevas y existentes", () => {
     expect(plan2.agrupaciones_nuevas).toEqual([]);
     expect(plan2.asignaciones[0]?.agrupacion_id).toBe("a-z");
     const plan3 = planificar([hup("", "CURVA X Y")], estado);
-    expect(plan3.agrupaciones_nuevas).toEqual([{ nombre: "CURVA X Y", codigo: "CURVA_X_Y", genero_ids: ["g-h"] }]);
+    expect(plan3.agrupaciones_nuevas).toEqual([{ nombre: "CURVA X Y", codigo: "CURVA_X_Y", genero_ids: ["g-h"], temporada: "todo_el_ano" }]);
   });
   it("existente se resuelve por nombre normalizado o por código; el nombre literal gana", () => {
     const agrupaciones = [
@@ -263,7 +263,7 @@ describe("regla 15: la misma equivalencia dos veces", () => {
     ]);
     // La agrupación B no se crea: ninguna fila procesada la usa.
     expect(plan.agrupaciones_nuevas.map((a) => a.nombre)).toEqual(["A"]);
-    expect(plan.reporte.muestra.agrupaciones).toEqual([{ nombre: "A", codigo: "A", equivalencias: 1, generos: ["HOMBRE"] }]);
+    expect(plan.reporte.muestra.agrupaciones).toEqual([{ nombre: "A", codigo: "A", equivalencias: 1, generos: ["HOMBRE"], temporada: "todo_el_ano" }]);
   });
   it("la agrupación de la primera aparición se compara por nombre resuelto (código o nombre)", () => {
     const plan = planificar([hup("JOGGER", "pantalones_verano"), hup("JOGGER", "Pantalones Verano")]);
@@ -409,9 +409,9 @@ describe("géneros de la agrupación (cambio «agrupaciones por género»)", () 
         hup("JOGGER", "CURVA NUEVA"),
         fila("MUJER", "URBANO", "BLUSA", "MANGA LARGA", "CURVA NUEVA"),
       ]);
-      expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h", "g-m"] }]);
+      expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h", "g-m"], temporada: "todo_el_ano" }]);
       expect(plan.reporte.muestra.agrupaciones).toEqual([
-        { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", equivalencias: 3, generos: ["HOMBRE", "MUJER"] },
+        { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", equivalencias: 3, generos: ["HOMBRE", "MUJER"], temporada: "todo_el_ano" },
       ]);
     });
     it("un solo género → una sola entrada, aunque haya muchas filas", () => {
@@ -422,8 +422,8 @@ describe("géneros de la agrupación (cambio «agrupaciones por género»)", () 
     it("cada agrupación nueva lleva solo los géneros de SUS filas", () => {
       const plan = planificar([hup("", "CURVA H"), MUJER_PANT("", "CURVA M")]);
       expect(plan.agrupaciones_nuevas).toEqual([
-        { nombre: "CURVA H", codigo: "CURVA_H", genero_ids: ["g-h"] },
-        { nombre: "CURVA M", codigo: "CURVA_M", genero_ids: ["g-m"] },
+        { nombre: "CURVA H", codigo: "CURVA_H", genero_ids: ["g-h"], temporada: "todo_el_ano" },
+        { nombre: "CURVA M", codigo: "CURVA_M", genero_ids: ["g-m"], temporada: "todo_el_ano" },
       ]);
     });
     it("toda agrupación nueva tiene al menos un género", () => {
@@ -442,8 +442,8 @@ describe("géneros de la agrupación (cambio «agrupaciones por género»)", () 
       ]);
       expect(motivos(plan.reporte.omitidas)).toEqual(["duplicada_en_archivo", "contradictoria_en_archivo"]);
       expect(plan.agrupaciones_nuevas).toEqual([
-        { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h"] },
-        { nombre: "OTRA", codigo: "OTRA", genero_ids: ["g-m"] },
+        { nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h"], temporada: "todo_el_ano" },
+        { nombre: "OTRA", codigo: "OTRA", genero_ids: ["g-m"], temporada: "todo_el_ano" },
       ]);
     });
     it("una fila omitida por otro motivo (nodo, equivalencia, género inactivo) tampoco aporta género", () => {
@@ -452,7 +452,7 @@ describe("géneros de la agrupación (cambio «agrupaciones por género»)", () 
         fila("MUJER", "URBANO", "ABRIGO", "VARIOS", "CURVA NUEVA"), // nodo inactivo
         MUJER_PANT("JOGER", "CURVA NUEVA"), // equivalencia desconocida
       ]);
-      expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h"] }]);
+      expect(plan.agrupaciones_nuevas).toEqual([{ nombre: "CURVA NUEVA", codigo: "CURVA_NUEVA", genero_ids: ["g-h"], temporada: "todo_el_ano" }]);
     });
   });
 

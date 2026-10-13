@@ -2,6 +2,7 @@
 
 import {
   ETIQUETA_CAMPO_DIFERENCIA,
+  ETIQUETA_MOTIVO_OMISION_CONJUNTO,
   ETIQUETA_MOTIVO_OMISION_MARCA,
   type DiferenciaImportacionMarca,
   type FilaImportacionMarca,
@@ -44,6 +45,13 @@ const CAMPOS: CampoImportador<Campo>[] = [
     opcional: true,
     hint: "Si no la mapeas, las marcas nuevas entran sin tratamiento especial.",
   },
+  {
+    campo: "conjunto",
+    etiqueta: "Conjunto",
+    alias: ["CONJUNTO", "CASA", "LICENCIA"],
+    opcional: true,
+    hint: "Si no la mapeas, las marcas nuevas entran sin conjunto (los conjuntos se arman en la pestaña Conjuntos).",
+  },
 ];
 
 /** Todos los motivos salvo la repetida se arreglan en el archivo. */
@@ -60,11 +68,12 @@ const COLUMNAS_FILA: ColumnaOmitida<FilaOmitidaMarca>[] = [
   { clave: "marca", titulo: "Marca", valor: (f) => f.marca },
   { clave: "agrupacion", titulo: "Agrupación", valor: (f) => f.agrupacion },
   { clave: "tratamiento_especial", titulo: "Tratamiento especial", valor: (f) => f.tratamiento_especial },
+  { clave: "conjunto", titulo: "Conjunto", valor: (f) => f.conjunto ?? "" },
 ];
 
 function resumenCrear(r: ReporteImportacionMarcas): string {
   const verbo = r.modo === "aplicar" ? "Creadas" : "Se crearán";
-  return `${verbo} ${plural(r.crear.marcas, "marca", "marcas")} (${formatearNumero(r.crear.con_tratamiento_especial)} con tratamiento especial).`;
+  return `${verbo} ${plural(r.crear.marcas, "marca", "marcas")} (${formatearNumero(r.crear.con_tratamiento_especial)} con tratamiento especial, ${formatearNumero(r.crear.con_conjunto)} con conjunto).`;
 }
 
 function mensajeConfirmarAplicar(nombre: string, reporte: ReporteImportacionMarcas): string {
@@ -78,6 +87,14 @@ function mensajeConfirmarAplicar(nombre: string, reporte: ReporteImportacionMarc
   }
   if (reporte.diferencias.length > 0) {
     partes.push(`${plural(reporte.diferencias.length, "marca existente", "marcas existentes")} con diferencias no se modifican.`);
+  }
+  const aCrear = reporte.conjuntos.a_crear;
+  if (aCrear.length > 0) {
+    partes.push(`Se crearán ${plural(aCrear.length, "marca cabeza", "marcas cabeza")} de conjunto: ${aCrear.map((c) => `${c.conjunto} → ${c.agrupacion}`).join(", ")}.`);
+  }
+  const sinConjunto = reporte.conjuntos.omitidos.length;
+  if (sinConjunto > 0) {
+    partes.push(`${plural(sinConjunto, "marca nueva entra", "marcas nuevas entran")} sin conjunto (la columna CONJUNTO no se pudo aplicar).`);
   }
   return partes.join("\n");
 }
@@ -97,7 +114,7 @@ export function ImportarMarcas({ onAplicado }: { onAplicado: () => void }) {
       <PasoArchivo
         archivo={archivo}
         leyendo={imp.leyendo}
-        descripcion="CSV o Excel (.xlsx, .xls) con la cabecera en la primera fila. Se lee en tu navegador; solo se envían las columnas mapeadas (marca, agrupación y, si existe, tratamiento especial)."
+        descripcion="CSV o Excel (.xlsx, .xls) con la cabecera en la primera fila. Se lee en tu navegador; solo se envían las columnas mapeadas (marca, agrupación y, si existen, tratamiento especial y conjunto)."
         hintHoja="El libro tiene varias hojas; elige la que contiene las marcas."
         onElegir={imp.elegirArchivo}
         onCambiarHoja={imp.cambiarHoja}
@@ -161,6 +178,7 @@ function Reporte({ titulo, reporte, nombreArchivo }: { titulo: string; reporte: 
             filas={[
               ["Marcas", c.marcas],
               ["Con tratamiento especial", c.con_tratamiento_especial],
+              ["Con conjunto", c.con_conjunto],
             ]}
           />
           <Tarjeta titulo="Ya existían" tono="neutro" filas={[["Marcas", reporte.existentes.marcas]]} />
@@ -195,6 +213,19 @@ function Reporte({ titulo, reporte, nombreArchivo }: { titulo: string; reporte: 
           />
         )}
 
+        {reporte.conjuntos.a_crear.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Conjuntos a crear ({formatearNumero(reporte.conjuntos.a_crear.length)})</h3>
+            <p className="text-xs text-tinta-suave">Marcas cabeza que no existen todavía: se crean con la agrupación de la primera fila que las nombra.</p>
+            <Muestra
+              titulo={aplicado ? "Cabezas creadas" : "Cabezas que se crearán"}
+              items={reporte.conjuntos.a_crear.map((c) => `${c.conjunto} → ${c.agrupacion} (de ${c.de})`)}
+            />
+          </div>
+        )}
+
+        {reporte.conjuntos.omitidos.length > 0 && <TablaConjuntosOmitidos omitidos={reporte.conjuntos.omitidos} />}
+
         {reporte.diferencias.length > 0 && <TablaDiferencias diferencias={reporte.diferencias} />}
 
         {reporte.muestra.marcas.length > 0 && (
@@ -222,6 +253,24 @@ function TablaDiferencias({ diferencias }: { diferencias: DiferenciaImportacionM
         El importador no modifica marcas existentes; cámbialas desde la pestaña Marcas si el archivo tiene la razón.
       </Alert>
       <DataTable columnas={columnas} filas={diferencias} claveFila={(d) => `${d.fila}-${d.campo}`} />
+    </div>
+  );
+}
+
+/** Filas cuya columna CONJUNTO no se aplicó: la marca nueva entra igual, sin conjunto. */
+function TablaConjuntosOmitidos({ omitidos }: { omitidos: ReporteImportacionMarcas["conjuntos"]["omitidos"] }) {
+  const columnas: Columna<(typeof omitidos)[number]>[] = [
+    { clave: "fila", titulo: "Fila", render: (o) => <span className="font-mono text-xs">{o.fila}</span> },
+    { clave: "marca", titulo: "Marca", render: (o) => <span className="font-medium">{o.marca}</span> },
+    { clave: "conjunto", titulo: "Conjunto del archivo", render: (o) => o.conjunto },
+    { clave: "motivo", titulo: "Motivo", render: (o) => <Badge tono="alerta">{ETIQUETA_MOTIVO_OMISION_CONJUNTO[o.motivo] ?? o.motivo}</Badge> },
+    { clave: "detalle", titulo: "Detalle", render: (o) => o.detalle ?? <span className="text-tinta-suave">—</span> },
+  ];
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">Conjuntos que no se aplicaron ({formatearNumero(omitidos.length)})</h3>
+      <Alert tono="info">La marca se crea igual, sin conjunto. Arma el conjunto después en la pestaña Conjuntos o con el importador de conjuntos.</Alert>
+      <DataTable columnas={columnas} filas={omitidos} claveFila={(o) => `${o.fila}-${o.motivo}`} />
     </div>
   );
 }

@@ -6,8 +6,9 @@
  */
 import type { Temporada } from "@/lib/arbol/normalizar";
 import type { ModoImportacion } from "@/components/importador/tipos";
+import type { TemporadaAgrupacion, TemporadaDeAgrupacionApi } from "@/lib/curvas/tipos-api";
 
-export type { ModoImportacion };
+export type { ModoImportacion, TemporadaAgrupacion, TemporadaDeAgrupacionApi };
 
 // ─── Catálogo (GET /api/agrupaciones-estacionalidad) ───
 
@@ -38,7 +39,7 @@ export type AgrupacionEstacionalidadFila = {
   genero_ids: string[];
   /** Los mismos géneros con nombre, por `orden, nombre`. */
   generos: GeneroDeAgrupacion[];
-};
+} & TemporadaDeAgrupacionApi; // M6 paso 1: temporada, temporada_sugerida, temporada_sugerida_distinta
 
 /** La agrupación tal como viaja embebida en cada equivalencia de la lista plana. */
 export type AgrupacionEstacionalidadEmbebida = Pick<AgrupacionEstacionalidadFila, "id" | "codigo" | "nombre" | "activo">;
@@ -53,6 +54,8 @@ export type CrearAgrupacionEstacionalidadCuerpo = {
   orden?: number;
   /** Mínimo uno (`400` si falta o va vacío). */
   genero_ids: string[];
+  /** M6: por defecto `todo_el_ano`. */
+  temporada?: TemporadaAgrupacion;
 };
 
 export type EditarAgrupacionEstacionalidadCuerpo = Partial<{
@@ -63,6 +66,8 @@ export type EditarAgrupacionEstacionalidadCuerpo = Partial<{
   activo: boolean;
   /** Reemplaza el conjunto de géneros; mínimo uno. */
   genero_ids: string[];
+  /** M6: no recalcula nada; la próxima corrida la usa. */
+  temporada: TemporadaAgrupacion;
 }>;
 
 // ─── Equivalencias: asignación individual (PATCH /api/equivalencias/[id]) ───
@@ -143,19 +148,30 @@ export type EquivalenciasEstacionalidadRespuesta = {
   generos: CatalogoPlanoEstacionalidad[];
   mundos: CatalogoPlanoEstacionalidad[];
   lineas: LineaPlana[];
-  agrupaciones: (CatalogoPlanoEstacionalidad & { descripcion?: string | null; genero_ids: string[] })[];
+  agrupaciones: (CatalogoPlanoEstacionalidad & {
+    descripcion?: string | null;
+    genero_ids: string[];
+    /** M6 paso 1. */
+    temporada: TemporadaAgrupacion;
+    temporada_sugerida: TemporadaAgrupacion;
+  })[];
   resumen: ResumenEstacionalidad;
 };
 
 // ─── Importador (POST /api/estacionalidad/importar) ───
 
-/** Una fila del archivo ya mapeada a las cinco columnas. */
+/**
+ * Una fila del archivo ya mapeada a las cinco columnas, más la sexta opcional
+ * `temporada` (M6): `Invierno` / `Verano` / `Todo el año` o sus códigos; vacía o
+ * ausente = `todo_el_ano`. Solo aplica a las agrupaciones que el archivo crea.
+ */
 export type FilaImportacionEstacionalidad = {
   genero: string;
   mundo: string;
   linea: string;
   equivalencia: string;
   agrupacion: string;
+  temporada?: string | null;
 };
 
 export type ImportarEstacionalidadCuerpo = {
@@ -184,7 +200,10 @@ export type MotivoOmisionEstacionalidad =
   | "contradictoria_en_archivo"
   // Del vínculo agrupación-género.
   | "genero_no_incluido"
-  | "agrupacion_sin_genero";
+  | "agrupacion_sin_genero"
+  // De la sexta columna `temporada` (M6).
+  | "temporada_invalida"
+  | "temporada_contradictoria_en_archivo";
 
 /** Fila omitida con su contenido normalizado, para corregir el archivo. */
 export type FilaOmitidaEstacionalidad = FilaImportacionEstacionalidad & {
@@ -210,6 +229,8 @@ export type AgrupacionNuevaImportacion = {
   equivalencias: number;
   /** Géneros (nombres) de las filas que apuntan a ella: con ellos se crea. */
   generos: string[];
+  /** Con la que se creará: la del archivo o `todo_el_ano` si ninguna fila la trae. */
+  temporada: TemporadaAgrupacion;
 };
 
 export type ReporteImportacionEstacionalidad = {
@@ -245,6 +266,8 @@ export const ETIQUETA_MOTIVO_OMISION_ESTACIONALIDAD: Record<MotivoOmisionEstacio
   duplicada_en_archivo: "Duplicada en el archivo",
   genero_no_incluido: "El género no está en la agrupación",
   agrupacion_sin_genero: "La agrupación no tiene géneros",
+  temporada_invalida: "Temporada no válida",
+  temporada_contradictoria_en_archivo: "Temporada contradictoria en el archivo",
 };
 
 export const ETIQUETA_MOTIVO_FALTANTE: Record<MotivoFaltante, string> = {

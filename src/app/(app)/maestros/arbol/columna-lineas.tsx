@@ -5,13 +5,14 @@ import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useColeccion } from "@/lib/use-coleccion";
 import { TEMPORADAS, aCodigo, normalizarNombre, type Temporada } from "@/lib/arbol/normalizar";
-import type { GeneroArbol, LineaArbol, LineaFila, MundoArbol, NodoFila } from "@/lib/arbol/tipos-api";
+import type { GeneroArbol, LineaArbol, LineaFila, MundoArbol, NivelPlanificacion, NodoFila } from "@/lib/arbol/tipos-api";
 import { textoResponsable } from "@/lib/responsables/pantalla";
 import type { CeldaResponsable } from "@/lib/responsables/tipos-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Field, Input, Select } from "@/components/ui/form";
+import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BadgeTemporada, Columna, FilaColumna, VistaPreviaNombre, estadoNodo, mensajeError } from "./comunes";
 
@@ -28,6 +29,14 @@ type Props = {
   onError: (mensaje: string | null) => void;
   /** Tras mover un nodo a otro mundo, para que la selección lo siga. */
   onMovido: (mundoId: string, nodoId: string) => void;
+  /** 02b: cambia el nivel de planificación de uno o varios nodos (PATCH si es uno, bloque si son varios). */
+  onCambiarNivel: (nodoIds: string[], nivel: NivelPlanificacion) => Promise<void>;
+  /** 02b: hay un cambio de nivel en curso. */
+  ocupadoNivel: boolean;
+  /** 02b: solo se listan los nodos abiertos a GMLE. */
+  soloGmle: boolean;
+  /** 02b: marcas relevantes vigentes por nodo (solo se carga para admin y planner); `null` si no aplica o no cargó. */
+  relevantesPorNodo?: ReadonlyMap<string, number> | null;
 };
 
 export function ColumnaLineas({
@@ -40,13 +49,24 @@ export function ColumnaLineas({
   onCambio,
   onError,
   onMovido,
+  onCambiarNivel,
+  ocupadoNivel,
+  soloGmle,
+  relevantesPorNodo = null,
 }: Props) {
   const [filtro, setFiltro] = useState("");
+  // 02b: nodos marcados para un cambio de nivel en bloque. Se guarda por id y se interseca con los nodos del mundo en cada render.
+  const [marcados, setMarcados] = useState<Set<string>>(() => new Set());
   const [agregando, setAgregando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
 
   const consulta = normalizarNombre(filtro);
-  const lineas = consulta ? mundo.lineas.filter((l) => l.nombre.includes(consulta)) : mundo.lineas;
+  const lineas = mundo.lineas
+    .filter((l) => (consulta ? l.nombre.includes(consulta) : true))
+    .filter((l) => (soloGmle ? l.nivel_planificacion === "GMLE" : true));
+  const idsMundo = new Set(mundo.lineas.map((l) => l.nodo_id));
+  const marcadosVigentes = [...marcados].filter((id) => idsMundo.has(id));
+  const abiertosEnMundo = mundo.lineas.filter((l) => l.nivel_planificacion === "GMLE").length;
   // Mover a otro mundo del mismo género: disponible para quien puede editar
   // (admin y planner), en cualquier nodo. El 409 del backend (la línea ya
   // existe en el destino) llega por `onError` como cualquier otro fallo.
@@ -134,6 +154,50 @@ export function ColumnaLineas({
         />
       )}
 
+      {puedeEditar && mundo.lineas.length > 0 && (
+        <div className="mb-2 space-y-1.5 rounded-lg border border-borde bg-fondo px-2 py-1.5" role="group" aria-label="Nivel de planificación en bloque">
+          <div className="flex flex-wrap items-center gap-1">
+            <Button
+              variante="fantasma"
+              tamano="sm"
+              disabled={ocupadoNivel}
+              onClick={() => setMarcados(new Set(mundo.lineas.map((l) => l.nodo_id)))}
+              title="Marca todos los nodos de este género y mundo"
+            >
+              Todos los de este género × mundo
+            </Button>
+            {marcadosVigentes.length > 0 && (
+              <Button variante="fantasma" tamano="sm" disabled={ocupadoNivel} onClick={() => setMarcados(new Set())}>
+                Limpiar
+              </Button>
+            )}
+          </div>
+          {marcadosVigentes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <Button
+                tamano="sm"
+                disabled={ocupadoNivel}
+                onClick={() => void onCambiarNivel(marcadosVigentes, "GMLE").then(() => setMarcados(new Set()))}
+              >
+                Abrir a GMLE ({marcadosVigentes.length} seleccionado{marcadosVigentes.length === 1 ? "" : "s"})
+              </Button>
+              <Button
+                variante="secundario"
+                tamano="sm"
+                disabled={ocupadoNivel}
+                onClick={() => void onCambiarNivel(marcadosVigentes, "GML").then(() => setMarcados(new Set()))}
+              >
+                Volver a GML ({marcadosVigentes.length} seleccionado{marcadosVigentes.length === 1 ? "" : "s"})
+              </Button>
+            </div>
+          )}
+          <p className="text-xs text-tinta-suave">
+            GMLE abre el nodo: una unidad de planificación por equivalencia. GML (lo normal) lo deja como una sola.
+            {abiertosEnMundo > 0 && ` ${abiertosEnMundo} de ${mundo.lineas.length} abiertos aquí.`}
+          </p>
+        </div>
+      )}
+
       {mundo.lineas.length > 3 && (
         <Input
           type="search"
@@ -153,7 +217,9 @@ export function ColumnaLineas({
       )}
 
       {mundo.lineas.length > 0 && lineas.length === 0 && (
-        <p className="px-2 py-3 text-sm text-tinta-suave">Ninguna línea coincide con el filtro.</p>
+        <p className="px-2 py-3 text-sm text-tinta-suave">
+          {soloGmle && consulta === "" ? "Ningún nodo de este mundo está abierto a GMLE." : "Ninguna línea coincide con el filtro."}
+        </p>
       )}
 
       <ul className="space-y-0.5">
@@ -166,19 +232,61 @@ export function ColumnaLineas({
           ).length;
           return (
             <li key={l.nodo_id}>
-              <FilaColumna seleccionada={seleccionada} atenuada={!l.vigente} onClick={() => onSeleccionar(l.nodo_id)}>
-                <span className="min-w-0">
-                  <span className="block truncate font-medium">{l.nombre}</span>
-                  <span className="mt-0.5 flex flex-wrap items-center gap-1">
-                    <BadgeTemporada temporada={l.temporada} />
-                    {estado && <Badge tono={estado.tono}>{estado.texto}</Badge>}
-                  </span>
-                </span>
-                <span className="shrink-0 text-right text-xs text-tinta-suave">
-                  <span className="block">{l.equivalencias.length} eq.</span>
-                  {sinAgrupacion > 0 && <span className="block text-alerta">{sinAgrupacion} sin agrupación</span>}
-                </span>
-              </FilaColumna>
+              <div className="flex items-center gap-1">
+                {puedeEditar && (
+                  <Checkbox
+                    checked={marcados.has(l.nodo_id)}
+                    disabled={ocupadoNivel}
+                    onChange={(v) => {
+                      const s = new Set(marcados);
+                      if (v) s.add(l.nodo_id);
+                      else s.delete(l.nodo_id);
+                      setMarcados(s);
+                    }}
+                    label={`Elegir ${l.nombre} para cambiar su nivel de planificación`}
+                    className="ml-1 shrink-0"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <FilaColumna seleccionada={seleccionada} atenuada={!l.vigente} onClick={() => onSeleccionar(l.nodo_id)}>
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{l.nombre}</span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1">
+                        <BadgeTemporada temporada={l.temporada} />
+                        {l.nivel_planificacion === "GMLE" && (
+                          <span title="Abierto a GMLE: una unidad de planificación por equivalencia">
+                            <Badge tono="marca">GMLE</Badge>
+                          </span>
+                        )}
+                        {estado && <Badge tono={estado.tono}>{estado.texto}</Badge>}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right text-xs text-tinta-suave">
+                      <span className="block">{l.equivalencias.length} eq.</span>
+                      {sinAgrupacion > 0 && <span className="block text-alerta">{sinAgrupacion} sin agrupación</span>}
+                      {!puedeEditar && <span className="block">Nivel {l.nivel_planificacion}</span>}
+                      {(relevantesPorNodo?.get(l.nodo_id) ?? 0) > 0 && (
+                        <span className="block" title="Marcas relevantes por GML en este nodo">
+                          {relevantesPorNodo?.get(l.nodo_id)} relevante{relevantesPorNodo?.get(l.nodo_id) === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </span>
+                  </FilaColumna>
+                </div>
+                {puedeEditar && (
+                  <Select
+                    value={l.nivel_planificacion}
+                    disabled={ocupadoNivel}
+                    onChange={(e) => void onCambiarNivel([l.nodo_id], e.target.value as NivelPlanificacion)}
+                    aria-label={`Nivel de planificación de ${l.nombre}`}
+                    title="Nivel de planificación: GML (una unidad) o GMLE (una por equivalencia)"
+                    className="h-8 w-[5.25rem] shrink-0 px-2!"
+                  >
+                    <option value="GML">GML</option>
+                    <option value="GMLE">GMLE</option>
+                  </Select>
+                )}
+              </div>
 
               {seleccionada && puedeEditar && (
                 <div className="mt-1 mb-2 flex flex-wrap items-center gap-1 rounded-md bg-fondo px-2 py-1.5">
@@ -194,6 +302,14 @@ export function ColumnaLineas({
                   >
                     Eliminar
                   </Button>
+                  {(relevantesPorNodo?.get(l.nodo_id) ?? 0) > 0 && (
+                    <Link
+                      href={`/maestros/marcas?pestana=gml&nodo=${l.nodo_id}`}
+                      className="px-2 text-xs font-medium text-marca-oscura underline-offset-2 hover:underline"
+                    >
+                      · {relevantesPorNodo?.get(l.nodo_id)} marca{relevantesPorNodo?.get(l.nodo_id) === 1 ? "" : "s"} relevante{relevantesPorNodo?.get(l.nodo_id) === 1 ? "" : "s"}
+                    </Link>
+                  )}
                   {puedeMover && (
                     <Select
                       className="h-8 w-auto"

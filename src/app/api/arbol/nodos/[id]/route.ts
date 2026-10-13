@@ -12,7 +12,8 @@ type Params = { params: Promise<{ id: string }> };
 const NO_ENCONTRADO = "Nodo no encontrado.";
 
 /**
- * Activa/desactiva el nodo o lo mueve de mundo (`requirePlanner`).
+ * Activa/desactiva el nodo, lo mueve de mundo o cambia su nivel de
+ * planificación GML/GMLE (`requirePlanner`).
  * `mundo_id` mueve la línea a otro mundo del mismo género (p. ej. corregir una
  * clasificación); `409` si en el mundo destino ya existe esa línea para ese género.
  */
@@ -32,6 +33,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   const cambios: TablesUpdate<"genero_mundo_linea"> = {};
   if (datos.activo !== undefined) cambios.activo = datos.activo;
+  // 02b: el nivel de planificación es una propiedad del nodo; cambiarlo no toca equivalencias, curvas ni venta.
+  if (datos.nivel_planificacion !== undefined) cambios.nivel_planificacion = datos.nivel_planificacion;
 
   if (datos.mundo_id !== undefined) {
     const [{ data: mundo, error: errMundo }, { data: hermanos, error: errHermanos }] = await Promise.all([

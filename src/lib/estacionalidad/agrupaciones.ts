@@ -6,7 +6,9 @@ import { requirePlanner, requireUser } from "@/lib/auth/guard";
 import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { incluirInactivos } from "@/lib/api/catalogo";
-import { leerTodo } from "@/lib/arbol/consultas";
+import { leerLineas, leerNodos, leerTodo } from "@/lib/arbol/consultas";
+import { temporadaSugerida, temporadaSugeridaDistinta } from "@/lib/curvas/atipicos";
+import { temporadaDeFila } from "@/lib/curvas/tipos";
 import { crearAgrupacionSchema, editarAgrupacionSchema } from "./esquemas";
 import {
   AGRUPACION_NO_ENCONTRADA,
@@ -14,6 +16,7 @@ import {
   generosDeAgrupacion,
   motivoRechazoGenerosPedidos,
   motivoRechazoQuitarGeneros,
+  temporadasDeLineasPorAgrupacion,
 } from "./reglas";
 import type { AgrupacionEstacionalidadFila } from "./tipos";
 
@@ -56,9 +59,11 @@ async function anexarDatos(
   filas: Agrupacion[],
   ids?: string[]
 ): Promise<{ data: AgrupacionEstacionalidadFila[]; error: PostgrestError | null }> {
-  const [equivalencias, vinculos, generos] = await Promise.all([
-    leerTodo<{ agrupacion_estacionalidad_id: string | null; activo: boolean }>((d, h) => {
-      const consulta = db.from("equivalencias").select("id, agrupacion_estacionalidad_id, activo");
+  const [equivalencias, vinculos, generos, nodos, lineas] = await Promise.all([
+    leerTodo<{ agrupacion_estacionalidad_id: string | null; activo: boolean; genero_mundo_linea_id: string }>((d, h) => {
+      const consulta = db
+        .from("equivalencias")
+        .select("id, agrupacion_estacionalidad_id, activo, genero_mundo_linea_id");
       return (ids ? consulta.in("agrupacion_estacionalidad_id", ids) : consulta.not("agrupacion_estacionalidad_id", "is", null))
         .order("id")
         .range(d, h);
@@ -68,8 +73,11 @@ async function anexarDatos(
       return (ids ? consulta.in("agrupacion_estacionalidad_id", ids) : consulta).order("id").range(d, h);
     }),
     leerGeneros(db),
+    // M6: las líneas de las equivalencias dan la temporada sugerida de cada agrupación.
+    leerNodos(db),
+    leerLineas(db),
   ]);
-  const fallo = equivalencias.error ?? vinculos.error ?? generos.error;
+  const fallo = equivalencias.error ?? vinculos.error ?? generos.error ?? nodos.error ?? lineas.error;
   if (fallo) return { data: [], error: fallo };
 
   const total = new Map<string, number>();
@@ -86,10 +94,17 @@ async function anexarDatos(
     generoIdsPorAgrupacion.set(v.agrupacion_estacionalidad_id, lista);
   }
 
+  const lineasPorAgrupacion = temporadasDeLineasPorAgrupacion(equivalencias.data, nodos.data, lineas.data);
+
   const data = filas.map((fila) => {
     const losGeneros = generosDeAgrupacion(generoIdsPorAgrupacion.get(fila.id) ?? [], generos.data);
+    const temporada = temporadaDeFila(fila.temporada);
+    const sugerida = temporadaSugerida(lineasPorAgrupacion.get(fila.id) ?? []);
     return {
       ...fila,
+      temporada,
+      temporada_sugerida: sugerida,
+      temporada_sugerida_distinta: temporadaSugeridaDistinta(temporada, sugerida, activas.get(fila.id) ?? 0),
       equivalencias: total.get(fila.id) ?? 0,
       equivalencias_activas: activas.get(fila.id) ?? 0,
       genero_ids: losGeneros.map((g) => g.id),
@@ -102,7 +117,8 @@ async function anexarDatos(
 /**
  * `GET /api/agrupaciones-estacionalidad` (`requireUser`; `?incluir_inactivos=1`):
  * por `orden, nombre`, cada fila con `equivalencias`, `equivalencias_activas`,
- * `genero_ids` y `generos`.
+ * `genero_ids`, `generos` y (M6) `temporada`, `temporada_sugerida` y
+ * `temporada_sugerida_distinta`.
  */
 export async function listarAgrupaciones(request: NextRequest): Promise<NextResponse> {
   const { response } = await requireUser();
@@ -125,7 +141,9 @@ export async function listarAgrupaciones(request: NextRequest): Promise<NextResp
 /**
  * `POST /api/agrupaciones-estacionalidad` (`requirePlanner`), `201`. Exige
  * `genero_ids` (1 a 50 UUID únicos): `404` si alguno no existe, `409` si alguno
- * está inactivo, `409` nombre o código repetido.
+ * está inactivo, `409` nombre o código repetido. Acepta `temporada`
+ * (`invierno` / `verano` / `todo_el_ano`, por defecto `todo_el_ano`; `400` si
+ * es otra cosa).
  */
 export async function crearAgrupacion(request: NextRequest): Promise<NextResponse> {
   const { response } = await requirePlanner();
@@ -157,6 +175,10 @@ export async function crearAgrupacion(request: NextRequest): Promise<NextRespons
   const losGeneros = generosDeAgrupacion(genero_ids, generos.data);
   const creada: AgrupacionEstacionalidadFila = {
     ...fila,
+    temporada: temporadaDeFila(fila.temporada),
+    // Sin equivalencias todavía: nada que sugerir (el valor neutro) ni que avisar.
+    temporada_sugerida: "todo_el_ano",
+    temporada_sugerida_distinta: false,
     equivalencias: 0,
     equivalencias_activas: 0,
     genero_ids: losGeneros.map((g) => g.id),
@@ -208,7 +230,8 @@ async function contarEquivalenciasPorGenero(
 
 /**
  * `PATCH /api/agrupaciones-estacionalidad/[id]` (`requirePlanner`): nombre,
- * código, descripción, orden, activo y/o `genero_ids`. Si `genero_ids` viene
+ * código, descripción, orden, activo, `temporada` (M6; no recalcula nada) y/o
+ * `genero_ids`. Si `genero_ids` viene
  * (mínimo 1) reemplaza el conjunto: `404` si algún género no existe, `409` si
  * agrega uno inactivo y `409` si quita un género del que la agrupación tiene
  * equivalencias ("Reasígnalas antes."). Todo se valida antes de escribir. Una

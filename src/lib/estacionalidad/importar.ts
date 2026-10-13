@@ -15,6 +15,7 @@ import {
   type GeneroEstado,
 } from "@/lib/arbol/importar";
 import { compararOrdenNombre, nodoVigente } from "@/lib/arbol/armar-arbol";
+import { ETIQUETA_TEMPORADA, type TemporadaAgrupacion } from "@/lib/curvas/tipos-api";
 import { armarRuta } from "./aplanar";
 import { generoPermitido } from "./reglas";
 import type {
@@ -44,15 +45,55 @@ import type {
  * distintos de las filas procesadas que apuntan a ella. Una agrupación
  * EXISTENTE nunca amplía sus géneros: la fila cuyo género no incluye se omite
  * con `genero_no_incluido` y, si no tiene ninguno, con `agrupacion_sin_genero`.
+ *
+ * Temporada (M6, sexta columna opcional `temporada`): una agrupación NUEVA se
+ * crea con la del archivo (la primera fila que la traiga; vacía en todas =
+ * `todo_el_ano`). Una EXISTENTE nunca cambia de temporada, igual que no amplía
+ * sus géneros. Un valor que no es `Invierno` / `Verano` / `Todo el año` (ni sus
+ * códigos) omite la fila con `temporada_invalida`, también si la agrupación ya
+ * existía (es un error del archivo); dos filas de la misma agrupación nueva con
+ * temporadas distintas omiten la segunda con `temporada_contradictoria_en_archivo`.
+ * Un archivo de cinco columnas sigue valiendo tal cual.
  */
 
 export { enTandas, TANDA } from "@/lib/arbol/importar";
 
 export const REASIGNACIONES_MAX = 500;
 
+/** Valor que `leerTemporadaImportada` devuelve cuando el texto no es una temporada. */
+export const TEMPORADA_NO_RECONOCIDA = "no_reconocida" as const;
+
+const TEMPORADAS_IMPORTADAS: ReadonlyMap<string, TemporadaAgrupacion> = new Map<string, TemporadaAgrupacion>([
+  ["INVIERNO", "invierno"],
+  ["VERANO", "verano"],
+  ["TODO EL ANO", "todo_el_ano"],
+  ["TODA TEMPORADA", "todo_el_ano"],
+  ["TODA LA TEMPORADA", "todo_el_ano"],
+]);
+
+/**
+ * Lee la columna `temporada` del archivo: `Invierno`, `Verano`, `Todo el año`
+ * (o `Toda temporada`) y los códigos `invierno`, `verano`, `todo_el_ano`, sin
+ * importar mayúsculas, acentos ni `_` o `-` entre palabras. Vacío o ausente →
+ * `null` (la agrupación nueva queda `todo_el_ano`); cualquier otro texto →
+ * `TEMPORADA_NO_RECONOCIDA`.
+ */
+export function leerTemporadaImportada(valor: unknown): TemporadaAgrupacion | null | typeof TEMPORADA_NO_RECONOCIDA {
+  const texto = normalizarNombre(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (texto === "") return null;
+  return TEMPORADAS_IMPORTADAS.get(texto) ?? TEMPORADA_NO_RECONOCIDA;
+}
+
 export type AgrupacionEstado = Pick<Tables<"agrupaciones_estacionalidad">, "id" | "codigo" | "nombre" | "activo"> & {
   /** Géneros de la agrupación (`agrupacion_estacionalidad_genero`); vacío en las heredadas "sin género". */
   genero_ids: string[];
+  /** Solo informativa: el importador nunca cambia la temporada de una agrupación existente. */
+  temporada?: string;
 };
 /** Género del estado; `orden` (si viene) ordena los nombres del reporte. */
 export type GeneroEstadoEstacionalidad = GeneroEstado & { orden?: number };
@@ -66,8 +107,8 @@ export type EstadoImportacionEstacionalidad = Omit<EstadoImportacion, "equivalen
   agrupaciones: AgrupacionEstado[];
 };
 
-/** Agrupación a crear con los ids de sus géneros (≥ 1 por construcción), en el orden del catálogo de géneros. */
-export type AgrupacionNueva = { nombre: string; codigo: string; genero_ids: string[] };
+/** Agrupación a crear con los ids de sus géneros (≥ 1 por construcción), en el orden del catálogo de géneros, y su temporada. */
+export type AgrupacionNueva = { nombre: string; codigo: string; genero_ids: string[]; temporada: TemporadaAgrupacion };
 
 /**
  * Una asignación a escribir. El destino se referencia por nombre normalizado
@@ -132,7 +173,10 @@ export function planificarImportacionEstacionalidad(
   const codigosAgrupacion = new Set(estado.agrupaciones.map((a) => a.codigo.toUpperCase()));
 
   // Lo visto dentro del archivo.
-  const nuevasPorNombre = new Map<string, { nombre: string; codigo: string; equivalencias: number; generos: Set<string> }>();
+  const nuevasPorNombre = new Map<
+    string,
+    { nombre: string; codigo: string; equivalencias: number; generos: Set<string>; temporada: TemporadaAgrupacion | null }
+  >();
   const vistas = new Map<string, { fila: number; agrupacion: string }>();
 
   let procesadas = 0;
@@ -144,6 +188,7 @@ export function planificarImportacionEstacionalidad(
     const lineaTxt = normalizarNombre(cruda.linea);
     const equivalenciaTxt = normalizarNombre(cruda.equivalencia);
     const agrupacionTxt = normalizarNombre(cruda.agrupacion);
+    const temporadaTxt = normalizarNombre(cruda.temporada);
 
     /** Anota la omisión con la fila completa, para que se pueda corregir el archivo. */
     const omitir = (
@@ -159,6 +204,7 @@ export function planificarImportacionEstacionalidad(
         linea: lineaTxt,
         equivalencia: equivalenciaTxt,
         agrupacion: agrupacionTxt,
+        ...(temporadaTxt ? { temporada: temporadaTxt } : {}),
       });
     };
 
@@ -211,6 +257,9 @@ export function planificarImportacionEstacionalidad(
     if (existente && existente.genero_ids.length === 0) return omitir("agrupacion_sin_genero", { detalle: existente.nombre });
     if (existente && !generoPermitido(existente, genero.id)) return omitir("genero_no_incluido", { detalle: genero.nombre });
     const destinoNombre = existente ? normalizarNombre(existente.nombre) : agrupacionTxt;
+    // Temporada del archivo: se valida siempre, pero solo se usa al crear.
+    const temporadaLeida = leerTemporadaImportada(temporadaTxt);
+    if (temporadaLeida === TEMPORADA_NO_RECONOCIDA) return omitir("temporada_invalida", { detalle: temporadaTxt });
 
     // 6. Duplicados dentro del archivo: gana la primera aparición. Va antes de
     // registrar la agrupación nueva para no crear una que ninguna fila
@@ -219,6 +268,13 @@ export function planificarImportacionEstacionalidad(
     if (vista) {
       if (vista.agrupacion === destinoNombre) return omitir("duplicada_en_archivo", { fila_original: vista.fila });
       return omitir("contradictoria_en_archivo", { fila_original: vista.fila, detalle: vista.agrupacion });
+    }
+    // Dos filas de la misma agrupación NUEVA con temporadas distintas: gana la primera que la fije.
+    if (!existente && temporadaLeida !== null) {
+      const previa = nuevasPorNombre.get(agrupacionTxt)?.temporada;
+      if (previa && previa !== temporadaLeida) {
+        return omitir("temporada_contradictoria_en_archivo", { detalle: ETIQUETA_TEMPORADA[previa] });
+      }
     }
     vistas.set(equivalencia.id, { fila, agrupacion: destinoNombre });
     procesadas += 1;
@@ -229,10 +285,11 @@ export function planificarImportacionEstacionalidad(
       if (!nueva) {
         const codigo = codigoUnico(aCodigo(agrupacionTxt), codigosAgrupacion, "AGRUPACION");
         codigosAgrupacion.add(codigo);
-        nueva = { nombre: agrupacionTxt, codigo, equivalencias: 0, generos: new Set() };
+        nueva = { nombre: agrupacionTxt, codigo, equivalencias: 0, generos: new Set(), temporada: null };
         nuevasPorNombre.set(agrupacionTxt, nueva);
       }
       nueva.equivalencias += 1;
+      nueva.temporada ??= temporadaLeida;
       // Solo las filas procesadas aportan género: las duplicadas y contradictorias ya salieron arriba.
       nueva.generos.add(genero.id);
     }
@@ -276,12 +333,14 @@ export function planificarImportacionEstacionalidad(
     nombre: n.nombre,
     codigo: n.codigo,
     genero_ids: generosDe(n.generos).map((g) => g.id),
+    temporada: n.temporada ?? "todo_el_ano",
   }));
   const muestra: AgrupacionAImportar[] = nuevas.map((n) => ({
     nombre: n.nombre,
     codigo: n.codigo,
     equivalencias: n.equivalencias,
     generos: generosDe(n.generos).map((g) => g.nombre),
+    temporada: n.temporada ?? "todo_el_ano",
   }));
 
   const reporte: ReporteImportacionEstacionalidadBase = {
@@ -316,6 +375,7 @@ export function aplicarPlanEstacionalidad(
       codigo: a.codigo,
       activo: true,
       genero_ids: [...a.genero_ids],
+      temporada: a.temporada,
     };
     agrupaciones.push(nueva);
     porNombre.set(a.nombre, nueva);

@@ -258,6 +258,16 @@ export async function contarHechos(db: Db, columna: ColumnaHechos, id: string) {
 }
 
 /**
+ * ¿Hay al menos una fila de hechos de esta marca? Una existencia (`limit 1`) por
+ * el índice `(marca_id, carga_id)`, más barata que `contarHechos` cuando solo
+ * importa saber si "vende" (conjuntos de 02b).
+ */
+export async function existenHechosDeMarca(db: Db, marcaId: string) {
+  const { data, error } = await db.from("venta_stock_mensual").select("carga_id").eq("marca_id", marcaId).limit(1);
+  return { existe: (data?.length ?? 0) > 0, error };
+}
+
+/**
  * Limpieza (regla de la ficha): borra las filas de las cargas terminales que
  * todavía las tienen y marca `limpiada_at`. Nunca toca `publicada` ni
  * `en_curso` (la función SQL no las devuelve). Idempotente.

@@ -6,9 +6,9 @@
  * No dependen de `Tables<>` a propósito: describen el JSON que viaja, no las
  * filas de la base.
  */
-import type { Temporada } from "./normalizar";
+import type { NivelPlanificacion, Temporada } from "./normalizar";
 
-export type { Temporada };
+export type { NivelPlanificacion, Temporada };
 
 // ─── Catálogos planos (/api/generos, /api/mundos, /api/agrupaciones-talla) ───
 
@@ -46,6 +46,8 @@ export type NodoFila = {
   mundo_id: string;
   linea_id: string;
   activo: boolean;
+  /** 02b: `GML` (el nodo es una unidad) o `GMLE` (una unidad por equivalencia activa). */
+  nivel_planificacion: NivelPlanificacion;
   created_at: string;
   updated_at: string;
 };
@@ -94,6 +96,8 @@ export type LineaArbol = {
   activo_nodo: boolean;
   /** `activo_nodo ∧ genero.activo ∧ mundo.activo ∧ activo_linea`. */
   vigente: boolean;
+  /** 02b: nivel de planificación del nodo. */
+  nivel_planificacion: NivelPlanificacion;
   equivalencias: EquivalenciaArbol[];
 };
 
@@ -127,6 +131,10 @@ export type ResumenArbol = {
   equivalencias: number;
   /** M3: entre las equivalencias devueltas, las faltantes (activas, en nodo vigente y sin agrupación activa). */
   equivalencias_sin_agrupacion: number;
+  /** 02b: nodos vigentes abiertos a GMLE (entre los devueltos). */
+  nodos_gmle: number;
+  /** 02b: equivalencias activas de los nodos vigentes abiertos a GMLE (entre las devueltas). */
+  equivalencias_en_gmle: number;
 };
 
 export type ArbolRespuesta = {
@@ -210,3 +218,66 @@ export type ReporteBase = {
 };
 
 export type ReporteImportacion = ReporteBase & { modo: ModoImportacion };
+
+// ─── Nivel de planificación (02b): bloque e importador ───
+
+/** `POST /api/arbol/nodos/nivel`: cuerpo. `nodo_ids` de 1 a 600. */
+export type NivelBloqueCuerpo = { nivel: NivelPlanificacion; nodo_ids: string[] };
+
+/**
+ * Respuesta del bloque. `|ids únicos| = cambiados + sin_cambio + no_encontrados.length`.
+ * Los nodos no vigentes se cambian igual (el nivel es una propiedad del nodo).
+ */
+export type NivelBloqueRespuesta = {
+  nivel: NivelPlanificacion;
+  cambiados: number;
+  sin_cambio: number;
+  no_encontrados: string[];
+};
+
+/** Una fila del archivo de niveles ya mapeada (`GENERO, MUNDO, LINEA, NIVEL`). */
+export type FilaImportacionNivel = { genero: string; mundo: string; linea: string; nivel: string };
+
+export type ImportarNivelCuerpo = { modo: ModoImportacion; filas: FilaImportacionNivel[] };
+
+/** Motivos con los que `resolverGml` (compartida por los importadores de nivel y de marcas relevantes) descarta una fila. */
+export type MotivoResolverGml =
+  | "fila_total"
+  | "genero_vacio"
+  | "genero_desconocido"
+  | "genero_inactivo"
+  | "mundo_vacio"
+  | "mundo_desconocido"
+  | "mundo_inactivo"
+  | "linea_vacia"
+  | "linea_desconocida"
+  | "linea_inactiva"
+  | "gml_inexistente"
+  | "gml_inactivo";
+
+export type MotivoOmisionNivel = MotivoResolverGml | "nivel_vacio" | "nivel_invalido" | "duplicada_en_archivo";
+
+/** Fila omitida con su contenido normalizado (el nivel tal como llegó), para corregir el archivo. */
+export type FilaOmitidaNivel = FilaImportacionNivel & {
+  fila: number;
+  motivo: MotivoOmisionNivel;
+  detalle?: string;
+  /** Solo en `duplicada_en_archivo`: la primera aparición del mismo nodo. */
+  fila_original?: number;
+};
+
+/** Un nodo cuyo nivel cambiará (el archivo manda): `de → a`. `fila` es 1-based. */
+export type CambioNivel = { fila: number; ruta: string; de: NivelPlanificacion; a: NivelPlanificacion };
+
+export type ReporteNivelBase = {
+  totales: { recibidas: number; procesadas: number; omitidas: number };
+  /** Nodos cuyo nivel cambia. `procesadas = cambios.length + sin_cambio`. */
+  cambios: CambioNivel[];
+  /** Nodos del archivo que ya tenían ese nivel. */
+  sin_cambio: number;
+  omitidas: FilaOmitidaNivel[];
+  /** Primeros 20 cambios como `"HOMBRE · URBANO · DENIM: GML → GMLE"`. */
+  muestra: { cambios: string[] };
+};
+
+export type ReporteImportacionNivel = ReporteNivelBase & { modo: ModoImportacion };

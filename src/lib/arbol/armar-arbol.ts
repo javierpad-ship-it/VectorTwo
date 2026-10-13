@@ -1,6 +1,7 @@
 import type { Tables } from "@/lib/supabase/database.types";
 import { motivoFaltante } from "@/lib/estacionalidad/reglas";
-import { esTemporada, type Temporada } from "./normalizar";
+import { esNivelPlanificacion, esTemporada, type NivelPlanificacion, type Temporada } from "./normalizar";
+import { resumenNiveles } from "./nivel/reglas";
 import type {
   ArbolRespuesta,
   EquivalenciaArbol,
@@ -22,7 +23,17 @@ import type {
 export type GeneroEntrada = Pick<Tables<"generos">, "id" | "codigo" | "nombre" | "orden" | "activo">;
 export type MundoEntrada = Pick<Tables<"mundos">, "id" | "codigo" | "nombre" | "orden" | "activo">;
 export type LineaEntrada = Pick<Tables<"lineas">, "id" | "codigo" | "nombre" | "temporada" | "activo">;
-export type NodoEntrada = Pick<Tables<"genero_mundo_linea">, "id" | "genero_id" | "mundo_id" | "linea_id" | "activo">;
+/**
+ * `nivel_planificacion` (02b) es opcional en la entrada para no obligar a los
+ * módulos que arman nodos a mano (fixtures de M1b, M3): ausente = `GML`.
+ */
+export type NodoEntrada = Pick<Tables<"genero_mundo_linea">, "id" | "genero_id" | "mundo_id" | "linea_id" | "activo"> &
+  Partial<Pick<Tables<"genero_mundo_linea">, "nivel_planificacion">>;
+
+/** Nivel de un nodo leído de la base: cualquier valor desconocido se trata como `GML` (el default). */
+export function nivelDeNodo(nodo: Pick<NodoEntrada, "nivel_planificacion">): NivelPlanificacion {
+  return esNivelPlanificacion(nodo.nivel_planificacion) ? nodo.nivel_planificacion : "GML";
+}
 export type EquivalenciaEntrada = Pick<
   Tables<"equivalencias">,
   "id" | "genero_mundo_linea_id" | "codigo" | "nombre" | "es_generica" | "activo" | "agrupacion_estacionalidad_id"
@@ -114,6 +125,8 @@ export function armarArbol(
     nodos: 0,
     equivalencias: 0,
     equivalencias_sin_agrupacion: 0,
+    nodos_gmle: 0,
+    equivalencias_en_gmle: 0,
   };
   const lineasDevueltas = new Set<string>();
 
@@ -137,6 +150,7 @@ export function armarArbol(
           activo_linea: linea.activo,
           activo_nodo: n.activo,
           vigente,
+          nivel_planificacion: nivelDeNodo(n),
           equivalencias: eqs,
         });
 
@@ -158,5 +172,6 @@ export function armarArbol(
   });
 
   resumen.lineas = lineasDevueltas.size;
+  Object.assign(resumen, resumenNiveles({ generos: salida }));
   return { generos: salida, resumen };
 }

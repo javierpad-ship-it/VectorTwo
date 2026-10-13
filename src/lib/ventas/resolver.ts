@@ -177,6 +177,16 @@ export const textoDestino = (d: Pick<DestinoMapeo, "genero" | "mundo" | "linea" 
   `${d.genero} / ${d.mundo} / ${d.linea} / ${d.equivalencia}`;
 
 /**
+ * `enviarAGml` (0.8.3, decisión de Javier del 2026-10-13): activa el envío
+ * automático a la equivalencia de nivel GML. Solo lo activa `previsualizar`; los
+ * demás usos del resolutor (estado de un mapeo, alta e importación de mapeos,
+ * sugerencias) preguntan "¿resuelve el árbol?" y necesitan la respuesta sin
+ * fallback: con el envío activo, todo origen de un nodo vigente "resolvería" y
+ * ningún mapeo se podría crear. Por eso es opt-in y no el valor por defecto.
+ */
+export type OpcionesResolutorCombinaciones = { enviarAGml?: boolean };
+
+/**
  * Resolutor de combinaciones. Recibe el estado del árbol y, opcionalmente, los
  * mapeos. `mapeosNoAplicables()` lista (una vez por mapeo y en el orden en que
  * aparecieron) los mapeos activos que se cruzaron con una combinación pero cuyo
@@ -201,10 +211,23 @@ export type ResolutorCombinaciones = ((c: CombinacionPeticion) => ResolucionComb
  * mapeo activo elegido apunta a un destino no vigente, no se aplica (la fila
  * conserva su motivo) y se anota para `mapeosNoAplicables()`; no se prueba
  * entonces el comodín. Un mapeo inactivo se ignora.
+ *
+ * 0.8.3, con `enviarAGml`. Precedencia: árbol exacto → mapeo explícito (exacto
+ * antes que comodín; un mapeo a un destino concreto GANA sobre el envío) →
+ * envío a la GML → error. Si el nodo género-mundo-línea existe y es vigente
+ * pero la equivalencia no existe (`equivalencia_inexistente`) o está inactiva
+ * (`equivalencia_inactiva`), la fila no es un error: va a la equivalencia de
+ * nivel GML del nodo, 1.º la genérica activa (`es_generica`) y, si no hay, 2.º
+ * la equivalencia activa que se llama como la línea (`-` de M1); sin ninguna de
+ * las dos queda el motivo original. Con el nodo inexistente, inactivo o con
+ * género, mundo o línea no vigentes no hay envío. Un mapeo activo cuyo destino
+ * ya no es vigente tampoco deja pasar al envío: es una decisión rota que debe
+ * verse (aviso rojo), no taparse en silencio.
  */
 export function crearResolutorCombinaciones(
   estado: EstadoImportacion,
-  mapeos: readonly MapeoResolvible[] = []
+  mapeos: readonly MapeoResolvible[] = [],
+  opciones: OpcionesResolutorCombinaciones = {}
 ): ResolutorCombinaciones {
   const lineasPorNombre = new Map(estado.lineas.map((l) => [normalizarNombre(l.nombre), l]));
   const nodos = new Map(estado.nodos.map((n) => [`${n.genero_id}|${n.mundo_id}|${n.linea_id}`, n]));
@@ -232,9 +255,14 @@ export function crearResolutorCombinaciones(
   }
   const hayMapeos = exactos.size > 0 || comodines.size > 0;
   const destinos = hayMapeos ? crearIndiceDestinos(estado) : null;
+  let destinosGml: IndiceDestinos | null = destinos;
   const noAplicables = new Map<string, MapeoNoAplicableApi>();
 
+  /** Nodo vigente de la combinación cuando el árbol llegó hasta la equivalencia (para el envío a la GML). */
+  let nodoDeLaUltima: { id: string; lineaTxt: string } | null = null;
+
   const resolverArbol = (c: CombinacionPeticion): ResolucionCombinacionApi => {
+    nodoDeLaUltima = null;
     const generoTxt = normalizarNombre(c.genero);
     const mundoTxt = normalizarNombre(c.mundo);
     const lineaTxt = normalizarNombre(c.linea);
@@ -268,19 +296,50 @@ export function crearResolutorCombinaciones(
       ? (eqs?.generica ?? eqs?.porNombre.get(normalizarNombre("SIN EQUIVALENCIA")))
       : eqs?.porNombre.get(nombreEq);
     const detalleEq = `${terna} / ${esEquivalenciaGenerica(equivalenciaTxt) ? "SIN EQUIVALENCIA" : nombreEq}`;
+    if (!eq || !eq.activo) nodoDeLaUltima = { id: nodo.id, lineaTxt };
     if (!eq) return { resultado: "equivalencia_inexistente", detalle: detalleEq };
     if (!eq.activo) return { resultado: "equivalencia_inactiva", detalle: detalleEq };
     return { resultado: "ok", equivalencia_id: eq.id };
   };
 
+  /** Equivalencia de nivel GML del nodo: la genérica activa o, si no, la activa que se llama como la línea. */
+  const equivalenciaGml = (nodoId: string, lineaTxt: string) => {
+    const eqs = porNodo.get(nodoId);
+    if (eqs?.generica?.activo) return { eq: eqs.generica, tipo: "generica" as const };
+    const comoLinea = eqs?.porNombre.get(lineaTxt);
+    if (comoLinea?.activo) return { eq: comoLinea, tipo: "igual_a_linea" as const };
+    return null;
+  };
+
+  const enviarAGml = (base: ResolucionCombinacionApi): ResolucionCombinacionApi => {
+    const nodo = nodoDeLaUltima;
+    if (!opciones.enviarAGml || !nodo) return base;
+    if (base.resultado !== "equivalencia_inexistente" && base.resultado !== "equivalencia_inactiva") return base;
+    const gml = equivalenciaGml(nodo.id, nodo.lineaTxt);
+    if (!gml) return base;
+    const destino = (destinosGml ??= crearIndiceDestinos(estado)).describir(gml.eq.id);
+    if (!destino || !destino.vigente) return base;
+    return {
+      resultado: "ok",
+      equivalencia_id: gml.eq.id,
+      a_gml: {
+        motivo_original: base.resultado,
+        tipo: gml.tipo,
+        valor: base.detalle ?? textoDestino(destino),
+        destino: textoDestino(destino),
+      },
+    };
+  };
+
   const resolutor = (c: CombinacionPeticion): ResolucionCombinacionApi => {
     const base = resolverArbol(c);
-    if (base.resultado === "ok" || !destinos) return base;
+    if (base.resultado === "ok") return base;
+    if (!destinos) return enviarAGml(base);
 
     const origen = normalizarOrigen(c);
     if (ternaVacia(origen)) return base;
     const mapeo = exactos.get(claveOrigen(origen)) ?? comodines.get(claveTerna(origen));
-    if (!mapeo) return base;
+    if (!mapeo) return enviarAGml(base);
 
     const destino = destinos.describir(mapeo.equivalencia_id);
     if (!destino || !destino.vigente) {

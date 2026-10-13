@@ -10,13 +10,15 @@ import {
   orden,
   uuid,
 } from "@/lib/arbol/esquemas";
+import { temporadaAgrupacion } from "@/lib/curvas/esquemas";
 
 /**
  * Esquemas zod de M3 (docs/modulos/03-agrupaciones-estacionalidad.md,
  * "Contratos de API" y reglas 1–3). Las piezas básicas (nombre normalizado,
  * código derivado, orden, uuid, activo) son las de M1; aquí solo se agrega lo
- * propio: la descripción de la agrupación, la asignación masiva y el
- * importador de cinco columnas.
+ * propio: la descripción de la agrupación, su temporada (M6 paso 1), la
+ * asignación masiva y el importador de cinco columnas más la sexta opcional
+ * `temporada`.
  *
  * `editarEquivalenciaSchema` (M1) ya acepta `agrupacion_estacionalidad_id`
  * como UUID o `null`; vive en `src/lib/arbol/esquemas.ts`.
@@ -59,7 +61,15 @@ export const generoIds = z
   .refine((ids) => new Set(ids).size === ids.length, "No repitas géneros.");
 
 export const crearAgrupacionSchema = z
-  .object({ nombre, codigo: codigoOpcional, descripcion, orden: orden.optional(), genero_ids: generoIds })
+  .object({
+    nombre,
+    codigo: codigoOpcional,
+    descripcion,
+    orden: orden.optional(),
+    genero_ids: generoIds,
+    /** M6: opcional; sin ella la agrupación nace `todo_el_ano`. */
+    temporada: temporadaAgrupacion.default("todo_el_ano"),
+  })
   .transform(derivarCodigo)
   .pipe(
     z.object({
@@ -68,11 +78,12 @@ export const crearAgrupacionSchema = z
       descripcion: z.string().nullable(),
       orden: orden.optional(),
       genero_ids: z.array(z.string()),
+      temporada: temporadaAgrupacion,
     })
   );
 
 export const editarAgrupacionSchema = z
-  .object({ nombre, codigo, descripcion, orden, activo, genero_ids: generoIds })
+  .object({ nombre, codigo, descripcion, orden, activo, genero_ids: generoIds, temporada: temporadaAgrupacion })
   .partial()
   .refine(tieneAlgo, noVacio);
 
@@ -95,6 +106,12 @@ export const filaImportacionEstacionalidadSchema = z.object({
   linea: z.string("linea debe ser texto."),
   equivalencia: z.string("equivalencia debe ser texto."),
   agrupacion: z.string("agrupacion debe ser texto."),
+  /**
+   * Sexta columna, opcional (los archivos de cinco columnas siguen valiendo):
+   * `Invierno` / `Verano` / `Todo el año` o sus códigos. Solo aplica a las
+   * agrupaciones que el archivo crea; el importador la valida (`temporada_invalida`).
+   */
+  temporada: z.string("temporada debe ser texto.").nullish(),
 });
 
 export const importarEstacionalidadSchema = z.object({

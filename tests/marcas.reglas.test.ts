@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AGRUPACION_NO_ENCONTRADA,
+  MENSAJE_MODALIDAD_SIN_BANDERA_PATCH,
   MENSAJE_NOTA_SIN_BANDERA_PATCH,
   marcaVigente,
+  modalidadEfectiva,
+  modalidadPorDefecto,
+  motivoRechazoEliminarMarca,
   motivoRechazoAgrupacionDestino,
   motivoRechazoEliminar,
   motivoRechazoMarca,
@@ -80,18 +84,20 @@ describe("motivoRechazoEliminar con los tipos de M2 (regla 4)", () => {
   });
 });
 
-describe("normalizarTratamiento (regla 6)", () => {
-  const conNota = { tratamiento_especial: true, nota_tratamiento: "Licencia" };
-  const sinTratamiento = { tratamiento_especial: false, nota_tratamiento: null };
+describe("normalizarTratamiento (regla 6, ampliada por 02b)", () => {
+  const conNota = { tratamiento_especial: true, nota_tratamiento: "Licencia", modalidad_tratamiento: "por_gml" as const };
+  const sinTratamiento = { tratamiento_especial: false, nota_tratamiento: null, modalidad_tratamiento: null };
+  const apagada = { tratamiento_especial: false, nota_tratamiento: null, modalidad_tratamiento: null };
 
-  it("desmarcar la bandera borra la nota, aunque el cuerpo traiga nota", () => {
-    expect(normalizarTratamiento({ tratamiento_especial: false }, conNota)).toEqual({
-      motivo: null,
-      valor: { tratamiento_especial: false, nota_tratamiento: null },
-    });
+  it("desmarcar la bandera borra la nota y la modalidad, aunque el cuerpo traiga nota", () => {
+    expect(normalizarTratamiento({ tratamiento_especial: false }, conNota)).toEqual({ motivo: null, valor: apagada });
     expect(normalizarTratamiento({ tratamiento_especial: false, nota_tratamiento: "x" }, conNota)).toEqual({
       motivo: null,
-      valor: { tratamiento_especial: false, nota_tratamiento: null },
+      valor: apagada,
+    });
+    expect(normalizarTratamiento({ tratamiento_especial: false, modalidad_tratamiento: "barrido" }, conNota)).toEqual({
+      motivo: null,
+      valor: apagada,
     });
   });
 
@@ -99,17 +105,46 @@ describe("normalizarTratamiento (regla 6)", () => {
     expect(normalizarTratamiento({ tratamiento_especial: true, nota_tratamiento: "Nueva" }, conNota).valor).toEqual({
       tratamiento_especial: true,
       nota_tratamiento: "Nueva",
+      modalidad_tratamiento: "por_gml",
     });
     expect(normalizarTratamiento({ tratamiento_especial: true }, conNota).valor).toEqual(conNota);
-    expect(normalizarTratamiento({ tratamiento_especial: true }, sinTratamiento).valor).toEqual({
-      tratamiento_especial: true,
-      nota_tratamiento: null,
-    });
     // Solo la nota, sobre una marca que ya tiene tratamiento.
     expect(normalizarTratamiento({ nota_tratamiento: "Otra" }, conNota).valor).toEqual({
       tratamiento_especial: true,
       nota_tratamiento: "Otra",
+      modalidad_tratamiento: "por_gml",
     });
+  });
+
+  it("regla 6: marcar sin modalidad escribe la actual, si no por_gml con GML y barrido sin ellos", () => {
+    expect(normalizarTratamiento({ tratamiento_especial: true }, sinTratamiento).valor).toEqual({
+      tratamiento_especial: true,
+      nota_tratamiento: null,
+      modalidad_tratamiento: "barrido",
+    });
+    expect(normalizarTratamiento({ tratamiento_especial: true }, sinTratamiento, 0).valor?.modalidad_tratamiento).toBe("barrido");
+    expect(normalizarTratamiento({ tratamiento_especial: true }, sinTratamiento, 3).valor?.modalidad_tratamiento).toBe("por_gml");
+    // Con modalidad en el cuerpo manda el cuerpo; con la actual, la actual aunque haya GML.
+    expect(normalizarTratamiento({ tratamiento_especial: true, modalidad_tratamiento: "barrido" }, sinTratamiento, 3).valor?.modalidad_tratamiento).toBe("barrido");
+    const enBarrido = { tratamiento_especial: true, nota_tratamiento: null, modalidad_tratamiento: "barrido" };
+    expect(normalizarTratamiento({ nota_tratamiento: "x" }, enBarrido, 5).valor?.modalidad_tratamiento).toBe("barrido");
+    // Casilla con modalidad nula (heredada): se escribe una al tocar el tratamiento.
+    const heredada = { tratamiento_especial: true, nota_tratamiento: null, modalidad_tratamiento: null };
+    expect(normalizarTratamiento({ nota_tratamiento: "x" }, heredada, 2).valor?.modalidad_tratamiento).toBe("por_gml");
+    // Cambiar solo la modalidad.
+    expect(normalizarTratamiento({ modalidad_tratamiento: "barrido" }, conNota).valor).toEqual({
+      tratamiento_especial: true,
+      nota_tratamiento: "Licencia",
+      modalidad_tratamiento: "barrido",
+    });
+  });
+
+  it("modalidad sin casilla y sin traerla → 400 con el mensaje de la ficha", () => {
+    expect(normalizarTratamiento({ modalidad_tratamiento: "por_gml" }, sinTratamiento)).toEqual({
+      motivo: MENSAJE_MODALIDAD_SIN_BANDERA_PATCH,
+      valor: null,
+    });
+    expect(MENSAJE_MODALIDAD_SIN_BANDERA_PATCH).toBe("Marca el tratamiento especial para definir la modalidad.");
   });
 
   it("nota vacía, solo espacios o null → null (borra la nota conservando la bandera)", () => {
@@ -118,6 +153,7 @@ describe("normalizarTratamiento (regla 6)", () => {
     expect(normalizarTratamiento({ nota_tratamiento: null }, conNota).valor).toEqual({
       tratamiento_especial: true,
       nota_tratamiento: null,
+      modalidad_tratamiento: "por_gml",
     });
     expect(normalizarTratamiento({ nota_tratamiento: "  recortada  " }, conNota).valor?.nota_tratamiento).toBe("recortada");
   });
@@ -138,11 +174,37 @@ describe("normalizarTratamiento (regla 6)", () => {
     });
     expect(MENSAJE_NOTA_SIN_BANDERA_PATCH).toBe("Marca el tratamiento especial para agregar una nota.");
     // Nota vacía sin bandera no es un error: no hay nada que guardar.
-    expect(normalizarTratamiento({ nota_tratamiento: "" }, sinTratamiento).valor).toEqual(sinTratamiento);
+    expect(normalizarTratamiento({ nota_tratamiento: "" }, sinTratamiento).valor).toEqual(apagada);
   });
 
   it("sin cambios de tratamiento devuelve lo actual", () => {
     expect(normalizarTratamiento({}, conNota).valor).toEqual(conNota);
-    expect(normalizarTratamiento({}, sinTratamiento).valor).toEqual(sinTratamiento);
+    expect(normalizarTratamiento({}, sinTratamiento).valor).toEqual(apagada);
+  });
+});
+
+describe("modalidadEfectiva (02b regla 5) y modalidadPorDefecto", () => {
+  it("sin casilla → null; con casilla: por_gml es por_gml y barrido o nula es barrido", () => {
+    expect(modalidadEfectiva({ tratamiento_especial: false, modalidad_tratamiento: null })).toBeNull();
+    expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: "por_gml" })).toBe("por_gml");
+    expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: "barrido" })).toBe("barrido");
+    expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: null })).toBe("barrido");
+  });
+  it("por defecto: por_gml si hay GML y barrido si no", () => {
+    expect(modalidadPorDefecto(0)).toBe("barrido");
+    expect(modalidadPorDefecto(1)).toBe("por_gml");
+  });
+});
+
+describe("motivoRechazoEliminarMarca (02b)", () => {
+  it("sin nada colgando → null", () => {
+    expect(motivoRechazoEliminarMarca(0, 0)).toBeNull();
+  });
+  it("con venta o stock manda el mensaje de M5", () => {
+    expect(motivoRechazoEliminarMarca(3, 2)).toBe("No se puede eliminar la marca: tiene 3 registros asociados. Desactívala.");
+  });
+  it("cabeza con miembros → 409 con el conteo (caso 22)", () => {
+    expect(motivoRechazoEliminarMarca(0, 2)).toContain("es cabeza de un conjunto con 2 marcas");
+    expect(motivoRechazoEliminarMarca(0, 1)).toContain("con 1 marca.");
   });
 });

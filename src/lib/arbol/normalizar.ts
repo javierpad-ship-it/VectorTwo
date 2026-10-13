@@ -13,6 +13,17 @@ export function esTemporada(valor: unknown): valor is Temporada {
   return typeof valor === "string" && (TEMPORADAS as readonly string[]).includes(valor);
 }
 
+/**
+ * Nivel de planificación de un nodo (02b): `GML` = el nodo es una sola unidad;
+ * `GMLE` = el nodo se abre y cada equivalencia activa es una unidad.
+ */
+export const NIVELES_PLANIFICACION = ["GML", "GMLE"] as const;
+export type NivelPlanificacion = (typeof NIVELES_PLANIFICACION)[number];
+
+export function esNivelPlanificacion(valor: unknown): valor is NivelPlanificacion {
+  return typeof valor === "string" && (NIVELES_PLANIFICACION as readonly string[]).includes(valor);
+}
+
 /** Equivalencia genérica que recibe las filas sin equivalencia definida. */
 export const EQUIVALENCIA_GENERICA = {
   nombre: "SIN EQUIVALENCIA",

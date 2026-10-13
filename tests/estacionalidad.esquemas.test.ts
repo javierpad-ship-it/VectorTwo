@@ -20,6 +20,7 @@ describe("crearAgrupacionSchema (regla 1)", () => {
       codigo: "PANTALONES_INVIERNO",
       descripcion: null,
       genero_ids: GENEROS,
+      temporada: "todo_el_ano",
     });
   });
   it("respeta el código enviado (a ASCII) y vacío lo deriva", () => {
