@@ -211,3 +211,45 @@ export const ETIQUETA_CORTA_TIPO: Record<TipoTienda, string> = {
   Tienda: "Tienda",
   "Centro de Distribución": "CD",
 };
+
+// ─── Ubicaciones ignoradas (/api/tiendas/ubicaciones-ignoradas) · M5c ───
+//
+// Nombres de la columna TIENDA del archivo de venta que NO son tiendas
+// (central, oficinas, almacenes de muestras). Sus filas se excluyen por
+// decisión (motivo `ubicacion_ignorada`), sin contar como error y sin crear
+// tiendas. Toda la API exige `requirePlanner`, lecturas incluidas.
+// docs/modulos/05c-ubicaciones-conciliacion.md, "Contratos de API".
+
+export type UbicacionIgnoradaApi = {
+  id: string;
+  /** Normalizado por el servidor (NFC, trim, espacios colapsados, mayúsculas en español). */
+  nombre: string;
+  nota: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Tienda (activa o no) con el mismo nombre normalizado: la fila no tiene efecto. Se calcula al listar; `null` al crear/editar. */
+  sin_efecto: { tienda_id: string; codigo: string; activo: boolean } | null;
+};
+
+/** `POST /api/tiendas/ubicaciones-ignoradas`. */
+export type CrearUbicacionIgnoradaPeticion = { nombre: string; nota?: string | null };
+
+/** `PATCH /api/tiendas/ubicaciones-ignoradas/[id]`. Al menos un campo; `nota: ""` o `null` la borra. */
+export type EditarUbicacionIgnoradaPeticion = { nombre?: string; nota?: string | null };
+
+/** `GET`: ordenadas por `nombre`. */
+export type ListarUbicacionesIgnoradasRespuesta = UbicacionIgnoradaApi[];
+
+/** `POST` → `201`; `PATCH` → `200`. */
+export type UbicacionIgnoradaRespuesta = UbicacionIgnoradaApi;
+
+/** `DELETE` → `200`. Nunca `409`: nada cuelga de la fila. */
+export type EliminarUbicacionIgnoradaRespuesta = { id: string };
+
+/**
+ * Cuerpo del `409` al crear o renombrar con el nombre de una tienda existente:
+ * `{ error, codigo }`. `error` ya viene listo para pantalla ("Ya existe la
+ * tienda R101 con ese nombre. Si no debe cargarse, desactívala en Tiendas.").
+ * El `409` de nombre repetido (único) trae solo `{ error }`, sin `codigo`.
+ */
+export type ErrorNombreEsTienda = { error: string; codigo: "nombre_es_tienda" };

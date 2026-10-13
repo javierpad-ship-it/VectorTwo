@@ -60,6 +60,8 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["cargas_periodo_publicada_uniq", "Ese mes ya tiene una carga publicada."],
   // M5b. La API de mapeos ya lo anticipa con el mapeo que choca; esto es la red de seguridad (carrera entre dos usuarios).
   ["mapeos_combinacion_origen_uniq", "Ese origen ya tiene un mapeo."],
+  // M5c. La API ya lo anticipa solo para tiendas; el repetido lo detecta el único.
+  ["ubicaciones_ignoradas_nombre", "Esa ubicación ya está en la lista."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -81,6 +83,9 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["mapeos_combinacion_terna_no_vacia", "Un origen necesita al menos género, mundo o línea."],
   ["mapeos_combinacion_origen_equivalencia", "La equivalencia de origen no puede estar vacía ni superar 120 caracteres."],
   ["mapeos_combinacion_origen_", "Género, mundo y línea de origen no pueden superar 120 caracteres."],
+  // M5c. Los dos checks de las ubicaciones ignoradas (el esquema zod los atrapa antes; esto es la red de seguridad).
+  ["ubicaciones_ignoradas_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
+  ["ubicaciones_ignoradas_nota_len", "La nota no puede superar 200 caracteres."],
   // Genéricos: cubren `*_codigo_len_check` y `*_nombre_len_check` de todas las tablas, incluidas tiendas.
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],

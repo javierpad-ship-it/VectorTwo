@@ -28,13 +28,18 @@ describe("resolverTienda (regla 28)", () => {
     expect(resolverTienda("R102", tiendas)).toMatchObject({ resultado: "ok", id: "a" });
   });
 
-  it("inactiva se distingue de desconocida y la lista de excluidas se mira antes que desconocida", () => {
+  it("inactiva se distingue de desconocida y la lista de ignoradas se mira antes que desconocida", () => {
     expect(resolverTienda("OFICINA CENTRAL", TIENDAS)).toEqual({ valor: "OFICINA CENTRAL", resultado: "inactiva" });
     expect(resolverTienda("LOCAL X", TIENDAS)).toEqual({ valor: "LOCAL X", resultado: "desconocida" });
-    const excluidas = new Map([["LOCAL X", "Central, no es tienda"]]);
-    expect(resolverTienda("local x", TIENDAS, excluidas)).toEqual({ valor: "LOCAL X", resultado: "excluida", nota: "Central, no es tienda" });
+    const ignoradas = new Map([["LOCAL X", { id: "u-1", nota: "Central, no es tienda" }]]);
+    expect(resolverTienda("local x", TIENDAS, ignoradas)).toEqual({
+      valor: "LOCAL X",
+      resultado: "ignorada",
+      id: "u-1",
+      nota: "Central, no es tienda",
+    });
     // una tienda existente no se ve afectada por la lista
-    expect(resolverTienda("LUKERS UNO", TIENDAS, new Map([["LUKERS UNO", "x"]])).resultado).toBe("ok");
+    expect(resolverTienda("LUKERS UNO", TIENDAS, new Map([["LUKERS UNO", { id: "u-2", nota: null }]])).resultado).toBe("ok");
   });
 });
 

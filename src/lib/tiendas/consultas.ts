@@ -1,5 +1,5 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Tables } from "@/lib/supabase/database.types";
+import type { Database, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types";
 import { leerTodo } from "@/lib/arbol/consultas";
 import { esTipoTienda, estadoTienda } from "./estado";
 import type { EstadoImportacionTiendas } from "./importar";
@@ -31,6 +31,38 @@ export function leerTiendas(db: Db, opciones: { soloActivas?: boolean } = {}) {
     if (soloActivas) consulta = consulta.eq("activo", true);
     return consulta.order("codigo").order("id").range(d, h);
   });
+}
+
+/**
+ * Ubicaciones ignoradas (M5c) por `nombre` (y `id` para que el orden sea
+ * estable). Por defecto solo `activo = true`: una fila con `activo = false` se
+ * lee como si no existiera. ÚNICO lugar que toca la tabla.
+ */
+export function leerUbicacionesIgnoradas(db: Db, opciones: { soloActivas?: boolean } = {}) {
+  const soloActivas = opciones.soloActivas ?? true;
+  return leerTodo<Tables<"ubicaciones_ignoradas">>((d, h) => {
+    let consulta = db.from("ubicaciones_ignoradas").select("*");
+    if (soloActivas) consulta = consulta.eq("activo", true);
+    return consulta.order("nombre").order("id").range(d, h);
+  });
+}
+
+/** Una ubicación ignorada por id (`data: null` si no existe). */
+export function buscarUbicacionIgnorada(db: Db, id: string) {
+  return db.from("ubicaciones_ignoradas").select("*").eq("id", id).maybeSingle();
+}
+
+export function crearUbicacionIgnorada(db: Db, nueva: TablesInsert<"ubicaciones_ignoradas">) {
+  return db.from("ubicaciones_ignoradas").insert(nueva).select("*").single();
+}
+
+export function editarUbicacionIgnorada(db: Db, id: string, cambio: TablesUpdate<"ubicaciones_ignoradas">) {
+  return db.from("ubicaciones_ignoradas").update(cambio).eq("id", id).select("*").single();
+}
+
+/** Borra la fila: la baja de una ubicación ignorada no deja rastro (nada cuelga de ella). */
+export function eliminarUbicacionIgnorada(db: Db, id: string) {
+  return db.from("ubicaciones_ignoradas").delete().eq("id", id);
 }
 
 /** La tabla completa (activas e inactivas) para el importador. */

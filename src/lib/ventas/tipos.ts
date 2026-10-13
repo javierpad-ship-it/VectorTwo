@@ -43,6 +43,13 @@ export const FILAS_EXCEL_MAX = 150_000;
 export const FILAS_XLS_TRUNCADO = 65_536;
 /** Diferencia relativa por debajo de la cual soles coinciden con QlikView (0,1 %). */
 export const TOLERANCIA_CONCILIACION = 0.001;
+/**
+ * Diferencia absoluta (en unidades) por debajo de la cual unidades y stock en
+ * unidades coinciden con QlikView. Hoy 0 = exactas (decisión vigente; Javier
+ * aún no decidió si admite ±2). ÚNICO lugar del valor: cambiarlo aquí cambia
+ * la regla en el informe, en `conciliarConQlik` y en el texto de estado.
+ */
+export const TOLERANCIA_UNIDADES = 0;
 /** Cambio relativo contra el mes anterior que dispara `comparacion_mes_anterior` (25 %). */
 export const UMBRAL_COMPARACION_MES = 0.25;
 /** Cuántas marcas nuevas con una o dos filas se tratan como posible error de tipeo. */
@@ -141,7 +148,7 @@ export const MOTIVOS_ERROR = [
 export const MOTIVOS_DECISION = [
   "sin_clasificar",
   "tienda_inactiva",
-  "tienda_excluida",
+  "ubicacion_ignorada",
   "marca_inactiva",
   "genero_inactivo",
   "mundo_inactivo",
@@ -160,6 +167,23 @@ export function esMotivoError(motivo: MotivoExclusion): motivo is MotivoError {
   return (MOTIVOS_ERROR as readonly string[]).includes(motivo);
 }
 
+/**
+ * M5c. Exclusiones que QlikView no muestra: la tabla de la que se copian los
+ * totales tiene las dimensiones género, mundo y línea, así que una fila con las
+ * tres en blanco no existe para ese objeto, y una fila de totales es un pie, no
+ * un dato. Se restan del archivo para obtener la base `comparable`. NO se
+ * restan `ubicacion_ignorada` ni los géneros, mundos o líneas desconocidos
+ * (para QlikView son filas como cualquier otra). Añadir un motivo aquí es un
+ * cambio de una línea (pregunta abierta 1 de la ficha 05c).
+ */
+export const MOTIVOS_NO_COMPARABLES: readonly MotivoExclusion[] = ["sin_clasificar", "fila_total"];
+
+/** Base contra la que se concilia con QlikView; va al reporte guardado como `base_conciliacion`. */
+export const BASE_CONCILIACION = "comparable" as const;
+/** Base de los reportes de 0.8.0 (sin `base_conciliacion`): se leían contra el archivo completo. */
+export const BASE_CONCILIACION_ANTIGUA = "archivo" as const;
+export type BaseConciliacion = typeof BASE_CONCILIACION | typeof BASE_CONCILIACION_ANTIGUA;
+
 export const ETIQUETAS_MOTIVO: Record<MotivoExclusion, string> = {
   mes_invalido: "Mes o año no reconocido",
   numero_invalido: "Número inválido",
@@ -175,7 +199,7 @@ export const ETIQUETAS_MOTIVO: Record<MotivoExclusion, string> = {
   demasiados_valores: "Demasiados valores distintos en el archivo",
   sin_clasificar: "Sin género, mundo ni línea",
   tienda_inactiva: "Tienda desactivada",
-  tienda_excluida: "Tienda que no debe cargarse",
+  ubicacion_ignorada: "Ubicación ignorada (no es tienda)",
   marca_inactiva: "Marca desactivada",
   genero_inactivo: "Género desactivado",
   mundo_inactivo: "Mundo desactivado",
@@ -391,13 +415,18 @@ export type FilaConciliacion = {
   /** Total que escribió el usuario (opcional). */
   qlik: number | null;
   archivo: number;
+  /** M5c. Lo que QlikView no muestra: Σ exclusiones con motivo en `MOTIVOS_NO_COMPARABLES` (`sin_clasificar`, `fila_total`). */
+  no_comparable: number;
+  /** M5c. `archivo - no_comparable`: la cifra que se compara con QlikView. */
+  comparable: number;
+  /** Todas las exclusiones (incluye `no_comparable`). */
   excluido: number;
   cargado: number;
   /** `archivo - excluido - cargado`: debe ser 0 (identidad exacta, en céntimos). */
   descuadre: number;
-  /** `archivo - qlik`, o `null` sin total de QlikView. */
+  /** `comparable - qlik`, o `null` sin total de QlikView (hasta 0.8.0 era `archivo - qlik`). */
   diferencia_qlik: number | null;
-  /** `|archivo - qlik| / |qlik|`, o `null`. */
+  /** `|comparable - qlik| / |qlik|` (fracción, no porcentaje), o `null`. */
   diferencia_relativa: number | null;
   estado_qlik: EstadoConciliacionQlik;
 };

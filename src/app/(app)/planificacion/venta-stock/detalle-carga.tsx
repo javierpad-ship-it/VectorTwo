@@ -7,7 +7,8 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Columna } from "@/components/ui/data-table";
-import type { Aviso, FilaConciliacion, ResumenExclusion } from "@/lib/ventas/tipos";
+import type { Aviso, ResumenExclusion } from "@/lib/ventas/tipos";
+import { leerConciliacionGuardada } from "@/lib/ventas/conciliacion";
 import type { CargaApi, DetalleCargaRespuesta, EstadoCarga } from "@/lib/ventas/tipos-api";
 import { ConciliacionGuardada, ListaAvisos, TablaResumenExclusiones } from "./detalle-mes";
 import { formatearEntero, formatearFechaHora, formatearSoles, nombrePeriodo } from "./comunes";
@@ -48,7 +49,7 @@ export function DetalleCarga({ id, periodo, onCerrar }: { id: string; periodo: s
   }, [id]);
 
   const reporte = detalle?.reporte ?? {};
-  const conciliacion = lista<FilaConciliacion>(reporte.conciliacion);
+  const conciliacion = leerConciliacionGuardada(reporte);
   const resumen = lista<ResumenExclusion>(reporte.resumen_exclusiones);
   const avisos = lista<Aviso>(reporte.avisos);
   const marcas = lista<{ nombre: string }>(reporte.marcas_nuevas);
@@ -84,10 +85,10 @@ export function DetalleCarga({ id, periodo, onCerrar }: { id: string; periodo: s
             {detalle.carga.incompleto && " Se cargó forzado con errores de 2 % o más: queda marcado como Incompleto hasta que se recargue."}
           </p>
 
-          {conciliacion.length > 0 ? (
+          {conciliacion.filas.length > 0 ? (
             <div className="space-y-2">
               <h4 className="text-sm font-semibold">Conciliación al cargar</h4>
-              <ConciliacionGuardada filas={conciliacion} />
+              <ConciliacionGuardada filas={conciliacion.filas} base={conciliacion.base} />
             </div>
           ) : (
             <p className="text-sm text-tinta-suave">Esta carga no guardó el detalle de la conciliación.</p>

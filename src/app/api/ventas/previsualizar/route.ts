@@ -5,7 +5,8 @@ import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { cargarEstadoArbol } from "@/lib/arbol/consultas";
 import { leerAgrupacionesMarca, leerMarcas } from "@/lib/marcas/consultas";
-import { leerTiendas } from "@/lib/tiendas/consultas";
+import { leerTiendas, leerUbicacionesIgnoradas } from "@/lib/tiendas/consultas";
+import { indiceUbicacionesIgnoradas } from "@/lib/tiendas/ubicaciones";
 import { hoyLima } from "@/lib/tiendas/estado";
 import { previsualizarSchema } from "@/lib/ventas/esquemas";
 import {
@@ -39,6 +40,10 @@ import type { PeriodoPrevisualizado, PrevisualizarRespuesta } from "@/lib/ventas
  * árbol manda y un mapeo solo entra cuando el árbol no resuelve (una
  * combinación puede volver `ok` con `mapeo`). Los mapeos activos cuyo destino
  * ya no es vigente no se aplican y se listan en `mapeos_no_aplicables`.
+ *
+ * M5c. Carga las ubicaciones ignoradas activas y las pasa al resolutor de
+ * tiendas. Orden: tienda por nombre → tienda por código → ubicación ignorada
+ * (`resultado: "ignorada"`, con `id` y `nota`) → desconocida. La tienda manda.
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -50,9 +55,10 @@ export async function POST(request: NextRequest) {
   const db = supabaseAdmin();
   const hoy = hoyLima();
 
-  const [arbol, tiendas, marcas, agrupaciones, talla, cargas, mapeos] = await Promise.all([
+  const [arbol, tiendas, ignoradas, marcas, agrupaciones, talla, cargas, mapeos] = await Promise.all([
     cargarEstadoArbol(db),
     leerTiendas(db, { soloActivas: false }),
+    leerUbicacionesIgnoradas(db),
     leerMarcas(db),
     leerAgrupacionesMarca(db),
     leerCodigosTalla(db),
@@ -61,6 +67,7 @@ export async function POST(request: NextRequest) {
   ]);
   if (arbol.error) return traducirErrorDb(arbol.error, "previsualizar ventas: árbol");
   if (tiendas.error) return traducirErrorDb(tiendas.error, "previsualizar ventas: tiendas");
+  if (ignoradas.error) return traducirErrorDb(ignoradas.error, "previsualizar ventas: ubicaciones ignoradas");
   if (marcas.error) return traducirErrorDb(marcas.error, "previsualizar ventas: marcas");
   if (agrupaciones.error) return traducirErrorDb(agrupaciones.error, "previsualizar ventas: agrupaciones de marca");
   if (talla.error) return traducirErrorDb(talla.error, "previsualizar ventas: tallas");
@@ -68,7 +75,7 @@ export async function POST(request: NextRequest) {
   if (mapeos.error) return traducirErrorDb(mapeos.error, "previsualizar ventas: mapeos");
   if (!talla.data) return error("Faltan las agrupaciones de talla CENTRALES y EXTREMAS en el catálogo.", 500);
 
-  const resolverTienda = crearResolutorTiendas(tiendas.data);
+  const resolverTienda = crearResolutorTiendas(tiendas.data, indiceUbicacionesIgnoradas(ignoradas.data));
   const resolverCombinacion = crearResolutorCombinaciones(
     arbol.estado,
     mapeos.data.map((m) => ({ id: m.id, origen: origenDeFila(m), equivalencia_id: m.equivalencia_id, activo: m.activo }))

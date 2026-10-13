@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +17,7 @@ import { AsignarMapeo } from "./asignar-mapeo";
 import { DetalleMes, type Asignacion } from "./detalle-mes";
 import { filasReasignadas, reasignadasDe, type OrigenAsignable } from "./origenes-mapeo";
 import { MarcasNuevas } from "./marcas-nuevas";
+import { agruparPorTienda, IgnorarUbicacion, notasDeIgnoradas, TiendasDesconocidas, UbicacionesIgnoradas, type GrupoTienda } from "./ubicaciones-ignoradas";
 import { formatearEntero, formatearPorcentaje, formatearSoles, nombrePeriodo } from "./comunes";
 import { ETIQUETA_SALTO, planificarCarga, type MotivoSalto } from "./plan";
 import type { Previsualizacion, useCargaVentas } from "./use-carga-ventas";
@@ -61,48 +61,6 @@ function descargarFormatoArbol(desconocidas: CombinacionDesconocida[], nombreArc
   descargarCsv(campos, datos, `combinaciones-desconocidas-${nombreBase(nombreArchivo)}.csv`);
 }
 
-type TiendaDesconocida = { valor: string; filas: number; venta_soles: number; stock_valorizado: number; meses: number };
-
-/** Tiendas del archivo que no existen, sumadas en todos los meses. */
-function tiendasDesconocidas(informe: InformeCarga): TiendaDesconocida[] {
-  const mapa = new Map<string, TiendaDesconocida>();
-  for (const m of informe.meses) {
-    for (const e of m.exclusiones) {
-      if (e.motivo !== "tienda_desconocida") continue;
-      const t = mapa.get(e.valor) ?? { valor: e.valor, filas: 0, venta_soles: 0, stock_valorizado: 0, meses: 0 };
-      t.filas += e.filas;
-      t.venta_soles += e.venta_soles;
-      t.stock_valorizado += e.stock_valorizado;
-      t.meses += 1;
-      mapa.set(e.valor, t);
-    }
-  }
-  return [...mapa.values()].sort((a, b) => b.filas - a.filas);
-}
-
-function TiendasDesconocidas({ tiendas }: { tiendas: TiendaDesconocida[] }) {
-  const columnas: Columna<TiendaDesconocida>[] = [
-    { clave: "valor", titulo: "Tienda del archivo", render: (t) => <span className="font-medium">{t.valor === "" ? "(vacía)" : t.valor}</span> },
-    { clave: "filas", titulo: "Filas", className: "text-right font-mono", render: (t) => formatearNumero(t.filas) },
-    { clave: "meses", titulo: "Meses", className: "text-right font-mono", render: (t) => formatearNumero(t.meses) },
-    { clave: "venta", titulo: "Venta", className: "text-right font-mono", render: (t) => formatearSoles(t.venta_soles) },
-    { clave: "stock", titulo: "Stock a costo", className: "text-right font-mono", render: (t) => formatearSoles(t.stock_valorizado) },
-  ];
-  return (
-    <div className="space-y-2">
-      <Alert>
-        <strong>{plural(tiendas.length, "tienda del archivo no existe", "tiendas del archivo no existen")} en el sistema</strong> y sus filas no se cargan. Si es una tienda real, créala o
-        corrige su nombre en{" "}
-        <Link href="/maestros/tiendas" className="underline underline-offset-2">
-          Tiendas y aperturas
-        </Link>
-        ; si no debe cargarse nunca (la central, una oficina), créala <strong>desactivada</strong> y desde entonces saldrá como informativa.
-      </Alert>
-      <DataTable columnas={columnas} filas={tiendas} claveFila={(t) => t.valor} />
-    </div>
-  );
-}
-
 /** Paso 4: reporte previo (diagnósticos, resumen por mes, detalle con conciliación, marcas nuevas, tiendas, descargas). */
 export function ReportePrevio({ c, informe, prev }: Props) {
   const [mesElegido, setMesElegido] = useState<string>("");
@@ -110,7 +68,11 @@ export function ReportePrevio({ c, informe, prev }: Props) {
   const [asignando, setAsignando] = useState<OrigenAsignable[] | null>(null);
   const plan = useMemo(() => planificarCarga(informe, c.opciones), [informe, c.opciones]);
   const salto = useMemo(() => new Map(plan.saltados.map((s) => [s.mes.periodo, s.motivo])), [plan]);
-  const tiendas = useMemo(() => tiendasDesconocidas(informe), [informe]);
+  const tiendas = useMemo(() => agruparPorTienda(informe, "tienda_desconocida"), [informe]);
+  const ignoradas = useMemo(() => agruparPorTienda(informe, "ubicacion_ignorada"), [informe]);
+  const notasIgnoradas = useMemo(() => notasDeIgnoradas(prev.respuesta.tiendas), [prev.respuesta.tiendas]);
+  /** Ubicación que se está confirmando para ignorar (`null` = diálogo cerrado). */
+  const [ignorando, setIgnorando] = useState<GrupoTienda | null>(null);
   const desconocidas = prev.resultado.combinacionesDesconocidas;
   const asignacion: Asignacion = { indice: prev.origenes, disponible: c.puedeRecalcular, onAsignar: setAsignando };
 
@@ -228,7 +190,9 @@ export function ReportePrevio({ c, informe, prev }: Props) {
           </Alert>
         )}
 
-        {tiendas.length > 0 && <TiendasDesconocidas tiendas={tiendas} />}
+        {tiendas.length > 0 && <TiendasDesconocidas tiendas={tiendas} puedeIgnorar={c.puedeRecalcular} recalculando={c.recalculando} onIgnorar={setIgnorando} />}
+
+        {ignoradas.length > 0 && <UbicacionesIgnoradas ubicaciones={ignoradas} notas={notasIgnoradas} />}
 
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">Marcas nuevas</h3>
@@ -257,6 +221,7 @@ export function ReportePrevio({ c, informe, prev }: Props) {
         </div>
       </div>
 
+      {ignorando && <IgnorarUbicacion grupo={ignorando} confirmar={c.ignorarUbicacionDelArchivo} onCerrar={() => setIgnorando(null)} />}
       {asignando && <AsignarMapeo origenes={asignando} reasignadasAntes={filasReasignadas(informe)} bloqueadosAntes={informe.meses.filter((m) => m.bloqueado).map((m) => m.periodo)} recalcular={c.recalcularConMapeos} onCerrar={() => setAsignando(null)} />}
     </Card>
   );

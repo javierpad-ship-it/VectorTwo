@@ -3,7 +3,9 @@ import {
   MENSAJE_CODIGO_OBLIGATORIO,
   MENSAJE_FECHA,
   crearTiendaSchema,
+  crearUbicacionIgnoradaSchema,
   editarTiendaSchema,
+  editarUbicacionIgnoradaSchema,
   filaImportacionTiendaSchema,
   filtrosAperturasSchema,
   filtrosTiendasSchema,
@@ -160,5 +162,37 @@ describe("importarTiendasSchema", () => {
     );
     expect(importarTiendasSchema.safeParse({ modo: "aplicar", filas: [] }).success).toBe(false);
     expect(importarTiendasSchema.safeParse({ modo: "aplicar", filas: [{ codigo: "A" }] }).success).toBe(false);
+  });
+});
+
+describe("M5c regla 11 · esquemas de ubicaciones ignoradas", () => {
+  it("el alta normaliza el nombre y guarda la nota vacía como null", () => {
+    expect(crearUbicacionIgnoradaSchema.parse({ nombre: " central  ejemplo " })).toEqual({ nombre: "CENTRAL EJEMPLO", nota: null });
+    expect(crearUbicacionIgnoradaSchema.parse({ nombre: "Almacén", nota: "" })).toEqual({ nombre: "ALMACÉN", nota: null });
+    expect(crearUbicacionIgnoradaSchema.parse({ nombre: "X", nota: "  muestras  " }).nota).toBe("muestras");
+    expect(crearUbicacionIgnoradaSchema.parse({ nombre: "X", nota: null }).nota).toBeNull();
+  });
+
+  it("rechaza nombre vacío o de más de 120 y nota de más de 200", () => {
+    expect(primerError(crearUbicacionIgnoradaSchema.safeParse({ nombre: "   " }))?.message).toBe("El nombre es obligatorio.");
+    expect(crearUbicacionIgnoradaSchema.safeParse({ nombre: "A".repeat(120) }).success).toBe(true);
+    expect(crearUbicacionIgnoradaSchema.safeParse({ nombre: "A".repeat(121) }).success).toBe(false);
+    expect(crearUbicacionIgnoradaSchema.safeParse({ nombre: "A", nota: "n".repeat(200) }).success).toBe(true);
+    const larga = crearUbicacionIgnoradaSchema.safeParse({ nombre: "A", nota: "n".repeat(201) });
+    expect(primerError(larga)?.message).toBe("La nota no puede superar 200 caracteres.");
+    expect(primerError(larga)?.path).toEqual(["nota"]);
+    expect(crearUbicacionIgnoradaSchema.safeParse({}).success).toBe(false);
+    expect(crearUbicacionIgnoradaSchema.safeParse({ nombre: 5 }).success).toBe(false);
+  });
+
+  it("la edición rechaza un cuerpo sin cambios y distingue nota ausente de nota vacía", () => {
+    const sin = editarUbicacionIgnoradaSchema.safeParse({});
+    expect(primerError(sin)?.message).toBe("No hay nada que cambiar.");
+    expect(editarUbicacionIgnoradaSchema.parse({ nombre: " nuevo  nombre " })).toEqual({ nombre: "NUEVO NOMBRE", nota: undefined });
+    expect(editarUbicacionIgnoradaSchema.parse({ nota: "" })).toEqual({ nombre: undefined, nota: null });
+    expect(editarUbicacionIgnoradaSchema.parse({ nota: null }).nota).toBeNull();
+    expect(editarUbicacionIgnoradaSchema.parse({ nota: " algo " }).nota).toBe("algo");
+    expect(editarUbicacionIgnoradaSchema.safeParse({ nombre: "" }).success).toBe(false);
+    expect(editarUbicacionIgnoradaSchema.safeParse({ nota: "n".repeat(201) }).success).toBe(false);
   });
 });

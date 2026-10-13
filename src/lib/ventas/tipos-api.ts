@@ -102,7 +102,12 @@ export type ResolucionTiendaApi =
       fecha_apertura: string | null;
       fecha_cierre: string | null;
     }
-  | { valor: string; resultado: "excluida"; nota: string }
+  /**
+   * M5c. El valor está en la lista de ubicaciones ignoradas (no es tienda): sus
+   * filas se excluyen por decisión (`ubicacion_ignorada`). `id` es el de la fila
+   * de `ubicaciones_ignoradas`; `nota`, la del usuario o `null`.
+   */
+  | { valor: string; resultado: "ignorada"; id: string; nota: string | null }
   | { valor: string; resultado: "desconocida" }
   | { valor: string; resultado: "inactiva" };
 

@@ -9,11 +9,14 @@ import { DataTable, type Columna } from "@/components/ui/data-table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/form";
 import { formatearNumero, plural } from "@/lib/formato";
+import { NOTA_CONCILIACION_080, textoEstadoQlik } from "@/lib/ventas/conciliacion";
 import {
+  BASE_CONCILIACION,
   ETIQUETAS_MEDIDA,
   ETIQUETAS_MOTIVO,
   MEDIDAS_DINERO,
   type Aviso,
+  type BaseConciliacion,
   type DetalleAviso,
   type Exclusion,
   type FilaConciliacion,
@@ -21,7 +24,7 @@ import {
   type MedidaVenta,
   type ResumenExclusion,
 } from "@/lib/ventas/tipos";
-import { formatearEntero, formatearPct, formatearPorcentaje, formatearSoles, formatearSoles2 } from "./comunes";
+import { formatearEntero, formatearPorcentaje, formatearSoles, formatearSoles2 } from "./comunes";
 import { useContextoMapeos } from "./contexto-mapeos";
 import { origenesDeGrupo, reasignadasDe, unirOrigenes, type IndiceOrigenes, type OrigenAsignable } from "./origenes-mapeo";
 import { textoQlikInvalido } from "./plan";
@@ -31,28 +34,63 @@ const formatearMedida = (m: MedidaVenta, v: number) => (esDinero(m) ? formatearS
 
 // ─── Conciliación ───
 
+const TONO_NIVEL = { exacto: "exito", tolerancia: "exito", difiere: "alerta" } as const;
+
+/**
+ * Resultado de comparar el comparable con el total de QlikView («Coincide (exacto)», «Coincide
+ * dentro de la tolerancia: S/ 143 (0,004 %)», «Difiere: 1 unidad (0,0018 %)»; textos de
+ * `textoEstadoQlik`). La diferencia es `comparable - qlik`: el sentido se dice con palabras, no
+ * solo con el color.
+ */
 function EstadoQlikCelda({ f }: { f: FilaConciliacion }) {
-  if (f.estado_qlik === "sin_qlik") return <span className="text-tinta-suave">—</span>;
-  if (f.estado_qlik === "coincide") {
+  const { nivel, texto } = textoEstadoQlik(f);
+  if (nivel === "sin_qlik") {
     return (
-      <span className="flex flex-wrap items-center gap-1.5">
-        <Badge tono="exito">Coincide</Badge>
-        {f.diferencia_qlik !== null && f.diferencia_qlik !== 0 && <span className="font-mono text-xs text-tinta-suave">{formatearMedida(f.medida, f.diferencia_qlik)}</span>}
+      <span className="text-tinta-suave">
+        <span aria-hidden>—</span>
+        <span className="sr-only">Sin total de QlikView</span>
       </span>
     );
   }
+  const dif = f.diferencia_qlik;
+  const sentido = dif === null || dif === 0 ? null : dif > 0 ? "El comparable es mayor que QlikView." : "El comparable es menor que QlikView.";
   return (
-    <span className="flex flex-wrap items-center gap-1.5">
-      <Badge tono="alerta">Difiere</Badge>
-      <span className="font-mono text-xs text-alerta">
-        {f.diferencia_qlik !== null ? formatearMedida(f.medida, f.diferencia_qlik) : ""}
-        {f.diferencia_relativa !== null && ` (${formatearPct(f.diferencia_relativa)})`}
-      </span>
-    </span>
+    <div className="space-y-0.5">
+      <Badge tono={TONO_NIVEL[nivel]}>{texto}</Badge>
+      {sentido && <div className="text-xs text-tinta-suave">{sentido}</div>}
+    </div>
   );
 }
 
-/** Tabla `medida · QlikView (opcional) · archivo · excluido · cargado · diferencia` de un mes. */
+const TITULO_COMPARACION = "Comparable frente a QlikView";
+
+/** Columnas de cifras comunes a la conciliación del reporte previo y a la guardada (archivo → no comparable → comparable → cargado). */
+function columnasCifras(): Columna<FilaConciliacion>[] {
+  return [
+    { clave: "archivo", titulo: "Archivo", className: "text-right font-mono", render: (f) => formatearMedida(f.medida, f.archivo) },
+    { clave: "no_comparable", titulo: "No comparable", className: "text-right font-mono", render: (f) => formatearMedida(f.medida, f.no_comparable) },
+    { clave: "comparable", titulo: "Comparable", className: "text-right font-mono font-medium", render: (f) => formatearMedida(f.medida, f.comparable) },
+    { clave: "cargado", titulo: "Cargado", className: "text-right font-mono font-medium", render: (f) => formatearMedida(f.medida, f.cargado) },
+  ];
+}
+
+const columnaMedida: Columna<FilaConciliacion> = {
+  clave: "medida",
+  titulo: "Medida",
+  render: (f) => <span className="whitespace-nowrap font-medium">{ETIQUETAS_MEDIDA[f.medida] ?? f.medida}</span>,
+};
+
+function PieConciliacion() {
+  return (
+    <p className="text-xs text-tinta-suave">
+      QlikView no muestra las filas sin género, mundo ni línea (ni filas de totales): se comparan sus totales con el <strong className="font-medium text-tinta">comparable</strong> = archivo − no
+      comparable. Unidades y stock en unidades deben coincidir exactos; venta, costo y stock valorizado, con una diferencia menor al 0,1 % (las cifras enteras del CSV no dan igualdad
+      exacta).
+    </p>
+  );
+}
+
+/** Tabla `medida · QlikView (opcional) · archivo · no comparable · comparable · cargado · comparable frente a QlikView` de un mes. */
 export function Conciliacion({
   mes,
   textos,
@@ -63,7 +101,7 @@ export function Conciliacion({
   onTotal: (medida: MedidaVenta, texto: string) => void;
 }) {
   const columnas: Columna<FilaConciliacion>[] = [
-    { clave: "medida", titulo: "Medida", render: (f) => <span className="whitespace-nowrap font-medium">{ETIQUETAS_MEDIDA[f.medida]}</span> },
+    columnaMedida,
     {
       clave: "qlik",
       titulo: "Total de QlikView (opcional)",
@@ -86,19 +124,15 @@ export function Conciliacion({
         );
       },
     },
-    { clave: "archivo", titulo: "Archivo", className: "text-right font-mono", render: (f) => formatearMedida(f.medida, f.archivo) },
-    { clave: "excluido", titulo: "Excluido", className: "text-right font-mono", render: (f) => formatearMedida(f.medida, f.excluido) },
-    { clave: "cargado", titulo: "Cargado", className: "text-right font-mono font-medium", render: (f) => formatearMedida(f.medida, f.cargado) },
-    { clave: "dif", titulo: "Archivo frente a QlikView", render: (f) => <EstadoQlikCelda f={f} /> },
+    ...columnasCifras(),
+    { clave: "dif", titulo: TITULO_COMPARACION, render: (f) => <EstadoQlikCelda f={f} /> },
   ];
 
   return (
     <div className="space-y-2">
       <DataTable columnas={columnas} filas={mes.conciliacion} claveFila={(f) => f.medida} />
-      <p className="text-xs text-tinta-suave">
-        Unidades y stock en unidades deben coincidir exactos; venta, costo y stock valorizado coinciden con una diferencia menor al 0,1 % (las cifras enteras del CSV no dan
-        igualdad exacta). Escribir los totales no vuelve a leer el archivo.
-      </p>
+      <PieConciliacion />
+      <p className="text-xs text-tinta-suave">Escribir los totales no vuelve a leer el archivo.</p>
       {!mes.identidad_ok && (
         <Alert>
           <strong>La identidad archivo = cargado + excluido no cierra.</strong> Es un error de la herramienta, no de tus datos: no se puede cargar este mes. Avisa al equipo con este archivo.
@@ -276,17 +310,30 @@ export function TablaResumenExclusiones({ resumen }: { resumen: ResumenExclusion
   return <DataTable columnas={columnas} filas={resumen} claveFila={(r) => `${r.tipo}-${r.motivo}`} vacio="No se excluyó ninguna fila." />;
 }
 
-/** Conciliación de solo lectura (la de una carga ya publicada). */
-export function ConciliacionGuardada({ filas }: { filas: FilaConciliacion[] }) {
+/**
+ * Conciliación de solo lectura (la de una carga ya publicada). `base` sale de
+ * `leerConciliacionGuardada`: `"archivo"` si el reporte no declara `base_conciliacion` (carga de
+ * 0.8.0), caso en que se muestra la nota de compatibilidad.
+ */
+export function ConciliacionGuardada({ filas, base }: { filas: FilaConciliacion[]; base: BaseConciliacion }) {
   const columnas: Columna<FilaConciliacion>[] = [
-    { clave: "medida", titulo: "Medida", render: (f) => <span className="whitespace-nowrap font-medium">{ETIQUETAS_MEDIDA[f.medida] ?? f.medida}</span> },
+    columnaMedida,
     { clave: "qlik", titulo: "QlikView", className: "text-right font-mono", render: (f) => (f.qlik === null ? "—" : formatearMedida(f.medida, f.qlik)) },
-    { clave: "archivo", titulo: "Archivo", className: "text-right font-mono", render: (f) => formatearMedida(f.medida, f.archivo) },
-    { clave: "excluido", titulo: "Excluido", className: "text-right font-mono", render: (f) => formatearMedida(f.medida, f.excluido) },
-    { clave: "cargado", titulo: "Cargado", className: "text-right font-mono font-medium", render: (f) => formatearMedida(f.medida, f.cargado) },
-    { clave: "dif", titulo: "Archivo frente a QlikView", render: (f) => <EstadoQlikCelda f={f} /> },
+    ...columnasCifras(),
+    { clave: "dif", titulo: TITULO_COMPARACION, render: (f) => <EstadoQlikCelda f={f} /> },
   ];
-  return <DataTable columnas={columnas} filas={filas} claveFila={(f) => f.medida} />;
+  const antigua = base !== BASE_CONCILIACION;
+  return (
+    <div className="space-y-2">
+      {antigua && (
+        <Alert tono="info">
+          {NOTA_CONCILIACION_080} En esta tabla el comparable es igual al archivo y la columna «{TITULO_COMPARACION}» es la comparación que se hizo entonces.
+        </Alert>
+      )}
+      <DataTable columnas={columnas} filas={filas} claveFila={(f) => f.medida} />
+      {!antigua && <PieConciliacion />}
+    </div>
+  );
 }
 
 function BloqueExclusiones({
@@ -525,7 +572,7 @@ export function DetalleMes({
         titulo="Excluidas por decisión (informativas)"
         ayuda={
           <>
-            Ya son decisiones tomadas en los maestros o por regla (por ejemplo, tiendas desactivadas o filas sin clasificar). No hay nada que hacer; se resaltan si pesan más del 2 %. Si quieres
+            Ya son decisiones tomadas en los maestros o por regla (por ejemplo, tiendas desactivadas, ubicaciones ignoradas que no son tiendas o filas sin clasificar). No hay nada que hacer; se resaltan si pesan más del 2 %. Si quieres
             cargar una combinación desactivada en el árbol, puedes asignarla a un GML o GMLE vigente.
           </>
         }

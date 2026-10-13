@@ -17,7 +17,7 @@ import type {
  * la pantalla distingue un `409` ("ese origen ya tiene otro destino") de un
  * fallo de red. Solo navegador; no importa nada del servidor.
  */
-async function llamar<T>(metodo: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<T> {
+export async function llamar<T>(metodo: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, {

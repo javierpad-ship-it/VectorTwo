@@ -36,7 +36,7 @@ export function CargarTab({ onPublicado }: { onPublicado: () => void }) {
   if (plan && plan.cargar.length === 0) razones.push("No hay ningún mes para cargar con las opciones elegidas.");
   if (sinIdentidad.length > 0) razones.push(`La identidad archivo = cargado + excluido no cierra en ${sinIdentidad.map((m) => nombrePeriodo(m.periodo)).join(", ")}.`);
   if (nuevasSinAgrupacion) razones.push("Elige la agrupación de las marcas nuevas.");
-  if (c.recalculando) razones.push("Se está recalculando el reporte con los mapeos nuevos.");
+  if (c.recalculando) razones.push("Se está recalculando el reporte.");
   const puedeCargar = prevVigente !== null && plan !== null && razones.length === 0 && !c.cargando && !c.leyendo && !c.recalculando;
 
   function textoConfirmar(p: PlanCarga): string {

@@ -168,3 +168,79 @@ describe("M5b regla 14: mapeos de combinación", () => {
     }
   });
 });
+
+describe("M5c regla 13: ubicaciones ignoradas", () => {
+  const dir = "src/app/api/tiendas/ubicaciones-ignoradas/";
+  const rutas = src.filter((f) => f.ruta.startsWith(dir) && f.ruta.endsWith("route.ts"));
+  const metodos = (ruta: string) =>
+    [...(rutas.find((f) => f.ruta === ruta)?.texto.matchAll(/export async function (GET|POST|PUT|PATCH|DELETE)\(/g) ?? [])].map((m) => m[1]).sort();
+
+  it("existen las dos rutas de la ficha (cuatro handlers) con sus métodos", () => {
+    expect(rutas.map((f) => f.ruta).sort()).toEqual([`${dir}[id]/route.ts`, `${dir}route.ts`]);
+    expect(metodos(`${dir}route.ts`)).toEqual(["GET", "POST"]);
+    expect(metodos(`${dir}[id]/route.ts`)).toEqual(["DELETE", "PATCH"]);
+  });
+
+  it("todo handler empieza con requirePlanner (lecturas incluidas; nunca requireUser ni requireAdmin) y usa supabaseAdmin, no supabaseServer", () => {
+    for (const f of rutas) {
+      const handlers = f.texto.match(/export async function (GET|POST|PUT|PATCH|DELETE)\([^)]*\)\s*\{\s*(?:const \{[^}]*\} = await (\w+)\(\);)?/g) ?? [];
+      expect(handlers.length, f.ruta).toBeGreaterThan(0);
+      for (const h of handlers) expect(h, `${f.ruta}: ${h}`).toContain("await requirePlanner()");
+      expect(f.texto, f.ruta).not.toMatch(/requireUser|requireAdmin|supabaseServer/);
+      expect(f.texto, f.ruta).toContain("supabaseAdmin");
+    }
+  });
+
+  it("solo consultas.ts toca la tabla `ubicaciones_ignoradas` (tipos generados, constraints de errores-db y tipos `Tables<...>` aparte)", () => {
+    const permitidos = new Set(["src/lib/tiendas/consultas.ts", "src/lib/supabase/database.types.ts", "src/lib/api/errores-db.ts"]);
+    const sinComentarios = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    for (const f of src) {
+      if (permitidos.has(f.ruta) || !f.texto.includes("ubicaciones_ignoradas")) continue;
+      const resto = sinComentarios(f.texto).replace(/Tables(?:Insert|Update)?<"ubicaciones_ignoradas">/g, "").replace(/["'`/]ubicaciones-ignoradas["'`/]?/g, "");
+      expect(resto, `${f.ruta} nombra la tabla`).not.toContain("ubicaciones_ignoradas");
+    }
+    const consultas = src.find((f) => f.ruta === "src/lib/tiendas/consultas.ts")?.texto ?? "";
+    expect(consultas).toContain('from("ubicaciones_ignoradas")');
+    expect(src.filter((f) => /from\(\s*["'`]ubicaciones_ignoradas["'`]/.test(f.texto)).map((f) => f.ruta)).toEqual(["src/lib/tiendas/consultas.ts"]);
+    const errores = src.find((x) => x.ruta === "src/lib/api/errores-db.ts")?.texto ?? "";
+    for (const m of errores.match(/ubicaciones_ignoradas\w*/g) ?? []) expect(m).toMatch(/^ubicaciones_ignoradas_\w+$/);
+  });
+
+  it("`previsualizar` lee las ubicaciones ignoradas y se las pasa al resolutor de tiendas", () => {
+    const f = src.find((x) => x.ruta === "src/app/api/ventas/previsualizar/route.ts")?.texto ?? "";
+    expect(f).toContain("leerUbicacionesIgnoradas");
+    expect(f).toMatch(/crearResolutorTiendas\(\s*tiendas\.data,\s*indiceUbicacionesIgnoradas\(/);
+  });
+
+  it("`tienda_excluida` y el resultado `excluida` ya no existen en src/", () => {
+    const viejos = src.filter((f) => /tienda_excluida|resultado:\s*"excluida"|=== "excluida"\) return "tienda/.test(f.texto)).map((f) => f.ruta);
+    expect(viejos).toEqual([]);
+  });
+
+  it("la lógica pura nueva no importa de @supabase/*, de components ni de módulos con acceso a la base", () => {
+    for (const ruta of ["src/lib/tiendas/ubicaciones.ts", "src/lib/ventas/conciliacion.ts"]) {
+      const f = src.find((x) => x.ruta === ruta);
+      expect(f, ruta).toBeDefined();
+      const imports = [...(f?.texto.matchAll(/(?:import|export)[^;]*?from\s+["']([^"']+)["']/g) ?? [])].map((m) => m[1]);
+      for (const origen of imports) {
+        expect(origen, `${ruta} importa ${origen}`).not.toMatch(/^@supabase\//);
+        expect(origen, `${ruta} importa ${origen}`).not.toMatch(/components/);
+        expect(origen, `${ruta} importa ${origen}`).not.toMatch(/supabase\/(admin|server)/);
+      }
+      expect(f?.texto, ruta).not.toContain("supabaseAdmin");
+      expect(f?.texto, ruta).not.toMatch(/^\s*["']use client["']/);
+    }
+  });
+
+  it("los tipos de contrato de tiendas (tipos-api.ts) no importan nada de la base ni de componentes que no sean tipos", () => {
+    const f = src.find((x) => x.ruta === "src/lib/tiendas/tipos-api.ts");
+    const imports = [...(f?.texto.matchAll(/^import[^;]*?from\s+["']([^"']+)["']/gm) ?? [])];
+    for (const m of imports) expect(m[0], m[0]).toMatch(/^import type /);
+    expect(f?.texto).not.toMatch(/supabase/);
+  });
+
+  it("TOLERANCIA_UNIDADES se define en un único lugar (tipos.ts)", () => {
+    const definiciones = src.filter((f) => /export const TOLERANCIA_UNIDADES\b/.test(f.texto)).map((f) => f.ruta);
+    expect(definiciones).toEqual(["src/lib/ventas/tipos.ts"]);
+  });
+});

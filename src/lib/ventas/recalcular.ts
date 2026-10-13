@@ -1,6 +1,7 @@
 import type { Acumulador } from "./acumulador";
 import { construirInforme, type ResultadoInforme } from "./informe";
 import { crearPeticionPrevisualizar } from "./previsualizar";
+import { marcarIgnorada } from "./resolver";
 import type { InformeCarga, TotalesQlik } from "./tipos";
 import type { PrevisualizarPeticion, PrevisualizarRespuesta } from "./tipos-api";
 
@@ -46,4 +47,32 @@ export async function recalcularInforme(
     posiblementeTruncado: opciones.posiblementeTruncado,
   });
   return { respuesta, resultado, reasignadas: totalReasignadas(resultado.informe) };
+}
+
+/**
+ * M5c. Marca `valor` como ubicación ignorada y recalcula el informe SIN releer el
+ * archivo ni volver a llamar a `previsualizar`: `marcarIgnorada` cambia solo esa
+ * posición de `respuesta.tiendas` (`desconocida` → `ignorada`) y `construirInforme`
+ * corre de nuevo sobre el mismo acumulador. Los totales de QlikView y el aviso de
+ * hoja truncada se pasan en `opciones` para conservarlos. `id` y `nota` son los de
+ * la fila que devolvió `POST /api/tiendas/ubicaciones-ignoradas`. Idempotente.
+ * Devuelve la respuesta nueva (hay que guardarla como la vigente: la siguiente
+ * ubicación se marca sobre ella) y el resultado.
+ */
+export function recalcularConIgnorada(
+  acumulador: Acumulador,
+  respuesta: PrevisualizarRespuesta,
+  valor: string,
+  id: string,
+  nota: string | null,
+  opciones: { totalesQlik?: Record<string, TotalesQlik>; posiblementeTruncado?: boolean } = {}
+): { respuesta: PrevisualizarRespuesta; resultado: ResultadoInforme } {
+  const nueva = marcarIgnorada(respuesta, valor, id, nota);
+  const resultado = construirInforme({
+    acumulador,
+    resoluciones: nueva,
+    totalesQlik: opciones.totalesQlik,
+    posiblementeTruncado: opciones.posiblementeTruncado,
+  });
+  return { respuesta: nueva, resultado };
 }

@@ -97,6 +97,45 @@ export const editarTiendaSchema = z
   .partial()
   .refine(tieneAlgo, noVacio);
 
+// ─── Ubicaciones ignoradas (M5c) ───
+
+/** Nombre tal como viene en la columna TIENDA del archivo, normalizado como `tiendas.nombre`. */
+const nombreUbicacion = z
+  .string("El nombre debe ser texto.")
+  .transform(normalizarNombre)
+  .pipe(z.string().min(1, "El nombre es obligatorio.").max(120, "El nombre no puede superar 120 caracteres."));
+
+/** Nota libre: vacía, `null` o ausente → `null`; más de 200 caracteres → error. */
+const notaUbicacion = z
+  .string("La nota debe ser texto.")
+  .nullable()
+  .optional()
+  .transform((v) => {
+    const t = (v ?? "").trim();
+    return t === "" ? null : t;
+  })
+  .pipe(z.string().max(200, "La nota no puede superar 200 caracteres.").nullable());
+
+export const crearUbicacionIgnoradaSchema = z.object({ nombre: nombreUbicacion, nota: notaUbicacion });
+
+/**
+ * Edición parcial. Como `nota` pasa por un `transform` que vuelve `null` la
+ * ausencia, el esquema la deja `undefined` cuando la clave no viene (no se
+ * toca) y `null`/texto cuando viene (`""` la borra).
+ */
+export const editarUbicacionIgnoradaSchema = z
+  .object({ nombre: nombreUbicacion.optional(), nota: z.unknown().optional() })
+  .transform((d, ctx) => {
+    if (d.nota === undefined) return { nombre: d.nombre, nota: undefined as string | null | undefined };
+    const r = notaUbicacion.safeParse(d.nota);
+    if (!r.success) {
+      for (const i of r.error.issues) ctx.addIssue({ code: "custom", message: i.message, path: ["nota"] });
+      return z.NEVER;
+    }
+    return { nombre: d.nombre, nota: r.data as string | null | undefined };
+  })
+  .refine((d) => d.nombre !== undefined || d.nota !== undefined, "No hay nada que cambiar.");
+
 // ─── Filtros de lectura (query string) ───
 
 /** `GET /api/tiendas`: cada filtro es opcional; `""` cuenta como ausente. */
@@ -142,3 +181,5 @@ export type EditarTienda = z.infer<typeof editarTiendaSchema>;
 export type FiltrosTiendas = z.infer<typeof filtrosTiendasSchema>;
 export type FiltrosAperturas = z.infer<typeof filtrosAperturasSchema>;
 export type ImportarTiendas = z.infer<typeof importarTiendasSchema>;
+export type CrearUbicacionIgnorada = z.infer<typeof crearUbicacionIgnoradaSchema>;
+export type EditarUbicacionIgnorada = z.infer<typeof editarUbicacionIgnoradaSchema>;

@@ -11,7 +11,8 @@ import { crearPeticionPrevisualizar } from "@/lib/ventas/previsualizar";
 import { CAMPOS_ARCHIVO_VENTA } from "@/lib/ventas/columnas";
 import { construirInforme, marcasSinId, sustituirMarcasNuevas, type ResultadoInforme } from "@/lib/ventas/informe";
 import { interpretarFila } from "@/lib/ventas/interpretar";
-import { recalcularInforme } from "@/lib/ventas/recalcular";
+import { recalcularConIgnorada, recalcularInforme } from "@/lib/ventas/recalcular";
+import { ignorarUbicacion } from "./api-ubicaciones";
 import { construirIndiceOrigenes, type IndiceOrigenes } from "./origenes-mapeo";
 import {
   crearProyector,
@@ -329,6 +330,34 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
     }
   }
 
+  /**
+   * "Ignorar esta ubicación" (ficha M5c): guarda el nombre en la lista de ubicaciones ignoradas y
+   * reconstruye el informe con el mismo acumulador, sin releer el archivo ni volver a llamar a
+   * `previsualizar`: `marcarIgnorada` cambia solo la resolución de ese valor. La firma no cambia y
+   * los totales de QlikView escritos se conservan (viven en `textosQlik`, aparte del informe). Si
+   * falla, lanza (el diálogo muestra el error) y el reporte anterior queda intacto.
+   */
+  async function ignorarUbicacionDelArchivo(valor: string, nota: string): Promise<void> {
+    const p = prevVigente;
+    const acum = acumRef.current;
+    if (!p || !acum) throw new Error("Ya no hay una lectura en memoria: vuelve a leer el archivo para ignorar ubicaciones.");
+    if (leyendo || cargando || recalculando) throw new Error("Hay una lectura, una carga o un recálculo en marcha: espera a que termine.");
+    setRecalculando(true);
+    try {
+      const guardada = await ignorarUbicacion(valor, nota);
+      await new Promise<void>((r) => setTimeout(r, 0)); // deja pintar "Recalculando el reporte…" antes del cálculo (síncrono)
+      // `marcarIgnorada` + `construirInforme` sobre el mismo acumulador (src/lib/ventas/recalcular.ts). Los totales de
+      // QlikView no se pasan: viven en `textosQlik` y `informeConQlik` los aplica sobre el informe, como tras un mapeo.
+      const { respuesta, resultado } = recalcularConIgnorada(acum, p.respuesta, valor, guardada.id, guardada.nota, {
+        posiblementeTruncado: p.posiblementeTruncado,
+      });
+      const origenes = construirIndiceOrigenes(acum, respuesta);
+      setPrev((actual) => (actual && actual.firma === p.firma ? { ...actual, resultado, respuesta, origenes, leidoEn: Date.now() } : actual));
+    } finally {
+      setRecalculando(false);
+    }
+  }
+
   function setTotalQlik(periodo: string, medida: MedidaVenta, texto: string) {
     setTextosQlik((t) => ({ ...t, [periodo]: { ...t[periodo], [medida]: texto } }));
   }
@@ -508,6 +537,7 @@ export function useCargaVentas({ onPublicado }: { onPublicado: () => void }) {
     puedeRecalcular,
     recalculando,
     recalcularConMapeos,
+    ignorarUbicacionDelArchivo,
     elegirArchivo,
     cambiarCodificacion,
     cambiarSeparador,

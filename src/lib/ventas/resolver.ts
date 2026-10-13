@@ -4,6 +4,7 @@ import { codigoUnico, type EstadoImportacion } from "@/lib/arbol/importar";
 import type { AgrupacionMarcaEstado, MarcaEstado, MarcaNueva } from "@/lib/marcas/importar";
 import { motivoRechazoAgrupacionDestino } from "@/lib/marcas/reglas";
 import { esTipoTienda } from "@/lib/tiendas/estado";
+import type { UbicacionesIgnoradasIndice } from "@/lib/tiendas/ubicaciones";
 import { esComodin } from "./interpretar";
 import { claveOrigen, claveTerna, esComodinOrigen, normalizarOrigen, ternaVacia, vacioLegible } from "./origen-mapeo";
 import type { DestinoMapeo, MapeoNoAplicableApi, OrigenMapeo } from "./tipos-mapeo";
@@ -14,6 +15,7 @@ import {
 } from "./tipos";
 import type {
   CombinacionPeticion,
+  PrevisualizarRespuesta,
   ResolucionCombinacionApi,
   ResolucionMarcaApi,
   ResolucionTiendaApi,
@@ -34,18 +36,23 @@ export type TiendaResolvible = Pick<
   "id" | "codigo" | "nombre" | "tipo" | "fecha_apertura" | "fecha_cierre" | "activo"
 >;
 
-/** Tiendas que se ignoran a propósito: valor normalizado → nota. Hoy vacía (se crean desactivadas en M4). */
-export type TiendasExcluidas = ReadonlyMap<string, string>;
+/**
+ * Ubicaciones ignoradas (M5c): nombre normalizado → `{ id, nota }` de la fila de
+ * `ubicaciones_ignoradas`. `indiceUbicacionesIgnoradas` (src/lib/tiendas/ubicaciones.ts)
+ * lo arma desde las filas de la base.
+ */
+export type TiendasIgnoradas = UbicacionesIgnoradasIndice;
 
 /**
- * Regla 28. Por nombre normalizado primero (es lo que trae QlikView) y, si no,
- * por código; un valor que coincida por nombre con una tienda y por código con
- * otra se resuelve a favor del nombre. `excluida` (lista) se mira antes que
- * `desconocida`; `inactiva` se distingue de `desconocida`.
+ * Regla 28 (M5c). Orden: tienda por nombre normalizado (es lo que trae
+ * QlikView) → tienda por código → ubicación ignorada → desconocida. Un valor
+ * que coincida por nombre con una tienda y por código con otra se resuelve a
+ * favor del nombre. La tienda manda: si existe (activa o no) gana a la lista de
+ * ignoradas. `inactiva` se distingue de `desconocida`.
  */
 export function crearResolutorTiendas(
   tiendas: readonly TiendaResolvible[],
-  excluidas: TiendasExcluidas = new Map()
+  ignoradas: TiendasIgnoradas = new Map()
 ): (valor: string) => ResolucionTiendaApi {
   const porNombre = new Map<string, TiendaResolvible>();
   const porCodigo = new Map<string, TiendaResolvible>();
@@ -60,8 +67,10 @@ export function crearResolutorTiendas(
     const codigo = aCodigo(valor);
     const t = porNombre.get(nombre) ?? (codigo !== "" ? porCodigo.get(codigo) : undefined);
     if (!t) {
-      const nota = excluidas.get(nombre);
-      return nota !== undefined ? { valor: nombre, resultado: "excluida", nota } : { valor: nombre, resultado: "desconocida" };
+      const ig = ignoradas.get(nombre);
+      return ig !== undefined
+        ? { valor: nombre, resultado: "ignorada", id: ig.id, nota: ig.nota }
+        : { valor: nombre, resultado: "desconocida" };
     }
     if (!t.activo) return { valor: nombre, resultado: "inactiva" };
     return {
@@ -79,9 +88,35 @@ export function crearResolutorTiendas(
 export function resolverTienda(
   valor: string,
   tiendas: readonly TiendaResolvible[],
-  excluidas: TiendasExcluidas = new Map()
+  ignoradas: TiendasIgnoradas = new Map()
 ): ResolucionTiendaApi {
-  return crearResolutorTiendas(tiendas, excluidas)(valor);
+  return crearResolutorTiendas(tiendas, ignoradas)(valor);
+}
+
+/**
+ * Regla 7 de M5c: marca `valor` como ubicación ignorada en una respuesta de
+ * `previsualizar` SIN volver a llamar al servidor. Cambia solo la posición de
+ * ese valor en `tiendas` de `desconocida` a `ignorada` (la tienda manda: un valor
+ * `ok` o `inactiva` no se toca). Devuelve una respuesta nueva; la original no
+ * se modifica. Idempotente: aplicarla dos veces da lo mismo, y si el valor ya
+ * estaba ignorada se actualizan `id` y `nota`. Con el resultado, el hook vuelve a
+ * ejecutar `construirInforme` sobre el mismo acumulador.
+ */
+export function marcarIgnorada(
+  respuesta: PrevisualizarRespuesta,
+  valor: string,
+  id: string,
+  nota: string | null
+): PrevisualizarRespuesta {
+  const nombre = normalizarNombre(valor);
+  return {
+    ...respuesta,
+    tiendas: respuesta.tiendas.map((t) =>
+      t.valor === nombre && (t.resultado === "desconocida" || t.resultado === "ignorada")
+        ? { valor: nombre, resultado: "ignorada" as const, id, nota }
+        : t
+    ),
+  };
 }
 
 // ─── Combinaciones ───

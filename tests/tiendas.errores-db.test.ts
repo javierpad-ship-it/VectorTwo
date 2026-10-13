@@ -41,3 +41,21 @@ describe("errores-db · checks de M4 (nombres reales de la migración)", () => {
     expect(check("tiendas_nombre_len_check").mensaje).toBe("El nombre debe tener entre 1 y 120 caracteres.");
   });
 });
+
+describe("errores-db · ubicaciones ignoradas (M5c, nombres reales de la migración 0009)", () => {
+  it("el único del nombre", () => {
+    expect(unico("ubicaciones_ignoradas_nombre_uniq")).toEqual({ status: 409, mensaje: "Esa ubicación ya está en la lista." });
+  });
+  it("los checks de nombre y nota", () => {
+    const c = (n: string) => describirErrorDb("23514", `new row for relation "ubicaciones_ignoradas" violates check constraint "${n}"`);
+    expect(c("ubicaciones_ignoradas_nombre_len_check")).toEqual({
+      status: 400,
+      mensaje: "El nombre debe tener entre 1 y 120 caracteres.",
+    });
+    expect(c("ubicaciones_ignoradas_nota_len_check")).toEqual({ status: 400, mensaje: "La nota no puede superar 200 caracteres." });
+  });
+  it("no pisa los mensajes de marcas ni de tiendas", () => {
+    expect(unico("tiendas_nombre_uniq").mensaje).toBe("Ya existe una tienda con ese nombre.");
+    expect(check("marcas_nota_len_check").mensaje).toBe("La nota no puede superar 200 caracteres.");
+  });
+});

@@ -243,15 +243,17 @@ describe("conciliación contra QlikView (regla 21)", () => {
     expect(c.unidades.estado_qlik).toBe("coincide");
     expect(c.venta_soles.estado_qlik).toBe("coincide"); // 0,05 %
     expect(c.venta_soles.diferencia_qlik).toBe(-5);
+    expect(c.venta_soles.comparable).toBe(10_000);
     expect(c.stock_unidades.estado_qlik).toBe("difiere");
     expect(c.costo_vendido.estado_qlik).toBe("sin_qlik");
     expect(MEDIDAS_VENTA.every((k) => c[k].descuadre === 0)).toBe(true);
   });
 
-  it("conciliarMes expone archivo, excluido y cargado", () => {
+  it("conciliarMes expone archivo, no comparable, comparable, excluido y cargado", () => {
     const m = mes(armar([{}, { tienda: "OFICINA CENTRAL" }]));
     const v = m.conciliacion.find((x) => x.medida === "venta_soles");
-    expect(v).toMatchObject({ archivo: 2000, excluido: 1000, cargado: 1000, descuadre: 0 });
+    // Sin filas sin clasificar ni de totales, comparable = archivo.
+    expect(v).toMatchObject({ archivo: 2000, no_comparable: 0, comparable: 2000, excluido: 1000, cargado: 1000, descuadre: 0 });
     expect(conciliarMes).toBeTypeOf("function");
   });
 });

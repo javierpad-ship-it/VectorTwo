@@ -1,6 +1,6 @@
-import { estadoQlik } from "@/lib/ventas/informe";
-import { leerNumero, redondear2, NUMERO_INVALIDO } from "@/lib/ventas/numeros";
-import { MEDIDAS_DINERO, MEDIDAS_VENTA, TANDA_CLIENTE } from "@/lib/ventas/tipos";
+import { conciliarFilasConQlik } from "@/lib/ventas/conciliacion";
+import { leerNumero, NUMERO_INVALIDO } from "@/lib/ventas/numeros";
+import { MEDIDAS_VENTA, TANDA_CLIENTE } from "@/lib/ventas/tipos";
 import type { FilaConciliacion, InformeCarga, InformeMes, MedidaVenta, TotalesQlik } from "@/lib/ventas/tipos";
 
 /**
@@ -82,28 +82,15 @@ export function totalesQlikPorMes(textos: TextosQlik): Record<string, TotalesQli
   return salida;
 }
 
-const esDinero = (m: MedidaVenta) => (MEDIDAS_DINERO as readonly MedidaVenta[]).includes(m);
-
 /**
  * Recalcula las columnas de QlikView de la conciliación de un mes con los
  * totales escritos (el informe se arma una sola vez; escribir un total no debe
- * recorrer 400 000 filas). Mismas reglas que `conciliarMes`: unidades y stock
- * exactos, soles con tolerancia relativa del 0,1 %.
+ * recorrer 400 000 filas). M5c: compara contra `f.comparable` (archivo menos lo
+ * que QlikView no muestra), no contra `f.archivo`. La regla vive en
+ * `src/lib/ventas/conciliacion.ts`.
  */
 export function conciliarConQlik(filas: FilaConciliacion[], qlik: TotalesQlik | undefined): FilaConciliacion[] {
-  return filas.map((f) => {
-    const q = qlik?.[f.medida];
-    const estado = estadoQlik(f.medida, q, f.archivo);
-    if (q === undefined || estado === "sin_qlik") return { ...f, qlik: null, diferencia_qlik: null, diferencia_relativa: null, estado_qlik: "sin_qlik" };
-    const dif = f.archivo - q;
-    return {
-      ...f,
-      qlik: q,
-      diferencia_qlik: esDinero(f.medida) ? redondear2(dif) : dif,
-      diferencia_relativa: q !== 0 ? Math.abs(f.archivo - q) / Math.abs(q) : null,
-      estado_qlik: estado,
-    };
-  });
+  return conciliarFilasConQlik(filas, qlik);
 }
 
 /** El informe con la conciliación de cada mes recalculada con los totales de QlikView escritos. */

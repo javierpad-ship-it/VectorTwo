@@ -18,9 +18,10 @@ import {
   ETIQUETAS_MEDIDA,
   MAX_ENTRADAS_REPORTE,
   MAX_REPORTE_BYTES,
+  BASE_CONCILIACION,
   MEDIDAS_DINERO,
   MEDIDAS_VENTA,
-  TOLERANCIA_CONCILIACION,
+  MOTIVOS_NO_COMPARABLES,
   UMBRAL_AVISO_ABIERTO,
   UMBRAL_BLOQUEO_ERRORES,
   UMBRAL_COMPARACION_MES,
@@ -29,7 +30,6 @@ import {
   type Aviso,
   type CodigoAvisoONota,
   type Diagnostico,
-  type EstadoConciliacionQlik,
   type Exclusion,
   type FilaConciliacion,
   type HuellaMes,
@@ -47,6 +47,7 @@ import {
 } from "./tipos";
 import { planificarMarcasNuevas, type CandidataMarcaNueva } from "./resolver";
 import { describirOrigen } from "./origen-mapeo";
+import { coincideConQlik, estadoQlik } from "./conciliacion";
 import type { PrevisualizarRespuesta, ResolucionCombinacionApi } from "./tipos-api";
 import type { MapeoNoAplicableApi } from "./tipos-mapeo";
 
@@ -66,26 +67,8 @@ import type { MapeoNoAplicableApi } from "./tipos-mapeo";
 
 const esDinero = (m: MedidaVenta) => (MEDIDAS_DINERO as readonly MedidaVenta[]).includes(m);
 
-/**
- * Regla 21. Unidades y stock en unidades coinciden solo si la diferencia es 0;
- * venta, costo y stock valorizado, con diferencia relativa menor a 0,1 %
- * (`0,0999 %` coincide y `0,1 %` no). Aritmética de céntimos enteros, sin
- * deriva de coma flotante. `qlik` es el total de QlikView; `archivo`, el del archivo.
- */
-export function coincideConQlik(medida: MedidaVenta, qlik: number, archivo: number): boolean {
-  if (!esDinero(medida)) return qlik === archivo;
-  const q = aCentimos(qlik);
-  const a = aCentimos(archivo);
-  const dif = Math.abs(a - q);
-  if (q === 0) return dif === 0;
-  // dif / |q| < 0,1 % sin dividir: exacto en céntimos enteros.
-  return dif * (1 / TOLERANCIA_CONCILIACION) < Math.abs(q);
-}
-
-export function estadoQlik(medida: MedidaVenta, qlik: number | null | undefined, archivo: number): EstadoConciliacionQlik {
-  if (qlik === null || qlik === undefined || !Number.isFinite(qlik)) return "sin_qlik";
-  return coincideConQlik(medida, qlik, archivo) ? "coincide" : "difiere";
-}
+// `coincideConQlik` y `estadoQlik` viven en `conciliacion.ts` (también las usa el detalle de una carga guardada).
+export { coincideConQlik, estadoQlik };
 
 const valorMedidaC = (m: MedidaVenta, t: Tally): number =>
   m === "unidades"
@@ -112,25 +95,51 @@ export function medidasInforme(t: Tally): MedidasInforme {
   };
 }
 
-/** Tabla `medida · QlikView (opcional) · archivo · excluido · cargado · diferencia` de un mes. */
-export function conciliarMes(archivo: Tally, excluido: Tally, cargado: Tally, qlik?: TotalesQlik): FilaConciliacion[] {
+/**
+ * Tally de las exclusiones de un mes cuyo motivo QlikView no muestra
+ * (`MOTIVOS_NO_COMPARABLES`): lo que se resta del archivo para obtener la base
+ * comparable.
+ */
+export function tallyNoComparable(grupos: readonly (Tally & { motivo: MotivoExclusion })[]): Tally {
+  const t = tallyVacio();
+  for (const g of grupos) if (MOTIVOS_NO_COMPARABLES.includes(g.motivo)) sumarEn(t, g, g.filas);
+  return t;
+}
+
+/**
+ * Tabla `medida · QlikView (opcional) · archivo · no comparable · comparable ·
+ * excluido · cargado · diferencia` de un mes. `noComparable` es el tally de los
+ * grupos del mes con motivo en `MOTIVOS_NO_COMPARABLES`; `comparable = archivo -
+ * noComparable` es lo que se compara con QlikView.
+ */
+export function conciliarMes(
+  archivo: Tally,
+  excluido: Tally,
+  cargado: Tally,
+  noComparable: Tally,
+  qlik?: TotalesQlik
+): FilaConciliacion[] {
   return MEDIDAS_VENTA.map((medida) => {
     const a = valorMedidaC(medida, archivo);
+    const nc = valorMedidaC(medida, noComparable);
+    const cmp = a - nc;
     const e = valorMedidaC(medida, excluido);
     const c = valorMedidaC(medida, cargado);
     const q = qlik?.[medida];
-    const estado = estadoQlik(medida, q, aSoles(medida, a));
+    const comparableSoles = aSoles(medida, cmp);
+    const estado = estadoQlik(medida, q, comparableSoles);
     const tieneQ = estado !== "sin_qlik" && q !== undefined;
-    const archivoSoles = aSoles(medida, a);
     return {
       medida,
       qlik: tieneQ ? (q as number) : null,
-      archivo: archivoSoles,
+      archivo: aSoles(medida, a),
+      no_comparable: aSoles(medida, nc),
+      comparable: comparableSoles,
       excluido: aSoles(medida, e),
       cargado: aSoles(medida, c),
       descuadre: aSoles(medida, a - e - c),
-      diferencia_qlik: tieneQ ? aSoles(medida, a - aCentimosSiDinero(medida, q as number)) : null,
-      diferencia_relativa: tieneQ && (q as number) !== 0 ? Math.abs(archivoSoles - (q as number)) / Math.abs(q as number) : null,
+      diferencia_qlik: tieneQ ? aSoles(medida, cmp - aCentimosSiDinero(medida, q as number)) : null,
+      diferencia_relativa: tieneQ && (q as number) !== 0 ? Math.abs(comparableSoles - (q as number)) / Math.abs(q as number) : null,
       estado_qlik: estado,
     };
   });
@@ -278,7 +287,7 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
     const r = res.tiendas[t];
     if (!r || r.resultado === "desconocida") return "tienda_desconocida";
     if (r.resultado === "inactiva") return "tienda_inactiva";
-    if (r.resultado === "excluida") return "tienda_excluida";
+    if (r.resultado === "ignorada") return "ubicacion_ignorada";
     return null;
   });
   const tiendaOrd = new Int32Array(dic.tiendas.length).fill(-1);
@@ -569,6 +578,7 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
     const grupos = [...exclusiones.values()].filter((g) => g.periodo === p);
     const excluido = tallyVacio();
     const errores = tallyVacio();
+    const noComparable = tallyNoComparable(grupos);
     for (const g of grupos) {
       sumarEn(excluido, g, g.filas);
       if (esMotivoError(g.motivo)) sumarEn(errores, g, g.filas);
@@ -861,7 +871,7 @@ export function construirInforme(entrada: EntradaInforme): ResultadoInforme {
       reasignadas: medidasInforme(reasig ? reasig.total : tallyVacio()),
       mapeos_aplicados: [...(mapeosAplicadosPorMes.get(p) ?? [])].sort(),
       identidad_ok: identidadOk,
-      conciliacion: conciliarMes(st.archivo, excluido, cargado, entrada.totalesQlik?.[periodo]),
+      conciliacion: conciliarMes(st.archivo, excluido, cargado, noComparable, entrada.totalesQlik?.[periodo]),
       resumen_exclusiones: resumen,
       exclusiones: detalleExclusiones,
       avisos,
@@ -1062,6 +1072,7 @@ export function armarReporteMes(informe: InformeCarga, periodo: string, opciones
       mapeos_aplicados: mes.mapeos_aplicados,
       identidad_ok: mes.identidad_ok,
       conciliacion: mes.conciliacion,
+      base_conciliacion: BASE_CONCILIACION,
       totales_qlik: opciones.totalesQlik ?? null,
       resumen_exclusiones: mes.resumen_exclusiones,
       exclusiones,

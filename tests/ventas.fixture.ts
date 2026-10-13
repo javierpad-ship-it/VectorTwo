@@ -1,4 +1,5 @@
 import type { EstadoImportacion } from "@/lib/arbol/importar";
+import type { UbicacionesIgnoradasIndice } from "@/lib/tiendas/ubicaciones";
 import type { AgrupacionMarcaEstado, MarcaEstado } from "@/lib/marcas/importar";
 import { Acumulador } from "@/lib/ventas/acumulador";
 import { interpretarFila } from "@/lib/ventas/interpretar";
@@ -120,13 +121,15 @@ type Extras = {
   anterior?: PrevisualizarRespuesta["anterior"];
   huellas?: HuellaStock[];
   tiendas?: TiendaResolvible[];
+  /** M5c. Ubicaciones ignoradas (nombre normalizado → `{ id, nota }`). */
+  ignoradas?: UbicacionesIgnoradasIndice;
   marcas?: { id: string; nombre: string; agrupacion_marca_id: string; activo: boolean }[];
 };
 
 /** Lo que devolvería `previsualizar`, calculado con los resolutores reales sobre el estado sintético. */
 export function resoluciones(acum: Acumulador, extras: Extras = {}): EntradaInforme["resoluciones"] {
   const d = acum.diccionarios;
-  const rt = crearResolutorTiendas(extras.tiendas ?? TIENDAS);
+  const rt = crearResolutorTiendas(extras.tiendas ?? TIENDAS, extras.ignoradas);
   const rc = crearResolutorCombinaciones(extras.estado ?? ARBOL, extras.mapeos ?? []);
   const rm = crearResolutorMarcas(extras.marcas ?? MARCAS);
   const combinaciones = d.combinaciones.map((c) => rc({ genero: c.genero, mundo: c.mundo, linea: c.linea, equivalencia: c.equivalencia }));

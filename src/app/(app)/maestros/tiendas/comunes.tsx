@@ -15,6 +15,14 @@ export function formatearFecha(iso: string | null | undefined): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
 
+/** Instante ISO (`2026-10-09T15:02:11Z`) → `09/10/2026`, en la fecha de Lima; vacío o inválido → `—`. */
+export function formatearFechaCorta(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("es-PE", { timeZone: "America/Lima", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+}
+
 /** `2019-03-15` → `15/03`. */
 export function formatearDiaMes(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
