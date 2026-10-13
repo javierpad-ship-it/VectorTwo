@@ -643,6 +643,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      ubicaciones_ignoradas: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          id: string;
+          nombre: string;
+          nota: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          id?: string;
+          nombre: string;
+          nota?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          id?: string;
+          nombre?: string;
+          nota?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       venta_stock_mensual: {
         Row: {
           agrupacion_talla_id: string;
