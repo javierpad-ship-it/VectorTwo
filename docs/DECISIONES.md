@@ -554,7 +554,7 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Descartado.** Distancia de Levenshtein; aplicar la sugerencia fuerte automáticamente.
 
-## 2026-10-12 · Numeración de migraciones y versiones de las mejoras 05b, 05c, 02b y M6 (05b construida 2026-10-12; las otras, pendientes de construcción)
+## 2026-10-12 · Numeración de migraciones y versiones de las mejoras 05b, 05c, 02b y M6 (05b construida 2026-10-12 y 05c 2026-10-13; 02b y M6, pendientes de construcción)
 
 **Decisión.** Orden de construcción y numeración final, fijada con Javier el 2026-10-12: 05b mapeo de combinaciones, migración `0008` y `0.8.1 · M5`; 05c ubicaciones ignoradas y conciliación, `0009_ubicaciones_ignoradas.sql` y `0.8.2 · M5`; 02b nivel de planificación y marcas relevantes por GML, `0010` y `0.8.3 · M2b`; M6 curvas de estacionalidad, `0011` (la versión `0.9.0 · M6` no cambia). Los documentos de las cinco fichas y PLAN §4, §5 y §7 se renumeraron en consecuencia.
 
@@ -564,7 +564,9 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Estado (2026-10-12).** La 05b se construyó con `0008_mapeo_combinaciones.sql` y `0.8.1 · M5`, como estaba previsto. 05c (`0009`, `0.8.2`), 02b (`0010`, `0.8.3`) y M6 (`0011`) siguen sin construir.
 
-## 2026-10-12 · M5c: las ubicaciones que no son tiendas viven en `ubicaciones_ignoradas`, no en `tiendas` desactivadas (propuesta, pendiente de construcción)
+**Estado (2026-10-13).** La 05c se construyó con `0009_ubicaciones_ignoradas.sql` y `0.8.2 · M5`, como estaba previsto. 02b (`0010`, `0.8.3`) y M6 (`0011`) siguen sin construir.
+
+## 2026-10-12 · M5c: las ubicaciones que no son tiendas viven en `ubicaciones_ignoradas`, no en `tiendas` desactivadas (construido 2026-10-13)
 
 **Decisión.** Las ubicaciones del archivo de venta que no son tiendas (la central, las oficinas) se guardan en una tabla propia, `ubicaciones_ignoradas` (nombre normalizado único, nota, sin FKs ni seed), administrada en Maestros → Tiendas y con un botón *Ignorar esta ubicación* en el reporte previo que recalcula sin releer el archivo. Sus filas se excluyen por decisión con el motivo `ubicacion_ignorada` (antes `tienda_excluida`, que nunca se usó), no pesan en el 2 % de errores y no crean tiendas. El resolutor busca tienda por nombre, tienda por código, ubicación ignorada y por último desconocida: si existe una tienda con el mismo nombre, la tienda manda y la fila ignorada queda "sin efecto". Sustituye a la entrada del 2026-10-11 "lo desactivado se excluye en silencio informativo…", en lo que dice de crear desactivadas las tres tiendas "sin tabla de exclusiones" (el resto de esa entrada sigue en pie).
 
@@ -572,10 +574,14 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Descartado.** Seguir con `tiendas.activo = false`; un botón "Excluir siempre" sin pantalla de administración.
 
-## 2026-10-12 · M5c: la conciliación contra QlikView compara con el comparable, mostrando siempre las cinco cifras (propuesta, pendiente de construcción)
+**Estado de la construcción (2026-10-13).** Construido en `0.8.2 · M5` con la migración `0009_ubicaciones_ignoradas.sql` (aplicada en Vector2 y verificada): la decisión se cumple tal cual, y el "Estado: propuesta" de arriba queda superado por esta línea. Hito pendiente de recorrer por Javier. Precisiones al construir: el índice del resolutor guarda `{ id, nota }` por nombre (no solo la nota), para que *Ignorar esta ubicación* recalcule sin volver a consultar; el esquema de edición no toca la nota si la petición no la trae; y el atajo del reporte previo abre un diálogo con nota opcional en vez de un `confirm`. Detalle en `docs/modulos/05c-ubicaciones-conciliacion.md`.
+
+## 2026-10-12 · M5c: la conciliación contra QlikView compara con el comparable, mostrando siempre las cinco cifras (construido 2026-10-13)
 
 **Decisión.** La conciliación compara los totales que escribe Javier con el **comparable** = archivo menos las exclusiones `sin_clasificar` y `fila_total`, que la tabla de QlikView de Javier no muestra (sus dimensiones son género, mundo y línea). La tabla muestra siempre archivo, no comparable, comparable, cargado y QlikView. Las tolerancias no cambian: unidades y stock en unidades exactos; soles con diferencia relativa menor al 0,1 %. Los reportes guardados con `0.8.0` se leen sin migrarlos, con una nota de que concilian contra el archivo completo. Sustituye a "compara con el total del archivo tal cual" de la entrada del 2026-10-11 sobre lo que decidió el backend.
 
 **Por qué.** Contra el archivo completo siempre decía "difiere" porque las filas sin género, mundo ni línea no existen para el objeto de QlikView. No se restan las ubicaciones ignoradas ni los géneros, mundos o líneas desconocidos sin evidencia: si el hito demuestra lo contrario, es una línea en `MOTIVOS_NO_COMPARABLES`. Estado: propuesta, pendiente de aprobación y de construcción.
 
 **Descartado.** Conciliar contra lo cargado (esconde lo excluido); restar también ubicaciones ignoradas o géneros desconocidos sin evidencia; varias bases a elegir.
+
+**Estado de la construcción (2026-10-13).** Construido en `0.8.2 · M5`: el "Estado: propuesta" de arriba queda superado por esta línea. Hito pendiente de recorrer por Javier. Se cumple tal cual, con una precisión: el porcentaje de la diferencia se **trunca** en vez de redondear, para que 0,099996 % no se lea "0,1" dentro de un "Coincide". Sigue abierta una pregunta que esta entrada daba por cerrada: `TOLERANCIA_UNIDADES` vale 0 (unidades exactas), definida solo en `src/lib/ventas/tipos.ts`, y Javier debe decidir si deja las unidades exactas o admite unas pocas unidades (se habló de ±5); la recomendación es una tolerancia pequeña. Mientras no responda, rige 0. Si se cambia, irá en una entrada nueva que referencie a esta.
