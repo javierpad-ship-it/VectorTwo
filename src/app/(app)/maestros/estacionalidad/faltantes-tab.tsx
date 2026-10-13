@@ -8,13 +8,13 @@ import {
   type EquivalenciasEstacionalidadRespuesta,
   type MotivoFaltante,
 } from "@/lib/estacionalidad/tipos-api";
-import { formatearNumero, plural } from "@/lib/formato";
+import { formatearNumero, mensajeError, plural } from "@/lib/formato";
 import { Card } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Chips, type ChipItem } from "@/components/ui/chips";
 import { EmptyState } from "@/components/ui/empty-state";
-import { CATALOGOS_VACIOS, FiltrosArbol, descargarFaltantesCsv, useFiltroArbol } from "./comunes";
+import { CATALOGOS_VACIOS, FiltrosArbol, descargarFaltantesCsv, descargarFaltantesExcel, useFiltroArbol } from "./comunes";
 import { TablaSeleccion } from "./tabla-seleccion";
 import { useAsignar } from "./use-asignar";
 
@@ -50,6 +50,8 @@ export function FaltantesTab({
   const catalogos = lista ?? CATALOGOS_VACIOS;
   const [motivo, setMotivo] = useState<FiltroMotivo>("todas");
   const [tipo, setTipo] = useState<FiltroTipo>("todas");
+  const [generandoExcel, setGenerandoExcel] = useState(false);
+  const [errorExcel, setErrorExcel] = useState<string | null>(null);
   const { filtro, setFiltro, lineasDisponibles, filas } = useFiltroArbol(faltantes, catalogos.lineas);
 
   // Resumen por género sobre todas las faltantes (no sobre lo filtrado): es el
@@ -92,6 +94,18 @@ export function FaltantesTab({
     { id: "genericas", label: "Genéricas", conteo: conteos.genericas },
   ];
 
+  async function descargarExcel() {
+    setGenerandoExcel(true);
+    setErrorExcel(null);
+    try {
+      await descargarFaltantesExcel(visibles, catalogos);
+    } catch (e) {
+      setErrorExcel(`No se pudo generar el Excel: ${mensajeError(e)}`);
+    } finally {
+      setGenerandoExcel(false);
+    }
+  }
+
   if (lista && faltantes.length === 0) {
     return (
       <div className="space-y-4">
@@ -109,6 +123,7 @@ export function FaltantesTab({
   return (
     <div className="space-y-4">
       {asignacion.error && <Alert onCerrar={() => asignacion.setError(null)}>{asignacion.error}</Alert>}
+      {errorExcel && <Alert onCerrar={() => setErrorExcel(null)}>{errorExcel}</Alert>}
       {asignacion.aviso && (
         <Alert tono="exito" onCerrar={() => asignacion.setAviso(null)}>
           {asignacion.aviso}
@@ -134,10 +149,19 @@ export function FaltantesTab({
               variante="secundario"
               tamano="sm"
               disabled={visibles.length === 0}
-              title="GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION (vacía): complétalo en Excel y súbelo en Importar."
+              title="GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION y TEMPORADA (vacías): complétalo y súbelo en Importar."
               onClick={() => descargarFaltantesCsv(visibles, catalogos)}
             >
               Descargar faltantes (CSV)
+            </Button>
+            <Button
+              variante="secundario"
+              tamano="sm"
+              disabled={visibles.length === 0 || generandoExcel}
+              title="Mismas columnas y filas que el CSV, en un libro de Excel con la hoja ASIGNAR: llena AGRUPACION y súbelo en Importar."
+              onClick={() => void descargarExcel()}
+            >
+              {generandoExcel ? "Generando Excel…" : "Descargar faltantes (Excel)"}
             </Button>
             {puedeEditar && (
               <Button variante="fantasma" tamano="sm" onClick={onIrAImportar}>
@@ -167,8 +191,9 @@ export function FaltantesTab({
             onIrAAgrupaciones={onIrAAgrupaciones}
           />
           <p className="text-xs text-tinta-suave">
-            El CSV descarga {plural(visibles.length, "fila", "filas")} según los filtros, en el formato exacto del importador (la genérica sale con
-            la celda EQUIVALENCIA vacía).
+            El CSV y el Excel descargan {plural(visibles.length, "fila", "filas")} según los filtros, en el formato exacto del importador: llena
+            la columna AGRUPACION (y, si quieres, TEMPORADA para las agrupaciones nuevas) y súbelo en Importar. La genérica sale con la celda
+            EQUIVALENCIA vacía.
           </p>
         </div>
       </Card>

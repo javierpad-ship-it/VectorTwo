@@ -12,7 +12,7 @@ import { MapaTab } from "./mapa-tab";
 import { AgrupacionesTab } from "./agrupaciones-tab";
 import { AsignacionTab, type VistaAsignacion } from "./asignacion-tab";
 import { FaltantesTab } from "./faltantes-tab";
-import { ImportarEstacionalidad } from "./importar-estacionalidad";
+import { ImportarPanel } from "./importar-panel";
 import type { PestanaEstacionalidad } from "@/lib/estacionalidad/pestanas";
 
 const EMPTY: EquivalenciaPlana[] = [];
@@ -148,9 +148,9 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "mapa" }: { rol: Rol
       )}
 
       {pestana === "importar" && puedeEditar && (
-        <ImportarEstacionalidad
-          onAplicado={() => {
-            setPestana("faltantes");
+        <ImportarPanel
+          onAplicado={(tipo) => {
+            setPestana(tipo === "agrupaciones" ? "agrupaciones" : "faltantes");
             void recargarTodo();
           }}
         />

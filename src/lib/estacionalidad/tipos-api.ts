@@ -274,3 +274,135 @@ export const ETIQUETA_MOTIVO_FALTANTE: Record<MotivoFaltante, string> = {
   sin_agrupacion: "Sin agrupación",
   agrupacion_inactiva: "Agrupación inactiva",
 };
+
+// ─── Importador de agrupaciones (POST /api/agrupaciones-estacionalidad/importar) ───
+//
+// Carga masiva para CREAR agrupaciones de estacionalidad nuevas (nunca actualiza
+// una existente). Contrato autocontenido: sin `"use client"`, sin base de datos;
+// lo importan tanto el backend como la pantalla de `/maestros/estacionalidad`.
+
+/**
+ * Una fila del archivo ya mapeada a las columnas de la plantilla
+ * (`NOMBRE`, `CODIGO`, `GENEROS`, `TEMPORADA`, `DESCRIPCION`, `ORDEN`). Todo
+ * viaja como texto tal cual lo leyó el archivo (se admite un número en `orden`);
+ * una columna sin mapear viaja como cadena vacía, `null` o ausente.
+ *
+ * - `nombre`: obligatorio (se normaliza: NFC, espacios, mayúsculas; ≤ 120).
+ * - `codigo`: opcional; vacío → se deriva del nombre (`aCodigo`), ≤ 40.
+ * - `generos`: obligatorio; uno o más nombres o códigos de género separados por
+ *   coma, punto y coma, barra (`/`) o `|`.
+ * - `temporada`: `Invierno`, `Verano`, `Todo el año` / `Toda temporada` o sus
+ *   códigos; vacía → `todo_el_ano`.
+ * - `descripcion`: opcional, ≤ 500; vacía → `null`.
+ * - `orden`: opcional, entero ≥ 0; vacío → el siguiente múltiplo de 10 tras el
+ *   mayor `orden` actual (creciente por fila).
+ */
+export type FilaImportacionAgrupaciones = {
+  nombre: string;
+  generos: string;
+  codigo?: string | null;
+  temporada?: string | null;
+  descripcion?: string | null;
+  orden?: string | number | null;
+};
+
+/** Máximo de filas por importación (el servidor responde `400` con más). */
+export const MAX_FILAS_IMPORTAR_AGRUPACIONES = 5_000;
+
+export type PeticionImportarAgrupaciones = {
+  modo: ModoImportacion;
+  /** 1 a 5 000 filas. */
+  filas: FilaImportacionAgrupaciones[];
+};
+
+/**
+ * Por qué una fila no crea nada. `ya_existe` es informativo (la agrupación ya
+ * está; nunca se actualiza) y `nombre_repetido_en_archivo` lo es solo cuando la
+ * fila repite exactamente a otra anterior; el resto son errores del archivo.
+ * La fila que gana en un nombre o código repetido es la primera.
+ */
+export type MotivoOmisionAgrupaciones =
+  | "nombre_vacio"
+  | "nombre_largo"
+  | "fila_total"
+  | "genero_vacio"
+  | "genero_desconocido"
+  | "genero_inactivo"
+  | "temporada_invalida"
+  | "orden_invalido"
+  | "descripcion_larga"
+  | "codigo_invalido"
+  | "codigo_repetido_en_archivo"
+  | "nombre_repetido_en_archivo"
+  | "codigo_en_uso"
+  | "ya_existe";
+
+/** Fila omitida con su contenido normalizado (texto), para corregir el archivo. */
+export type FilaOmitidaAgrupaciones = {
+  /** Posición de la fila en el archivo enviado (1 = la primera fila de datos). */
+  fila: number;
+  motivo: MotivoOmisionAgrupaciones;
+  /** Qué valor falló o con qué choca (p. ej. el género desconocido, la agrupación que ya existe). */
+  detalle?: string;
+  /** En `nombre_repetido_en_archivo` y `codigo_repetido_en_archivo`: la primera fila que lo usó. */
+  fila_original?: number;
+  /** `true` = no hay nada que corregir (`ya_existe`, o repetida exacta); `false` = error del archivo. */
+  informativa: boolean;
+  nombre: string;
+  codigo: string;
+  generos: string;
+  temporada: string;
+  descripcion: string;
+  orden: string;
+};
+
+/** Agrupación que se creará (previsualizar) o que el archivo propone crear (aplicar). */
+export type AgrupacionNuevaImportada = {
+  /** Fila del archivo de la que sale. */
+  fila: number;
+  nombre: string;
+  codigo: string;
+  /** Nombres de los géneros, por `orden, nombre` del género. */
+  generos: string[];
+  temporada: TemporadaAgrupacion;
+  orden: number;
+  descripcion: string | null;
+};
+
+export type ReporteImportacionAgrupaciones = {
+  modo: ModoImportacion;
+  totales: {
+    /** Filas recibidas. */
+    filas: number;
+    /** Agrupaciones que el archivo crearía (igual en los dos modos). */
+    a_crear: number;
+    /** Realmente creadas: 0 en `previsualizar`. */
+    creadas: number;
+    /** Filas omitidas por `ya_existe`. */
+    ya_existen: number;
+    /** Todas las filas omitidas (informativas y con error). */
+    omitidas: number;
+    /** Omitidas que son un error del archivo (`informativa: false`). */
+    con_error: number;
+  };
+  /** Todas las que se crearán, en el orden del archivo. */
+  agrupaciones_nuevas: AgrupacionNuevaImportada[];
+  omitidas: FilaOmitidaAgrupaciones[];
+};
+
+export const ETIQUETA_MOTIVO_OMISION_AGRUPACIONES: Record<MotivoOmisionAgrupaciones, string> = {
+  nombre_vacio: "Nombre vacío",
+  nombre_largo: "Nombre demasiado largo",
+  fila_total: "Fila de totales",
+  genero_vacio: "Género vacío",
+  genero_desconocido: "Género desconocido",
+  genero_inactivo: "Género inactivo",
+  temporada_invalida: "Temporada no válida",
+  orden_invalido: "Orden no válido",
+  descripcion_larga: "Descripción demasiado larga",
+  codigo_invalido: "Código no válido",
+  codigo_repetido_en_archivo: "Código repetido en el archivo",
+  nombre_repetido_en_archivo: "Nombre repetido en el archivo",
+  codigo_en_uso: "Código en uso por otra agrupación",
+  ya_existe: "Ya existe",
+};

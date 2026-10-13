@@ -11,6 +11,7 @@ import {
   uuid,
 } from "@/lib/arbol/esquemas";
 import { temporadaAgrupacion } from "@/lib/curvas/esquemas";
+import { MAX_FILAS_IMPORTAR_AGRUPACIONES } from "./tipos-api";
 
 /**
  * Esquemas zod de M3 (docs/modulos/03-agrupaciones-estacionalidad.md,
@@ -122,7 +123,35 @@ export const importarEstacionalidadSchema = z.object({
     .max(10_000, "Se admiten hasta 10 000 filas por importación."),
 });
 
-export type CrearAgrupacion = z.infer<typeof crearAgrupacionSchema>;
+// ─── Importador de agrupaciones (carga masiva de agrupaciones nuevas) ───
+
+
+/**
+ * Fila de la plantilla `NOMBRE · CODIGO · GENEROS · TEMPORADA · DESCRIPCION ·
+ * ORDEN`. `nombre` y `generos` viajan siempre (cadena vacía si la columna no
+ * está mapeada); el resto es opcional. Las reglas de contenido (longitudes,
+ * géneros, temporada, orden) las aplica el importador y salen como motivos de
+ * omisión por fila, no como un `400` de todo el archivo.
+ */
+export const filaImportacionAgrupacionesSchema = z.object({
+  nombre: z.string("nombre debe ser texto."),
+  generos: z.string("generos debe ser texto."),
+  codigo: z.string("codigo debe ser texto.").nullish(),
+  temporada: z.string("temporada debe ser texto.").nullish(),
+  descripcion: z.string("descripcion debe ser texto.").nullish(),
+  orden: z.union([z.string(), z.number()], "orden debe ser un número o texto.").nullish(),
+});
+
+export const importarAgrupacionesSchema = z.object({
+  modo: z.enum(["previsualizar", "aplicar"], "El modo debe ser previsualizar o aplicar."),
+  filas: z
+    .array(filaImportacionAgrupacionesSchema)
+    .min(1, "No hay filas que importar.")
+    .max(MAX_FILAS_IMPORTAR_AGRUPACIONES, "Se admiten hasta 5 000 filas por importación."),
+});
+
+export type CrearAgrupacion =z.infer<typeof crearAgrupacionSchema>;
 export type EditarAgrupacion = z.infer<typeof editarAgrupacionSchema>;
 export type Asignar = z.infer<typeof asignarSchema>;
 export type ImportarEstacionalidad = z.infer<typeof importarEstacionalidadSchema>;
+export type ImportarAgrupaciones = z.infer<typeof importarAgrupacionesSchema>;

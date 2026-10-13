@@ -17,6 +17,7 @@ import type {
 import { Field, Input, Select } from "@/components/ui/form";
 import { Checkbox } from "@/components/ui/checkbox";
 import { descargarCsv } from "@/components/importador/csv";
+import { descargarExcel } from "@/components/importador/excel";
 
 /** Piezas compartidas por las pestañas Asignación y Faltantes. */
 
@@ -193,20 +194,38 @@ export function estadoEquivalencia(
   return { texto: "Activa", tono: "exito" };
 }
 
-// ─── CSV de faltantes (formato del importador) ───
+// ─── Descarga de faltantes (CSV y Excel, mismas columnas y filas) ───
+
+/** Columnas de la descarga de faltantes: las cinco del importador más la TEMPORADA opcional (vacía). */
+export const ENCABEZADOS_FALTANTES = ["GENERO", "MUNDO", "LINEA", "EQUIVALENCIA", "AGRUPACION", "TEMPORADA"];
 
 /**
- * `GENERO, MUNDO, LINEA, EQUIVALENCIA, AGRUPACION` con la última vacía: la
- * genérica sale como celda vacía y la que se llama como la línea, con su
- * nombre literal. Es exactamente lo que acepta la pestaña Importar.
+ * Filas de la descarga: la genérica sale con EQUIVALENCIA vacía y la que se
+ * llama como la línea, con su nombre literal; AGRUPACION y TEMPORADA salen
+ * vacías para completarlas. Es exactamente lo que acepta la pestaña Importar.
  */
-export function descargarFaltantesCsv(filas: EquivalenciaPlana[], catalogos: Catalogos, nombreArchivo = "faltantes-estacionalidad.csv") {
+export function filasFaltantes(filas: EquivalenciaPlana[], catalogos: Catalogos): string[][] {
   const generos = new Map(catalogos.generos.map((g) => [g.id, g.nombre]));
   const mundos = new Map(catalogos.mundos.map((m) => [m.id, m.nombre]));
   const lineas = new Map(catalogos.lineas.map((l) => [l.id, l.nombre]));
-  const data = filas.map((e) => {
+  return filas.map((e) => {
     const [g, m, l] = e.ruta.split(" / ");
-    return [generos.get(e.genero_id) ?? g ?? "", mundos.get(e.mundo_id) ?? m ?? "", lineas.get(e.linea_id) ?? l ?? "", e.es_generica ? "" : e.nombre, ""];
+    return [
+      generos.get(e.genero_id) ?? g ?? "",
+      mundos.get(e.mundo_id) ?? m ?? "",
+      lineas.get(e.linea_id) ?? l ?? "",
+      e.es_generica ? "" : e.nombre,
+      "",
+      "",
+    ];
   });
-  descargarCsv(["GENERO", "MUNDO", "LINEA", "EQUIVALENCIA", "AGRUPACION"], data, nombreArchivo);
+}
+
+export function descargarFaltantesCsv(filas: EquivalenciaPlana[], catalogos: Catalogos, nombreArchivo = "faltantes-estacionalidad.csv") {
+  descargarCsv(ENCABEZADOS_FALTANTES, filasFaltantes(filas, catalogos), nombreArchivo);
+}
+
+/** Mismo contenido que el CSV, en un .xlsx de una hoja llamada ASIGNAR (SheetJS se carga solo al pulsar). */
+export function descargarFaltantesExcel(filas: EquivalenciaPlana[], catalogos: Catalogos, nombreArchivo = "faltantes-estacionalidad.xlsx"): Promise<void> {
+  return descargarExcel(ENCABEZADOS_FALTANTES, filasFaltantes(filas, catalogos), "ASIGNAR", nombreArchivo);
 }

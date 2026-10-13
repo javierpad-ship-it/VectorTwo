@@ -99,7 +99,7 @@ export function ImportarEstacionalidad({ onAplicado }: { onAplicado: () => void 
       {imp.error && <Alert onCerrar={() => imp.setError(null)}>{imp.error}</Alert>}
 
       <Alert tono="info">
-        Formato: las cuatro columnas del árbol más AGRUPACION (descárgalo listo desde Faltantes) y, opcional, TEMPORADA (Invierno, Verano o Toda temporada; vacía = Toda temporada): solo se aplica a las agrupaciones que el archivo crea y nunca cambia la de una que ya existe (se cambia en la pestaña Agrupaciones). Equivalencia vacía = la genérica del nodo; «-»
+        Formato: las cuatro columnas del árbol más AGRUPACION (descárgalo listo desde Faltantes, en CSV o Excel) y, opcional, TEMPORADA (Invierno, Verano o Toda temporada; vacía = Toda temporada): la TEMPORADA solo se aplica a las agrupaciones nuevas que crea el archivo; nunca cambia la de una agrupación que ya existe (se cambia en la pestaña Agrupaciones). Equivalencia vacía = la genérica del nodo; «-»
         = la que se llama como la línea. Las agrupaciones que no existan se crean con los géneros de sus filas; una equivalencia solo se asigna a una
         agrupación que incluya su género. Las filas que no casen con el árbol o con los géneros de la agrupación se reportan y no se cargan. Nunca se quita una agrupación por archivo.
       </Alert>
