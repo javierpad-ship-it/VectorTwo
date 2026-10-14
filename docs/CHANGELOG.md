@@ -2,6 +2,16 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.9.5 · M11 — 2026-10-14
+
+Histograma **Unidades vendidas por mes y año** al inicio de la pestaña Resumen del reporte agrupación GMLE (pedido de Javier para validar la data histórica cargada: 45 meses, enero 2023 a setiembre 2026, 1 983 921 unidades). Barras agrupadas (12 meses en el eje X, una barra por año, leyenda por color), tabla alternativa mes × año con totales y variación contra el año anterior (solo donde ambos meses existen; la fila Total compara solo los meses comunes), meses sin datos vacíos y no en cero. Sigue los filtros del reporte: sin filtros suma toda la venta publicada; con filtros envía las equivalencias que pasan. Detalle de diseño en la ficha `docs/modulos/11-reporte-agrupacion-gmle.md`.
+
+- Migración `0014_unidades_mensuales.sql` (aplicada en Vector2; idempotente; sin `DROP`/`DELETE`/`TRUNCATE`/`UPDATE`): función `public.unidades_mensuales(p_equivalencias uuid[] default null)` que agrega `venta_stock_vigente` por mes (solo cargas publicadas), `security invoker`, `search_path` vacío y ejecutable solo por `service_role`. Verificada contra la base: 45 meses, 1 983 921 unidades (igual a la suma directa) y las mismas con solo equivalencias activas y vigentes (no hay inactivas). El paso 2 de M6 pasa a usar la `0015`.
+- API: `POST /api/reportes/agrupacion-gmle/unidades-mensuales` (`requirePlanner`, solo POST, `equivalencia_ids` opcional de hasta 5 000 uuid; `[]` responde vacío sin consultar la base); la suma de soles se hace en céntimos y los datos ilegibles dan `500` con mensaje claro en vez de un cero falso. `api.post` admite un `signal` opcional para cancelar peticiones.
+- Pantalla: hook con debounce de 300 ms y cancelación de peticiones obsoletas, estados de carga y error con reintento, aviso si los filtros dejan más de 5 000 equivalencias.
+- QA: lint, `tsc`, 1 720 pruebas en 112 archivos y build en verde. Hallazgo importante corregido antes del cierre: la lectura de la barra activa podía lanzar un error si llegaban datos con menos años mientras el cursor seguía sobre una barra. Pendientes menores (no bloquean): barras con `aria-hidden` y la tabla como alternativa principal, colores de 2024 y 2025 por debajo de 3:1 de contraste sobre blanco, el tope de 5 000 está definido en dos archivos, el hook no tiene pruebas automáticas (vitest corre en entorno `node`), y no hay modo oscuro en `globals.css`.
+- Limitaciones: no se probó en navegador ni con los tres roles; la primera vista real es la de Javier.
+
 ## 0.9.4 · M11 — 2026-10-14
 
 Módulo nuevo de solo lectura **Reporte agrupación GMLE** (`/maestros/agrupacion-gmle`, Maestros, justo debajo de "Agrupaciones de estacionalidad"; admin y planner, el comprador no lo ve y la página lo redirige). Pedido de Javier para revisar cómo quedó cada agrupación de estacionalidad después de asignar las 2 336 equivalencias. Sin migración. Ficha: `docs/modulos/11-reporte-agrupacion-gmle.md` (decisiones por defecto de sus 4 preguntas abiertas: línea partida por género · línea, nodo GML mixto como aviso, genérica discrepante contra la mayoría de las reales, ubicación en Maestros).

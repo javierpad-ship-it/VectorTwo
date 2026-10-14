@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
 import { Punto } from "@/components/ui/punto";
 import { AgrupacionDetalle } from "./agrupacion-detalle";
+import { HistogramaUnidades } from "./histograma-unidades";
 import { AnomaliaBadges, BotonesDescarga, EnlaceCorreccion, RUTAS_CORRECCION, columnasDeTabla } from "./comunes";
 
 const NUMERICA = "text-right tabular-nums";
@@ -29,7 +30,8 @@ const NUMERICA = "text-right tabular-nums";
  * Pestaña Resumen: una fila por agrupación (y "Sin agrupación" al pie) con lo
  * que tiene en nodos GML, mixtos y unidades GMLE. Los conteos respetan los
  * filtros de género, mundo, nivel, texto y genéricas; al pulsar el nombre se
- * abre debajo el detalle de la agrupación.
+ * abre debajo el detalle de la agrupación. Arriba va el histograma de
+ * unidades vendidas por mes y año, que sigue todos los filtros de la barra.
  */
 export const ResumenTab = memo(function ResumenTab({
   reporte,
@@ -113,6 +115,8 @@ export const ResumenTab = memo(function ResumenTab({
 
   return (
     <div className="space-y-4">
+      <HistogramaUnidades detalle={detalle} filtros={filtros} />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-tinta-suave">
           {formatearNumero(visibles.length)} de {formatearNumero(todas.length)} filas · Pulsa el nombre de una agrupación para ver sus nodos.

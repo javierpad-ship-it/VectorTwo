@@ -1017,6 +1017,16 @@ export type Database = {
           venta_soles: number;
         }[];
       };
+      unidades_mensuales: {
+        Args: {
+          p_equivalencias?: string[];
+        };
+        Returns: {
+          periodo: string;
+          unidades: number;
+          venta_soles: number;
+        }[];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

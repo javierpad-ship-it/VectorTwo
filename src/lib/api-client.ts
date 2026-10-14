@@ -25,8 +25,9 @@ async function llamar<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   get: <T>(url: string) => llamar<T>(url),
-  post: <T>(url: string, body: unknown) =>
-    llamar<T>(url, { method: "POST", body: JSON.stringify(body) }),
+  /** `opciones.signal` permite cancelar la petición (p. ej. una consulta obsoleta). */
+  post: <T>(url: string, body: unknown, opciones?: { signal?: AbortSignal }) =>
+    llamar<T>(url, { method: "POST", body: JSON.stringify(body), signal: opciones?.signal }),
   put: <T>(url: string, body: unknown) =>
     llamar<T>(url, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(url: string, body: unknown) =>
