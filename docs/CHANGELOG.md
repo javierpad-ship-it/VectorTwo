@@ -10,7 +10,7 @@ Marcas relevantes por GML, vista "Por marca": en la tarjeta **Agregar GML** apar
 
 ## 0.9.2 · Seguridad — 2026-10-14
 
-Correcciones de código de la primera auditoría de seguridad (agente `seguridad`, siempre con opus; informe de 4 importantes y 10 menores, sin bloqueantes). Sin migración. **Pendiente de Javier**: la migración `0013_endurecer_permisos` (revocar los permisos por defecto de `anon` y `authenticated` en `public`, rol por defecto `comprador` en `perfiles`) no está aplicada; el paso 2 de M6 pasa a usar la `0014`, M7 la `0015`.
+Correcciones de código de la primera auditoría de seguridad (agente `seguridad`, siempre con opus; informe de 4 importantes y 10 menores, sin bloqueantes). Sin migración. Migración `0013_endurecer_permisos` (aplicada en Vector2 el 2026-10-14 con la aprobación de Javier; idempotente, sin `DROP`/`DELETE`/`TRUNCATE`/`UPDATE`): revoca todos los privilegios de `anon` y `authenticated` sobre tablas, vistas, secuencias y funciones de `public` (y los privilegios por defecto del rol `postgres`), reafirma el acceso total de `service_role` y deja `perfiles.rol` con valor por defecto `comprador`. Verificado: 0 permisos de `anon`/`authenticated` en `public`, `service_role` conserva acceso, cifras intactas. El paso 2 de M6 pasa a usar la `0014`, M7 la `0015`.
 
 - Importador de agrupaciones: `separarGeneros` ya no es cúbica (ventana acotada al mayor género con "/" del catálogo; 10 000 piezas en milisegundos) y la celda `GENEROS` tiene tope de 1 000 caracteres.
 - Topes de tamaño: celdas de importación de 300 caracteres (1 000 en notas y descripciones, `src/lib/api/celdas.ts`) y `413` si el cuerpo supera 6 MB (`leerCuerpo`). Una celda demasiado larga rechaza el archivo entero con `400` y la fila en el mensaje.
