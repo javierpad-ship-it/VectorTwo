@@ -7,6 +7,7 @@
 > - **Nada de esta ficha se construye**: ni la migración (su número `0014` ya lo tomó `unidades_mensuales` de M11 el 2026-10-14, y la `0015` es del paso 2 de M6; M7 no tiene número reservado hasta reespecificarse), ni la versión `0.10.0`, ni las tablas, rutas, pantallas o fórmulas. Se conserva **solo como inventario de ideas y de contratos** que M6 y 02b ya ofrecen (`GET /api/curvas/vigentes`, `claseDeAnio`, `ratio_volumen`, `red_comparable`, `claveFlujo`, `curvaUnidad`): M7 podrá usarlos o no.
 > - Las catorce preguntas abiertas del final **quedan sin efecto**; las sustituyen las de abajo, pensadas para empezar de cero. PLAN y DECISIONES deben reflejar que M7 vuelve a borrador (lo integra `documentador` con el paso 2 de M6).
 > - El `analista-planeamiento` entra **después** de que Javier responda, no antes.
+> - **Nota de M6 (segunda pasada del 2026-10-14):** además del `ratio_volumen` por agrupación, M6 entregará el **factor de volumen del año Niño por temporada y año** (`corridas_estacionalidad.efecto_atipico.por_temporada`: ratio del año atípico frente al año normal más cercano, sobre las tiendas comunes; invierno cae y verano sube en 2023 y 2026, con la etiqueta `sustitucion_temporada`). Si M7 lo aplica calculado o lo fija Javier es la pregunta abierta 1 de M6, que se decide al rediseñar M7.
 >
 > **Preguntas de diseño para Javier (para empezar M7 de cero; máximo diez):**
 >
