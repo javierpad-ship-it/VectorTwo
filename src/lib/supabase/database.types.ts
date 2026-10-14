@@ -1,7 +1,7 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-13 (0011, M6 paso 1) contra `generate_typescript_types` del proyecto
+ * Verificados el 2026-10-14 (0015, M6 paso 2) contra `generate_typescript_types` del proyecto
  * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
  * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
  */
@@ -212,6 +212,183 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "cargas_venta_stock_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      corridas_estacionalidad: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          efecto_atipico: Json;
+          hasta_periodo: string;
+          id: string;
+          parametros: Json;
+          perfil_id: string | null;
+          red_comparable: Json;
+          resultado: Json;
+          resumen: Json;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          efecto_atipico?: Json;
+          hasta_periodo: string;
+          id?: string;
+          parametros: Json;
+          perfil_id?: string | null;
+          red_comparable?: Json;
+          resultado: Json;
+          resumen: Json;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          efecto_atipico?: Json;
+          hasta_periodo?: string;
+          id?: string;
+          parametros?: Json;
+          perfil_id?: string | null;
+          red_comparable?: Json;
+          resultado?: Json;
+          resumen?: Json;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "corridas_estacionalidad_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      curvas_estacionalidad: {
+        Row: {
+          activo: boolean;
+          agrupacion_estacionalidad_id: string;
+          anios_utilizados: Json;
+          aprobada_at: string;
+          corrida_id: string;
+          created_at: string;
+          eat: number | null;
+          error_max: number | null;
+          estado: string;
+          id: string;
+          medida: string;
+          modelo: string;
+          nota: string | null;
+          origen: string;
+          p01: number;
+          p02: number;
+          p03: number;
+          p04: number;
+          p05: number;
+          p06: number;
+          p07: number;
+          p08: number;
+          p09: number;
+          p10: number;
+          p11: number;
+          p12: number;
+          perfil_id: string | null;
+          recomendada: boolean;
+          updated_at: string;
+          usuario_nombre: string | null;
+          version: number;
+        };
+        Insert: {
+          activo?: boolean;
+          agrupacion_estacionalidad_id: string;
+          anios_utilizados: Json;
+          aprobada_at?: string;
+          corrida_id: string;
+          created_at?: string;
+          eat?: number | null;
+          error_max?: number | null;
+          estado?: string;
+          id?: string;
+          medida: string;
+          modelo: string;
+          nota?: string | null;
+          origen: string;
+          p01: number;
+          p02: number;
+          p03: number;
+          p04: number;
+          p05: number;
+          p06: number;
+          p07: number;
+          p08: number;
+          p09: number;
+          p10: number;
+          p11: number;
+          p12: number;
+          perfil_id?: string | null;
+          recomendada: boolean;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version: number;
+        };
+        Update: {
+          activo?: boolean;
+          agrupacion_estacionalidad_id?: string;
+          anios_utilizados?: Json;
+          aprobada_at?: string;
+          corrida_id?: string;
+          created_at?: string;
+          eat?: number | null;
+          error_max?: number | null;
+          estado?: string;
+          id?: string;
+          medida?: string;
+          modelo?: string;
+          nota?: string | null;
+          origen?: string;
+          p01?: number;
+          p02?: number;
+          p03?: number;
+          p04?: number;
+          p05?: number;
+          p06?: number;
+          p07?: number;
+          p08?: number;
+          p09?: number;
+          p10?: number;
+          p11?: number;
+          p12?: number;
+          perfil_id?: string | null;
+          recomendada?: boolean;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "curvas_estacionalidad_agrupacion_fkey";
+            columns: ["agrupacion_estacionalidad_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_estacionalidad";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "curvas_estacionalidad_corrida_id_fkey";
+            columns: ["corrida_id"];
+            isOneToOne: false;
+            referencedRelation: "corridas_estacionalidad";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "curvas_estacionalidad_perfil_id_fkey";
             columns: ["perfil_id"];
             isOneToOne: false;
             referencedRelation: "perfiles";
@@ -634,6 +811,7 @@ export type Database = {
           hasta: string;
           id: string;
           motivo: string;
+          temporadas: string[] | null;
           updated_at: string;
         };
         Insert: {
@@ -645,6 +823,7 @@ export type Database = {
           hasta: string;
           id?: string;
           motivo: string;
+          temporadas?: string[] | null;
           updated_at?: string;
         };
         Update: {
@@ -656,6 +835,7 @@ export type Database = {
           hasta?: string;
           id?: string;
           motivo?: string;
+          temporadas?: string[] | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -887,6 +1067,48 @@ export type Database = {
         };
         Relationships: [];
       };
+      venta_mensual_estacionalidad: {
+        Row: {
+          agrupacion_estacionalidad_id: string | null;
+          costo_vendido: number | null;
+          genero_id: string | null;
+          linea_id: string | null;
+          periodo: string | null;
+          tienda_id: string | null;
+          unidades: number | null;
+          venta_soles: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "equivalencias_agrupacion_estacionalidad_id_fkey";
+            columns: ["agrupacion_estacionalidad_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_estacionalidad";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "genero_mundo_linea_genero_id_fkey";
+            columns: ["genero_id"];
+            isOneToOne: false;
+            referencedRelation: "generos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "genero_mundo_linea_linea_id_fkey";
+            columns: ["linea_id"];
+            isOneToOne: false;
+            referencedRelation: "lineas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "venta_stock_mensual_tienda_id_fkey";
+            columns: ["tienda_id"];
+            isOneToOne: false;
+            referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       venta_stock_vigente: {
         Row: {
           agrupacion_talla_id: string | null;
@@ -1023,6 +1245,19 @@ export type Database = {
         };
         Returns: {
           periodo: string;
+          unidades: number;
+          venta_soles: number;
+        }[];
+      };
+      refrescar_venta_mensual_estacionalidad: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
+      venta_mensual_tienda: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          periodo: string;
+          tienda_id: string;
           unidades: number;
           venta_soles: number;
         }[];
