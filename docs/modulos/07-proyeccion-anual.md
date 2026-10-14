@@ -1,5 +1,29 @@
 # M7 · Proyección anual de unidades
 
+> ## BORRADOR A REDISEÑAR CON JAVIER (2026-10-14): NO CONSTRUIR
+>
+> **Javier, 2026-10-14: "de M7 en adelante hay que diseñar casi desde cero".** Lo que sigue se escribió el 2026-10-13 suponiendo que la lógica de proyección de Vector-One (base histórica normalizada, crecimiento por unidad, reparto con la curva, escenarios por año) seguía siendo la forma en que Lukers planifica. Javier confirmó que esa lógica **sirve hasta M6** (curvas de estacionalidad: todos los años superpuestos, participación mensual sobre las mismas tiendas, curva propuesta) y que M7 **se rediseña con él desde cero**. Por tanto:
+>
+> - **Nada de esta ficha se construye**: ni la migración (su número `0014` ya lo tomó `unidades_mensuales` de M11 el 2026-10-14, y la `0015` es del paso 2 de M6; M7 no tiene número reservado hasta reespecificarse), ni la versión `0.10.0`, ni las tablas, rutas, pantallas o fórmulas. Se conserva **solo como inventario de ideas y de contratos** que M6 y 02b ya ofrecen (`GET /api/curvas/vigentes`, `claseDeAnio`, `ratio_volumen`, `red_comparable`, `claveFlujo`, `curvaUnidad`): M7 podrá usarlos o no.
+> - Las catorce preguntas abiertas del final **quedan sin efecto**; las sustituyen las de abajo, pensadas para empezar de cero. PLAN y DECISIONES deben reflejar que M7 vuelve a borrador (lo integra `documentador` con el paso 2 de M6).
+> - El `analista-planeamiento` entra **después** de que Javier responda, no antes.
+>
+> **Preguntas de diseño para Javier (para empezar M7 de cero; máximo diez):**
+>
+> 1. **¿Cómo planificas hoy en Excel?** Una copia anonimizada del archivo real (hojas, columnas, en qué orden las llenas, qué celdas son fórmula y cuáles las escribes tú) vale más que cualquier descripción: el sistema debe reproducir ese flujo, no inventar otro.
+> 2. **¿Qué es "el plan anual"?** ¿Unidades, soles o ambos? ¿Año calendario o temporada? ¿Horizonte: el año siguiente completo, doce meses móviles, o dos temporadas? ¿Cuándo se hace (una vez al año, por temporada, se revisa cada mes)?
+> 3. **¿A qué nivel decides el volumen?** Agrupación de estacionalidad, GML/GMLE, equivalencia, agrupación de marca, marca, talla, tienda… ¿y en qué orden: de arriba hacia abajo (un total que se reparte) o de abajo hacia arriba (sumas de filas)? ¿Qué nivel es "la fila" que compra el comprador?
+> 4. **¿Qué papel tienen las marcas?** ¿Se proyecta por marca o solo se reparte un total entre marcas? ¿Las marcas relevantes por GML (02b) y las de barrido siguen siendo la partición correcta? "Los 500 de ALFA": ¿salen del histórico o los fija el comprador?
+> 5. **¿Tallas?** ¿Centrales y extremas se proyectan por separado, se reparten con un porcentaje fijo o no entran en M7 y son de M8?
+> 6. **¿Tiendas?** ¿Se proyecta por tienda o un total que luego se reparte? ¿Cómo tratas una **tienda nueva** (su primer año vende con efecto apertura: ¿es base o excepción?), una **tienda cerrada**, y la tienda que concentra cerca del 40 % de la venta? ¿Para qué usas `venta_esperada_promedio` de M4?
+> 7. **¿Marcas nuevas, líneas nuevas y agrupaciones sin histórico?** ¿Cómo les pones volumen hoy (copia de otra, cifra a mano, nada)?
+> 8. **¿Año Niño?** Al proyectar, ¿qué haces hoy con 2023 y 2026: los descartas, los corriges con un factor, los usas tal cual? ¿Y si el año objetivo va a ser de Niño? ¿Te sirve el `ratio_volumen` que M6 calculará por agrupación de invierno, o prefieres un porcentaje tuyo?
+> 9. **¿Base y crecimiento?** ¿Partes del último año, de los últimos doce meses, de un promedio de años? ¿El crecimiento lo decides por agrupación, por GML, por tienda o global? ¿Miras el stock de fin de mes (quiebres) o la liquidación (CV %) para corregir la base, o solo la venta?
+> 10. **¿Qué sale de M7 y para quién?** ¿Un único plan aprobado por año, o varios escenarios? ¿Quién aprueba? ¿Qué formato necesitan M8 y los compradores (Excel con qué columnas)? ¿Qué se revisa cada mes contra el real?
+>
+> Texto original del borrador del 2026-10-13, sin cambios, a continuación.
+
+
 > Estado: **especificación pendiente de aprobación por Javier (escrita el 2026-10-13)**. No hay código ni migración. Módulos de los que depende: [05-venta-stock](05-venta-stock.md) (hechos mensuales: venta neta, costo vendido y stock de fin de mes por tienda × equivalencia × marca × agrupación de talla, desde 2023-01), [06-curvas-estacionalidad](06-curvas-estacionalidad.md) (curva vigente por agrupación de estacionalidad, `temporada`, `periodos_atipicos`, `claseDeAnio`, `ratio_volumen`), [02b-marcas-tratamiento-gml](02b-marcas-tratamiento-gml.md) (`nivel_planificacion`, marcas relevantes por GML, al barrer, conjuntos, `claveFlujo`, `curvaUnidad`, vistas `marcas_unidad` y `marca_gml_especial_vigente`), [04-tiendas](04-tiendas.md) (apertura, cierre, `venta_esperada_promedio`) y [01-arbol-producto](01-arbol-producto.md). Migración prevista: `0014_proyeccion_anual.sql` (renumerada el 2026-10-13 desde `0012`: la `0012` la tomó `sugerir_marcas_relevantes_v2` de M2b y el paso 2 de M6, vista materializada, corridas y curvas, pasó a `0013`); versión prevista `0.10.0 · M7` (después de `0.9.1 · M6`, cuyo cálculo de curvas es prerrequisito del reparto mensual; el mantenimiento de M7 funciona antes). Toda la API, lecturas incluidas, es `requirePlanner` (criterio de M5 y M6: venta y costo son margen). Ningún dato real de Lukers en esta ficha: ALFA, BETA, GAMMA y las cifras son sintéticas.
 
 ## 1. Objetivo
