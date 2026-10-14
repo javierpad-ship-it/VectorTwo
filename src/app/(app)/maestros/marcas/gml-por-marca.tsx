@@ -149,6 +149,22 @@ export function GmlPorMarca({
     .filter((m) => m.activo && !enLista.has(m.id) && !esMiembroEfectivo(m) && !esMarcaGenerica(m.nombre) && !m.tratamiento_especial)
     .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
 
+  // Marcas que se pueden sumar al bloque desde "Agregar GML": las de la lista que no son miembros de un conjunto y aún no están en el bloque.
+  const opcionesBloque = lista.filter((m) => !idsObjetivo.includes(m.id) && !(porId.get(m.id) && esMiembroEfectivo(porId.get(m.id) as MarcaConGml)));
+
+  function agregarAlBloque(id: string) {
+    const s = new Set(marcadas);
+    if (s.size === 0 && sel) s.add(sel.id);
+    s.add(id);
+    setMarcadas(s);
+  }
+
+  function quitarDelBloque(id: string) {
+    const s = new Set(marcadas);
+    s.delete(id);
+    setMarcadas(s);
+  }
+
   function seleccionarMarca(id: string) {
     setSelId(id);
     setSeleccionGml(new Set());
@@ -473,6 +489,37 @@ export function GmlPorMarca({
                 <p className="text-sm text-tinta-suave">Cargando el árbol de producto…</p>
               ) : (
                 <div className="space-y-3">
+                  <div className="space-y-2 rounded-lg border border-borde bg-fondo p-3">
+                    <p className="text-sm font-medium text-tinta">Marcas que recibirán estos GML</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {objetivo.map((m) => (
+                        <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-marca/10 px-2.5 py-0.5 text-xs font-medium text-marca">
+                          {m.nombre}
+                          {marcadas.size > 1 && (
+                            <button type="button" onClick={() => quitarDelBloque(m.id)} aria-label={`Quitar ${m.nombre} del bloque`} className="rounded-full px-1 leading-none hover:bg-marca/20">
+                              ×
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                      <div className="w-56 max-w-full">
+                        <Select value="" onChange={(e) => e.target.value && agregarAlBloque(e.target.value)} aria-label="Agregar otra marca al bloque">
+                          <option value="">+ Agregar otra marca…</option>
+                          {opcionesBloque.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.nombre}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      {marcadas.size > 0 && (
+                        <button type="button" onClick={() => setMarcadas(new Set())} className="text-xs font-medium text-tinta-suave underline underline-offset-2">
+                          Solo {sel.nombre}
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-tinta-suave">Los GML que elijas abajo se asignan a todas estas marcas a la vez. También puedes marcarlas con las casillas de la lista.</p>
+                  </div>
                   <SelectorNodos nodos={nodos} yaRelevante={yaRelevante} seleccion={nodosSel} onSeleccion={setNodosSel} />
                   <div className="flex flex-wrap items-end gap-3">
                     <Field label="Nota (opcional)" hint={`${nota.length}/${MAX_NOTA}`} className="w-72 max-w-full">

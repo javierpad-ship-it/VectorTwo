@@ -2,6 +2,10 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.9.3 · M2b — 2026-10-14
+
+Marcas relevantes por GML, vista "Por marca": en la tarjeta **Agregar GML** aparece ahora el bloque "Marcas que recibirán estos GML" con las marcas elegidas como etiquetas (con ×), un selector "+ Agregar otra marca…" y "Solo <marca>" para volver a una sola. Antes el bloque solo se armaba con las casillas pequeñas de la lista de la izquierda y Javier no encontraba cómo asignar un mismo GML a varias marcas. El comportamiento no cambia (producto cartesiano marcas × GML, con confirmación si son varias); solo se hace visible. Sin migración.
+
 ## 0.9.2 · Seguridad — 2026-10-14
 
 Correcciones de código de la primera auditoría de seguridad (agente `seguridad`, siempre con opus; informe de 4 importantes y 10 menores, sin bloqueantes). Sin migración. **Pendiente de Javier**: la migración `0013_endurecer_permisos` (revocar los permisos por defecto de `anon` y `authenticated` en `public`, rol por defecto `comprador` en `perfiles`) no está aplicada; el paso 2 de M6 pasa a usar la `0014`, M7 la `0015`.
