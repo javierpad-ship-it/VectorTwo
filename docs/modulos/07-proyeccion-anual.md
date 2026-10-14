@@ -22,6 +22,10 @@
 > 9. **¿Base y crecimiento?** ¿Partes del último año, de los últimos doce meses, de un promedio de años? ¿El crecimiento lo decides por agrupación, por GML, por tienda o global? ¿Miras el stock de fin de mes (quiebres) o la liquidación (CV %) para corregir la base, o solo la venta?
 > 10. **¿Qué sale de M7 y para quién?** ¿Un único plan aprobado por año, o varios escenarios? ¿Quién aprueba? ¿Qué formato necesitan M8 y los compradores (Excel con qué columnas)? ¿Qué se revisa cada mes contra el real?
 >
+> **Respuestas de Javier a las preguntas de diseño (2026-10-14), acumuladas:**
+>
+> - **Nivel de decisión (pregunta 3):** *"el volumen lo quiero definir por GML - Agrupación de marcas"*. La fila donde Javier decide el volumen es **GML × agrupación de marca** (en los nodos abiertos a GMLE, la equivalencia ocupa el lugar del GML). Las marcas relevantes por GML y "otras" quedan como **desglose dentro de esa fila**, no como el nivel de decisión. Pendiente de cerrar: medida (unidades o soles), horizonte y dirección (arriba-abajo, abajo-arriba o mixto), y las preguntas 1, 4 a 10 de arriba.
+>
 > Texto original del borrador del 2026-10-13, sin cambios, a continuación.
 
 
