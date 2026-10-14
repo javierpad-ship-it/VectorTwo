@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Papa from "papaparse";
+import { generarCsv } from "./csv";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,10 +35,10 @@ export function descargarOmitidasCsv<O extends FilaOmitidaBase>(
   etiquetas: Record<string, string>,
   nombreArchivo: string
 ) {
-  const csv = Papa.unparse({
-    fields: ["fila", ...columnasFila.map((c) => c.clave), "motivo", "detalle"],
-    data: omitidas.map((o) => [o.fila, ...columnasFila.map((c) => c.valor(o)), etiquetas[o.motivo] ?? o.motivo, detalleOmitida(o)]),
-  });
+  const csv = generarCsv(
+    ["fila", ...columnasFila.map((c) => c.clave), "motivo", "detalle"],
+    omitidas.map((o) => [o.fila, ...columnasFila.map((c) => c.valor(o)), etiquetas[o.motivo] ?? o.motivo, detalleOmitida(o)])
+  );
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const enlace = document.createElement("a");

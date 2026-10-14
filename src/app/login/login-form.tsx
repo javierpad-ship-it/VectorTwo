@@ -6,6 +6,7 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/alert";
+import { destinoSeguro } from "@/lib/auth/destino";
 
 /** Clave de localStorage donde se recuerda el correo en este equipo. */
 const CLAVE_RECORDAR = "vector2.login.correo";
@@ -56,18 +57,20 @@ export function LoginForm() {
 
     if (err) {
       setEnviando(false);
+      const mensaje = err.message.toLowerCase();
       setError(
-        err.message.toLowerCase().includes("invalid")
+        mensaje.includes("invalid")
           ? "Correo o contraseña incorrectos."
-          : err.message
+          : mensaje.includes("banned")
+            ? "Tu usuario está desactivado. Contacta con un administrador."
+            : err.message
       );
       return;
     }
 
     guardarPreferencia(email.trim(), recordar);
 
-    const destino = params.get("next");
-    router.replace(destino && destino.startsWith("/") ? destino : "/");
+    router.replace(destinoSeguro(params.get("next")));
     router.refresh();
   }
 

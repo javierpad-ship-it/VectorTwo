@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/guard";
 import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { crearUsuarioSchema } from "@/lib/usuarios/esquemas";
+import { traducirErrorAuth } from "@/lib/usuarios/errores-auth";
 import { leerAsignaciones } from "@/lib/responsables/consultas";
 import { contarPorPerfil } from "@/lib/responsables/reglas";
 
@@ -22,7 +23,7 @@ export async function GET() {
     .select("*")
     .order("created_at", { ascending: true });
 
-  if (err) return error(err.message, 500);
+  if (err) return traducirErrorDb(err, "listar usuarios");
 
   const asignaciones = await leerAsignaciones(db);
   if (asignaciones.error) return traducirErrorDb(asignaciones.error, "listar usuarios: contar responsabilidades");
@@ -46,9 +47,8 @@ export async function POST(request: NextRequest) {
     email_confirm: true,
   });
 
-  if (errAuth || !creado.user) {
-    return error(traducirErrorAuth(errAuth?.message) ?? "No se pudo crear el usuario.");
-  }
+  if (errAuth) return traducirErrorAuth(errAuth, "crear usuario");
+  if (!creado.user) return error("No se pudo crear el usuario.", 500);
 
   const { data: perfil, error: errPerfil } = await db
     .from("perfiles")
@@ -62,17 +62,10 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (errPerfil) {
-    await db.auth.admin.deleteUser(creado.user.id);
-    return error(errPerfil.message);
+    const { error: errDeshacer } = await db.auth.admin.deleteUser(creado.user.id);
+    if (errDeshacer) console.error("[auth] crear usuario: no se pudo deshacer el usuario de Auth", creado.user.id, errDeshacer.message);
+    return traducirErrorDb(errPerfil, "crear usuario: crear perfil");
   }
 
   return ok(perfil, 201);
-}
-
-function traducirErrorAuth(mensaje?: string): string | null {
-  if (!mensaje) return null;
-  const m = mensaje.toLowerCase();
-  if (m.includes("already") && m.includes("registered")) return "Ya existe un usuario con ese correo.";
-  if (m.includes("password")) return "La contraseña no cumple los requisitos.";
-  return mensaje;
 }

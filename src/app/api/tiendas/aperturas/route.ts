@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth/guard";
+import { puedeEditarMaestros } from "@/lib/auth/roles";
 import { error, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { incluirInactivos } from "@/lib/api/catalogo";
@@ -15,10 +16,11 @@ import type { ReporteAperturas } from "@/lib/tiendas/tipos";
  * fecha registrada, por `fecha` y `codigo`, con `pasado`, el `estado` de la
  * tienda a `hoy` y el resumen. `desde`/`hasta` acotan por fecha (inclusive);
  * `hoy` simula otra fecha; `400` si alguno no es `aaaa-mm-dd`.
- * `?incluir_inactivos=1` incluye las desactivadas.
+ * `?incluir_inactivos=1` incluye las desactivadas. Quien no puede editar
+ * maestros (comprador) recibe `venta_esperada_promedio: null` en cada evento.
  */
 export async function GET(request: NextRequest) {
-  const { response } = await requireUser();
+  const { response, rol } = await requireUser();
   if (response) return response;
 
   const crudo: Record<string, string> = {};
@@ -38,6 +40,6 @@ export async function GET(request: NextRequest) {
   const { data, error: err } = await leerTiendas(db, { soloActivas: !incluirInactivos(request) });
   if (err) return traducirErrorDb(err, "listar aperturas");
 
-  const reporte: ReporteAperturas = eventosTiendas(data, hoy, { desde, hasta });
+  const reporte: ReporteAperturas = eventosTiendas(data, hoy, { desde, hasta }, { verVentaEsperada: puedeEditarMaestros(rol) });
   return ok(reporte);
 }

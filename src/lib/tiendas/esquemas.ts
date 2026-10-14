@@ -3,6 +3,7 @@ import { activo, nombre } from "@/lib/arbol/esquemas";
 import { MAX_CODIGO, MAX_NOMBRE, aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
 import { motivoRechazoTienda } from "./reglas";
 import { ESTADOS_TIENDA, TIPOS_TIENDA } from "./tipos";
+import { celdaTexto } from "@/lib/api/celdas";
 
 /**
  * Esquemas zod de M4 (docs/modulos/04-tiendas.md, "Contratos de API" y regla
@@ -155,11 +156,11 @@ export const filtrosAperturasSchema = z.object({
 
 // ─── Importador ───
 
-const celda = (campo: string) => z.string(`${campo} debe ser texto.`).default("");
+const celda = (campo: string) => celdaTexto(campo).default("");
 
 export const filaImportacionTiendaSchema = z.object({
-  codigo: z.string("codigo debe ser texto."),
-  nombre: z.string("nombre debe ser texto."),
+  codigo: celdaTexto("codigo"),
+  nombre: celdaTexto("nombre"),
   tipo: celda("tipo"),
   zona: celda("zona"),
   razon_social: celda("razon_social"),

@@ -91,9 +91,16 @@ const sinEspaciosEnBarra = (t: string) => t.replace(/\s*\/\s*/g, "/");
  */
 export function separarGeneros(valor: unknown, catalogo: ReadonlyArray<Pick<GeneroImportacion, "nombre">> = []): string[] {
   const conBarra = new Map<string, string>();
+  // Pedazos que puede tener, como máximo, un nombre de género con barra: acota la
+  // búsqueda de abajo, que de otro modo crece al cubo con el largo de la celda.
+  let maxCorrida = 1;
   for (const g of catalogo) {
     const nombre = normalizarNombre(g.nombre);
-    if (nombre.includes("/")) conBarra.set(sinEspaciosEnBarra(nombre), nombre);
+    if (nombre.includes("/")) {
+      const clave = sinEspaciosEnBarra(nombre);
+      conBarra.set(clave, nombre);
+      maxCorrida = Math.max(maxCorrida, clave.split("/").length);
+    }
   }
   const vistos = new Set<string>();
   const partes: string[] = [];
@@ -112,7 +119,7 @@ export function separarGeneros(valor: unknown, catalogo: ReadonlyArray<Pick<Gene
     while (i < piezas.length) {
       let hasta = i + 1;
       let token = piezas[i];
-      for (let j = piezas.length; j > i + 1; j--) {
+      for (let j = Math.min(piezas.length, i + maxCorrida); j > i + 1; j--) {
         const completo = conBarra.get(piezas.slice(i, j).join("/"));
         if (completo !== undefined) {
           hasta = j;

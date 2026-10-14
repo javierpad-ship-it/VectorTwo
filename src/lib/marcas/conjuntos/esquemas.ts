@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { uuid } from "@/lib/arbol/esquemas";
+import { celdaTexto } from "@/lib/api/celdas";
 
 /** Esquemas zod de los conjuntos de marcas (02b, "Contratos de API" y regla 17). */
 
@@ -22,8 +23,8 @@ export const sugerenciasConjuntosQuerySchema = z.object({
 });
 
 export const filaImportacionConjuntoSchema = z.object({
-  marca: z.string("marca debe ser texto."),
-  conjunto: z.string("conjunto debe ser texto."),
+  marca: celdaTexto("marca"),
+  conjunto: celdaTexto("conjunto"),
 });
 
 export const importarConjuntosSchema = z.object({

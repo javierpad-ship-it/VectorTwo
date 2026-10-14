@@ -2,6 +2,21 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.9.2 · Seguridad — 2026-10-14
+
+Correcciones de código de la primera auditoría de seguridad (agente `seguridad`, siempre con opus; informe de 4 importantes y 10 menores, sin bloqueantes). Sin migración. **Pendiente de Javier**: la migración `0013_endurecer_permisos` (revocar los permisos por defecto de `anon` y `authenticated` en `public`, rol por defecto `comprador` en `perfiles`) no está aplicada; el paso 2 de M6 pasa a usar la `0014`, M7 la `0015`.
+
+- Importador de agrupaciones: `separarGeneros` ya no es cúbica (ventana acotada al mayor género con "/" del catálogo; 10 000 piezas en milisegundos) y la celda `GENEROS` tiene tope de 1 000 caracteres.
+- Topes de tamaño: celdas de importación de 300 caracteres (1 000 en notas y descripciones, `src/lib/api/celdas.ts`) y `413` si el cuerpo supera 6 MB (`leerCuerpo`). Una celda demasiado larga rechaza el archivo entero con `400` y la fila en el mensaje.
+- Tiendas: `GET /api/tiendas` y `/api/tiendas/aperturas` devuelven `venta_esperada_promedio: null` al comprador.
+- Login: el destino `next` solo acepta rutas internas (`src/lib/auth/destino.ts`); un usuario desactivado ve "Tu usuario está desactivado" en español.
+- Usuarios: desactivar y reactivar usan `ban_duration` en Auth (el `signOut(id)` anterior no hacía nada: auth-js espera un JWT), con Auth antes que el perfil y rollback; los errores de Auth ya no se devuelven crudos (`src/lib/usuarios/errores-auth.ts`; los inesperados responden `500` genérico).
+- Cabeceras de seguridad en `next.config.ts` (`X-Frame-Options`, `nosniff`, HSTS, `Referrer-Policy`, `Permissions-Policy`, CSP solo `frame-ancestors 'none'`; una CSP completa exige nonces y queda para después) y sin `X-Powered-By`. `Cache-Control: no-store` en todas las respuestas de la API.
+- CSV exportados con escape de fórmulas (`generarCsv`; quedan sin escapar el guion solo y los números con signo).
+- Test global de guards (`tests/api.guards.estatico.test.ts`): cada handler de `src/app/api/**` debe abrir con `requireUser`/`requirePlanner`/`requireAdmin`.
+- Total: **1 545 pruebas en 105 archivos**. QA aprobó. Pendientes menores (0.9.3): que el analizador de guards exija `requirePlanner`/`requireAdmin` en escrituras y rechace `export *`; test del handler de tiendas con rol comprador; el tope de 6 MB podría quedar justo en `/api/ventas/previsualizar` si hay más de ~15 000 combinaciones; `server-only` sin instalar; rotar la clave del admin y activar la protección contra contraseñas filtradas (Auth, a cargo de Javier).
+- Datos (sin cambio de código): terminada la asignación de las 1 826 equivalencias a agrupaciones de estacionalidad; ninguna equivalencia activa queda sin agrupación.
+
 ## 0.9.1 · M3 — 2026-10-13
 
 Importador masivo de agrupaciones de estacionalidad y descarga de faltantes en Excel. Pedido de Javier el mismo día ("necesito una carga masiva"): un Excel para bajar las equivalencias que siguen sin asignación y otro para crear las agrupaciones de una vez, en lugar de darlas de alta una por una. Sin migración (la última sigue siendo la `0012`). **Etiqueta**: el paso 2 de M6 estaba anunciado como `0.9.1 · M6`; esta entrega tomó la `0.9.1`, así que el paso 2 pasará a la siguiente (previsiblemente `0.9.2`, a confirmar al construirlo). Detalle en `docs/modulos/03-agrupaciones-estacionalidad.md` (sección "Importador masivo de agrupaciones (0.9.1)") y decisiones del 2026-10-13 en `docs/DECISIONES.md`.

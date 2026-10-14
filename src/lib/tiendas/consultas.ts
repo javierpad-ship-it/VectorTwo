@@ -13,12 +13,16 @@ import type { TiendaFila } from "./tipos";
 
 type Db = SupabaseClient<Database>;
 
-/** Anexa el `estado` calculado a la fecha `hoy`. `tipo` sale del `check` de la base, así que siempre es válido. */
-export function aTiendaFila(fila: Tables<"tiendas">, hoy: string): TiendaFila {
+/**
+ * Anexa el `estado` calculado a la fecha `hoy`. `tipo` sale del `check` de la base, así que siempre es válido.
+ * `verVentaEsperada: false` (rol comprador) devuelve la venta esperada en `null`: es dato de planificación.
+ */
+export function aTiendaFila(fila: Tables<"tiendas">, hoy: string, verVentaEsperada = true): TiendaFila {
   return {
     ...fila,
     tipo: esTipoTienda(fila.tipo) ? fila.tipo : "Tienda",
-    venta_esperada_promedio: fila.venta_esperada_promedio === null ? null : Number(fila.venta_esperada_promedio),
+    venta_esperada_promedio:
+      !verVentaEsperada || fila.venta_esperada_promedio === null ? null : Number(fila.venta_esperada_promedio),
     estado: estadoTienda(fila, hoy),
   };
 }

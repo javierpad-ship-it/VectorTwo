@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { nivelPlanificacion, uuid } from "../esquemas";
+import { celdaTexto } from "@/lib/api/celdas";
 
 /**
  * Esquemas zod del nivel de planificación (02b, "Contratos de API" y regla 17).
@@ -15,10 +16,10 @@ export const nivelBloqueSchema = z.object({
 });
 
 export const filaImportacionNivelSchema = z.object({
-  genero: z.string("genero debe ser texto."),
-  mundo: z.string("mundo debe ser texto."),
-  linea: z.string("linea debe ser texto."),
-  nivel: z.string("nivel debe ser texto."),
+  genero: celdaTexto("genero"),
+  mundo: celdaTexto("mundo"),
+  linea: celdaTexto("linea"),
+  nivel: celdaTexto("nivel"),
 });
 
 export const importarNivelSchema = z.object({

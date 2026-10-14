@@ -12,6 +12,7 @@ import {
 } from "@/lib/arbol/esquemas";
 import { temporadaAgrupacion } from "@/lib/curvas/esquemas";
 import { MAX_FILAS_IMPORTAR_AGRUPACIONES } from "./tipos-api";
+import { celdaTexto, MAX_CELDA_NOTA } from "@/lib/api/celdas";
 
 /**
  * Esquemas zod de M3 (docs/modulos/03-agrupaciones-estacionalidad.md,
@@ -26,6 +27,8 @@ import { MAX_FILAS_IMPORTAR_AGRUPACIONES } from "./tipos-api";
  */
 
 export const MAX_DESCRIPCION = 500;
+/** Tope de la celda GENEROS del importador de agrupaciones. */
+export const MAX_CELDA_GENEROS = 1000;
 export const MENSAJE_DESCRIPCION_LARGA = `La descripción no puede superar ${MAX_DESCRIPCION} caracteres.`;
 export const MAX_EQUIVALENCIAS_ASIGNAR = 2_000;
 export const MAX_GENEROS_AGRUPACION = 50;
@@ -102,17 +105,17 @@ export const asignarSchema = z.object({
 // ─── Importador ───
 
 export const filaImportacionEstacionalidadSchema = z.object({
-  genero: z.string("genero debe ser texto."),
-  mundo: z.string("mundo debe ser texto."),
-  linea: z.string("linea debe ser texto."),
-  equivalencia: z.string("equivalencia debe ser texto."),
-  agrupacion: z.string("agrupacion debe ser texto."),
+  genero: celdaTexto("genero"),
+  mundo: celdaTexto("mundo"),
+  linea: celdaTexto("linea"),
+  equivalencia: celdaTexto("equivalencia"),
+  agrupacion: celdaTexto("agrupacion"),
   /**
    * Sexta columna, opcional (los archivos de cinco columnas siguen valiendo):
    * `Invierno` / `Verano` / `Todo el año` o sus códigos. Solo aplica a las
    * agrupaciones que el archivo crea; el importador la valida (`temporada_invalida`).
    */
-  temporada: z.string("temporada debe ser texto.").nullish(),
+  temporada: celdaTexto("temporada").nullish(),
 });
 
 export const importarEstacionalidadSchema = z.object({
@@ -134,12 +137,13 @@ export const importarEstacionalidadSchema = z.object({
  * omisión por fila, no como un `400` de todo el archivo.
  */
 export const filaImportacionAgrupacionesSchema = z.object({
-  nombre: z.string("nombre debe ser texto."),
-  generos: z.string("generos debe ser texto."),
-  codigo: z.string("codigo debe ser texto.").nullish(),
-  temporada: z.string("temporada debe ser texto.").nullish(),
-  descripcion: z.string("descripcion debe ser texto.").nullish(),
-  orden: z.union([z.string(), z.number()], "orden debe ser un número o texto.").nullish(),
+  nombre: celdaTexto("nombre"),
+  /** Tope bajo: el parser de géneros parte la celda en piezas; ver `separarGeneros`. */
+  generos: celdaTexto("generos", MAX_CELDA_GENEROS),
+  codigo: celdaTexto("codigo").nullish(),
+  temporada: celdaTexto("temporada").nullish(),
+  descripcion: celdaTexto("descripcion", MAX_CELDA_NOTA).nullish(),
+  orden: z.union([celdaTexto("orden"), z.number()], "orden debe ser un número o texto.").nullish(),
 });
 
 export const importarAgrupacionesSchema = z.object({

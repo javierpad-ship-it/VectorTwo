@@ -6,10 +6,15 @@ import { traducirErrorDb } from "@/lib/api/errores-db";
 import type { UsuarioEliminado } from "@/lib/responsables/tipos";
 import { editarUsuarioSchema } from "@/lib/usuarios/esquemas";
 import { motivoRechazo } from "@/lib/usuarios/reglas";
+import { traducirErrorAuth } from "@/lib/usuarios/errores-auth";
 
 type Params = { params: Promise<{ id: string }> };
 
 const NO_ENCONTRADO = "Usuario no encontrado.";
+
+/** `ban_duration` de Auth: 876 000 h son cien años (el bloqueo no admite "para siempre"); `none` lo quita. */
+const BAN_INDEFINIDO = "876000h";
+const BAN_NINGUNO = "none";
 
 async function cargar(id: string) {
   const db = supabaseAdmin();
@@ -20,7 +25,11 @@ async function cargar(id: string) {
   return { objetivo, todos: todos ?? [] };
 }
 
-/** Edita nombre, rol, activo y/o contraseña (solo admin). */
+/**
+ * Edita nombre, rol, activo y/o contraseña (solo admin). Desactivar bloquea al
+ * usuario en Auth (`ban_duration`) y reactivar lo desbloquea; si Auth falla se
+ * responde el error y el perfil no se toca.
+ */
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { perfil: actor, response } = await requireAdmin();
   if (response) return response;
@@ -38,11 +47,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   const db = supabaseAdmin();
 
-  if (datos.password) {
-    const { error: errAuth } = await db.auth.admin.updateUserById(id, {
-      password: datos.password,
-    });
-    if (errAuth) return error(errAuth.message);
+  // Un solo cambio en Auth: la contraseña y/o el bloqueo. Desactivar banea al
+  // usuario (no puede iniciar sesión ni renovar la sesión abierta); reactivar
+  // quita el bloqueo. Va ANTES de tocar el perfil para que, si falla, no quede
+  // un perfil que diga una cosa y Auth otra.
+  const cambioAuth: { password?: string; ban_duration?: string } = {};
+  if (datos.password) cambioAuth.password = datos.password;
+  if (datos.activo !== undefined) cambioAuth.ban_duration = datos.activo ? BAN_NINGUNO : BAN_INDEFINIDO;
+  if (Object.keys(cambioAuth).length > 0) {
+    const { error: errAuth } = await db.auth.admin.updateUserById(id, cambioAuth);
+    if (errAuth) return traducirErrorAuth(errAuth, "editar usuario");
   }
 
   const cambiosPerfil: { nombre?: string | null; rol?: string; activo?: boolean } = {};
@@ -59,11 +73,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     .select("*")
     .single();
 
-  if (err) return error(err.message);
-
-  // Un usuario desactivado no debe seguir con sesión abierta.
-  if (datos.activo === false) {
-    await db.auth.admin.signOut(id, "global").catch(() => undefined);
+  if (err) {
+    // Si el perfil no se pudo guardar, el bloqueo de Auth vuelve a como estaba.
+    if (datos.activo !== undefined && datos.activo !== objetivo.activo) {
+      const { error: errRevertir } = await db.auth.admin.updateUserById(id, {
+        ban_duration: objetivo.activo ? BAN_NINGUNO : BAN_INDEFINIDO,
+      });
+      if (errRevertir) console.error("[auth] editar usuario: no se pudo revertir el bloqueo", id, errRevertir.message);
+    }
+    return traducirErrorDb(err, "editar usuario");
   }
 
   return ok(data);
@@ -95,7 +113,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   if (errConteo) return traducirErrorDb(errConteo, "eliminar usuario: contar responsabilidades");
 
   const { error: errAuth } = await db.auth.admin.deleteUser(id);
-  if (errAuth) return error(errAuth.message);
+  if (errAuth) return traducirErrorAuth(errAuth, "eliminar usuario");
 
   const eliminado: UsuarioEliminado = { id, combinaciones_liberadas: count ?? 0 };
   return ok(eliminado);

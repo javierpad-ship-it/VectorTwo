@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { uuid } from "@/lib/arbol/esquemas";
 import { MAX_NOTA } from "../esquemas";
+import { celdaTexto, MAX_CELDA_NOTA } from "@/lib/api/celdas";
 
 /**
  * Esquemas zod de las marcas relevantes por GML (02b, "Contratos de API" y
@@ -117,12 +118,12 @@ export const sugerenciasQuerySchema = z
 // ─── Importador de marcas relevantes ───
 
 export const filaImportacionGmlSchema = z.object({
-  marca: z.string("marca debe ser texto."),
-  genero: z.string("genero debe ser texto."),
-  mundo: z.string("mundo debe ser texto."),
-  linea: z.string("linea debe ser texto."),
+  marca: celdaTexto("marca"),
+  genero: celdaTexto("genero"),
+  mundo: celdaTexto("mundo"),
+  linea: celdaTexto("linea"),
   /** La columna `NOTA` es opcional; el cliente manda "" si no la mapeó. */
-  nota: z.string("nota debe ser texto.").default(""),
+  nota: celdaTexto("nota", MAX_CELDA_NOTA).default(""),
 });
 
 export const importarGmlSchema = z.object({

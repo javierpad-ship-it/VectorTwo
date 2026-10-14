@@ -32,9 +32,16 @@ function tipoDe(t: TiendaParaEventos): TipoTienda {
  * o un cierre con fecha hoy todavía no pasó. `desde`/`hasta` acotan por
  * fecha (inclusive) y solo afectan a `eventos` y a los conteos de próximos;
  * `resumen.sin_fecha_apertura` cuenta tiendas activas de tipo Tienda sin
- * apertura, dentro o fuera del rango.
+ * apertura, dentro o fuera del rango. `verVentaEsperada: false` (rol comprador)
+ * deja `venta_esperada_promedio` en `null` en cada evento.
  */
-export function eventosTiendas(tiendas: TiendaParaEventos[], hoy: string, rango: RangoFechas = {}): ReporteAperturas {
+export function eventosTiendas(
+  tiendas: TiendaParaEventos[],
+  hoy: string,
+  rango: RangoFechas = {},
+  opciones: { verVentaEsperada?: boolean } = {}
+): ReporteAperturas {
+  const verVentaEsperada = opciones.verVentaEsperada ?? true;
   const eventos: EventoTienda[] = [];
   let sinFechaApertura = 0;
 
@@ -50,7 +57,7 @@ export function eventosTiendas(tiendas: TiendaParaEventos[], hoy: string, rango:
       tipo,
       zona: t.zona,
       estado,
-      venta_esperada_promedio: t.venta_esperada_promedio,
+      venta_esperada_promedio: verVentaEsperada ? t.venta_esperada_promedio : null,
     };
     if (t.fecha_apertura) {
       eventos.push({ fecha: t.fecha_apertura, evento: "apertura", pasado: t.fecha_apertura < hoy, ...base });

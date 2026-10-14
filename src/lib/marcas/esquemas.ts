@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { activo, codigo, codigoOpcional, codigoValido, derivarCodigo, nombre, nombreValido, uuid } from "@/lib/arbol/esquemas";
+import { celdaTexto } from "@/lib/api/celdas";
 
 /**
  * Esquemas zod de M2 (docs/modulos/02-marcas.md, "Contratos de API" y regla
@@ -99,12 +100,12 @@ export const editarMarcaSchema = z
 // ─── Importador ───
 
 export const filaImportacionMarcaSchema = z.object({
-  marca: z.string("marca debe ser texto."),
-  agrupacion: z.string("agrupacion debe ser texto."),
+  marca: celdaTexto("marca"),
+  agrupacion: celdaTexto("agrupacion"),
   /** La columna es opcional en el archivo; el cliente manda "" si no la mapeó. */
-  tratamiento_especial: z.string("tratamiento_especial debe ser texto.").default(""),
+  tratamiento_especial: celdaTexto("tratamiento_especial").default(""),
   /** 02b: columna opcional `CONJUNTO`; el cliente manda "" (o no la manda) si no la mapeó. */
-  conjunto: z.string("conjunto debe ser texto.").default(""),
+  conjunto: celdaTexto("conjunto").default(""),
 });
 
 export const importarMarcasSchema = z.object({

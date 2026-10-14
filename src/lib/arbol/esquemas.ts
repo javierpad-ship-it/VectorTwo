@@ -11,6 +11,7 @@ import {
   esEquivalenciaIgualALinea,
   normalizarNombre,
 } from "./normalizar";
+import { celdaTexto } from "@/lib/api/celdas";
 
 /**
  * Esquemas zod de M1 (docs/modulos/01-arbol-producto.md, "Contratos de API").
@@ -188,10 +189,10 @@ export const editarEquivalenciaSchema = z
 // ─── Importador ───
 
 export const filaImportacionSchema = z.object({
-  genero: z.string("genero debe ser texto."),
-  mundo: z.string("mundo debe ser texto."),
-  linea: z.string("linea debe ser texto."),
-  equivalencia: z.string("equivalencia debe ser texto."),
+  genero: celdaTexto("genero"),
+  mundo: celdaTexto("mundo"),
+  linea: celdaTexto("linea"),
+  equivalencia: celdaTexto("equivalencia"),
 });
 
 export const importarSchema = z.object({

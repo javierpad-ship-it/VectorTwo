@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requirePlanner, requireUser } from "@/lib/auth/guard";
+import { puedeEditarMaestros } from "@/lib/auth/roles";
 import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { incluirInactivos } from "@/lib/api/catalogo";
@@ -26,10 +27,11 @@ function parametros(request: NextRequest, claves: string[]): Record<string, stri
  * opcionales combinados con AND: `tipo`, `estado` (se aplica en memoria tras
  * calcular), `zona` (comparada normalizada), `hoy` (`aaaa-mm-dd`, por defecto
  * `hoyLima()`); `400` si alguno no es válido. `?incluir_inactivos=1` incluye
- * las desactivadas.
+ * las desactivadas. Quien no puede editar maestros (comprador) recibe
+ * `venta_esperada_promedio: null`.
  */
 export async function GET(request: NextRequest) {
-  const { response } = await requireUser();
+  const { response, rol } = await requireUser();
   if (response) return response;
 
   const parseado = filtrosTiendasSchema.safeParse(parametros(request, ["tipo", "estado", "zona", "hoy"]));
@@ -41,12 +43,14 @@ export async function GET(request: NextRequest) {
   const hoy = filtros.hoy ?? hoyLima();
   const zona = filtros.zona === undefined ? undefined : normalizarNombre(filtros.zona);
 
+  const verVentaEsperada = puedeEditarMaestros(rol);
+
   const db = supabaseAdmin();
   const { data, error: err } = await leerTiendas(db, { soloActivas: !incluirInactivos(request) });
   if (err) return traducirErrorDb(err, "listar tiendas");
 
   const filas = data
-    .map((t) => aTiendaFila(t, hoy))
+    .map((t) => aTiendaFila(t, hoy, verVentaEsperada))
     .filter((t) => filtros.tipo === undefined || t.tipo === filtros.tipo)
     .filter((t) => filtros.estado === undefined || t.estado === filtros.estado)
     .filter((t) => zona === undefined || t.zona === zona);
