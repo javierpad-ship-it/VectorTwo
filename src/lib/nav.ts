@@ -48,6 +48,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/maestros/responsables", label: "Responsables género-mundo" },
       { href: "/maestros/marcas", label: "Agrupaciones y marcas", roles: PLANIFICACION },
       { href: "/maestros/estacionalidad", label: "Agrupaciones de estacionalidad", roles: PLANIFICACION },
+      // M11: revisión (solo lectura) de cómo quedó la agrupación por nivel GML/GMLE.
+      { href: "/maestros/agrupacion-gmle", label: "Reporte agrupación GMLE", roles: PLANIFICACION },
       { href: "/maestros/tiendas", label: "Tiendas y aperturas", roles: PLANIFICACION },
     ],
   },

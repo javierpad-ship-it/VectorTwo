@@ -18,10 +18,22 @@ export function anchosColumnas(fields: string[], data: (string | number)[][]): {
   });
 }
 
-export async function descargarExcel(fields: string[], data: (string | number)[][], nombreHoja: string, nombreArchivo: string): Promise<void> {
-  const XLSX = await import("xlsx");
+/**
+ * La hoja tal como se escribe: encabezado + filas como celdas, con anchos
+ * ajustados. Pura (recibe el módulo SheetJS), probable sin navegador. Los
+ * textos van siempre como celdas de texto (`t: "s"`): `aoa_to_sheet` no
+ * interpreta `=…`, `+…`, `-…` ni `@…` como fórmula, así que un nombre
+ * malicioso no se ejecuta al abrir el Excel.
+ */
+export function construirHoja(XLSX: Pick<typeof import("xlsx"), "utils">, fields: string[], data: (string | number)[][]) {
   const hoja = XLSX.utils.aoa_to_sheet([fields, ...data]);
   hoja["!cols"] = anchosColumnas(fields, data);
+  return hoja;
+}
+
+export async function descargarExcel(fields: string[], data: (string | number)[][], nombreHoja: string, nombreArchivo: string): Promise<void> {
+  const XLSX = await import("xlsx");
+  const hoja = construirHoja(XLSX, fields, data);
   const libro = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(libro, hoja, nombreHoja);
   // `writeFile` dispara la descarga en el navegador; se escribe a bytes para

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useColeccion } from "@/lib/use-coleccion";
 import { puedeEditarMaestros, type Rol } from "@/lib/auth/roles";
 import type { AgrupacionEstacionalidadFila, EquivalenciaPlana } from "@/lib/estacionalidad/tipos-api";
@@ -98,6 +99,14 @@ export function EstacionalidadPanel({ rol, pestanaInicial = "mapa" }: { rol: Rol
         )}
         {(lista.cargando || agrupaciones.cargando) && <span className="ml-2 italic">Actualizando…</span>}
       </p>
+
+      {(pestana === "mapa" || pestana === "faltantes") && (
+        <p className="text-sm">
+          <Link href="/maestros/agrupacion-gmle" className="font-medium text-marca-oscura underline underline-offset-2 hover:text-marca">
+            Revisar en el reporte GMLE
+          </Link>
+        </p>
+      )}
 
       {lista.error && <Alert onCerrar={() => lista.setError(null)}>No se pudieron cargar las equivalencias: {lista.error}</Alert>}
       {agrupaciones.error && (

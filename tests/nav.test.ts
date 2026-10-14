@@ -14,6 +14,12 @@ describe("puedeVerRuta", () => {
     expect(puedeVerRuta("comprador", "/maestros/marcas")).toBe(false);
     expect(puedeVerRuta("comprador", "/maestros/estacionalidad")).toBe(false);
     expect(puedeVerRuta("comprador", "/maestros/tiendas")).toBe(false);
+    expect(puedeVerRuta("comprador", "/maestros/agrupacion-gmle")).toBe(false);
+  });
+  it("admin y planner entran al reporte de agrupación GMLE (M11); el comprador no, ni por URL", () => {
+    expect(puedeVerRuta("admin", "/maestros/agrupacion-gmle")).toBe(true);
+    expect(puedeVerRuta("planner", "/maestros/agrupacion-gmle")).toBe(true);
+    expect(puedeVerRuta("comprador", "/maestros/agrupacion-gmle")).toBe(false);
   });
   it("las subrutas heredan el permiso del padre", () => {
     expect(puedeVerRuta("comprador", "/maestros/arbol/catalogos")).toBe(true);
@@ -66,10 +72,12 @@ describe("seccionesVisibles", () => {
     const maestros = seccionesVisibles("comprador").find((s) => s.title === "Maestros");
     expect(maestros?.links.map((l) => l.href)).toEqual(["/maestros/arbol", "/maestros/responsables"]);
   });
-  it("el planner y el admin ven los cinco maestros, con los responsables justo después del árbol", () => {
+  it("el planner y el admin ven los seis maestros, con los responsables justo después del árbol y el reporte GMLE tras la estacionalidad", () => {
     for (const rol of ["planner", "admin"] as const) {
       const maestros = seccionesVisibles(rol).find((s) => s.title === "Maestros");
-      expect(maestros?.links).toHaveLength(5);
+      expect(maestros?.links).toHaveLength(6);
+      const hrefs = maestros?.links.map((l) => l.href) ?? [];
+      expect(hrefs.indexOf("/maestros/agrupacion-gmle")).toBe(hrefs.indexOf("/maestros/estacionalidad") + 1);
       expect(maestros?.links.slice(0, 2).map((l) => l.label)).toEqual(["Árbol de producto", "Responsables género-mundo"]);
     }
   });
