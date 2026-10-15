@@ -1,9 +1,10 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-15 (0018, M7 paso A) contra `generate_typescript_types` del proyecto
- * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
- * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
+ * Verificados el 2026-10-15 (0019 M12 y 0020 M13) contra `generate_typescript_types` del proyecto
+ * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, vistas, funciones,
+ * columnas, obligatoriedad y claves foráneas. Se actualizan a mano (estilo de este archivo)
+ * después de cada migración y se comparan con el generador.
  */
 export type Json =
   | string
@@ -610,6 +611,93 @@ export type Database = {
         };
         Relationships: [];
       };
+      intercompany_reglas: {
+        Row: {
+          activo: boolean;
+          cobertura_max_meses: number;
+          cobertura_min_meses: number;
+          created_at: string;
+          equivalencia_id: string | null;
+          genero_mundo_linea_id: string;
+          id: string;
+          marca_id: string;
+          nota: string | null;
+          pct_directo: number;
+          perfil_id: string | null;
+          updated_at: string;
+          usuario_nombre: string | null;
+          vigente_desde: string;
+        };
+        Insert: {
+          activo?: boolean;
+          cobertura_max_meses: number;
+          cobertura_min_meses: number;
+          created_at?: string;
+          equivalencia_id?: string | null;
+          genero_mundo_linea_id: string;
+          id?: string;
+          marca_id: string;
+          nota?: string | null;
+          pct_directo?: number;
+          perfil_id?: string | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          vigente_desde: string;
+        };
+        Update: {
+          activo?: boolean;
+          cobertura_max_meses?: number;
+          cobertura_min_meses?: number;
+          created_at?: string;
+          equivalencia_id?: string | null;
+          genero_mundo_linea_id?: string;
+          id?: string;
+          marca_id?: string;
+          nota?: string | null;
+          pct_directo?: number;
+          perfil_id?: string | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          vigente_desde?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "intercompany_reglas_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_gml_id_fkey";
+            columns: ["genero_mundo_linea_id"];
+            isOneToOne: false;
+            referencedRelation: "genero_mundo_linea";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas_unidad";
+            referencedColumns: ["marca_id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       lineas: {
         Row: {
           activo: boolean;
@@ -766,6 +854,7 @@ export type Database = {
           modalidad_tratamiento: string | null;
           nombre: string;
           nota_tratamiento: string | null;
+          resto_al_barrer: boolean;
           tratamiento_especial: boolean;
           updated_at: string;
         };
@@ -779,6 +868,7 @@ export type Database = {
           modalidad_tratamiento?: string | null;
           nombre: string;
           nota_tratamiento?: string | null;
+          resto_al_barrer?: boolean;
           tratamiento_especial?: boolean;
           updated_at?: string;
         };
@@ -792,6 +882,7 @@ export type Database = {
           modalidad_tratamiento?: string | null;
           nombre?: string;
           nota_tratamiento?: string | null;
+          resto_al_barrer?: boolean;
           tratamiento_especial?: boolean;
           updated_at?: string;
         };
@@ -1268,6 +1359,7 @@ export type Database = {
           created_at: string;
           estado: string;
           hasta_periodo: string;
+          huella_flujo: string | null;
           id: string;
           nombre: string;
           nota: string | null;
@@ -1288,6 +1380,7 @@ export type Database = {
           created_at?: string;
           estado?: string;
           hasta_periodo: string;
+          huella_flujo?: string | null;
           id?: string;
           nombre: string;
           nota?: string | null;
@@ -1308,6 +1401,7 @@ export type Database = {
           created_at?: string;
           estado?: string;
           hasta_periodo?: string;
+          huella_flujo?: string | null;
           id?: string;
           nombre?: string;
           nota?: string | null;
@@ -1331,6 +1425,179 @@ export type Database = {
             isOneToOne: false;
             referencedRelation: "perfiles";
             referencedColumns: ["id"];
+          },
+        ];
+      };
+      reparto_marca_barrido_gml: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          equivalencia_id: string | null;
+          genero_mundo_linea_id: string;
+          grupo_resto: string | null;
+          id: string;
+          mes: number | null;
+          participacion_ajustada: number | null;
+          participacion_calculada: number;
+          participacion_vigente: number;
+          reparto_id: string;
+          temporada: string | null;
+          unidades_ventana: number;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          equivalencia_id?: string | null;
+          genero_mundo_linea_id: string;
+          grupo_resto?: string | null;
+          id?: string;
+          mes?: number | null;
+          participacion_ajustada?: number | null;
+          participacion_calculada: number;
+          participacion_vigente: number;
+          reparto_id: string;
+          temporada?: string | null;
+          unidades_ventana?: number;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          equivalencia_id?: string | null;
+          genero_mundo_linea_id?: string;
+          grupo_resto?: string | null;
+          id?: string;
+          mes?: number | null;
+          participacion_ajustada?: number | null;
+          participacion_calculada?: number;
+          participacion_vigente?: number;
+          reparto_id?: string;
+          temporada?: string | null;
+          unidades_ventana?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "reparto_marca_barrido_gml_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "reparto_marca_barrido_gml_gml_id_fkey";
+            columns: ["genero_mundo_linea_id"];
+            isOneToOne: false;
+            referencedRelation: "genero_mundo_linea";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "reparto_marca_barrido_gml_reparto_id_fkey";
+            columns: ["reparto_id"];
+            isOneToOne: false;
+            referencedRelation: "repartos_marca_barrido";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      repartos_marca_barrido: {
+        Row: {
+          activo: boolean;
+          alcance: Json;
+          aprobada_at: string;
+          aprobada_por_id: string | null;
+          aprobada_por_nombre: string | null;
+          created_at: string;
+          eat_pp: number | null;
+          error_reparto_pp: number | null;
+          factores_usados: Json;
+          fuente: string;
+          hasta_periodo: string;
+          huella_cargas: string;
+          huella_config: string;
+          id: string;
+          marca_id: string;
+          modo: string;
+          normaliza_nino: boolean;
+          nota: string | null;
+          share_barrido: number | null;
+          updated_at: string;
+          ventana_meses: number;
+          version: number;
+          vigente: boolean;
+        };
+        Insert: {
+          activo?: boolean;
+          alcance?: Json;
+          aprobada_at?: string;
+          aprobada_por_id?: string | null;
+          aprobada_por_nombre?: string | null;
+          created_at?: string;
+          eat_pp?: number | null;
+          error_reparto_pp?: number | null;
+          factores_usados?: Json;
+          fuente?: string;
+          hasta_periodo: string;
+          huella_cargas: string;
+          huella_config: string;
+          id?: string;
+          marca_id: string;
+          modo: string;
+          normaliza_nino?: boolean;
+          nota?: string | null;
+          share_barrido?: number | null;
+          updated_at?: string;
+          ventana_meses: number;
+          version: number;
+          vigente?: boolean;
+        };
+        Update: {
+          activo?: boolean;
+          alcance?: Json;
+          aprobada_at?: string;
+          aprobada_por_id?: string | null;
+          aprobada_por_nombre?: string | null;
+          created_at?: string;
+          eat_pp?: number | null;
+          error_reparto_pp?: number | null;
+          factores_usados?: Json;
+          fuente?: string;
+          hasta_periodo?: string;
+          huella_cargas?: string;
+          huella_config?: string;
+          id?: string;
+          marca_id?: string;
+          modo?: string;
+          normaliza_nino?: boolean;
+          nota?: string | null;
+          share_barrido?: number | null;
+          updated_at?: string;
+          ventana_meses?: number;
+          version?: number;
+          vigente?: boolean;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "repartos_marca_barrido_aprobada_por_id_fkey";
+            columns: ["aprobada_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "repartos_marca_barrido_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "repartos_marca_barrido_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas_unidad";
+            referencedColumns: ["marca_id"];
           },
         ];
       };
@@ -1554,6 +1821,91 @@ export type Database = {
     };
     Views: {
       // Las vistas no entran en `Tables<...>`: consultas.ts declara sus alias.
+      intercompany_vigente: {
+        Row: {
+          cobertura_max_meses: number | null;
+          cobertura_min_meses: number | null;
+          created_at: string | null;
+          equivalencia_id: string | null;
+          equivalencia_nombre: string | null;
+          genero_id: string | null;
+          genero_mundo_linea_id: string | null;
+          genero_nombre: string | null;
+          hasta_derivado: string | null;
+          id: string | null;
+          linea_id: string | null;
+          linea_nombre: string | null;
+          marca_id: string | null;
+          marca_nombre: string | null;
+          mundo_id: string | null;
+          mundo_nombre: string | null;
+          nivel_planificacion: string | null;
+          nota: string | null;
+          pct_directo: number | null;
+          perfil_id: string | null;
+          updated_at: string | null;
+          usuario_nombre: string | null;
+          vigente_desde: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "genero_mundo_linea_genero_id_fkey";
+            columns: ["genero_id"];
+            isOneToOne: false;
+            referencedRelation: "generos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "genero_mundo_linea_linea_id_fkey";
+            columns: ["linea_id"];
+            isOneToOne: false;
+            referencedRelation: "lineas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "genero_mundo_linea_mundo_id_fkey";
+            columns: ["mundo_id"];
+            isOneToOne: false;
+            referencedRelation: "mundos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_gml_id_fkey";
+            columns: ["genero_mundo_linea_id"];
+            isOneToOne: false;
+            referencedRelation: "genero_mundo_linea";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas_unidad";
+            referencedColumns: ["marca_id"];
+          },
+          {
+            foreignKeyName: "intercompany_reglas_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       marca_gml_especial_vigente: {
         Row: {
           agrupacion_marca_id: string | null;
@@ -1784,6 +2136,22 @@ export type Database = {
           p_gml_ids: string[];
           p_grupos: Json;
           p_tiendas_detalle: string[];
+        };
+        Returns: Json;
+      };
+      venta_marca_gml: {
+        Args: {
+          p_desde: string;
+          p_hasta: string;
+          p_marca_ids: string[];
+        };
+        Returns: Json;
+      };
+      venta_marca_gml_resumen: {
+        Args: {
+          p_desde: string;
+          p_hasta: string;
+          p_umbral_pequeno?: number;
         };
         Returns: Json;
       };

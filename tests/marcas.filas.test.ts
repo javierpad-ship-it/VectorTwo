@@ -16,6 +16,7 @@ const leidas = (): MarcaLeida[] =>
       tratamiento_especial: m.tratamiento_especial,
       nota_tratamiento: m.nota_tratamiento ?? null,
       modalidad_tratamiento: m.modalidad_tratamiento,
+      resto_al_barrer: false,
       conjunto_marca_id: m.conjunto_marca_id,
       activo: m.activo,
       created_at: "",
