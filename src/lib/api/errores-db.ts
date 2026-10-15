@@ -71,6 +71,13 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["curvas_estacionalidad_vigente_uniq", "Esa agrupación ya tiene una curva vigente; vuelve a cargar."],
   ["curvas_estacionalidad_agrupacion_version_key", "Esa agrupación ya tiene una curva con esa versión; vuelve a cargar."],
   ["corridas_estacionalidad_referencia_uniq", "Ya hay otra corrida de referencia; vuelve a cargar."],
+  // M7. Los dos primeros los anticipa la API con el nombre que choca; el resto es la red de seguridad (carrera entre dos planners).
+  ["proyecciones_nombre_anio_uniq", "Ya existe una proyección con ese nombre para ese año."],
+  ["proyecciones_cerrada_anio_uniq", "Ese año ya tiene una proyección cerrada; vuelve a cargar."],
+  ["proyeccion_filas_proyeccion_clave_key", "Esa fila ya existe en la proyección; vuelve a cargar."],
+  ["proyeccion_fila_anios_fila_anio_key", "Ese año ya existe en la fila; vuelve a cargar."],
+  ["proyeccion_tiendas_proyeccion_tienda_anio_key", "Esa tienda ya está en la proyección para ese año; vuelve a cargar."],
+  ["factores_volumen_atipico_anio_temporada_key", "Ya existe un factor para ese año y temporada."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -115,6 +122,33 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["curvas_estacionalidad_nota_len", "La nota no puede superar 300 caracteres."],
   ["curvas_estacionalidad_", "La curva no cumple las reglas de la base (participaciones entre 0 y 1, estado, origen o medida)."],
   ["corridas_estacionalidad_resultado_size", "El resultado de la corrida es demasiado grande para guardarse."],
+  // M7 (0018). La API ya valida con zod; esto es la red de seguridad.
+  ["tiendas_referencia_no_propia", "Una tienda no puede ser su propia referencia."],
+  ["proyecciones_nombre_len", "El nombre debe tener entre 1 y 80 caracteres."],
+  ["proyecciones_hasta_periodo", "«Datos hasta» debe ser un mes del año en curso."],
+  ["proyecciones_anio", "El año de la proyección no es válido."],
+  ["proyecciones_nota_len", "La nota no puede superar 500 caracteres."],
+  ["proyecciones_", "La proyección no cumple las reglas de la base (estado, parámetros o resumen)."],
+  ["proyeccion_fila_anios_crecimiento", "El crecimiento debe estar entre −95 % y 500 %."],
+  ["proyeccion_fila_anios_decidido", "El total decidido no puede ser negativo."],
+  ["proyeccion_fila_anios_decision", "Una decisión necesita su origen (y sin decisión no hay origen)."],
+  ["proyeccion_fila_anios_vendido", "Lo vendido no puede ser negativo."],
+  ["proyeccion_fila_anios_propuesto", "La propuesta no puede ser negativa."],
+  ["proyeccion_fila_anios_nota_len", "La nota no puede superar 300 caracteres."],
+  ["proyeccion_fila_anios_meses", "El reparto mensual debe tener doce meses."],
+  ["proyeccion_fila_anios_origen_meses", "El origen de cada mes debe ser real o proyectado, doce valores."],
+  ["proyeccion_fila_anios_subbloque", "El subbloque solo existe en las tiendas nuevas."],
+  ["proyeccion_fila_anios_", "El registro del año no cumple las reglas de la base."],
+  ["proyeccion_filas_nivel_equivalencia", "Una fila de nodo GMLE lleva equivalencia y una de nodo GML no."],
+  ["proyeccion_filas_", "La fila de la proyección no cumple las reglas de la base."],
+  ["proyeccion_tiendas_rampa", "La rampa necesita entre 1 y 6 valores."],
+  ["proyeccion_tiendas_nota_len", "La nota no puede superar 300 caracteres."],
+  ["proyeccion_tiendas_decision", "Una decisión necesita su origen (y sin decisión no hay origen)."],
+  ["proyeccion_tiendas_origen", "El origen de la decisión de una tienda debe ser propuesta o manual."],
+  ["proyeccion_tiendas_", "La tienda de la proyección no cumple las reglas de la base."],
+  ["factores_volumen_atipico_ratio_aplicado", "El factor debe ser mayor que 0,05 y como máximo 3."],
+  ["factores_volumen_atipico_nota_len", "La nota no puede superar 200 caracteres."],
+  ["factores_volumen_atipico_", "El factor no cumple las reglas de la base."],
   // Genéricos: cubren `*_codigo_len_check` y `*_nombre_len_check` de todas las tablas, incluidas tiendas.
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
@@ -265,6 +299,57 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     {
       eliminar: "No se puede eliminar la corrida: hay curvas aprobadas a partir de ella.",
       asignar: { status: 404, mensaje: "Corrida no encontrada." },
+    },
+  ],
+  // M7. Una tienda que es referente de otra, o que está en una proyección, no se elimina (`restrict`): se cambia la referencia o se desactiva.
+  [
+    "tiendas_tienda_referencia_id_fkey",
+    {
+      eliminar: "La tienda es la referencia de otra tienda: cambia esa referencia antes de eliminarla, o desactívala.",
+      asignar: { status: 404, mensaje: "Tienda de referencia no encontrada." },
+    },
+  ],
+  [
+    "proyeccion_filas_tienda_id_fkey",
+    {
+      eliminar: "La tienda está en una proyección: no se puede eliminar. Desactívala.",
+      asignar: { status: 404, mensaje: "Tienda no encontrada." },
+    },
+  ],
+  [
+    "proyeccion_tiendas_tienda_id_fkey",
+    {
+      eliminar: "La tienda está en una proyección: no se puede eliminar. Desactívala.",
+      asignar: { status: 404, mensaje: "Tienda no encontrada." },
+    },
+  ],
+  // Las filas de una proyección cuelgan de nodo, equivalencia, agrupación de marca y de estacionalidad con `restrict`.
+  [
+    "proyeccion_filas_gml_id_fkey",
+    {
+      eliminar: "No se puede eliminar el nodo: está en una proyección. Desactívalo.",
+      asignar: { status: 404, mensaje: "Nodo género-mundo-línea no encontrado." },
+    },
+  ],
+  [
+    "proyeccion_filas_equivalencia_id_fkey",
+    {
+      eliminar: "No se puede eliminar la equivalencia: está en una proyección. Desactívala.",
+      asignar: { status: 404, mensaje: "Equivalencia no encontrada." },
+    },
+  ],
+  [
+    "proyeccion_filas_agrupacion_marca_id_fkey",
+    {
+      eliminar: "No se puede eliminar la agrupación de marca: está en una proyección. Desactívala.",
+      asignar: { status: 404, mensaje: "Agrupación de marca no encontrada." },
+    },
+  ],
+  [
+    "proyeccion_filas_agrupacion_estacionalidad_id_fkey",
+    {
+      eliminar: "No se puede eliminar la agrupación de estacionalidad: está en una proyección. Desactívala.",
+      asignar: { status: 404, mensaje: "Agrupación de estacionalidad no encontrada." },
     },
   ],
   // Las cargas nunca se eliminan (cambian de estado); la FK es la red de seguridad.

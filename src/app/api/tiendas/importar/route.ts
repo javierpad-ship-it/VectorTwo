@@ -20,7 +20,8 @@ const MENSAJE_CODIGO_REPETIDO_AL_APLICAR = "Ya existe una tienda con ese código
  * los códigos existentes (el único es sobre `upper(codigo)`, que PostgREST no
  * admite en `onConflict`); si alguien creó una de esas tiendas entre
  * previsualizar y aplicar, el `23505` responde `409` y reimportar completa
- * el resto sin duplicar. Nunca modifica tiendas existentes. Sin transacción.
+ * el resto sin duplicar. Nunca modifica tiendas existentes (salvo asignar la tienda de referencia de las
+ * nuevas, columna opcional `TIENDA_REFERENCIA`, al final y con los ids ya creados). Sin transacción.
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -55,17 +56,32 @@ export async function POST(request: NextRequest) {
     );
   };
 
+  const idsPorCodigo = new Map(estado.tiendas.map((t) => [t.codigo.toUpperCase(), t.id]));
   for (const tanda of enTandas(plan.tiendas)) {
-    const filas: TablesInsert<"tiendas">[] = tanda.map((t) => ({ ...t }));
-    const { data, error: err } = await db.from("tiendas").insert(filas).select("tipo, fecha_apertura");
+    const filas: TablesInsert<"tiendas">[] = tanda.map(({ tienda_referencia_codigo: _referencia, ...t }) => {
+      void _referencia;
+      return t;
+    });
+    const { data, error: err } = await db.from("tiendas").insert(filas).select("id, codigo, tipo, fecha_apertura");
     if (err) return fallo(err);
     for (const fila of data ?? []) {
+      idsPorCodigo.set(fila.codigo.toUpperCase(), fila.id);
       if (fila.tipo === "Centro de Distribución") creados.centros_distribucion += 1;
       else {
         creados.tiendas += 1;
         if (fila.fecha_apertura === null) creados.sin_fecha_apertura += 1;
       }
     }
+  }
+
+  // M7: la tienda de referencia se asigna al final, cuando todas las tiendas del archivo ya existen.
+  for (const t of plan.tiendas) {
+    if (t.tienda_referencia_codigo === undefined) continue;
+    const id = idsPorCodigo.get(t.codigo.toUpperCase());
+    const referente = idsPorCodigo.get(t.tienda_referencia_codigo.toUpperCase());
+    if (!id || !referente) continue;
+    const { error: errRef } = await db.from("tiendas").update({ tienda_referencia_id: referente }).eq("id", id);
+    if (errRef) return fallo(errRef);
   }
 
   const reporte: ReporteImportacionTiendas = { modo: "aplicar", hoy, ...plan.reporte, crear: creados };

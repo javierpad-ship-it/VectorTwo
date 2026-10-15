@@ -1,3 +1,4 @@
+import "server-only";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { cargarEstadoNivel } from "@/lib/arbol/nivel/consultas";

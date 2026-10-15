@@ -55,3 +55,32 @@ export function motivoRechazoTienda(fila: TiendaCoherencia): MotivoRechazoTienda
   }
   return null;
 }
+
+export const MENSAJE_REFERENCIA_PROPIA = "Una tienda no puede ser su propia referencia.";
+export const MENSAJE_REFERENCIA_NO_EXISTE = "La tienda de referencia no existe.";
+export const MENSAJE_REFERENCIA_NO_TIENDA = "La tienda de referencia debe ser una Tienda, no un centro de distribución.";
+export const MENSAJE_REFERENCIA_INACTIVA = "La tienda de referencia está desactivada.";
+export const MENSAJE_REFERENCIA_EN_CD = "Un centro de distribución no lleva tienda de referencia.";
+
+/**
+ * M7. Rechazo de la tienda de referencia sobre la fila resultante: un CD no lleva referencia; el referente debe existir, ser de
+ * tipo Tienda, estar activo y ser otra tienda (`400`). Sin cadenas: la composición se calcula siempre con los hechos del propio
+ * referente, así que no se exige nada sobre el referente del referente.
+ */
+export function motivoRechazoReferencia(args: {
+  /** Id de la tienda que se guarda (`null` en un alta). */
+  tiendaId: string | null;
+  /** Tipo de la tienda resultante. */
+  tipo: string | null | undefined;
+  referenciaId: string | null | undefined;
+  /** La fila del referente, o `null` si no existe. */
+  referente: { id: string; tipo: string; activo: boolean } | null;
+}): string | null {
+  if (args.referenciaId === null || args.referenciaId === undefined) return null;
+  if (args.tipo === "Centro de Distribución") return MENSAJE_REFERENCIA_EN_CD;
+  if (args.tiendaId !== null && args.referenciaId === args.tiendaId) return MENSAJE_REFERENCIA_PROPIA;
+  if (!args.referente) return MENSAJE_REFERENCIA_NO_EXISTE;
+  if (args.referente.tipo !== "Tienda") return MENSAJE_REFERENCIA_NO_TIENDA;
+  if (!args.referente.activo) return MENSAJE_REFERENCIA_INACTIVA;
+  return null;
+}

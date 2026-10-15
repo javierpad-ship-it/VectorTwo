@@ -33,8 +33,15 @@ export type TiendaFila = {
   fecha_apertura: string | null;
   /** Último día con venta (inclusive), `aaaa-mm-dd`. */
   fecha_cierre: string | null;
-  /** Soles por mes; solo en tipo Tienda. */
+  /** Soles por mes, SIN IGV, de la tienda ya madura (en régimen); solo en tipo Tienda. */
   venta_esperada_promedio: number | null;
+  /**
+   * M7: la tienda a cuya composición de venta debe parecerse esta si es nueva. Solo `admin` y `planner`; al comprador le
+   * llega `null` (como `venta_esperada_promedio`).
+   */
+  tienda_referencia_id: string | null;
+  /** Código y nombre de la tienda de referencia (mismo recorte para el comprador). */
+  tienda_referencia: { id: string; codigo: string; nombre: string } | null;
   activo: boolean;
   created_at: string;
   updated_at: string;
@@ -92,6 +99,8 @@ export type FilaImportacionTienda = {
   fecha_apertura: string;
   fecha_cierre: string;
   venta_esperada: string;
+  /** Opcional: código de la tienda de referencia (columna `TIENDA_REFERENCIA`); `""` si no se mapeó. */
+  tienda_referencia?: string;
 };
 
 export type MotivoOmisionTienda =
@@ -105,6 +114,7 @@ export type MotivoOmisionTienda =
   | "cierre_antes_de_apertura"
   | "venta_invalida"
   | "venta_en_cd"
+  | "referencia_invalida"
   | "nombre_repetido"
   | "duplicada_en_archivo";
 
@@ -124,7 +134,8 @@ export type CampoDiferenciaTienda =
   | "razon_social"
   | "fecha_apertura"
   | "fecha_cierre"
-  | "venta_esperada_promedio";
+  | "venta_esperada_promedio"
+  | "tienda_referencia";
 
 /** Tienda existente cuyo archivo trae otro valor en algún campo; informativo, el importador no la modifica. */
 export type DiferenciaImportacionTienda = {

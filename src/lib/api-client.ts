@@ -7,12 +7,15 @@
 export class ErrorApi extends Error {
   readonly status: number;
   readonly codigo: string | null;
+  /** El cuerpo completo de la respuesta de error (algunos `409` traen listas, p. ej. `filas_sin_decidir` de M7). */
+  readonly cuerpo: Record<string, unknown> | null;
 
-  constructor(mensaje: string, status: number, codigo: string | null = null) {
+  constructor(mensaje: string, status: number, codigo: string | null = null, cuerpo: Record<string, unknown> | null = null) {
     super(mensaje);
     this.name = "ErrorApi";
     this.status = status;
     this.codigo = codigo;
+    this.cuerpo = cuerpo;
   }
 }
 
@@ -33,7 +36,7 @@ async function llamar<T>(url: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
 
-  let cuerpo: { data?: T; error?: string; codigo?: string } = {};
+  let cuerpo: { data?: T; error?: string; codigo?: string; [extra: string]: unknown } = {};
   try {
     cuerpo = await res.json();
   } catch {
@@ -41,7 +44,7 @@ async function llamar<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    throw new ErrorApi(cuerpo.error ?? `Error ${res.status}`, res.status, cuerpo.codigo ?? null);
+    throw new ErrorApi(cuerpo.error ?? `Error ${res.status}`, res.status, cuerpo.codigo ?? null, cuerpo);
   }
   return cuerpo.data as T;
 }

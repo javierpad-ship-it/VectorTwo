@@ -77,6 +77,12 @@ export function TiendasTab({
     return { zonas: [...z].sort((a, b) => a.localeCompare(b)), razones: [...r].sort((a, b) => a.localeCompare(b)) };
   }, [tiendas]);
 
+  // M7: pueden ser referente las tiendas activas de tipo Tienda (el CD no vende).
+  const tiendasReferencia = useMemo(
+    () => tiendas.filter((t) => t.activo && t.tipo === "Tienda").sort((a, b) => a.codigo.localeCompare(b.codigo)),
+    [tiendas]
+  );
+
   // ─── Formulario de alta ───
   const filaForm = aFila(form);
   const motivoForm = motivoNoGuardar(form);
@@ -144,6 +150,7 @@ export function TiendasTab({
       fecha_apertura: filaForm.fecha_apertura,
       fecha_cierre: filaForm.fecha_cierre,
       venta_esperada_promedio: filaForm.venta_esperada_promedio,
+      ...(form.referencia ? { tienda_referencia_id: form.referencia } : {}),
     };
     const r = await ejecutar(() => api.post<TiendaFila>("/api/tiendas", cuerpo));
     if (r.ok) {
@@ -212,6 +219,11 @@ export function TiendasTab({
       className: "text-right",
       render: (t) => <Celda valor={t.venta_esperada_promedio === null ? null : formatearMonto(t.venta_esperada_promedio)} mono />,
     },
+    {
+      clave: "referencia",
+      titulo: "Referente",
+      render: (t) => <Celda valor={t.tienda_referencia?.codigo ?? null} mono />,
+    },
     { clave: "estado", titulo: "Estado", render: (t) => <BadgeEstado estado={t.estado} activo={t.activo} /> },
   ];
 
@@ -265,7 +277,7 @@ export function TiendasTab({
           descripcion="El código es el real de la tienda (el que traen venta y stock); nombre, zona y razón social se guardan normalizados en mayúsculas."
         >
           <form onSubmit={crear} className="grid gap-4 md:grid-cols-4">
-            <CamposTienda valor={form} onCambio={setForm} idLista={idLista} />
+            <CamposTienda valor={form} onCambio={setForm} idLista={idLista} tiendasReferencia={tiendasReferencia} />
             <div className="flex flex-wrap items-center gap-4 md:col-span-4">
               <Button type="submit" disabled={guardando || ocupado || motivoForm !== null} title={motivoForm ?? undefined}>
                 {guardando ? "Creando…" : "Crear tienda"}
@@ -320,6 +332,7 @@ export function TiendasTab({
           ocupado={ocupado}
           error={error}
           onCerrarError={() => setError(null)}
+          tiendasReferencia={tiendasReferencia}
           onGuardar={guardarEdicion}
           onCerrar={cerrarEdicion}
         />

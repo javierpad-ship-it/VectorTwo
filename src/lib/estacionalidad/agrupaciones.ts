@@ -1,3 +1,4 @@
+import "server-only";
 import type { NextRequest, NextResponse } from "next/server";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";

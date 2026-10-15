@@ -24,6 +24,7 @@ export function EditarTiendaDialogo({
   ocupado,
   error,
   onCerrarError,
+  tiendasReferencia,
   onGuardar,
   onCerrar,
 }: {
@@ -36,6 +37,8 @@ export function EditarTiendaDialogo({
   /** Error de la API del último intento; se muestra dentro del diálogo. */
   error: string | null;
   onCerrarError: () => void;
+  /** M7: las tiendas que pueden ser referente (el diálogo excluye a la que se edita). */
+  tiendasReferencia?: readonly TiendaFila[];
   onGuardar: (campos: Campos) => Promise<void>;
   onCerrar: () => void;
 }) {
@@ -73,7 +76,7 @@ export function EditarTiendaDialogo({
             <Alert onCerrar={onCerrarError}>{error}</Alert>
           </div>
         )}
-        <CamposTienda valor={campos} onCambio={setCampos} idLista={idLista} autoFocus />
+        <CamposTienda valor={campos} onCambio={setCampos} idLista={idLista} autoFocus tiendasReferencia={tiendasReferencia} idActual={tienda.id} />
         <div className="flex flex-wrap items-center gap-4 md:col-span-4">
           <BadgeEstado estado={estadoTienda(fila, hoy)} activo={tienda.activo} prefijo="Quedará" />
           <VistaPreviaNombre nombre={fila.nombre} codigo={fila.codigo} />

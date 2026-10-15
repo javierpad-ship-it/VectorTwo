@@ -15,16 +15,41 @@ type Db = SupabaseClient<Database>;
 
 /**
  * Anexa el `estado` calculado a la fecha `hoy`. `tipo` sale del `check` de la base, así que siempre es válido.
- * `verVentaEsperada: false` (rol comprador) devuelve la venta esperada en `null`: es dato de planificación.
+ * `verVentaEsperada: false` (rol comprador) devuelve la venta esperada Y la tienda de referencia en `null`: son datos de
+ * planificación. `referentes` (`id → { codigo, nombre }`) pone el nombre del referente; sin él (o si no está) queda `null`.
  */
-export function aTiendaFila(fila: Tables<"tiendas">, hoy: string, verVentaEsperada = true): TiendaFila {
+export function aTiendaFila(
+  fila: Tables<"tiendas">,
+  hoy: string,
+  verVentaEsperada = true,
+  referentes?: ReadonlyMap<string, { codigo: string; nombre: string }>
+): TiendaFila {
+  const referente = verVentaEsperada && fila.tienda_referencia_id ? referentes?.get(fila.tienda_referencia_id) : undefined;
+  // Lista EXPLÍCITA de campos (no un spread con lista negra): una columna nueva en `tiendas` no llega a la API ni al comprador
+  // sin que alguien la agregue aquí a propósito.
   return {
-    ...fila,
+    id: fila.id,
+    codigo: fila.codigo,
+    nombre: fila.nombre,
     tipo: esTipoTienda(fila.tipo) ? fila.tipo : "Tienda",
+    zona: fila.zona,
+    razon_social: fila.razon_social,
+    fecha_apertura: fila.fecha_apertura,
+    fecha_cierre: fila.fecha_cierre,
+    activo: fila.activo,
+    created_at: fila.created_at,
+    updated_at: fila.updated_at,
     venta_esperada_promedio:
       !verVentaEsperada || fila.venta_esperada_promedio === null ? null : Number(fila.venta_esperada_promedio),
+    tienda_referencia_id: verVentaEsperada ? fila.tienda_referencia_id : null,
+    tienda_referencia: referente && fila.tienda_referencia_id ? { id: fila.tienda_referencia_id, codigo: referente.codigo, nombre: referente.nombre } : null,
     estado: estadoTienda(fila, hoy),
   };
+}
+
+/** `id → { codigo, nombre }` de las tiendas leídas (para resolver el nombre del referente). */
+export function referentesDe(tiendas: readonly Pick<Tables<"tiendas">, "id" | "codigo" | "nombre">[]): Map<string, { codigo: string; nombre: string }> {
+  return new Map(tiendas.map((t) => [t.id, { codigo: t.codigo, nombre: t.nombre }]));
 }
 
 /** Tiendas por `codigo` (y `id` para que el orden sea estable). Por defecto solo activas. */

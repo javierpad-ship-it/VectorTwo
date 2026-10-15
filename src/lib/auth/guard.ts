@@ -1,3 +1,4 @@
+import "server-only";
 import type { NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { supabaseServer } from "@/lib/supabase/server";

@@ -1,7 +1,7 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-14 (0015, M6 paso 2) contra `generate_typescript_types` del proyecto
+ * Verificados el 2026-10-15 (0018, M7 paso A) contra `generate_typescript_types` del proyecto
  * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, columnas,
  * obligatoriedad y claves foráneas. Se regeneran después de cada migración.
  */
@@ -460,6 +460,71 @@ export type Database = {
           },
         ];
       };
+      factores_volumen_atipico: {
+        Row: {
+          activo: boolean;
+          anio: number;
+          calculado_at: string | null;
+          created_at: string;
+          huella_cargas: string | null;
+          id: string;
+          meses_comparados: number | null;
+          nota: string | null;
+          parcial: boolean;
+          perfil_id: string | null;
+          ratio_aplicado: number | null;
+          ratio_calculado: number | null;
+          temporada: string;
+          tiendas_comunes: number | null;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          anio: number;
+          calculado_at?: string | null;
+          created_at?: string;
+          huella_cargas?: string | null;
+          id?: string;
+          meses_comparados?: number | null;
+          nota?: string | null;
+          parcial?: boolean;
+          perfil_id?: string | null;
+          ratio_aplicado?: number | null;
+          ratio_calculado?: number | null;
+          temporada: string;
+          tiendas_comunes?: number | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          anio?: number;
+          calculado_at?: string | null;
+          created_at?: string;
+          huella_cargas?: string | null;
+          id?: string;
+          meses_comparados?: number | null;
+          nota?: string | null;
+          parcial?: boolean;
+          perfil_id?: string | null;
+          ratio_aplicado?: number | null;
+          ratio_calculado?: number | null;
+          temporada?: string;
+          tiendas_comunes?: number | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "factores_volumen_atipico_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       genero_mundo_linea: {
         Row: {
           activo: boolean;
@@ -853,6 +918,422 @@ export type Database = {
         };
         Relationships: [];
       };
+      proyeccion_fila_anios: {
+        Row: {
+          activo: boolean;
+          anio: number;
+          avisos: Json;
+          bloque: string;
+          created_at: string;
+          crecimiento_pct: number | null;
+          curva_origen_propuesta: Json | null;
+          curva_origen_usada: Json;
+          decidido: number | null;
+          decidido_at: string | null;
+          decidido_por_id: string | null;
+          decidido_por_nombre: string | null;
+          explicacion: string;
+          fila_id: string;
+          id: string;
+          meses: number[] | null;
+          meses_propuestos: number[] | null;
+          metodo: string;
+          nota: string | null;
+          origen: string | null;
+          origen_meses: string[] | null;
+          propuesta_al_decidir: number | null;
+          propuesto: number | null;
+          referencia_alternativa: number | null;
+          referencia_tres_meses: number | null;
+          subbloque: string | null;
+          updated_at: string;
+          vendido: number;
+        };
+        Insert: {
+          activo?: boolean;
+          anio: number;
+          avisos?: Json;
+          bloque: string;
+          created_at?: string;
+          crecimiento_pct?: number | null;
+          curva_origen_propuesta?: Json | null;
+          curva_origen_usada?: Json;
+          decidido?: number | null;
+          decidido_at?: string | null;
+          decidido_por_id?: string | null;
+          decidido_por_nombre?: string | null;
+          explicacion?: string;
+          fila_id: string;
+          id?: string;
+          meses?: number[] | null;
+          meses_propuestos?: number[] | null;
+          metodo?: string;
+          nota?: string | null;
+          origen?: string | null;
+          origen_meses?: string[] | null;
+          propuesta_al_decidir?: number | null;
+          propuesto?: number | null;
+          referencia_alternativa?: number | null;
+          referencia_tres_meses?: number | null;
+          subbloque?: string | null;
+          updated_at?: string;
+          vendido?: number;
+        };
+        Update: {
+          activo?: boolean;
+          anio?: number;
+          avisos?: Json;
+          bloque?: string;
+          created_at?: string;
+          crecimiento_pct?: number | null;
+          curva_origen_propuesta?: Json | null;
+          curva_origen_usada?: Json;
+          decidido?: number | null;
+          decidido_at?: string | null;
+          decidido_por_id?: string | null;
+          decidido_por_nombre?: string | null;
+          explicacion?: string;
+          fila_id?: string;
+          id?: string;
+          meses?: number[] | null;
+          meses_propuestos?: number[] | null;
+          metodo?: string;
+          nota?: string | null;
+          origen?: string | null;
+          origen_meses?: string[] | null;
+          propuesta_al_decidir?: number | null;
+          propuesto?: number | null;
+          referencia_alternativa?: number | null;
+          referencia_tres_meses?: number | null;
+          subbloque?: string | null;
+          updated_at?: string;
+          vendido?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proyeccion_fila_anios_decidido_por_id_fkey";
+            columns: ["decidido_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_fila_anios_fila_id_fkey";
+            columns: ["fila_id"];
+            isOneToOne: false;
+            referencedRelation: "proyeccion_filas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      proyeccion_filas: {
+        Row: {
+          activo: boolean;
+          agrupacion_estacionalidad_id: string | null;
+          agrupacion_marca_id: string;
+          avisos: Json;
+          clave: string;
+          composicion: Json | null;
+          created_at: string;
+          curva: Json | null;
+          curva_origen: Json;
+          equivalencia_id: string | null;
+          factores_mes: Json | null;
+          gml_id: string;
+          historico: Json;
+          id: string;
+          nivel_proyectado: string;
+          participaciones: Json | null;
+          proyeccion_id: string;
+          temporada: string | null;
+          tienda_id: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          agrupacion_estacionalidad_id?: string | null;
+          agrupacion_marca_id: string;
+          avisos?: Json;
+          clave: string;
+          composicion?: Json | null;
+          created_at?: string;
+          curva?: Json | null;
+          curva_origen?: Json;
+          equivalencia_id?: string | null;
+          factores_mes?: Json | null;
+          gml_id: string;
+          historico: Json;
+          id?: string;
+          nivel_proyectado: string;
+          participaciones?: Json | null;
+          proyeccion_id: string;
+          temporada?: string | null;
+          tienda_id?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          agrupacion_estacionalidad_id?: string | null;
+          agrupacion_marca_id?: string;
+          avisos?: Json;
+          clave?: string;
+          composicion?: Json | null;
+          created_at?: string;
+          curva?: Json | null;
+          curva_origen?: Json;
+          equivalencia_id?: string | null;
+          factores_mes?: Json | null;
+          gml_id?: string;
+          historico?: Json;
+          id?: string;
+          nivel_proyectado?: string;
+          participaciones?: Json | null;
+          proyeccion_id?: string;
+          temporada?: string | null;
+          tienda_id?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proyeccion_filas_agrupacion_estacionalidad_id_fkey";
+            columns: ["agrupacion_estacionalidad_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_estacionalidad";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_filas_agrupacion_marca_id_fkey";
+            columns: ["agrupacion_marca_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_marca";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_filas_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_filas_gml_id_fkey";
+            columns: ["gml_id"];
+            isOneToOne: false;
+            referencedRelation: "genero_mundo_linea";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_filas_proyeccion_id_fkey";
+            columns: ["proyeccion_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_filas_tienda_id_fkey";
+            columns: ["tienda_id"];
+            isOneToOne: false;
+            referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      proyeccion_tiendas: {
+        Row: {
+          activo: boolean;
+          anio: number;
+          avisos: Json;
+          bloque: string;
+          created_at: string;
+          decidido: number | null;
+          decidido_at: string | null;
+          decidido_por_id: string | null;
+          decidido_por_nombre: string | null;
+          explicacion: string;
+          fecha_usada: string;
+          id: string;
+          metodo: string;
+          nota: string | null;
+          origen: string | null;
+          origen_composicion: string | null;
+          propuesta_al_decidir: number | null;
+          propuesto: number | null;
+          proyeccion_id: string;
+          rampa: Json;
+          referencia_alternativa: number | null;
+          referencia_tres_meses: number | null;
+          referente_id_usado: string | null;
+          subbloque: string | null;
+          tienda_id: string;
+          unidades_maduras: number | null;
+          updated_at: string;
+          vendido: number;
+          venta_esperada_usada: number | null;
+        };
+        Insert: {
+          activo?: boolean;
+          anio: number;
+          avisos?: Json;
+          bloque: string;
+          created_at?: string;
+          decidido?: number | null;
+          decidido_at?: string | null;
+          decidido_por_id?: string | null;
+          decidido_por_nombre?: string | null;
+          explicacion?: string;
+          fecha_usada: string;
+          id?: string;
+          metodo?: string;
+          nota?: string | null;
+          origen?: string | null;
+          origen_composicion?: string | null;
+          propuesta_al_decidir?: number | null;
+          propuesto?: number | null;
+          proyeccion_id: string;
+          rampa?: Json;
+          referencia_alternativa?: number | null;
+          referencia_tres_meses?: number | null;
+          referente_id_usado?: string | null;
+          subbloque?: string | null;
+          tienda_id: string;
+          unidades_maduras?: number | null;
+          updated_at?: string;
+          vendido?: number;
+          venta_esperada_usada?: number | null;
+        };
+        Update: {
+          activo?: boolean;
+          anio?: number;
+          avisos?: Json;
+          bloque?: string;
+          created_at?: string;
+          decidido?: number | null;
+          decidido_at?: string | null;
+          decidido_por_id?: string | null;
+          decidido_por_nombre?: string | null;
+          explicacion?: string;
+          fecha_usada?: string;
+          id?: string;
+          metodo?: string;
+          nota?: string | null;
+          origen?: string | null;
+          origen_composicion?: string | null;
+          propuesta_al_decidir?: number | null;
+          propuesto?: number | null;
+          proyeccion_id?: string;
+          rampa?: Json;
+          referencia_alternativa?: number | null;
+          referencia_tres_meses?: number | null;
+          referente_id_usado?: string | null;
+          subbloque?: string | null;
+          tienda_id?: string;
+          unidades_maduras?: number | null;
+          updated_at?: string;
+          vendido?: number;
+          venta_esperada_usada?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proyeccion_tiendas_decidido_por_id_fkey";
+            columns: ["decidido_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_tiendas_proyeccion_id_fkey";
+            columns: ["proyeccion_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_tiendas_tienda_id_fkey";
+            columns: ["tienda_id"];
+            isOneToOne: false;
+            referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      proyecciones: {
+        Row: {
+          activo: boolean;
+          anio_en_curso: number;
+          calculado_at: string | null;
+          calculando_desde: string | null;
+          cerrada_at: string | null;
+          cerrada_por_id: string | null;
+          cerrada_por_nombre: string | null;
+          created_at: string;
+          estado: string;
+          hasta_periodo: string;
+          id: string;
+          nombre: string;
+          nota: string | null;
+          parametros: Json;
+          perfil_id: string | null;
+          resumen: Json | null;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          anio_en_curso: number;
+          calculado_at?: string | null;
+          calculando_desde?: string | null;
+          cerrada_at?: string | null;
+          cerrada_por_id?: string | null;
+          cerrada_por_nombre?: string | null;
+          created_at?: string;
+          estado?: string;
+          hasta_periodo: string;
+          id?: string;
+          nombre: string;
+          nota?: string | null;
+          parametros: Json;
+          perfil_id?: string | null;
+          resumen?: Json | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          anio_en_curso?: number;
+          calculado_at?: string | null;
+          calculando_desde?: string | null;
+          cerrada_at?: string | null;
+          cerrada_por_id?: string | null;
+          cerrada_por_nombre?: string | null;
+          created_at?: string;
+          estado?: string;
+          hasta_periodo?: string;
+          id?: string;
+          nombre?: string;
+          nota?: string | null;
+          parametros?: Json;
+          perfil_id?: string | null;
+          resumen?: Json | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proyecciones_cerrada_por_id_fkey";
+            columns: ["cerrada_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyecciones_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       responsables_genero_mundo: {
         Row: {
           activo: boolean;
@@ -915,6 +1396,7 @@ export type Database = {
           id: string;
           nombre: string;
           razon_social: string | null;
+          tienda_referencia_id: string | null;
           tipo: string;
           updated_at: string;
           venta_esperada_promedio: number | null;
@@ -929,6 +1411,7 @@ export type Database = {
           id?: string;
           nombre: string;
           razon_social?: string | null;
+          tienda_referencia_id?: string | null;
           tipo?: string;
           updated_at?: string;
           venta_esperada_promedio?: number | null;
@@ -943,12 +1426,21 @@ export type Database = {
           id?: string;
           nombre?: string;
           razon_social?: string | null;
+          tienda_referencia_id?: string | null;
           tipo?: string;
           updated_at?: string;
           venta_esperada_promedio?: number | null;
           zona?: string | null;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "tiendas_tienda_referencia_id_fkey";
+            columns: ["tienda_referencia_id"];
+            isOneToOne: false;
+            referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       ubicaciones_ignoradas: {
         Row: {
@@ -1282,6 +1774,16 @@ export type Database = {
       venta_estacionalidad_agrupacion: {
         Args: {
           p_agrupacion_id?: string;
+        };
+        Returns: Json;
+      };
+      venta_proyeccion: {
+        Args: {
+          p_desde: string;
+          p_desde_w12: string;
+          p_gml_ids: string[];
+          p_grupos: Json;
+          p_tiendas_detalle: string[];
         };
         Returns: Json;
       };

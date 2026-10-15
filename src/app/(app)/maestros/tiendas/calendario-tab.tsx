@@ -175,7 +175,7 @@ function FilaEvento({ evento: e }: { evento: EventoTienda }) {
       {e.tipo === "Centro de Distribución" && <Badge tono="marca">CD</Badge>}
       {e.zona && <span className="text-tinta-suave">{e.zona}</span>}
       {e.evento === "apertura" && e.venta_esperada_promedio !== null && (
-        <span className="font-mono text-xs text-tinta-suave" title="Venta esperada (S/ por mes)">
+        <span className="font-mono text-xs text-tinta-suave" title="Venta esperada (S/ por mes, sin IGV, tienda madura)">
           {formatearMonto(e.venta_esperada_promedio)}
         </span>
       )}

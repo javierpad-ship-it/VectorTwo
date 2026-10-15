@@ -57,6 +57,9 @@ const monto = z
   .optional();
 
 const tipo = z.enum(TIPOS_TIENDA, MENSAJE_TIPO);
+
+/** M7: id de la tienda de referencia; `null` la quita. El handler comprueba que sea una Tienda activa y distinta. */
+const referencia = z.uuid("La tienda de referencia no es válida.").nullable().optional();
 export const estadoTiendaSchema = z.enum(ESTADOS_TIENDA, MENSAJE_ESTADO);
 
 /** Coherencia cruzada (regla 4) como issue de zod colgada del campo que la provoca. */
@@ -75,6 +78,7 @@ export const crearTiendaSchema = z
     fecha_apertura: fecha.transform((v) => v ?? null),
     fecha_cierre: fecha.transform((v) => v ?? null),
     venta_esperada_promedio: monto.transform((v) => v ?? null),
+    tienda_referencia_id: referencia,
   })
   .superRefine(coherente);
 
@@ -93,6 +97,7 @@ export const editarTiendaSchema = z
     fecha_apertura: fecha,
     fecha_cierre: fecha,
     venta_esperada_promedio: monto,
+    tienda_referencia_id: referencia,
     activo,
   })
   .partial()
@@ -167,6 +172,7 @@ export const filaImportacionTiendaSchema = z.object({
   fecha_apertura: celda("fecha_apertura"),
   fecha_cierre: celda("fecha_cierre"),
   venta_esperada: celda("venta_esperada"),
+  tienda_referencia: celdaTexto("tienda_referencia").optional(),
 });
 
 export const importarTiendasSchema = z.object({

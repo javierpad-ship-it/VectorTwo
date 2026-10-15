@@ -19,6 +19,7 @@ const fila = (extra: Partial<Tables<"tiendas">> = {}): Tables<"tiendas"> => ({
   tipo: "Tienda",
   zona: null,
   razon_social: null,
+  tienda_referencia_id: null,
   fecha_apertura: "2027-03-01",
   fecha_cierre: null,
   venta_esperada_promedio: 85000,

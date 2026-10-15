@@ -1,0 +1,106 @@
+"use client";
+
+import { useState } from "react";
+import { api } from "@/lib/api-client";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, Input } from "@/components/ui/form";
+import { Modal } from "@/components/ui/modal";
+import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
+import { AlertaError } from "./comunes";
+import { rutaProyeccion, useAccion } from "./use-proyeccion";
+import { lineasDeCierre, listaSinDecidir, listaTiendasSinDecidir, MAX_SIN_DECIDIR } from "./vista";
+import { formatearNumero } from "@/lib/formato";
+
+/**
+ * Cerrar la proyección (ficha 07, paso 7). Resume filas decididas y sin decidir por año, cola larga que se cerrará con la
+ * propuesta y avisos, y pide confirmación. El servidor bloquea si queda sin decidir una fila con propuesta mayor o igual
+ * al umbral de cola larga, o una tienda nueva con venta esperada; si la proyección está desactualizada, ofrece cerrar de
+ * todos modos (`?forzar=1`, que solo salta ese aviso). Al cerrar, la cerrada anterior del mismo año pasa a archivada y
+ * una cerrada es solo lectura: nunca se vuelve a repartir.
+ */
+export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: { proyeccion: ProyeccionApi; onCerrar: () => void; onCerrada: (p: ProyeccionApi) => Promise<void> | void; onRecalcular: () => void }) {
+  const [nota, setNota] = useState("");
+  const [forzar, setForzar] = useState(false);
+  const accion = useAccion();
+  const lineas = lineasDeCierre(proyeccion);
+  const desactualizada = proyeccion.desactualizada.length > 0;
+  const sinDecidir = listaSinDecidir(accion.error?.detalle);
+  const tiendasSinDecidir = listaTiendasSinDecidir(accion.error?.detalle, proyeccion.bloques);
+
+  async function cerrar() {
+    const r = await accion.ejecutar(() => api.post<ProyeccionApi>(`${rutaProyeccion(proyeccion.id)}/cerrar${forzar ? "?forzar=1" : ""}`, { nota: nota.trim() === "" ? null : nota.trim() }));
+    if (!r.ok) return;
+    await onCerrada(r.valor);
+    onCerrar();
+  }
+
+  return (
+    <Modal
+      titulo={`Cerrar ${proyeccion.nombre}`}
+      descripcion={`La proyección cerrada es el único insumo de volumen del flujo de mercadería. La cerrada anterior de ${proyeccion.anio_en_curso} pasará a archivada.`}
+      onCerrar={onCerrar}
+      cerrable={!accion.ocupado}
+      ancho="max-w-xl"
+      pie={
+        <>
+          <Button variante="fantasma" disabled={accion.ocupado} onClick={onCerrar}>
+            Cancelar
+          </Button>
+          <Button disabled={accion.ocupado || (desactualizada && !forzar)} onClick={() => void cerrar()}>
+            {accion.ocupado ? "Cerrando…" : "Cerrar proyección"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {accion.error && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} />}
+        {sinDecidir && (
+          <div className="space-y-1">
+            <p className="text-sm font-medium">
+              {sinDecidir.total > MAX_SIN_DECIDIR ? `Primeras ${MAX_SIN_DECIDIR} de ${formatearNumero(sinDecidir.total)} filas por decidir (las de mayor propuesta):` : `Filas por decidir (${formatearNumero(sinDecidir.total)}):`}
+            </p>
+            <ul className="max-h-56 list-disc space-y-0.5 overflow-y-auto rounded-md border border-borde bg-fondo py-2 pl-7 pr-3 text-xs">
+              {sinDecidir.lineas.map((l, i) => (
+                <li key={i}>{l}</li>
+              ))}
+            </ul>
+            {sinDecidir.total > MAX_SIN_DECIDIR && <p className="text-xs text-tinta-suave">… y {formatearNumero(sinDecidir.total - MAX_SIN_DECIDIR)} más. Decídelas en Por línea; la matriz con «Solo sin proyectar» ayuda a encontrarlas.</p>}
+          </div>
+        )}
+        {tiendasSinDecidir && (
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Tiendas nuevas por decidir ({tiendasSinDecidir.length}):</p>
+            <ul className="list-disc space-y-0.5 pl-7 text-xs">
+              {tiendasSinDecidir.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {lineas.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+        </ul>
+        <p className="text-sm text-tinta-suave">
+          Se bloquea si queda sin decidir, en cualquiera de los dos años, una fila con propuesta mayor o igual a {proyeccion.parametros.umbral_cola_larga} unidades, o una tienda nueva con venta esperada. Lo demás (la cola larga) se cierra con la propuesta y queda marcado.
+          Una proyección cerrada es solo lectura: para seguir, se copia.
+        </p>
+        {desactualizada && (
+          <Alert tono="alerta">
+            <span className="block">La proyección está desactualizada: {proyeccion.desactualizada.map((m) => m.mensaje).join("; ")}. Lo recomendable es recalcular antes de cerrar.</span>
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <Checkbox checked={forzar} onChange={setForzar} label="Cerrar de todos modos" />
+              Cerrar de todos modos, con los datos con que se calculó
+            </label>
+          </Alert>
+        )}
+        <Field label="Nota (opcional)" hint="Hasta 500 caracteres. Queda guardada con la proyección cerrada.">
+          <Input value={nota} maxLength={500} disabled={accion.ocupado} onChange={(e) => setNota(e.target.value)} />
+        </Field>
+      </div>
+    </Modal>
+  );
+}

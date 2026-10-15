@@ -16,6 +16,8 @@ export type Campos = {
   fecha_apertura: string;
   fecha_cierre: string;
   venta: string;
+  /** M7: id de la tienda de referencia (`""` = sin referente). */
+  referencia: string;
 };
 
 export const FORM_VACIO: Campos = {
@@ -27,6 +29,7 @@ export const FORM_VACIO: Campos = {
   fecha_apertura: "",
   fecha_cierre: "",
   venta: "",
+  referencia: "",
 };
 
 /** Fila resultante (alta o actual más cambio) tal como la ven `estadoTienda` y `motivoRechazoTienda`. */
@@ -75,6 +78,7 @@ export function camposDeTienda(t: TiendaFila): Campos {
     fecha_apertura: t.fecha_apertura ?? "",
     fecha_cierre: t.fecha_cierre ?? "",
     venta: t.venta_esperada_promedio === null ? "" : String(t.venta_esperada_promedio),
+    referencia: t.tienda_referencia_id ?? "",
   };
 }
 
@@ -90,12 +94,14 @@ export function cambiosDeEdicion(t: TiendaFila, campos: Campos): EditarTiendaCue
   if (fila.fecha_apertura !== t.fecha_apertura) cuerpo.fecha_apertura = fila.fecha_apertura;
   if (fila.fecha_cierre !== t.fecha_cierre) cuerpo.fecha_cierre = fila.fecha_cierre;
   if (fila.venta_esperada_promedio !== t.venta_esperada_promedio) cuerpo.venta_esperada_promedio = fila.venta_esperada_promedio;
+  // M7: el referente solo se manda si cambió (una API sin el campo lo trae ausente = sin referente).
+  if ((campos.referencia || null) !== (t.tienda_referencia_id ?? null)) cuerpo.tienda_referencia_id = campos.referencia || null;
   return Object.keys(cuerpo).length === 0 ? null : cuerpo;
 }
 
 /** Al pasar a CD se vacía la venta esperada (el campo queda deshabilitado). */
 function conTipo(c: Campos, tipo: TipoTienda): Campos {
-  return { ...c, tipo, venta: tipo === "Centro de Distribución" ? "" : c.venta };
+  return { ...c, tipo, venta: tipo === "Centro de Distribución" ? "" : c.venta, referencia: tipo === "Centro de Distribución" ? "" : c.referencia };
 }
 
 /** Al quitar la apertura se vacía el cierre (sin apertura no hay cierre). */
@@ -113,12 +119,18 @@ export function CamposTienda({
   onCambio,
   idLista,
   autoFocus = false,
+  tiendasReferencia,
+  idActual,
 }: {
   valor: Campos;
   onCambio: (c: Campos) => void;
   idLista: string;
   /** Foco inicial en el primer campo (para el diálogo; el alta no debe robar el foco de la página). */
   autoFocus?: boolean;
+  /** M7: tiendas que pueden ser referente (tipo Tienda, activas). Sin lista, el campo no se muestra. */
+  tiendasReferencia?: readonly Pick<TiendaFila, "id" | "codigo" | "nombre">[];
+  /** La tienda que se edita (no puede ser su propio referente). */
+  idActual?: string;
 }) {
   const esCd = valor.tipo === "Centro de Distribución";
   const cierreAntes = Boolean(valor.fecha_apertura && valor.fecha_cierre && valor.fecha_cierre < valor.fecha_apertura);
@@ -179,8 +191,12 @@ export function CamposTienda({
         />
       </Field>
       <Field
-        label="Venta esperada (S/ por mes)"
-        hint={esCd ? "Un centro de distribución no vende." : "Solo para tiendas que aún no abren: M7 la usa en lugar del histórico."}
+        label="Venta esperada mensual (sin IGV)"
+        hint={
+          esCd
+            ? "Un centro de distribución no vende."
+            : "S/ por mes, sin IGV, de la tienda ya madura (en régimen). M7 la usa para proyectar una tienda que aún no abre."
+        }
         className="md:col-span-2"
       >
         <Input
@@ -193,6 +209,28 @@ export function CamposTienda({
           placeholder="85000"
         />
       </Field>
+      {tiendasReferencia && (
+        <Field
+          label="Tienda de referencia"
+          hint={
+            esCd
+              ? "Un centro de distribución no tiene referente."
+              : "Opcional. Si esta tienda es nueva, su composición de venta (género, agrupación de marca) se parecerá a la de la referente; sin referente, al promedio de las mismas tiendas."
+          }
+          className="md:col-span-2"
+        >
+          <Select value={valor.referencia} disabled={esCd} onChange={(e) => onCambio({ ...valor, referencia: e.target.value })}>
+            <option value="">Sin referente (promedio de la red)</option>
+            {tiendasReferencia
+              .filter((t) => t.id !== idActual)
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.codigo} · {t.nombre}
+                </option>
+              ))}
+          </Select>
+        </Field>
+      )}
     </>
   );
 }

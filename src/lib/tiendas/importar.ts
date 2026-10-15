@@ -43,7 +43,7 @@ export type TiendaEstado = Pick<
   | "fecha_cierre"
   | "venta_esperada_promedio"
   | "activo"
->;
+> & { tienda_referencia_id?: string | null };
 
 /** La tabla completa (activas e inactivas), leída plana de la base o fabricada en los tests. */
 export type EstadoImportacionTiendas = { tiendas: TiendaEstado[] };
@@ -60,9 +60,12 @@ export type TiendaNueva = {
   venta_esperada_promedio: number | null;
 };
 
+/** Una tienda nueva del plan con el código de su referente (se resuelve a id después de insertar; no es una columna). */
+export type TiendaNuevaConReferencia = TiendaNueva & { tienda_referencia_codigo?: string };
+
 export type PlanImportacionTiendas = {
   reporte: ReporteImportacionTiendasBase;
-  tiendas: TiendaNueva[];
+  tiendas: TiendaNuevaConReferencia[];
 };
 
 const texto = (v: unknown) => (typeof v === "string" ? v : "");
@@ -99,6 +102,7 @@ const ETIQUETA_CAMPO: Record<CampoDiferenciaTienda, string> = {
   fecha_apertura: "apertura",
   fecha_cierre: "cierre",
   venta_esperada_promedio: "venta esperada",
+  tienda_referencia: "tienda de referencia",
 };
 
 export function planificarImportacionTiendas(
@@ -112,10 +116,17 @@ export function planificarImportacionTiendas(
   const diferencias: DiferenciaImportacionTienda[] = [];
   const omitidas: FilaOmitidaTienda[] = [];
   const muestra = { tiendas: [] as string[] };
-  const nuevas: TiendaNueva[] = [];
+  const nuevas: TiendaNuevaConReferencia[] = [];
 
   // Índices del estado actual.
   const porCodigo = new Map(estado.tiendas.map((t) => [t.codigo.toUpperCase(), t]));
+  const codigoPorId = new Map(estado.tiendas.map((t) => [t.id, t.codigo.toUpperCase()]));
+  // Tiendas (no CD) que el archivo trae, para aceptar una referencia a una tienda nueva de la misma importación.
+  const tiendasDelArchivo = new Set<string>();
+  for (const c of filas) {
+    const cod = aCodigo(c.codigo);
+    if (cod && leerTipo(texto(c.tipo)) === "Tienda") tiendasDelArchivo.add(cod);
+  }
   const codigoPorNombre = new Map(estado.tiendas.map((t) => [normalizarNombre(t.nombre), t.codigo]));
 
   // Lo visto dentro del archivo: código → fila y valores de su primera aparición.
@@ -133,6 +144,8 @@ export function planificarImportacionTiendas(
     const aperturaTxt = texto(cruda.fecha_apertura);
     const cierreTxt = texto(cruda.fecha_cierre);
     const ventaTxt = texto(cruda.venta_esperada);
+    const referenciaTxt = texto(cruda.tienda_referencia);
+    const referencia = aCodigo(referenciaTxt) || null;
 
     /** Anota la omisión con la fila completa: código y nombre normalizados, el resto tal como vino. */
     const omitir = (
@@ -151,6 +164,7 @@ export function planificarImportacionTiendas(
         fecha_apertura: aperturaTxt,
         fecha_cierre: cierreTxt,
         venta_esperada: ventaTxt,
+        ...(referenciaTxt !== "" ? { tienda_referencia: referenciaTxt } : {}),
       });
     };
 
@@ -180,6 +194,16 @@ export function planificarImportacionTiendas(
     const venta = leerMonto(ventaTxt);
     if (venta === MONTO_INVALIDO) return omitir("venta_invalida", { detalle: ventaTxt.trim() });
     if (venta !== null && tipo === "Centro de Distribución") return omitir("venta_en_cd", { detalle: ventaTxt.trim() });
+
+    // La referencia (opcional): una tienda activa de tipo Tienda, distinta de esta; un CD no lleva referencia.
+    if (referencia !== null) {
+      const enBase = porCodigo.get(referencia);
+      const valida =
+        referencia !== codigo &&
+        tipo === "Tienda" &&
+        ((enBase !== undefined && enBase.tipo === "Tienda" && enBase.activo) || (enBase === undefined && tiendasDelArchivo.has(referencia)));
+      if (!valida) return omitir("referencia_invalida", { detalle: referenciaTxt.trim() });
+    }
 
     const interpretada: TiendaNueva = {
       codigo,
@@ -218,6 +242,13 @@ export function planificarImportacionTiendas(
           diferencias.push({ fila, codigo, campo: c.campo, en_base: c.legible(enBase), en_archivo: c.legible(enArchivo) });
         }
       }
+      // La referencia solo se compara si el archivo la trae.
+      if (referencia !== null) {
+        const enBase = existente.tienda_referencia_id ? (codigoPorId.get(existente.tienda_referencia_id) ?? null) : null;
+        if (enBase !== referencia) {
+          diferencias.push({ fila, codigo, campo: "tienda_referencia", en_base: textoLegible(enBase), en_archivo: textoLegible(referencia) });
+        }
+      }
       return;
     }
 
@@ -231,7 +262,7 @@ export function planificarImportacionTiendas(
     vistas.set(codigo, { fila, tienda: interpretada });
     codigoPorNombre.set(nombre, codigo);
     procesadas += 1;
-    nuevas.push(interpretada);
+    nuevas.push({ ...interpretada, ...(referencia !== null ? { tienda_referencia_codigo: referencia } : {}) });
     if (tipo === "Centro de Distribución") crear.centros_distribucion += 1;
     else {
       crear.tiendas += 1;
@@ -263,7 +294,9 @@ export function planificarImportacionTiendas(
 export function aplicarPlanTiendas(estado: EstadoImportacionTiendas, plan: PlanImportacionTiendas): EstadoImportacionTiendas {
   const tiendas = [...estado.tiendas];
   const codigos = new Set(tiendas.map((t) => t.codigo.toUpperCase()));
-  plan.tiendas.forEach((t, i) => {
+  plan.tiendas.forEach((nueva, i) => {
+    const { tienda_referencia_codigo: _referencia, ...t } = nueva;
+    void _referencia;
     if (codigos.has(t.codigo.toUpperCase())) return;
     tiendas.push({ id: `plan-tienda-${i + 1}`, ...t, activo: true });
     codigos.add(t.codigo.toUpperCase());

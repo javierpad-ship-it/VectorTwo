@@ -2,6 +2,17 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.0 · M7 — 2026-10-15
+
+**M7 · Proyección anual**: se proyectan en unidades el año en curso y el año siguiente completo, por GML (o GMLE) y agrupación de marcas. Ficha `docs/modulos/07-proyeccion-anual.md` (revisión independiente del `arquitecto-revisor` en opus; QA con prueba en navegador sobre una pila local sintética; auditoría de `seguridad` en opus). Migración **`0018_proyeccion_anual.sql`** (aplicada en Vector2): `tiendas.tienda_referencia_id` (`on delete restrict`), la función `venta_proyeccion` (`stable`, `security invoker`, `search_path` vacío, solo `service_role`; 0,6 s por tanda media medidos con 870 mil hechos) y las tablas `proyecciones`, `proyeccion_filas`, `proyeccion_fila_anios`, `proyeccion_tiendas` y `factores_volumen_atipico`, con RLS sin políticas. Sin `DROP`/`DELETE`/`TRUNCATE`/`UPDATE`. Humo SQL en `scripts/humo-0018.sql`.
+
+- **Regla de mismas tiendas por año:** para proyectar Y son las tiendas abiertas los 12 meses de Y−1; una tienda que abre en el año va aparte como tienda nueva y entra a mismas tiendas dos años después; cierres clasificados (su proyección llega en la 0.10.1).
+- **Cierre por avance** (vendido ÷ avance de la curva de M6, normalizado por el factor del Niño), avance propio de una tienda nueva (A = V ÷ Σ c·r), año siguiente = base de mismas tiendas × crecimiento, y decidir una tienda nueva recalcula la propuesta del año siguiente sin releer venta. Aperturas con venta esperada (S/ por mes, sin IGV, tienda madura) y tienda de referencia; rampa sin efecto por defecto (1, 1, 1), editable.
+- **Pantalla `/planificacion/proyeccion`** (admin y planner): Tiendas nuevas, Por línea, Matriz (con filtros y Excel), Mensual (real frente a proyectado, con Excel) y Factores del Niño. "La curva cambió" con "Aplicar curva nueva", datos desactualizados, cola larga (100 unidades) y cierre de la proyección; nada se aprueba en bloque. Campo de tienda de referencia en Tiendas (oculto al comprador).
+- **Contrato para M8:** `GET /api/proyeccion/cerrada` con meses reales y proyectados, bloques y participaciones históricas.
+- **Seguridad:** un solo cálculo pesado a la vez en todo el sistema, tope de 20 proyecciones en trabajo por año, cerrar, archivar y editar condicionales, `server-only` en 14 módulos, analizador de guardas más estricto y 125 pruebas de roles con guardas reales en las escrituras de maestros.
+- Total: **2 879 pruebas en 155 archivos**, lint, `tsc` y build en verde. No probado contra la base real con la venta completa ni contra el Excel de planeamiento (lo valida Cowork y Javier).
+
 ## 0.9.7 · M6 — 2026-10-15
 
 **Rediseño del flujo de M6: se trabaja una agrupación a la vez.** Pedido de Javier: el módulo ya calculaba bien, pero no cumplía el flujo que necesita. Ficha: `docs/modulos/06b-curvas-trabajo-por-agrupacion.md` (con revisión independiente del `arquitecto-revisor` en opus, auditoría de `seguridad` en opus y QA en navegador sobre una base local sintética). Migración **`0017_venta_estacionalidad_agrupacion.sql`** (aplicada en Vector2): función `venta_estacionalidad_agrupacion(uuid)` (`stable`, `security invoker`, `search_path` vacío, solo `service_role`; devuelve la agrupación × tienda × mes, las temporadas, los meses publicados y las cargas; 0,6 a 1,5 s medidos con 870 mil filas) y `corridas_estacionalidad.agrupacion_estacionalidad_id`. Sin `DROP`/`DELETE`/`TRUNCATE`/`UPDATE`. La vista materializada y las funciones de refresco de la 0015/0016 quedan sin uso.

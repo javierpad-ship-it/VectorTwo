@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   DELEGADOS,
   analizarRuta,
   cuerpoDeFuncion,
+  describirViolaciones,
   escanearRutas,
   limpiar,
   primeraSentencia,
@@ -31,7 +32,82 @@ describe("rutas reales de la API", () => {
   });
 
   it("todos los handlers exportados empiezan con un guard o delegan en una función con guard", () => {
-    expect(escanearRutas(API, RAIZ)).toEqual([]);
+    const violaciones = escanearRutas(API, RAIZ);
+    expect(
+      violaciones,
+      `Estos handlers no abren con requireUser / requirePlanner / requireAdmin como PRIMERA sentencia:\n${describirViolaciones(violaciones)}\n`
+    ).toEqual([]);
+  });
+
+  it("ninguna ruta lee el cuerpo por su cuenta: todo pasa por leerCuerpo (tope de 6 MB)", () => {
+    const sueltas: string[] = [];
+    for (const archivo of rutasDeApi(API)) {
+      const limpio = limpiar(readFileSync(archivo, "utf8"));
+      if (/\.(json|text|formData|arrayBuffer|blob)\s*\(|\.body\b/.test(limpio.replace(/NextResponse\.json|Response\.json/g, ""))) {
+        sueltas.push(path.relative(RAIZ, archivo));
+      }
+    }
+    expect(sueltas, `Rutas que leen el cuerpo sin leerCuerpo (sin tope de tamaño):\n${sueltas.join("\n")}`).toEqual([]);
+  });
+
+  it("cada ruta que recibe cuerpo (POST/PUT/PATCH) lo lee con leerCuerpo, directamente o vía la lista blanca", () => {
+    const sin: string[] = [];
+    for (const archivo of rutasDeApi(API)) {
+      const limpio = limpiar(readFileSync(archivo, "utf8"));
+      for (const metodo of ["POST", "PUT", "PATCH"]) {
+        const cuerpo = cuerpoDeFuncion(limpio, metodo);
+        if (cuerpo === null) continue;
+        const primera = primeraSentencia(cuerpo);
+        if (primera.tipo === "delegado" || /\bleerCuerpo\s*\(/.test(cuerpo)) continue;
+        // POST sin cuerpo (p. ej. acciones como "calcular") es válido si no usa `request`.
+        if (!/\brequest\b/.test(cuerpo)) continue;
+        sin.push(`${path.relative(RAIZ, archivo)} ${metodo}`);
+      }
+    }
+    expect(sin, `Handlers con petición que no usan leerCuerpo:\n${sin.join("\n")}`).toEqual([]);
+  });
+});
+
+describe('módulos con service role marcados con import "server-only"', () => {
+  const MARCADOS = [
+    "src/lib/supabase/admin.ts",
+    "src/lib/supabase/server.ts",
+    "src/lib/auth/guard.ts",
+    "src/lib/api/catalogo.ts",
+    "src/lib/estacionalidad/agrupaciones.ts",
+    "src/lib/arbol/consultas.ts",
+    "src/lib/arbol/nivel/consultas.ts",
+    "src/lib/marcas/consultas.ts",
+    "src/lib/marcas/gml/consultas.ts",
+    "src/lib/marcas/gml/estado.ts",
+    "src/lib/estacionalidad/consultas.ts",
+    "src/lib/reportes/consultas.ts",
+    "src/lib/responsables/consultas.ts",
+    "src/lib/ventas/consultas.ts",
+  ];
+
+  for (const rel of MARCADOS) {
+    it(`${rel} importa "server-only"`, () => {
+      expect(readFileSync(path.join(RAIZ, rel), "utf8")).toMatch(/^import "server-only";/m);
+    });
+  }
+
+  it("ningún componente cliente importa supabase/admin, supabase/server ni el guard (ni directamente ni los módulos marcados)", () => {
+    const prohibidos = MARCADOS.map((m) => "@/" + m.replace(/^src\//, "").replace(/\.ts$/, ""));
+    const ofensores: string[] = [];
+    const recorrer = (d: string) => {
+      for (const nombre of readdirSync(d)) {
+        const p = path.join(d, nombre);
+        if (statSync(p).isDirectory()) recorrer(p);
+        else if (/\.(ts|tsx)$/.test(nombre)) {
+          const texto = readFileSync(p, "utf8");
+          if (!/^\s*["']use client["']/.test(texto)) continue;
+          for (const m of prohibidos) if (texto.includes(`"${m}"`)) ofensores.push(`${path.relative(RAIZ, p)} importa ${m}`);
+        }
+      }
+    };
+    recorrer(path.join(RAIZ, "src"));
+    expect(ofensores).toEqual([]);
   });
 });
 
@@ -121,9 +197,75 @@ describe("analizador (casos sintéticos)", () => {
   });
 
   it("delegar solo vale hacia la lista blanca", () => {
-    const delega = (f: string) => `export async function GET(request: Request) { return ${f}(cfg, request); }`;
+    const delega = (f: string) => `import { ${f} } from "@/lib/api/catalogo";\nexport async function GET(request: Request) { return ${f}(cfg, request); }`;
     expect(analizarRuta("a", delega("listarCatalogo"))).toEqual([]);
     expect(analizarRuta("a", delega("listarTodoSinGuard"))).toHaveLength(1);
+  });
+
+  it("delegar exige importar la función del módulo de la lista blanca (no una copia local)", () => {
+    const local = `function listarCatalogo() { return ok([]); }\nexport async function GET(request: Request) { return listarCatalogo(cfg, request); }`;
+    expect(analizarRuta("a", local)).toEqual([expect.objectContaining({ metodo: "GET", motivo: expect.stringContaining("no la importa") })]);
+    const otroModulo = `import { listarCatalogo } from "./mio";\nexport async function GET(request: Request) { return listarCatalogo(cfg, request); }`;
+    expect(analizarRuta("a", otroModulo)).toHaveLength(1);
+  });
+
+  it("falla ante re-exports y exports con desestructuración o generadores", () => {
+    expect(analizarRuta("a", `export { GET } from "./otro";`)).toHaveLength(1);
+    expect(analizarRuta("a", `export { handler as POST };`)).toHaveLength(1);
+    expect(analizarRuta("a", `export * from "./otro";`).length).toBeGreaterThan(0);
+    expect(analizarRuta("a", `export const { GET, POST } = handlers;`)).toHaveLength(1);
+    expect(analizarRuta("a", `export let DELETE = () => ok(1);`)).toHaveLength(1);
+  });
+
+  it("falla si el route.ts no exporta ningún método", () => {
+    expect(analizarRuta("a", `export const dynamic = "force-dynamic";`)).toEqual([
+      expect.objectContaining({ metodo: "*", motivo: expect.stringContaining("ningún método") }),
+    ]);
+  });
+
+  it("falla si el handler llama a otra función antes del guard, aunque luego lo tenga", () => {
+    const antes = `
+      export async function PATCH(request: Request) {
+        await registrarAcceso(request);
+        const { response } = await requirePlanner();
+        if (response) return response;
+        return ok(1);
+      }
+    `;
+    expect(analizarRuta("a", antes)).toHaveLength(1);
+    const delegaTarde = `export async function GET() { const x = 1; return listarCatalogo(cfg); }`;
+    expect(analizarRuta("a", delegaTarde)).toHaveLength(1);
+  });
+
+  it("lee bien un handler con tipo de retorno literal y con plantillas anidadas", () => {
+    const conTipo = `
+      export async function GET(request: Request): Promise<Response | { x: 1 }> {
+        const { response } = await requireUser();
+        if (response) return response;
+        return ok(\`a\${\`b\${"}"}\`}\`);
+      }
+    `;
+    expect(analizarRuta("a", conTipo)).toEqual([]);
+    const sinGuard = `export async function GET(): Promise<{ a: 1 }> { return ok(\`\${"requireUser"}\`); }`;
+    expect(analizarRuta("a", sinGuard)).toHaveLength(1);
+  });
+
+  it("si las llaves no cuadran tras limpiar, no se fía del análisis y falla", () => {
+    const regexConComilla = `
+      export async function GET() {
+        const { response } = await requireUser();
+        if (response) return response;
+        const r = /"/g; return ok(r.source + "{");
+      }
+    `;
+    expect(analizarRuta("a", regexConComilla)).toHaveLength(1);
+  });
+
+  it("describirViolaciones da un mensaje claro", () => {
+    const v = analizarRuta("src/app/api/falsa/route.ts", `export async function POST() { const x = 1; return ok(x); }`);
+    expect(describirViolaciones(v)).toBe(
+      "  - src/app/api/falsa/route.ts -> POST: la primera sentencia no es el guard (requireUser / requirePlanner / requireAdmin)"
+    );
   });
 
   it("no se despista con llaves dentro de cadenas ni con parámetros desestructurados", () => {

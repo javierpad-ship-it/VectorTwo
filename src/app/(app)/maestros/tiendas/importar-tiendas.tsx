@@ -46,7 +46,14 @@ const CAMPOS: CampoImportador<Campo>[] = [
     etiqueta: "Venta esperada",
     alias: ["VENTA_ESPERADA", "VENTA_ESPERADA_PROMEDIO", "VENTA_PROM", "VENTA_MENSUAL"],
     opcional: true,
-    hint: NOTA_OPCIONAL,
+    hint: `S/ por mes, sin IGV, de la tienda ya madura. ${NOTA_OPCIONAL}`,
+  },
+  {
+    campo: "tienda_referencia",
+    etiqueta: "Tienda de referencia",
+    alias: ["TIENDA_REFERENCIA", "REFERENCIA", "TIENDA_REF"],
+    opcional: true,
+    hint: `Código de otra tienda cuya composición de venta debe imitar una tienda nueva (M7). ${NOTA_OPCIONAL}`,
   },
 ];
 
@@ -62,6 +69,7 @@ const MOTIVOS_CORREGIBLES: ReadonlySet<MotivoOmisionTienda> = new Set<MotivoOmis
   "cierre_antes_de_apertura",
   "venta_invalida",
   "venta_en_cd",
+  "referencia_invalida",
   "nombre_repetido",
 ]);
 
@@ -74,6 +82,7 @@ const COLUMNAS_FILA: ColumnaOmitida<FilaOmitidaTienda>[] = [
   { clave: "fecha_apertura", titulo: "Apertura", valor: (f) => f.fecha_apertura },
   { clave: "fecha_cierre", titulo: "Cierre", valor: (f) => f.fecha_cierre },
   { clave: "venta_esperada", titulo: "Venta esperada", valor: (f) => f.venta_esperada },
+  { clave: "tienda_referencia", titulo: "Referente", valor: (f) => f.tienda_referencia ?? "" },
 ];
 
 function resumenCrear(r: ReporteImportacionTiendas): string {

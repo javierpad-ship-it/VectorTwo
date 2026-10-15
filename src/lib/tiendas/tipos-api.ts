@@ -28,8 +28,14 @@ export type TiendaFila = {
   fecha_apertura: string | null;
   /** ISO `aaaa-mm-dd` o `null`; último día con venta (inclusive). */
   fecha_cierre: string | null;
-  /** Soles por mes; solo en tipo Tienda. */
+  /** Soles por mes, sin IGV, de la tienda ya madura (en régimen); solo en tipo Tienda. */
   venta_esperada_promedio: number | null;
+  /**
+   * M7: tienda a cuya composición de venta debe parecerse esta si es nueva. Solo la reciben admin y planner (al
+   * comprador la API se la oculta, como la venta esperada); ausente o `null` = sin referente.
+   */
+  tienda_referencia_id?: string | null;
+  tienda_referencia?: { codigo: string; nombre: string } | null;
   activo: boolean;
   created_at: string;
   updated_at: string;
@@ -45,6 +51,8 @@ export type CrearTiendaCuerpo = {
   fecha_apertura?: string | null;
   fecha_cierre?: string | null;
   venta_esperada_promedio?: number | null;
+  /** M7: id de otra tienda de tipo Tienda, activa y distinta; `null` quita el referente. */
+  tienda_referencia_id?: string | null;
 };
 
 export type EditarTiendaCuerpo = Partial<{
@@ -56,6 +64,7 @@ export type EditarTiendaCuerpo = Partial<{
   fecha_apertura: string | null;
   fecha_cierre: string | null;
   venta_esperada_promedio: number | null;
+  tienda_referencia_id: string | null;
   activo: boolean;
 }>;
 
@@ -112,6 +121,8 @@ export type FilaImportacionTienda = {
   fecha_apertura: string;
   fecha_cierre: string;
   venta_esperada: string;
+  /** Opcional: código de la tienda de referencia (columna `TIENDA_REFERENCIA`); `""` si no se mapeó. */
+  tienda_referencia?: string;
 };
 
 export type ImportarTiendasCuerpo = {
@@ -130,6 +141,7 @@ export type MotivoOmisionTienda =
   | "cierre_antes_de_apertura"
   | "venta_invalida"
   | "venta_en_cd"
+  | "referencia_invalida"
   | "nombre_repetido"
   | "duplicada_en_archivo";
 
@@ -149,7 +161,8 @@ export type CampoDiferenciaTienda =
   | "razon_social"
   | "fecha_apertura"
   | "fecha_cierre"
-  | "venta_esperada_promedio";
+  | "venta_esperada_promedio"
+  | "tienda_referencia";
 
 /** Tienda existente cuyo archivo trae otro valor en algún campo; informativo, el importador no la modifica. */
 export type DiferenciaImportacionTienda = {
@@ -192,6 +205,7 @@ export const ETIQUETA_MOTIVO_OMISION_TIENDA: Record<MotivoOmisionTienda, string>
   cierre_antes_de_apertura: "Cierre anterior a la apertura",
   venta_invalida: "Venta esperada inválida",
   venta_en_cd: "Venta esperada en un CD",
+  referencia_invalida: "Tienda de referencia inválida",
   nombre_repetido: "Nombre ya usado por otro código",
   duplicada_en_archivo: "Duplicada en el archivo",
 };
@@ -204,6 +218,7 @@ export const ETIQUETA_CAMPO_DIFERENCIA_TIENDA: Record<CampoDiferenciaTienda, str
   fecha_apertura: "Fecha de apertura",
   fecha_cierre: "Fecha de cierre",
   venta_esperada_promedio: "Venta esperada",
+  tienda_referencia: "Tienda de referencia",
 };
 
 /** Etiqueta corta del tipo para badges y chips. */

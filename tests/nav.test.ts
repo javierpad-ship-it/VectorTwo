@@ -40,12 +40,21 @@ describe("puedeVerRuta", () => {
     expect(puedeVerRuta("planner", "/maestros/tiendas")).toBe(true);
     expect(puedeVerRuta("comprador", "/maestros/tiendas")).toBe(false);
   });
-  it("admin y planner entran a Planificación (carga de venta y curvas de estacionalidad); el comprador no, ni por URL", () => {
-    for (const ruta of ["/planificacion/venta-stock", "/planificacion/curvas-estacionalidad"]) {
+  it("admin y planner entran a Planificación (carga de venta, curvas de estacionalidad y proyección de unidades); el comprador no, ni por URL", () => {
+    for (const ruta of ["/planificacion/venta-stock", "/planificacion/curvas-estacionalidad", "/planificacion/proyeccion"]) {
       expect(puedeVerRuta("admin", ruta)).toBe(true);
       expect(puedeVerRuta("planner", ruta)).toBe(true);
       expect(puedeVerRuta("comprador", ruta)).toBe(false);
     }
+  });
+  it("la proyección de unidades (M7) está en el menú de Planificación, sin pendiente, solo para admin y planner", () => {
+    const l = NAV_SECTIONS.flatMap((s) => s.links).find((x) => x.href === "/planificacion/proyeccion");
+    expect(l?.label).toBe("Proyección de unidades");
+    expect(l?.pendiente).toBeUndefined();
+    const planificacion = NAV_SECTIONS.find((s) => s.title === "Planificación");
+    expect(planificacion?.roles).toEqual(["admin", "planner"]);
+    expect(puedeVerRuta("comprador", "/planificacion/proyeccion/")).toBe(false);
+    expect(seccionesVisibles("comprador").flatMap((s) => s.links).some((x) => x.href === "/planificacion/proyeccion")).toBe(false);
   });
   it("el menú del comprador no muestra la sección Planificación; admin y planner sí", () => {
     expect(seccionesVisibles("comprador").some((s) => s.title === "Planificación")).toBe(false);

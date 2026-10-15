@@ -1,3 +1,4 @@
+import "server-only";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables } from "@/lib/supabase/database.types";
 import { TANDA_IN, enTandas } from "@/lib/arbol/importar";

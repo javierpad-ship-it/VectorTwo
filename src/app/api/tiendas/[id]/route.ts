@@ -5,9 +5,9 @@ import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import type { TablesUpdate } from "@/lib/supabase/database.types";
 import { editarTiendaSchema } from "@/lib/tiendas/esquemas";
-import { aTiendaFila } from "@/lib/tiendas/consultas";
+import { aTiendaFila, referentesDe } from "@/lib/tiendas/consultas";
 import { hoyLima } from "@/lib/tiendas/estado";
-import { motivoRechazoEliminar, motivoRechazoTienda } from "@/lib/tiendas/reglas";
+import { motivoRechazoEliminar, motivoRechazoReferencia, motivoRechazoTienda } from "@/lib/tiendas/reglas";
 import { contarHechos } from "@/lib/ventas/consultas";
 
 type Params = { params: Promise<{ id: string }> };
@@ -38,15 +38,34 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const motivo = motivoRechazoTienda({ ...actual, ...datos });
   if (motivo) return error(motivo.mensaje, 400);
 
+  // M7: la tienda de referencia resultante (la nueva o la que ya tenía) debe ser una Tienda activa y otra distinta.
+  const resultante = { ...actual, ...datos };
+  const referenciaId = resultante.tienda_referencia_id;
+  if (referenciaId) {
+    const { data: ref, error: errRef } = await db.from("tiendas").select("id, tipo, activo").eq("id", referenciaId).maybeSingle();
+    if (errRef) return traducirErrorDb(errRef, "buscar tienda de referencia");
+    // Solo se vuelve a exigir "activo" si el cambio toca la referencia o el tipo: una referencia ya guardada que se desactivó después no impide editar otros campos.
+    const toca = datos.tienda_referencia_id !== undefined || datos.tipo !== undefined;
+    const m = motivoRechazoReferencia({ tiendaId: id, tipo: resultante.tipo, referenciaId, referente: ref && !toca ? { ...ref, activo: true } : ref });
+    if (m) return error(m, 400);
+  }
+
   const cambio: TablesUpdate<"tiendas"> = { ...datos };
   const { data, error: err } = await db.from("tiendas").update(cambio).eq("id", id).select("*").single();
   if (err) return traducirErrorDb(err, "editar tienda");
-  return ok(aTiendaFila(data, hoyLima()));
+  let referentes: ReturnType<typeof referentesDe> | undefined;
+  if (data.tienda_referencia_id) {
+    const { data: ref } = await db.from("tiendas").select("id, codigo, nombre").eq("id", data.tienda_referencia_id).maybeSingle();
+    if (ref) referentes = referentesDe([ref]);
+  }
+  return ok(aTiendaFila(data, hoyLima(), true, referentes));
 }
 
 /**
  * Elimina la tienda (`requirePlanner`); `409` con el conteo si tiene venta o
- * stock cargados (M5; el `restrict` de la FK es la red de seguridad).
+ * stock cargados (M5; el `restrict` de la FK es la red de seguridad). Si es la
+ * referencia de otra tienda o está en una proyección (M7), la FK `restrict` responde
+ * `409` con un mensaje propio (`traducirErrorDb`).
  */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
