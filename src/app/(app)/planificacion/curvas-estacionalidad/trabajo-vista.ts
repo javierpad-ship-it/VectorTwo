@@ -317,3 +317,23 @@ export function motivoNoSePuedeAprobar(e: {
   if (!e.tieneCandidata) return "La candidata elegida no tiene curva: elige otra.";
   return null;
 }
+
+// ─── Cambios sin aprobar ───
+
+/** ¿Son iguales los parámetros? (listas ordenadas; solo las claves del contrato). */
+export function parametrosIguales(a: ParametrosCurvas, b: ParametrosCurvas): boolean {
+  const norm = (p: ParametrosCurvas) => {
+    const s = soloParametros(p);
+    return JSON.stringify({ ...s, anios_excluidos: [...s.anios_excluidos].sort((x, y) => x - y), tiendas_excluidas: [...s.tiendas_excluidas].sort() });
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * ¿Hay trabajo sin guardar en la vista? Una nota escrita, «Calcular hasta» elegido, o parámetros distintos de los
+ * con que se abrió la agrupación. Cambiar de agrupación con esto pide confirmación.
+ */
+export function hayCambiosSinAprobar(e: { nota: string; hasta: string; parametros: ParametrosCurvas | null; iniciales: ParametrosCurvas | null }): boolean {
+  if (e.nota.trim() !== "" || e.hasta !== "") return true;
+  return e.parametros !== null && e.iniciales !== null && !parametrosIguales(e.parametros, e.iniciales);
+}

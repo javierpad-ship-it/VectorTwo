@@ -75,7 +75,8 @@ export function CurvasTab({
   /** Lo que dejó «Comparar con el sistema» por agrupación (vive en el panel: sobrevive a abrir una agrupación y volver). */
   comparaciones: Readonly<Record<string, ResultadoComparar>>;
   onComparacion: (agrupacionId: string, r: ResultadoComparar | null) => void;
-  onTrabajar: (agrupacionId: string) => void;
+  /** Abre una agrupación; `orden` son los ids de la lista tal como se ve (filtros incluidos): el orden de «← Anterior» y «Siguiente →». */
+  onTrabajar: (agrupacionId: string, orden: string[]) => void;
   onIrAPeriodos: () => void;
   /** Tras retirar una curva: recarga el estado y las agrupaciones. */
   onCambio: () => Promise<void> | void;
@@ -330,7 +331,7 @@ export function CurvasTab({
       className: "text-right",
       render: (a) => (
         <div className="flex min-w-28 flex-col items-end gap-1">
-          <Button tamano="sm" disabled={ocupadoId !== null} onClick={() => onTrabajar(a.id)} title="Abrir esta agrupación: curvas, parámetros y aprobación">
+          <Button tamano="sm" disabled={ocupadoId !== null} onClick={() => onTrabajar(a.id, filas.map((x) => x.id))} title="Abrir esta agrupación: curvas, parámetros y aprobación">
             Trabajar
           </Button>
           {a.vigente && (

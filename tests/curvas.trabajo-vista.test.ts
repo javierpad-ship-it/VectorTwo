@@ -9,6 +9,8 @@ import {
   cuerpoAprobar,
   cuerpoCalcular,
   enlaceDePrerrequisito,
+  hayCambiosSinAprobar,
+  parametrosIguales,
   errorDeAprobar,
   mensajeNotaRequerida,
   mesesParaHasta,
@@ -199,5 +201,23 @@ describe("prerrequisitos y cabecera", () => {
     expect(textoRedPorAnio([])).toBe("");
     expect(mesesParaHasta("2024-11", "2025-02", ["2024-12"])).toEqual(["2024-11", "2025-01", "2025-02"]);
     expect(mesesParaHasta(null, "2025-02", [])).toEqual([]);
+  });
+});
+
+describe("cambios sin aprobar (confirmación al cambiar de agrupación)", () => {
+  const base = parametrosPorDefecto();
+  it("sin cambios: ni nota, ni «hasta», ni parámetros distintos de los iniciales", () => {
+    expect(hayCambiosSinAprobar({ nota: "  ", hasta: "", parametros: base, iniciales: parametrosPorDefecto() })).toBe(false);
+    expect(hayCambiosSinAprobar({ nota: "", hasta: "", parametros: null, iniciales: null })).toBe(false);
+  });
+  it("una nota, un «Calcular hasta» elegido o un parámetro movido cuentan", () => {
+    expect(hayCambiosSinAprobar({ nota: "porque sí", hasta: "", parametros: base, iniciales: base })).toBe(true);
+    expect(hayCambiosSinAprobar({ nota: "", hasta: "2026-07", parametros: base, iniciales: base })).toBe(true);
+    expect(hayCambiosSinAprobar({ nota: "", hasta: "", parametros: { ...base, anios_excluidos: [2023] }, iniciales: base })).toBe(true);
+  });
+  it("los parámetros con que se abrió (aunque no sean los de por defecto) no son un cambio", () => {
+    const abierta = { ...base, tratamiento_atipicos: "descartar" as const, tiendas_excluidas: [T2, T1] };
+    expect(hayCambiosSinAprobar({ nota: "", hasta: "", parametros: { ...abierta, tiendas_excluidas: [T1, T2] }, iniciales: abierta })).toBe(false);
+    expect(parametrosIguales(abierta, { ...abierta, umbral_forma: 9 })).toBe(false);
   });
 });

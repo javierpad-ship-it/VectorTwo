@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useColeccion } from "@/lib/use-coleccion";
 import type { EstadoCurvasApi } from "@/lib/curvas/tipos-api";
@@ -13,7 +13,7 @@ import { DetalleAgrupacion } from "./detalle-agrupacion";
 import { PeriodosTab } from "./periodos-tab";
 import type { AgrupacionConTemporada } from "./tipos";
 import { useRecurso } from "./use-recurso";
-import { esIdAgrupacion, esModeloCurva, type FiltroEstado, type FiltroTemporada, type ResultadoComparar } from "./vista";
+import { esIdAgrupacion, esModeloCurva, filtrarAgrupaciones, vecinosDe, type FiltroEstado, type FiltroTemporada, type ResultadoComparar } from "./vista";
 
 type Pestana = "curvas" | "anios" | "periodos";
 
@@ -38,6 +38,8 @@ export function CurvasPanel() {
   const [pestanaElegida, setPestana] = useState<Pestana>("curvas");
   const [filtroTemporada, setFiltroTemporada] = useState<FiltroTemporada>("todas");
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("todas");
+  /** Ids de la lista como se veía al pulsar «Trabajar» (filtros incluidos): el orden de Anterior / Siguiente. `null` tras recargar la página. */
+  const [orden, setOrden] = useState<string[] | null>(null);
   const [comparaciones, setComparaciones] = useState<Record<string, ResultadoComparar>>({});
   const pestana: Pestana = agrupacionId ? "curvas" : pestanaElegida;
 
@@ -65,8 +67,14 @@ export function CurvasPanel() {
     [pathname]
   );
 
-  function trabajar(id: string) {
+  function trabajar(id: string, ordenLista?: string[]) {
     setPestana("curvas");
+    setOrden(ordenLista ?? null);
+    irA(id);
+  }
+
+  /** Anterior / Siguiente: otra agrupación con el mismo orden (la URL cambia; la vista se vuelve a montar). */
+  function irAOtra(id: string) {
     irA(id);
   }
 
@@ -100,6 +108,15 @@ export function CurvasPanel() {
       return sig;
     });
   }
+
+  // Vecinos: el orden recordado al abrir; si no se recuerda (recarga o enlace directo) o ya no contiene la agrupación, la lista completa por defecto.
+  const nombres = useMemo(() => new Map((estado.datos?.agrupaciones ?? []).map((a) => [a.id, a.nombre])), [estado.datos]);
+  const ordenCompleto = useMemo(
+    () => filtrarAgrupaciones(estado.datos?.agrupaciones ?? [], { temporada: "todas", estado: "todas", genero: "", busqueda: "" }).map((a) => a.id),
+    [estado.datos]
+  );
+  const vecinosRecordados = agrupacionId && orden ? vecinosDe(orden, agrupacionId, nombres) : null;
+  const vecinos = agrupacionId ? (vecinosRecordados ?? vecinosDe(ordenCompleto, agrupacionId, nombres)) : null;
 
   const nombreInicial = agrupacionId ? (estado.datos?.agrupaciones.find((a) => a.id === agrupacionId)?.nombre ?? null) : null;
 
@@ -135,6 +152,9 @@ export function CurvasPanel() {
             nombreInicial={nombreInicial}
             colores={colores}
             modeloInicial={modeloInicial}
+            vecinos={vecinos}
+            ordenPorDefecto={vecinosRecordados === null}
+            onIrA={irAOtra}
             onModelo={(m) => irA(agrupacionId, "replace", m)}
             onVolver={volverALaLista}
             onIrAPeriodos={irAPeriodos}

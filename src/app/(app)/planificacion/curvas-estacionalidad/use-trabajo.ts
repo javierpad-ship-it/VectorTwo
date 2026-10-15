@@ -16,6 +16,8 @@ export type EstadoTrabajo = {
   datos: TrabajoAgrupacionApi | null;
   /** Los parámetros que el planner tiene en pantalla (los de la última aprobación al abrir; `null` hasta la primera respuesta). */
   parametros: ParametrosCurvas | null;
+  /** Los parámetros con que se abrió la agrupación (para saber si hay cambios sin aprobar). */
+  iniciales: ParametrosCurvas | null;
   /** «Calcular hasta»: `""` es el defecto del servidor (último mes publicado y cerrado). Nunca se hereda de la vigente. */
   hasta: string;
   /** Primera lectura (todavía no hay nada que mostrar). */
@@ -27,7 +29,7 @@ export type EstadoTrabajo = {
   error: ErrorTrabajo | null;
 };
 
-const INICIAL: EstadoTrabajo = { datos: null, parametros: null, hasta: "", cargando: true, recalculando: false, desactualizado: false, error: null };
+const INICIAL: EstadoTrabajo = { datos: null, parametros: null, iniciales: null, hasta: "", cargando: true, recalculando: false, desactualizado: false, error: null };
 
 /**
  * Estado de la vista de trabajo de UNA agrupación (06b): pide `POST …/calcular` al abrir
@@ -60,6 +62,7 @@ export function useTrabajoAgrupacion(agrupacionId: string) {
           setEstado((e) => ({
             datos: d,
             parametros: apertura ? soloParametros(d.parametros) : e.parametros,
+            iniciales: apertura ? soloParametros(d.parametros) : e.iniciales,
             hasta: apertura ? "" : e.hasta,
             cargando: false,
             recalculando: false,

@@ -8,6 +8,7 @@ import { AprobarPanel } from "../src/app/(app)/planificacion/curvas-estacionalid
 import { CurvasTab } from "../src/app/(app)/planificacion/curvas-estacionalidad/curvas-tab";
 import { DetalleAgrupacion } from "../src/app/(app)/planificacion/curvas-estacionalidad/detalle-agrupacion";
 import { ParametrosAgrupacion } from "../src/app/(app)/planificacion/curvas-estacionalidad/parametros-agrupacion";
+import { NavegarAgrupaciones } from "../src/app/(app)/planificacion/curvas-estacionalidad/navegar-agrupaciones";
 import { RedPanel } from "../src/app/(app)/planificacion/curvas-estacionalidad/red-panel";
 import { parametrosPorDefecto } from "../src/app/(app)/planificacion/curvas-estacionalidad/trabajo-vista";
 import { FotoModal, VersionesPanel } from "../src/app/(app)/planificacion/curvas-estacionalidad/versiones-panel";
@@ -423,6 +424,9 @@ describe("vista de trabajo, versiones y apoyo", () => {
         colores: new Map(),
         modeloInicial: null,
         onModelo: () => {},
+        vecinos: { posicion: 3, total: 15, anterior: { id: "x", nombre: "ABRIGO" }, siguiente: { id: "y", nombre: "POLO" } },
+        ordenPorDefecto: false,
+        onIrA: () => {},
         onVolver: () => {},
         onIrAPeriodos: () => {},
         onCambio: () => {},
@@ -430,6 +434,9 @@ describe("vista de trabajo, versiones y apoyo", () => {
     );
     expect(h).toContain("← Agrupaciones");
     expect(h).toContain("Leyendo la venta de HO INVIERNO…");
+    expect(h).toContain("3 de 15");
+    expect(h).toContain("← Anterior");
+    expect(h).toContain("Siguiente →");
   });
 
   const versiones: VersionesAgrupacionApi = {
@@ -454,6 +461,29 @@ describe("vista de trabajo, versiones y apoyo", () => {
     expect(h).toContain("Foto de la versión 2");
     expect(h).toContain("Cargando la foto");
     expect(h).toContain("<dialog");
+  });
+
+  it("navegar entre agrupaciones: posición, nombre de la vecina en title y aria-label, texto en los botones", () => {
+    const v = { posicion: 3, total: 15, anterior: { id: "x", nombre: "ABRIGO" }, siguiente: { id: "y", nombre: "POLO" } };
+    const h = html(createElement(NavegarAgrupaciones, { vecinos: v, porDefecto: false, deshabilitado: false, onIr: () => {} }));
+    expect(h).toContain('aria-label="Navegar entre agrupaciones"');
+    expect(h).toContain('aria-label="Agrupación anterior: ABRIGO"');
+    expect(h).toContain('aria-label="Agrupación siguiente: POLO"');
+    expect(h).toContain('title="Anterior: ABRIGO');
+    expect(h).toContain("3 de 15");
+    expect(h).not.toContain('disabled=""');
+    expect(h).not.toContain("lista completa");
+  });
+
+  it("navegar: en los extremos el botón se deshabilita; con el orden por defecto lo dice", () => {
+    const primera = html(createElement(NavegarAgrupaciones, { vecinos: { posicion: 1, total: 2, anterior: null, siguiente: { id: "y", nombre: "POLO" } }, porDefecto: true, deshabilitado: false, onIr: () => {} }));
+    expect(primera.match(/disabled=""/g)).toHaveLength(1);
+    expect(primera).toContain("No hay agrupación anterior");
+    expect(primera).toContain("1 de 2 · lista completa");
+    const ultima = html(createElement(NavegarAgrupaciones, { vecinos: { posicion: 2, total: 2, anterior: { id: "x", nombre: "ABRIGO" }, siguiente: null }, porDefecto: false, deshabilitado: false, onIr: () => {} }));
+    expect(ultima).toContain("No hay agrupación siguiente");
+    const ocupado = html(createElement(NavegarAgrupaciones, { vecinos: { posicion: 2, total: 3, anterior: { id: "x", nombre: "A" }, siguiente: { id: "y", nombre: "B" } }, porDefecto: false, deshabilitado: true, onIr: () => {} }));
+    expect(ocupado.match(/disabled=""/g)).toHaveLength(2);
   });
 
   it("Años Niño a demanda: «Calculando…» al entrar, sin corrida de referencia", () => {

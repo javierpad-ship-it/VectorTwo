@@ -433,6 +433,28 @@ export function textoComparacionFila(r: ResultadoComparar): string {
   }
 }
 
+// ─── Navegar entre agrupaciones ───
+
+export type Vecino = { id: string; nombre: string };
+export type Vecinos = {
+  /** Posición de la agrupación abierta, desde 1. */
+  posicion: number;
+  total: number;
+  anterior: Vecino | null;
+  siguiente: Vecino | null;
+};
+
+/**
+ * Anterior y siguiente de la agrupación `id` dentro de `orden` (los ids de la lista como la veía el usuario),
+ * sin dar la vuelta: en los extremos el vecino es `null`. `null` si `id` no está en `orden`.
+ */
+export function vecinosDe(orden: readonly string[], id: string, nombres: ReadonlyMap<string, string>): Vecinos | null {
+  const i = orden.indexOf(id);
+  if (i < 0) return null;
+  const vecino = (j: number): Vecino | null => (j < 0 || j >= orden.length ? null : { id: orden[j], nombre: nombres.get(orden[j]) ?? "agrupación" });
+  return { posicion: i + 1, total: orden.length, anterior: vecino(i - 1), siguiente: vecino(i + 1) };
+}
+
 // ─── Comparador vigente / propuesta ───
 
 export type Comparacion = {

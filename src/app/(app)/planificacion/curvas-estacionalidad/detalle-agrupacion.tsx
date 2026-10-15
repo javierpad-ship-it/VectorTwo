@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, codigoDeError } from "@/lib/api-client";
 import { formatearNumero, mensajeError } from "@/lib/formato";
 import type { AprobarCurvaRespuesta, ModeloCurva, TemporadaAgrupacion, VersionAgrupacionApi, VersionesAgrupacionApi } from "@/lib/curvas/tipos-api";
@@ -18,12 +18,14 @@ import { AntesDeCalcular } from "./antes-de-calcular";
 import { AprobarPanel, ID_NOTA_APROBACION } from "./aprobar-panel";
 import { CandidatasTabla } from "./candidatas-tabla";
 import { EfectoNinoDetalle, hayEfectoNino } from "./efecto-nino-detalle";
+import { NavegarAgrupaciones } from "./navegar-agrupaciones";
 import { ParametrosAgrupacion } from "./parametros-agrupacion";
 import { RedComparable } from "./red-comparable";
 import { TablaAnioMes } from "./tabla-anio-mes";
 import {
   errorDeAprobar,
   cuerpoAprobar,
+  hayCambiosSinAprobar,
   mensajeNotaRequerida,
   motivoNoSePuedeAprobar,
   motivosNotaRequerida,
@@ -45,6 +47,7 @@ import {
   textoConfirmarAprobacion,
   textoNoComparable,
   modeloConNombre,
+  type Vecinos,
 } from "./vista";
 
 const ID_TABLA = "tabla-anio-mes";
@@ -65,6 +68,9 @@ export function DetalleAgrupacion({
   colores,
   modeloInicial,
   onModelo,
+  vecinos,
+  ordenPorDefecto,
+  onIrA,
   onVolver,
   onIrAPeriodos,
   onCambio,
@@ -77,6 +83,12 @@ export function DetalleAgrupacion({
   modeloInicial: ModeloCurva | null;
   /** Se llama al dibujar otra candidata, para llevarla a la URL. */
   onModelo: (m: ModeloCurva) => void;
+  /** Anterior y siguiente en el orden de la lista (`null` mientras no se conoce la lista). */
+  vecinos: Vecinos | null;
+  /** El orden es el de la lista completa (no se recordó el filtro). */
+  ordenPorDefecto: boolean;
+  /** Cambia a otra agrupación (la URL cambia; esta vista se vuelve a montar). */
+  onIrA: (agrupacionId: string) => void;
   onVolver: () => void;
   /** Lleva a la pestaña Periodos atípicos. */
   onIrAPeriodos: () => void;
@@ -233,6 +245,34 @@ export function DetalleAgrupacion({
     }
   }
 
+  const sinAprobar = hayCambiosSinAprobar({ nota, hasta: t.hasta, parametros, iniciales: t.iniciales });
+
+  /** Cambia de agrupación; con cambios sin aprobar (parámetros, «Calcular hasta» o una nota) pide confirmación antes de perderlos. */
+  function irA(id: string) {
+    if (ocupado || foto) return;
+    if (sinAprobar && !confirm("Tienes cambios sin aprobar en esta agrupación (parámetros o nota). Si cambias de agrupación se pierden. ¿Cambiar de todos modos?")) return;
+    onIrA(id);
+  }
+
+  // Atajos ← y →: solo si no se está escribiendo (campos, listas) y sin teclas modificadoras.
+  const anteriorId = vecinos?.anterior?.id ?? null;
+  const siguienteId = vecinos?.siguiente?.id ?? null;
+  useEffect(() => {
+    function alPulsar(e: KeyboardEvent) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      if (el && (el.isContentEditable || el.closest("input, select, textarea, [role=slider], dialog"))) return;
+      const destino = e.key === "ArrowLeft" ? anteriorId : siguienteId;
+      if (destino) {
+        e.preventDefault();
+        irA(destino);
+      }
+    }
+    window.addEventListener("keydown", alPulsar);
+    return () => window.removeEventListener("keydown", alPulsar);
+  });
+
   const volver = (
     <Button variante="secundario" tamano="sm" onClick={onVolver}>
       ← Agrupaciones
@@ -243,7 +283,10 @@ export function DetalleAgrupacion({
   if (!datos || !parametros) {
     return (
       <div className="space-y-4">
-        <div>{volver}</div>
+        <div className="flex flex-wrap items-center gap-3">
+          {volver}
+          {vecinos && <NavegarAgrupaciones vecinos={vecinos} porDefecto={ordenPorDefecto} deshabilitado={false} onIr={irA} />}
+        </div>
         {t.error && (
           <AlertaAccion
             error={{ ...errorDeAprobar(t.error.codigo, t.error.mensaje), accion: { tipo: "recargar", etiqueta: "Volver a intentar" } }}
@@ -270,6 +313,7 @@ export function DetalleAgrupacion({
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           {volver}
+          {vecinos && <NavegarAgrupaciones vecinos={vecinos} porDefecto={ordenPorDefecto} deshabilitado={ocupado} onIr={irA} />}
           <BadgeAgrupacion agrupacion={agrupacion} colores={colores} />
           {agrupacion.generos.length > 0 && (
             <ul className="flex flex-wrap gap-1" aria-label="Géneros">

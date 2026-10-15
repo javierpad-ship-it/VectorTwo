@@ -43,6 +43,7 @@ import {
   textoResumen,
   textoRuido,
   textoTotalRed,
+  vecinosDe,
   textoVeredictoForma,
 } from "../src/app/(app)/planificacion/curvas-estacionalidad/vista";
 import { agrupacion, anio, curvaConPico, PLANA, vigente } from "./curvas.pantalla.fixture";
@@ -343,6 +344,29 @@ describe("lo que propone el sistema", () => {
     expect(esModeloCurva("T")).toBe(true);
     expect(esModeloCurva("F")).toBe(false);
     expect(esModeloCurva(null)).toBe(false);
+  });
+});
+
+describe("navegar entre agrupaciones", () => {
+  const nombres = new Map([["a", "ABRIGO"], ["b", "BUZO"], ["c", "CASACA"]]);
+  it("anterior, siguiente y posición", () => {
+    expect(vecinosDe(["a", "b", "c"], "b", nombres)).toEqual({ posicion: 2, total: 3, anterior: { id: "a", nombre: "ABRIGO" }, siguiente: { id: "c", nombre: "CASACA" } });
+  });
+  it("extremos: sin vuelta (null)", () => {
+    expect(vecinosDe(["a", "b", "c"], "a", nombres)).toMatchObject({ posicion: 1, anterior: null, siguiente: { id: "b" } });
+    expect(vecinosDe(["a", "b", "c"], "c", nombres)).toMatchObject({ posicion: 3, siguiente: null, anterior: { id: "b" } });
+    expect(vecinosDe(["a"], "a", nombres)).toMatchObject({ posicion: 1, total: 1, anterior: null, siguiente: null });
+  });
+  it("una agrupación fuera del orden recordado devuelve null (el panel cae a la lista completa)", () => {
+    expect(vecinosDe(["a", "b"], "c", nombres)).toBeNull();
+    expect(vecinosDe([], "a", nombres)).toBeNull();
+  });
+  it("el orden de la lista con filtros: solo las que pasan el filtro, alfabéticas, inactivas al final", () => {
+    const l = [agrupacion({ id: "z", nombre: "ZETA", temporada: "verano" }), agrupacion({ id: "a", nombre: "ALFA" }), agrupacion({ id: "m", nombre: "MU", temporada: "verano" }), agrupacion({ id: "i", nombre: "0 INACTIVA", activo: false })];
+    const ids = (o: Partial<{ temporada: "todas" | "verano"; busqueda: string }>) => filtrarAgrupaciones(l, { temporada: "todas", estado: "todas", genero: "", busqueda: "", ...o }).map((a) => a.id);
+    expect(vecinosDe(ids({ temporada: "verano" }), "m", new Map(l.map((a) => [a.id, a.nombre])))).toMatchObject({ posicion: 1, total: 2, anterior: null, siguiente: { id: "z", nombre: "ZETA" } });
+    expect(vecinosDe(ids({}), "a", new Map(l.map((a) => [a.id, a.nombre])))).toMatchObject({ posicion: 1, total: 4, siguiente: { id: "m" } });
+    expect(ids({})).toEqual(["a", "m", "z", "i"]);
   });
 });
 

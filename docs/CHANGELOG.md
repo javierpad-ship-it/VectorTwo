@@ -2,6 +2,10 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.1 · M6 — 2026-10-15
+
+Navegación entre agrupaciones en la vista de trabajo de M6 (pedido de Javier tras probar la 0.9.7): botones **← Anterior** y **Siguiente →** junto a "← Agrupaciones", con la posición ("3 de 15") y el nombre de la agrupación vecina; siguen el orden de la lista tal como se veía al pulsar "Trabajar" (con sus filtros; tras recargar o entrar por enlace directo usan la lista completa y el contador dice "lista completa"); se deshabilitan en los extremos, piden confirmación si hay una nota, un "Calcular hasta" elegido o parámetros distintos de los de apertura, y admiten los atajos ← y → cuando el foco no está en un campo. Sin migración. Total: 2 888 pruebas en 155 archivos, lint, `tsc` y build en verde. Pendiente de la ficha `06c`: ver todas las GML del grupo, curva propuesta por el usuario y modelo avanzado F.
+
 ## 0.10.0 · M7 — 2026-10-15
 
 **M7 · Proyección anual**: se proyectan en unidades el año en curso y el año siguiente completo, por GML (o GMLE) y agrupación de marcas. Ficha `docs/modulos/07-proyeccion-anual.md` (revisión independiente del `arquitecto-revisor` en opus; QA con prueba en navegador sobre una pila local sintética; auditoría de `seguridad` en opus). Migración **`0018_proyeccion_anual.sql`** (aplicada en Vector2): `tiendas.tienda_referencia_id` (`on delete restrict`), la función `venta_proyeccion` (`stable`, `security invoker`, `search_path` vacío, solo `service_role`; 0,6 s por tanda media medidos con 870 mil hechos) y las tablas `proyecciones`, `proyeccion_filas`, `proyeccion_fila_anios`, `proyeccion_tiendas` y `factores_volumen_atipico`, con RLS sin políticas. Sin `DROP`/`DELETE`/`TRUNCATE`/`UPDATE`. Humo SQL en `scripts/humo-0018.sql`.
