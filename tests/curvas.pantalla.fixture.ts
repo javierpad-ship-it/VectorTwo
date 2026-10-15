@@ -1,4 +1,4 @@
-import type { AgrupacionCurvasApi, AnioAgrupacion, AvisoCurva, PropuestaApi, VigenteResumenApi } from "../src/lib/curvas/tipos-api";
+import type { AgrupacionCurvasApi, AnioAgrupacion, AvisoCurva, VigenteResumenApi } from "../src/lib/curvas/tipos-api";
 
 /** Datos sintéticos para las pruebas de la pantalla de curvas (M6). Nada de datos reales. */
 
@@ -18,6 +18,7 @@ export function anio(anio: number, extra: Partial<AnioAgrupacion> = {}): AnioAgr
     meses_atipicos: 0,
     atipicos: [],
     tratamiento: null,
+    tratamiento_motivo: null,
     unidades: 1200,
     meses,
     escaso: false,
@@ -43,31 +44,20 @@ export function vigente(extra: Partial<VigenteResumenApi> = {}): VigenteResumenA
     modelo: "A",
     origen: "propia",
     recomendada: true,
+    recomendada_entonces: "A",
     eat: 29.1,
     aprobada_at: "2026-10-14T15:42:00Z",
     usuario_nombre: "Planner",
-    corrida_id: "c1",
+    foto_id: "f1",
+    hasta_periodo: "2026-08",
+    hasta_fue_por_defecto: true,
+    nota: null,
     curva: [...PLANA],
-    ...extra,
-  };
-}
-
-export function propuesta(extra: Partial<PropuestaApi> = {}): PropuestaApi {
-  return {
-    corrida_id: "c1",
-    recomendada: "A",
-    motivo_recomendacion: "sin_evidencia",
-    origen: "propia",
-    eat: 29.1,
-    curva: [...PLANA],
-    estabilidad: 0.7,
-    nivel_estabilidad: "media",
-    difiere_de_vigente: false,
-    eat_vs_vigente: null,
-    veredicto_forma: null,
-    anios: [],
-    nino: { volumen: [], forma: null },
-    avisos: [],
+    parametros: null,
+    huella_calculo: null,
+    version_modelo: 1,
+    anios_ajuste: [2024, 2025],
+    ruido_normal: 33,
     ...extra,
   };
 }
@@ -82,10 +72,13 @@ export function agrupacion(extra: Partial<AgrupacionCurvasApi> = {}): Agrupacion
     temporada_sugerida: null,
     generos: ["HOMBRE"],
     equivalencias_activas: 10,
-    con_venta: true,
+    periodos_aplicables: 2,
     vigente: null,
     obsoleta: null,
-    propuesta: null,
+    avisos_vigente: [],
+    estado: "sin_curva",
+    bloqueada_por: [],
+    versiones: 0,
     ...extra,
   };
 }

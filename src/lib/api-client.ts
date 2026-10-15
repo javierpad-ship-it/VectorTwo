@@ -1,7 +1,30 @@
 /**
+ * Error de la API: el mensaje es el `error` de la respuesta, listo para mostrar.
+ * Además guarda el `status` HTTP y el `codigo` de negocio (`{ error, codigo }`,
+ * p. ej. los 409 de M6) para que la pantalla pueda ofrecer una acción distinta
+ * según el caso. Sigue siendo un `Error`: `mensajeError(e)` funciona igual.
+ */
+export class ErrorApi extends Error {
+  readonly status: number;
+  readonly codigo: string | null;
+
+  constructor(mensaje: string, status: number, codigo: string | null = null) {
+    super(mensaje);
+    this.name = "ErrorApi";
+    this.status = status;
+    this.codigo = codigo;
+  }
+}
+
+/** El `codigo` de negocio de un error de la API; `null` si no es de la API o no trae. */
+export function codigoDeError(e: unknown): string | null {
+  return e instanceof ErrorApi ? e.codigo : null;
+}
+
+/**
  * Envoltorio de fetch para hablar con /api desde el navegador. Toda respuesta
  * de la API es `{ data }` o `{ error }`; acá se desempaqueta y los errores se
- * lanzan como Error con el mensaje listo para mostrar.
+ * lanzan como `ErrorApi` con el mensaje listo para mostrar.
  */
 async function llamar<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -10,7 +33,7 @@ async function llamar<T>(url: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
 
-  let cuerpo: { data?: T; error?: string } = {};
+  let cuerpo: { data?: T; error?: string; codigo?: string } = {};
   try {
     cuerpo = await res.json();
   } catch {
@@ -18,7 +41,7 @@ async function llamar<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    throw new Error(cuerpo.error ?? `Error ${res.status}`);
+    throw new ErrorApi(cuerpo.error ?? `Error ${res.status}`, res.status, cuerpo.codigo ?? null);
   }
   return cuerpo.data as T;
 }

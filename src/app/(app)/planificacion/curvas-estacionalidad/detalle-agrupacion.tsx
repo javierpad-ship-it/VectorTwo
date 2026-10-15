@@ -1,132 +1,233 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { api } from "@/lib/api-client";
+import { api, codigoDeError } from "@/lib/api-client";
 import { formatearNumero, mensajeError } from "@/lib/formato";
-import { formatearUnidades } from "@/lib/reportes/histograma";
-import {
-  type DetalleAgrupacionApi,
-  type ElegirCurvaRespuesta,
-  type ModeloCurva,
-  type TemporadaAgrupacion,
-} from "@/lib/curvas/tipos-api";
+import type { AprobarCurvaRespuesta, ModeloCurva, TemporadaAgrupacion, VersionAgrupacionApi, VersionesAgrupacionApi } from "@/lib/curvas/tipos-api";
+import type { MapaColores } from "@/lib/estacionalidad/colores";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input, Select } from "@/components/ui/form";
+import { Select } from "@/components/ui/form";
+import { BadgeAgrupacion } from "@/components/estacionalidad/badge-agrupacion";
 import { BadgeTemporada, OPCIONES_TEMPORADA, esTemporada } from "@/components/estacionalidad/temporada";
 import { GraficoCurvas } from "@/components/curvas/grafico-curvas";
+import { AlertaAccion } from "./alerta-accion";
+import { AntesDeCalcular } from "./antes-de-calcular";
+import { AprobarPanel, ID_NOTA_APROBACION } from "./aprobar-panel";
 import { CandidatasTabla } from "./candidatas-tabla";
-import { ComparadorCurvas } from "./comparador-curvas";
-import { EfectoNinoDetalle } from "./efecto-nino-detalle";
+import { EfectoNinoDetalle, hayEfectoNino } from "./efecto-nino-detalle";
+import { ParametrosAgrupacion } from "./parametros-agrupacion";
 import { RedComparable } from "./red-comparable";
 import { TablaAnioMes } from "./tabla-anio-mes";
-import { useRecurso } from "./use-recurso";
 import {
-  ETIQUETA_AVISO,
+  errorDeAprobar,
+  cuerpoAprobar,
+  mensajeNotaRequerida,
+  motivoNoSePuedeAprobar,
+  motivosNotaRequerida,
+  textoCalculado,
+  textoRedPorAnio,
+  type AccionSugerida,
+  type ErrorAprobar,
+} from "./trabajo-vista";
+import { useRecurso } from "./use-recurso";
+import { useTrabajoAgrupacion } from "./use-trabajo";
+import { FotoModal, VersionesPanel } from "./versiones-panel";
+import {
+  aniosDeAjuste,
   compararCurvas,
-  formatearFechaHora,
-  modeloConNombre,
+  etiquetaAprobada,
+  etiquetaPropuesta,
+  motivoAnioSinDatos,
   redVistaDeAgrupacion,
   textoConfirmarAprobacion,
-  textoObsoleta,
+  textoNoComparable,
+  modeloConNombre,
 } from "./vista";
 
 const ID_TABLA = "tabla-anio-mes";
 
 /**
- * Detalle de una agrupación en la corrida elegida («tal como lo guardó la
- * corrida»; no lee la venta de nuevo). Aquí y solo aquí se aprueba una curva:
- * después de ver el efecto del Niño, el gráfico de todos los años, el comparador con
- * la vigente, las candidatas con su EAT por pliegue y la tabla año × mes. No hay
- * aprobación en bloque.
+ * Vista de trabajo de UNA agrupación (06b): aquí se mira, se ajusta y se aprueba su curva. Muestra, en el mismo
+ * gráfico y la misma tabla, la curva aprobada vigente, la de cada uno de los últimos años y la propuesta
+ * automática del sistema; la frase de recomendación con sus candidatas; el efecto del Niño; los parámetros de
+ * ESTA agrupación (que recalculan al cambiar); el comparador con la aprobada y el botón Aprobar; la red de tiendas
+ * y las versiones con su foto. No hay selección múltiple ni aprobación en bloque.
+ *
+ * Se monta con `key={agrupacionId}`: al cambiar de agrupación todo el estado empieza de cero. La agrupación y la
+ * candidata dibujada viven en la URL (`?agrupacion=&modelo=`), que maneja el panel.
  */
 export function DetalleAgrupacion({
-  corridaId,
   agrupacionId,
+  nombreInicial,
+  colores,
+  modeloInicial,
+  onModelo,
   onVolver,
+  onIrAPeriodos,
   onCambio,
 }: {
-  corridaId: string;
   agrupacionId: string;
+  /** El nombre de la lista, para el texto «Leyendo la venta de …» mientras llega el primer cálculo. */
+  nombreInicial: string | null;
+  colores: MapaColores;
+  /** La candidata de `?modelo=` (o `null`: la recomendada). */
+  modeloInicial: ModeloCurva | null;
+  /** Se llama al dibujar otra candidata, para llevarla a la URL. */
+  onModelo: (m: ModeloCurva) => void;
   onVolver: () => void;
-  /** Tras aprobar o cambiar la temporada: recarga el estado general y las agrupaciones. */
+  /** Lleva a la pestaña Periodos atípicos. */
+  onIrAPeriodos: () => void;
+  /** Tras aprobar, retirar o cambiar la temporada: recarga la lista y las agrupaciones. */
   onCambio: () => Promise<void> | void;
 }) {
-  const { datos, cargando, error: errorCarga, setError: setErrorCarga, recargar } = useRecurso<DetalleAgrupacionApi>(
-    `/api/curvas/corridas/${corridaId}/agrupaciones/${agrupacionId}`
-  );
-  const [elegida, setElegida] = useState<ModeloCurva | null>(null);
+  const t = useTrabajoAgrupacion(agrupacionId);
+  const versiones = useRecurso<VersionesAgrupacionApi>(`/api/curvas/agrupaciones/${agrupacionId}/versiones`);
+  const [elegida, setElegida] = useState<ModeloCurva | null>(modeloInicial);
   const [nota, setNota] = useState("");
   const [ocupado, setOcupado] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errorAccion, setErrorAccion] = useState<ErrorAprobar | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [redAbierta, setRedAbierta] = useState(false);
+  const [foto, setFoto] = useState<VersionAgrupacionApi | null>(null);
 
-  const resultado = datos?.resultado ?? null;
-  const modelo: ModeloCurva | null = elegida ?? resultado?.recomendada ?? null;
-  const candidata = useMemo(() => resultado?.candidatas.find((c) => c.modelo === modelo && c.curva !== null) ?? null, [resultado, modelo]);
+  const { datos, parametros } = t;
+  const calculo = datos?.calculo ?? null;
+  const resultado = calculo?.resultado ?? null;
   const vigente = datos?.vigente ?? null;
 
-  const propuesta = useMemo(() => (candidata?.curva && modelo ? { etiqueta: modeloConNombre(modelo), curva: candidata.curva } : null), [candidata, modelo]);
-  const vigenteGraf = useMemo(
-    () => (vigente ? { etiqueta: `v${vigente.version} · ${modeloConNombre(vigente.modelo)}`, curva: vigente.curva } : null),
-    [vigente]
+  const modelo: ModeloCurva | null = useMemo(() => {
+    if (!resultado) return null;
+    const sirve = (m: ModeloCurva | null) => m !== null && resultado.candidatas.some((c) => c.modelo === m && c.curva !== null);
+    return sirve(elegida) ? elegida : resultado.recomendada;
+  }, [resultado, elegida]);
+  const candidata = useMemo(() => resultado?.candidatas.find((c) => c.modelo === modelo && c.curva !== null) ?? null, [resultado, modelo]);
+
+  const propuesta = useMemo(() => (candidata?.curva && modelo ? { etiqueta: etiquetaPropuesta(modelo), curva: candidata.curva } : null), [candidata, modelo]);
+  const aprobada = useMemo(() => (vigente ? { etiqueta: etiquetaAprobada(vigente.version, vigente.modelo), curva: vigente.curva } : null), [vigente]);
+  const comparacion = useMemo(() => (propuesta && vigente ? compararCurvas(vigente.curva, propuesta.curva, vigente.modelo === modelo) : null), [propuesta, vigente, modelo]);
+  const avisoNoComparable = useMemo(
+    () => (resultado ? textoNoComparable(datos?.comparador?.comparable_con_vigente, vigente?.anios_ajuste ?? null, aniosDeAjuste(resultado.anios)) : null),
+    [datos?.comparador?.comparable_con_vigente, vigente?.anios_ajuste, resultado]
   );
-  const comparacion = useMemo(
-    () => (propuesta && vigente ? compararCurvas(vigente.curva, propuesta.curva, vigente.modelo === modelo) : null),
-    [propuesta, vigente, modelo]
-  );
+  const motivosAnios = useMemo(() => {
+    const m = new Map<number, string>();
+    if (!calculo || !datos) return m;
+    for (const a of calculo.resultado.anios) {
+      const sinRed = calculo.red.find((r) => r.anio === a.anio)?.sin_red ?? false;
+      const motivo = motivoAnioSinDatos(a, { sinRed, faltantes: datos.datos.faltantes });
+      if (motivo) m.set(a.anio, motivo);
+    }
+    return m;
+  }, [calculo, datos]);
   const red = useMemo(
-    () => (datos ? redVistaDeAgrupacion(datos.red, datos.tiendas, datos.resultado, datos.corrida.parametros.umbral_tienda_dominante) : null),
-    [datos]
+    () => (calculo && parametros ? redVistaDeAgrupacion(calculo.red, calculo.tiendas, calculo.resultado, parametros.umbral_tienda_dominante) : null),
+    [calculo, parametros]
   );
+
+  const motivosNota = parametros ? motivosNotaRequerida(parametros, modelo, resultado?.recomendada ?? null) : [];
+  const motivoNoPuede = motivoNoSePuedeAprobar({ datos, recalculando: t.recalculando, desactualizado: t.desactualizado, fallo: t.error !== null, tieneCandidata: candidata !== null });
+
+  function elegirCandidata(m: ModeloCurva) {
+    setElegida(m);
+    onModelo(m);
+  }
+
+  /** Recarga lo que depende de la base: el cálculo (con lo que hay en pantalla), las versiones y la lista. */
+  async function recargarTodo() {
+    t.recalcular();
+    await Promise.all([versiones.recargar(), onCambio()]);
+  }
+
+  function accion(a: AccionSugerida) {
+    if (a.tipo === "recargar") t.recalcular();
+    else if (a.tipo === "pestana") onIrAPeriodos();
+    else if (a.tipo === "candidata") document.getElementById("candidatas")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   async function aprobar() {
     if (!datos || !resultado || !modelo || !candidata) return;
+    setErrorAccion(null);
+    setAviso(null);
+    const motivos = motivosNotaRequerida(datos.parametros, modelo, resultado.recomendada);
+    if (motivos.length > 0 && nota.trim() === "") {
+      setErrorAccion(errorDeAprobar("nota_requerida", mensajeNotaRequerida(motivos)));
+      document.getElementById(ID_NOTA_APROBACION)?.focus();
+      return;
+    }
+    const cuerpo = cuerpoAprobar(datos, modelo, nota);
+    if (!cuerpo) return;
+    const nombresTiendas = new Map((calculo?.tiendas ?? []).map((x) => [x.id, x.codigo]));
     const texto = textoConfirmarAprobacion({
       agrupacion: datos.agrupacion.nombre,
+      temporada: datos.agrupacion.temporada,
       modelo,
       recomendada: resultado.recomendada,
       anios: resultado.anios,
       eat: candidata.eat,
-      ruidoNormal: resultado.efecto_atipico.forma?.ruido_normal ?? null,
+      ruidoNormal: resultado.ruido_normal,
       versionVigente: vigente?.version ?? null,
       comparacion,
-      avisos: resultado.avisos,
+      comparableConVigente: datos.comparador?.comparable_con_vigente ?? null,
+      aniosAjusteVigente: vigente?.anios_ajuste ?? null,
+      aniosExcluidos: datos.parametros.anios_excluidos,
+      tiendasExcluidas: datos.parametros.tiendas_excluidas.map((id) => nombresTiendas.get(id) ?? id),
+      tratamiento: datos.parametros.tratamiento_atipicos,
+      hasta: cuerpo.parametros.hasta_periodo,
+      avisos: [...datos.prerrequisitos.avisa, ...resultado.avisos],
       nota,
     });
     if (!confirm(texto)) return;
     setOcupado(true);
-    setError(null);
-    setAviso(null);
     try {
-      const r = await api.put<ElegirCurvaRespuesta>(`/api/curvas/agrupaciones/${agrupacionId}`, {
-        corrida_id: corridaId,
-        modelo,
-        ...(nota.trim() !== "" ? { nota: nota.trim() } : {}),
-      });
+      const r = await api.put<AprobarCurvaRespuesta>(`/api/curvas/agrupaciones/${agrupacionId}`, cuerpo);
       setNota("");
-      setAviso(`Curva ${modeloConNombre(r.curva.modelo)} aprobada como versión ${r.curva.version} de ${datos.agrupacion.nombre}.`);
-      await Promise.all([recargar(), onCambio()]);
+      setAviso(`Curva ${r.curva.modelo} aprobada como versión ${r.curva.version} de ${datos.agrupacion.nombre}.`);
+      await recargarTodo();
     } catch (e) {
-      setError(mensajeError(e));
+      const codigo = codigoDeError(e);
+      const err = errorDeAprobar(codigo, mensajeError(e));
+      if (codigo === "datos_cambiados" || codigo === "vigente_cambiada") {
+        // La pantalla recarga sola con lo que el planner tenía puesto; el mensaje explica por qué.
+        setErrorAccion({ mensaje: `${err.mensaje} Ya se volvió a cargar con tus parámetros: revisa y vuelve a aprobar.`, accion: null });
+        await recargarTodo();
+      } else {
+        setErrorAccion(err);
+      }
     } finally {
       setOcupado(false);
     }
   }
 
-  async function cambiarTemporada(t: TemporadaAgrupacion) {
+  async function retirar() {
+    if (!vigente || !datos) return;
+    if (!confirm(`¿Retirar la curva vigente de ${datos.agrupacion.nombre} (v${vigente.version}, ${modeloConNombre(vigente.modelo)})? La agrupación quedará sin curva hasta que apruebes otra.`)) return;
     setOcupado(true);
-    setError(null);
+    setErrorAccion(null);
     setAviso(null);
     try {
-      await api.patch(`/api/agrupaciones-estacionalidad/${agrupacionId}`, { temporada: t });
-      setAviso("Temporada guardada. Las curvas afectadas se marcan obsoletas hasta que recalcules y vuelvas a aprobar.");
-      await Promise.all([recargar(), onCambio()]);
+      await api.delete(`/api/curvas/agrupaciones/${agrupacionId}`);
+      setAviso(`${datos.agrupacion.nombre}: curva retirada. La agrupación quedó sin curva.`);
+      await recargarTodo();
     } catch (e) {
-      setError(mensajeError(e));
+      setErrorAccion(errorDeAprobar(codigoDeError(e), mensajeError(e)));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function cambiarTemporada(temporada: TemporadaAgrupacion) {
+    setOcupado(true);
+    setErrorAccion(null);
+    setAviso(null);
+    try {
+      await api.patch(`/api/agrupaciones-estacionalidad/${agrupacionId}`, { temporada });
+      setAviso("Temporada guardada. La curva vigente se marca obsoleta hasta que vuelvas a aprobar; ya se volvió a calcular.");
+      await recargarTodo();
+    } catch (e) {
+      setErrorAccion(errorDeAprobar(codigoDeError(e), mensajeError(e)));
     } finally {
       setOcupado(false);
     }
@@ -134,191 +235,207 @@ export function DetalleAgrupacion({
 
   const volver = (
     <Button variante="secundario" tamano="sm" onClick={onVolver}>
-      ← Volver a las curvas
+      ← Agrupaciones
     </Button>
   );
 
-  if (!datos || !resultado) {
+  // ─── Primera lectura o apertura fallida ───
+  if (!datos || !parametros) {
     return (
       <div className="space-y-4">
         <div>{volver}</div>
-        {errorCarga && <Alert onCerrar={() => setErrorCarga(null)}>No se pudo cargar el detalle: {errorCarga}</Alert>}
-        {!errorCarga && <p className="py-10 text-center text-sm text-tinta-suave">{cargando ? "Cargando el detalle…" : "Sin información."}</p>}
+        {t.error && (
+          <AlertaAccion
+            error={{ ...errorDeAprobar(t.error.codigo, t.error.mensaje), accion: { tipo: "recargar", etiqueta: "Volver a intentar" } }}
+            onAccion={() => t.recalcular()}
+            onCerrar={t.limpiarError}
+          />
+        )}
+        {!t.error && (
+          <p className="py-10 text-center text-sm text-tinta-suave" aria-live="polite">
+            Leyendo la venta de {nombreInicial ?? "la agrupación"}…
+          </p>
+        )}
       </div>
     );
   }
 
-  const { agrupacion, corrida } = datos;
-  const aniosOrdenados = [...resultado.anios].sort((a, b) => a.anio - b.anio);
-  const motivoObsoleta = textoObsoleta(datos.obsoleta);
-  const sinPropiaNiVigente = resultado.recomendada === null;
+  const { agrupacion } = datos;
+  const hastaVigente = vigente?.hasta_periodo ?? null;
+  const redPorAnio = textoRedPorAnio(calculo?.red ?? []);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {volver}
-        <p className="text-xs text-tinta-suave">
-          Corrida del {formatearFechaHora(corrida.created_at)}
-          {corrida.referencia ? " (referencia)" : ""} · datos y parámetros de ese momento
-        </p>
-      </div>
-
-      {(error || errorCarga) && <Alert onCerrar={() => (error ? setError(null) : setErrorCarga(null))}>{error ?? errorCarga}</Alert>}
-      {aviso && (
-        <Alert tono="exito" onCerrar={() => setAviso(null)}>
-          {aviso}
-        </Alert>
-      )}
-      {motivoObsoleta && <Alert>{motivoObsoleta}. Recalcula desde la pestaña Curvas y vuelve a aprobar.</Alert>}
-
-      <Card titulo={agrupacion.nombre} descripcion={`Código ${agrupacion.codigo}${agrupacion.activo ? "" : " · inactiva"}`}>
-        <div className="space-y-3 text-sm">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            {agrupacion.generos.length > 0 && (
-              <ul className="flex flex-wrap gap-1" aria-label="Géneros">
-                {agrupacion.generos.map((g) => (
-                  <li key={g}>
-                    <Badge>{g}</Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <label className="inline-flex items-center gap-2">
-              <span className="text-tinta-suave">Temporada</span>
-              <Select
-                aria-label={`Temporada de ${agrupacion.nombre}`}
-                value={agrupacion.temporada}
-                disabled={ocupado}
-                onChange={(e) => {
-                  if (esTemporada(e.target.value)) void cambiarTemporada(e.target.value);
-                }}
-                className="h-8 w-40!"
-              >
-                {OPCIONES_TEMPORADA.map((o) => (
-                  <option key={o.valor} value={o.valor}>
-                    {o.etiqueta}
-                  </option>
-                ))}
-              </Select>
-            </label>
-            {agrupacion.temporada_sugerida !== null && agrupacion.temporada_sugerida !== agrupacion.temporada && (
-              <span className="inline-flex items-center gap-1.5 text-xs text-alerta">
-                Sugerida por sus líneas: <BadgeTemporada temporada={agrupacion.temporada_sugerida} />
-              </span>
-            )}
-            <span className="text-tinta-suave">{formatearNumero(agrupacion.equivalencias_activas)} equivalencias activas</span>
-          </div>
-
-          <p className="text-tinta-suave">
-            <strong className="text-tinta">Unidades de la red por año:</strong>{" "}
-            {aniosOrdenados.map((a, i) => (
-              <span key={a.anio}>
-                {i > 0 && " · "}
-                {a.anio}
-                {a.clase === "en_curso" ? " (parcial)" : ""} {formatearUnidades(a.unidades)}
-              </span>
-            ))}
-          </p>
-          <p className="text-xs text-tinta-suave">
-            Huellas de la corrida: composición {formatearNumero(resultado.composicion.equivalencias)} equivalencias; red {aniosOrdenados.map((a) => a.tiendas_en_red).join(" · ")} tiendas
-            (un año por cifra).
-          </p>
-
-          {resultado.avisos.length > 0 && (
-            <ul className="space-y-1" aria-label="Avisos de la agrupación">
-              {resultado.avisos.map((a, i) => (
-                <li key={`${a.codigo}-${i}`} className="flex flex-wrap items-baseline gap-2 text-xs">
-                  <Badge tono="alerta">{ETIQUETA_AVISO[a.codigo]}</Badge>
-                  <span className="text-tinta-suave">{a.detalle}</span>
+      {/* Cabecera */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          {volver}
+          <BadgeAgrupacion agrupacion={agrupacion} colores={colores} />
+          {agrupacion.generos.length > 0 && (
+            <ul className="flex flex-wrap gap-1" aria-label="Géneros">
+              {agrupacion.generos.map((g) => (
+                <li key={g}>
+                  <Badge>{g}</Badge>
                 </li>
               ))}
             </ul>
           )}
+          <label className="inline-flex items-center gap-2 text-sm">
+            <span className="text-tinta-suave">Temporada</span>
+            <Select
+              aria-label={`Temporada de ${agrupacion.nombre}`}
+              value={agrupacion.temporada}
+              disabled={ocupado}
+              onChange={(e) => {
+                if (esTemporada(e.target.value)) void cambiarTemporada(e.target.value);
+              }}
+              className="h-8 w-40!"
+            >
+              {OPCIONES_TEMPORADA.map((o) => (
+                <option key={o.valor} value={o.valor}>
+                  {o.etiqueta}
+                </option>
+              ))}
+            </Select>
+          </label>
+          {agrupacion.temporada_sugerida !== null && agrupacion.temporada_sugerida !== agrupacion.temporada && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-alerta">
+              Sugerida por sus líneas: <BadgeTemporada temporada={agrupacion.temporada_sugerida} />
+            </span>
+          )}
         </div>
-      </Card>
+        <p className="text-xs text-tinta-suave" aria-live="polite">
+          {formatearNumero(agrupacion.equivalencias_activas)} equivalencias activas{redPorAnio ? ` · ${redPorAnio}` : ""}
+          {" · "}
+          {t.recalculando ? (
+            <span className="font-medium text-marca-oscura">Recalculando…</span>
+          ) : (
+            textoCalculado(calculo?.duracion_ms ?? null, datos.datos.hasta_periodo, hastaVigente) || "Sin cálculo"
+          )}
+          {datos.datos.meses_posteriores.length > 0 && ` · ${datos.datos.meses_posteriores.length} ${datos.datos.meses_posteriores.length === 1 ? "mes publicado" : "meses publicados"} después de ${datos.datos.hasta_periodo ?? "—"} (no entran)`}
+        </p>
+      </div>
 
-      {sinPropiaNiVigente && (
-        <Alert tono="info">
-          Esta agrupación no tiene curva posible en esta corrida (sin años utilizables). Revisa los avisos y la tabla de años; si faltan datos, publícalos en M5 y recalcula.
-        </Alert>
-      )}
+      {t.error && <AlertaAccion error={errorDeAprobar(t.error.codigo, t.error.mensaje)} onAccion={accion} onCerrar={t.limpiarError} />}
+      {!agrupacion.activo && <Alert>Esta agrupación está inactiva: se puede mirar, pero no aprobar su curva.</Alert>}
 
-      <EfectoNinoDetalle resultado={resultado} />
+      <AntesDeCalcular
+        datos={datos}
+        confirmadoSinPeriodos={parametros.sin_periodos_confirmado}
+        onConfirmarSinPeriodos={(v) => t.cambiar((p) => ({ ...p, sin_periodos_confirmado: v }))}
+        onIrAPeriodos={onIrAPeriodos}
+        deshabilitado={ocupado}
+      />
 
-      <Card titulo="Todos los años superpuestos" descripcion="La participación de cada mes en el total de su año, sobre las mismas tiendas dentro de cada año.">
-        <GraficoCurvas resultado={resultado} propuesta={propuesta} vigente={vigenteGraf} temporada={datos.temporada_curva} idTabla={ID_TABLA} />
-      </Card>
+      {resultado && calculo && (
+        <>
+          <Card
+            titulo="Curvas de la agrupación"
+            descripcion="La aprobada vigente, la curva de cada año sobre las mismas tiendas dentro de cada año y la propuesta del sistema, en el mismo gráfico."
+          >
+            <GraficoCurvas resultado={resultado} propuesta={propuesta} vigente={aprobada} temporada={calculo.temporada_curva} idTabla={ID_TABLA} />
+          </Card>
 
-      {propuesta && (
-        <Card titulo="Comparador vigente / propuesta" descripcion="La propuesta es la candidata seleccionada en la tabla de abajo.">
-          <ComparadorCurvas propuesta={propuesta} vigente={vigenteGraf} comparacion={comparacion} />
-        </Card>
-      )}
+          <Card titulo="Tabla año × mes" descripcion="Las cifras exactas del gráfico, la diferencia entre propuesta y aprobada, y el promedio, índice y años considerados de cada mes.">
+            <TablaAnioMes
+              id={ID_TABLA}
+              anios={resultado.anios}
+              propuesta={propuesta}
+              vigente={aprobada}
+              umbralDominante={parametros.umbral_tienda_dominante}
+              nombreArchivo={`curva-${agrupacion.codigo.toLowerCase()}-anio-mes.csv`}
+              motivos={motivosAnios}
+            />
+          </Card>
 
-      <Card
-        titulo="Candidatas"
-        descripcion="El modelo propone y compara con backtesting (se deja un año fuera y se compara con lo que ocurrió); tú eliges. Aprobar crea una versión nueva."
-      >
-        <div className="space-y-4">
-          <CandidatasTabla resultado={resultado} seleccionada={modelo} onSeleccionar={setElegida} />
-
-          <div className="flex flex-wrap items-end gap-3 border-t border-borde pt-4">
-            <div className="min-w-60 flex-1 text-sm">
-              <p className="text-tinta">
-                {modelo && candidata ? (
-                  <>
-                    Seleccionada: <strong>{modeloConNombre(modelo)}</strong>
-                    {modelo !== resultado.recomendada && resultado.recomendada && <span className="text-tinta-suave"> (no es la recomendada: {resultado.recomendada})</span>}
-                    {vigente ? <span className="text-tinta-suave"> · reemplazará a la v{vigente.version}</span> : <span className="text-tinta-suave"> · será la versión 1</span>}
-                  </>
-                ) : (
-                  <span className="text-tinta-suave">No hay candidata disponible para aprobar.</span>
-                )}
-              </p>
+          <div className={`grid items-start gap-6 ${hayEfectoNino(resultado) ? "xl:grid-cols-5" : ""}`}>
+            <div id="candidatas" className={hayEfectoNino(resultado) ? "xl:col-span-3" : ""}>
+              <Card
+                titulo="Lo que propone el sistema"
+                descripcion="El modelo propone y compara con backtesting (se deja un año fuera y se compara con lo que ocurrió); tú eliges con el botón de la izquierda."
+              >
+                <CandidatasTabla resultado={resultado} seleccionada={modelo} onSeleccionar={elegirCandidata} avisoNoComparable={avisoNoComparable} />
+              </Card>
             </div>
-            {modelo && modelo !== resultado.recomendada && candidata && (
-              <label className="block w-full max-w-sm">
-                <span className="mb-1 block text-sm font-medium text-tinta">Nota (opcional)</span>
-                <Input value={nota} maxLength={300} disabled={ocupado} onChange={(e) => setNota(e.target.value)} placeholder="Por qué eliges esta y no la recomendada" />
-              </label>
+            {hayEfectoNino(resultado) && (
+              <div className="xl:col-span-2">
+                <EfectoNinoDetalle resultado={resultado} />
+              </div>
             )}
-            <Button onClick={() => void aprobar()} disabled={ocupado || !candidata}>
-              {ocupado ? "Guardando…" : "Aprobar esta curva"}
-            </Button>
           </div>
-        </div>
-      </Card>
+        </>
+      )}
 
-      <Card titulo="Tabla año × mes" descripcion="Las cifras exactas del gráfico: participación y unidades de la red comparable de cada año.">
-        <TablaAnioMes
-          id={ID_TABLA}
-          anios={resultado.anios}
-          propuesta={propuesta}
-          vigente={vigenteGraf}
-          umbralDominante={corrida.parametros.umbral_tienda_dominante}
-          nombreArchivo={`curva-${agrupacion.codigo.toLowerCase()}-anio-mes.csv`}
-        />
-      </Card>
+      <ParametrosAgrupacion
+        datos={datos}
+        parametros={parametros}
+        hasta={t.hasta}
+        deshabilitado={ocupado}
+        onCambiar={t.cambiar}
+        onCambiarHasta={t.cambiarHasta}
+        onRestablecer={t.restablecer}
+      />
 
-      <Card
-        titulo="Red comparable de esta agrupación"
-        descripcion="Las tiendas de cada año con su peso sobre la venta de ESTA agrupación y su perfil frente al de la agrupación."
-        acciones={
-          <Button variante="fantasma" tamano="sm" aria-expanded={redAbierta} onClick={() => setRedAbierta((a) => !a)}>
-            {redAbierta ? "Ocultar" : "Mostrar"}
-          </Button>
-        }
-      >
-        {!redAbierta ? (
-          <p className="text-sm text-tinta-suave">Plegado.</p>
-        ) : red ? (
-          <RedComparable
-            red={red}
-            referencia="la agrupación"
-            pie="Una tienda marcada «Distinta» se aparta del perfil de la agrupación más que el ruido entre años normales y pesa lo suficiente. Es un diagnóstico y no cambia la curva: si una tienda se aparta de verdad y pesa, el siguiente paso es M6b (curvas por tienda o por grupo de tiendas)."
+      {resultado && calculo && (
+        <>
+          <AprobarPanel
+            datos={datos}
+            modelo={modelo}
+            propuesta={propuesta}
+            vigente={aprobada}
+            comparacion={comparacion}
+            avisoNoComparable={avisoNoComparable}
+            nota={nota}
+            onNota={setNota}
+            motivosNota={motivosNota}
+            puedeAprobar={motivoNoPuede === null}
+            motivoNoPuede={motivoNoPuede}
+            ocupado={ocupado}
+            error={errorAccion}
+            aviso={aviso}
+            onAprobar={() => void aprobar()}
+            onAccion={accion}
+            onCerrarError={() => setErrorAccion(null)}
+            onCerrarAviso={() => setAviso(null)}
           />
-        ) : null}
-      </Card>
+
+          <Card
+            titulo="Red comparable de esta agrupación"
+            descripcion="Las tiendas de cada año con su peso sobre la venta de ESTA agrupación y su perfil frente al de la agrupación."
+            acciones={
+              <Button variante="fantasma" tamano="sm" aria-expanded={redAbierta} onClick={() => setRedAbierta((a) => !a)}>
+                {redAbierta ? "Ocultar" : "Mostrar"}
+              </Button>
+            }
+          >
+            {!redAbierta ? (
+              <p className="text-sm text-tinta-suave">Plegado.</p>
+            ) : red ? (
+              <RedComparable
+                red={red}
+                referencia="la agrupación"
+                pie="Una tienda marcada «Distinta» se aparta del perfil de la agrupación más que el ruido entre años normales y pesa lo suficiente. Es un diagnóstico y no cambia la curva; para sacar una tienda del cálculo, exclúyela en Parámetros."
+              />
+            ) : null}
+          </Card>
+        </>
+      )}
+
+      {/* Si el cálculo está bloqueado, los mensajes de aprobar/retirar/temporada igual deben verse. */}
+      {!resultado && (errorAccion || aviso) && (
+        <>
+          {errorAccion && <AlertaAccion error={errorAccion} onAccion={accion} onCerrar={() => setErrorAccion(null)} />}
+          {aviso && (
+            <Alert tono="exito" onCerrar={() => setAviso(null)}>
+              {aviso}
+            </Alert>
+          )}
+        </>
+      )}
+
+      <VersionesPanel versiones={versiones} ocupado={ocupado} puedeRetirar={vigente !== null} onVerFoto={setFoto} onRetirar={() => void retirar()} />
+
+      {foto && <FotoModal agrupacionId={agrupacionId} version={foto} versionModeloActual={datos.version_modelo} onCerrar={() => setFoto(null)} />}
     </div>
   );
 }

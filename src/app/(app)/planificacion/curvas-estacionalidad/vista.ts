@@ -1,62 +1,67 @@
 import { normalizarNombre } from "@/lib/arbol/normalizar";
+import { formatearDecimal, formatearNumero, formatearPp as formatearPpCompartido } from "@/lib/formato";
 import { MESES_CORTOS, MESES_LARGOS } from "@/lib/reportes/histograma";
 import {
   ETIQUETA_MOTIVO_RED,
+  ETIQUETA_TEMPORADA,
   MODELOS,
   type AgrupacionCurvasApi,
   type AgrupacionResultado,
   type AnioAgrupacion,
-  type AvisoCurva,
+  type AvisoVigenteApi,
   type ClaseAnioCurva,
   type CodigoAviso,
+  type CodigoPrerrequisito,
   type EfectoAtipicoCorrida,
   type EfectoTemporadaAnio,
-  type FormaAnio,
+  type EstadoAgrupacion,
   type ModeloCurva,
+  type MotivoTratamiento,
   type ObsoletaApi,
   type RedAnioApi,
+  type ResumenEstadoCurvas,
   type RedTiendaAnioApi,
   type TemporadaAgrupacion,
+  type TrabajoAgrupacionApi,
   type TratamientoAnio,
+  type TratamientoAtipicos,
   type VeredictoForma,
 } from "@/lib/curvas/tipos-api";
 import { resumirMeses } from "./meses";
 
 /**
- * Presentación pura de la pantalla de curvas (M6, paso 2): formatos, textos,
- * filtros, comparaciones y adaptadores de datos. Sin React ni acceso a la API:
- * las prueba vitest con datos sintéticos.
+ * Presentación pura de la pantalla de curvas (M6): formatos, textos, filtros,
+ * comparaciones y adaptadores de datos. Sin React ni acceso a la API: las prueba
+ * vitest con datos sintéticos.
  */
 
-// ─── Formatos (es-PE, como el resto de la aplicación) ───
+// ─── Formatos (los compartidos de `src/lib/formato.ts`: el servidor y la pantalla escriben igual) ───
 
-function numero(n: number, minimo: number, maximo: number): string {
-  return n.toLocaleString("es-PE", { minimumFractionDigits: minimo, maximumFractionDigits: maximo });
-}
+const numero = (n: number, decimales: number): string => formatearDecimal(n, decimales);
 
 /** Fracción → porcentaje: `0.123` → `12.3 %`; `—` si no hay valor. */
 export function formatearPct(fraccion: number | null | undefined, decimales = 1): string {
   if (fraccion === null || fraccion === undefined || !Number.isFinite(fraccion)) return "—";
-  return `${numero(fraccion * 100, decimales, decimales)} %`;
+  return `${numero(fraccion * 100, decimales)} %`;
 }
 
 /** Solo el número del porcentaje (sin el signo `%`), para celdas de tabla. */
 export function formatearPctSolo(fraccion: number | null | undefined, decimales = 1): string {
   if (fraccion === null || fraccion === undefined || !Number.isFinite(fraccion)) return "—";
-  return numero(fraccion * 100, decimales, decimales);
+  return numero(fraccion * 100, decimales);
 }
 
 /** Puntos porcentuales: `29.1 pp`. */
 export function formatearPp(pp: number | null | undefined, decimales = 1): string {
   if (pp === null || pp === undefined || !Number.isFinite(pp)) return "—";
-  return `${numero(pp, decimales, decimales)} pp`;
+  return formatearPpCompartido(pp, decimales);
 }
 
 /** Diferencia en puntos con signo: `+1.8`, `-0.4`, `0.0`. */
 export function formatearDiferenciaPp(pp: number | null | undefined, decimales = 1): string {
   if (pp === null || pp === undefined || !Number.isFinite(pp)) return "—";
   const redondeado = Math.round(pp * 10 ** decimales) / 10 ** decimales;
-  const texto = numero(Math.abs(redondeado), decimales, decimales);
+  const texto = numero(Math.abs(redondeado), decimales);
   if (redondeado === 0) return texto;
   return `${redondeado > 0 ? "+" : "-"}${texto}`;
 }
@@ -64,7 +69,7 @@ export function formatearDiferenciaPp(pp: number | null | undefined, decimales =
 /** Ratio: `0.66` (dos decimales por defecto), `—` sin valor. */
 export function formatearRatio(r: number | null | undefined, decimales = 2): string {
   if (r === null || r === undefined || !Number.isFinite(r)) return "—";
-  return numero(r, decimales, decimales);
+  return numero(r, decimales);
 }
 
 /** `×0.66` para celdas compactas. */
@@ -148,6 +153,7 @@ export const ETIQUETA_AVISO: Record<CodigoAviso, string> = {
   ano_atipico_completo: "Año atípico completo",
   temporada_sugerida_distinta: "Temporada distinta de la sugerida",
   temporadas_mezcladas: "Temporadas mezcladas",
+  anio_excluido: "Año excluido a mano",
   liquidacion_fuerte: "Liquidación fuerte",
   sin_venta: "Sin venta",
   inactiva_con_curva: "Inactiva con curva",
@@ -165,6 +171,16 @@ export function etiquetaModelo(codigo: ModeloCurva): string {
 /** `B · Ponderado por volumen`. */
 export function modeloConNombre(codigo: ModeloCurva): string {
   return `${codigo} · ${etiquetaModelo(codigo)}`;
+}
+
+/** Etiqueta de la serie y de la fila de la propuesta: `Propuesta A · Promedio simple`. */
+export function etiquetaPropuesta(modelo: ModeloCurva): string {
+  return `Propuesta ${modeloConNombre(modelo)}`;
+}
+
+/** Etiqueta de la serie y de la fila de la aprobada: `Aprobada v2 (A)`. */
+export function etiquetaAprobada(version: number, modelo: ModeloCurva): string {
+  return `Aprobada v${version} (${modelo})`;
 }
 
 export const ETIQUETA_MOTIVO_RECOMENDACION = {
@@ -239,27 +255,55 @@ export function textoObsoleta(o: ObsoletaApi | null): string | null {
   return `Obsoleta: ${o.motivos.map((m) => m.detalle).join("; ")}`;
 }
 
-// ─── Filtros de la tabla de Curvas ───
+// ─── Lista de agrupaciones: estados, filtros y resumen ───
+
+export const ETIQUETA_ESTADO: Record<EstadoAgrupacion, string> = {
+  sin_curva: "Sin curva",
+  al_dia: "Al día",
+  al_dia_distinta: "Al día · distinta de la recomendada",
+  obsoleta: "Obsoleta",
+  inactiva_con_curva: "Inactiva con curva",
+};
+
+/** Texto corto de un prerrequisito que bloquea y se evalúa sin calcular (`bloqueada_por` de la lista). */
+export function textoBloqueo(codigo: CodigoPrerrequisito, temporada: TemporadaAgrupacion): string {
+  switch (codigo) {
+    case "periodos_temporada_faltantes":
+      return `Bloqueada: sin periodos para ${ETIQUETA_TEMPORADA[temporada].toLowerCase()}`;
+    case "composicion_vacia":
+      return "Bloqueada: sin equivalencias";
+    case "tienda_sin_apertura":
+      return "Bloqueada: hay una tienda con venta sin fecha de apertura";
+    case "sin_meses_publicados":
+      return "Bloqueada: no hay meses publicados";
+    default:
+      return "Bloqueada";
+  }
+}
+
+export const ETIQUETA_AVISO_VIGENTE: Record<AvisoVigenteApi["codigo"], string> = {
+  datos_posteriores: "Datos posteriores",
+  modelo_anterior: "Modelo anterior",
+  temporada_recompuesta: "Temporada recompuesta",
+};
 
 export type FiltroTemporada = "todas" | TemporadaAgrupacion;
-export type FiltroEstado = "todas" | "sin_curva" | "obsoletas" | "distinta" | "con_avisos" | "prestadas" | "forma_cambia";
+export type FiltroEstado = "todas" | "sin_curva" | "obsoletas" | "distintas" | "al_dia" | "bloqueadas";
 
 export function cumpleEstado(a: AgrupacionCurvasApi, f: FiltroEstado): boolean {
   switch (f) {
     case "todas":
       return true;
     case "sin_curva":
-      return a.activo && a.vigente === null;
+      return a.estado === "sin_curva";
     case "obsoletas":
-      return a.obsoleta !== null;
-    case "distinta":
-      return a.propuesta?.difiere_de_vigente === true;
-    case "con_avisos":
-      return (a.propuesta?.avisos.length ?? 0) > 0;
-    case "prestadas":
-      return a.vigente?.origen === "prestada" || a.propuesta?.origen === "prestada";
-    case "forma_cambia":
-      return a.propuesta?.veredicto_forma === "forma_cambia";
+      return a.estado === "obsoleta";
+    case "distintas":
+      return a.estado === "al_dia_distinta";
+    case "al_dia":
+      return a.estado === "al_dia";
+    case "bloqueadas":
+      return a.bloqueada_por.length > 0;
   }
 }
 
@@ -267,10 +311,9 @@ export const FILTROS_ESTADO: { id: FiltroEstado; label: string }[] = [
   { id: "todas", label: "Todas" },
   { id: "sin_curva", label: "Sin curva" },
   { id: "obsoletas", label: "Obsoletas" },
-  { id: "distinta", label: "Propuesta distinta" },
-  { id: "con_avisos", label: "Con avisos" },
-  { id: "prestadas", label: "Prestadas" },
-  { id: "forma_cambia", label: "Forma cambia" },
+  { id: "distintas", label: "Distintas" },
+  { id: "al_dia", label: "Al día" },
+  { id: "bloqueadas", label: "Bloqueadas" },
 ];
 
 /** Conteo de cada chip de estado sobre las agrupaciones activas. */
@@ -304,57 +347,90 @@ export function generosDe(agrupaciones: readonly AgrupacionCurvasApi[]): string[
   return [...new Set(agrupaciones.flatMap((a) => a.generos))].sort((a, b) => a.localeCompare(b, "es"));
 }
 
-// ─── Resumen de la cabecera ───
-
-/** «15 agrupaciones activas · 12 con curva vigente · 3 sin curva con venta · 2 obsoletas · 10 siguen en Toda temporada». */
-export function textoResumen(r: {
-  agrupaciones_activas: number;
-  con_curva_vigente: number;
-  sin_curva_con_venta: number;
-  obsoletas: number;
-  sin_revisar_toda_temporada: number;
-}): string {
-  const pl = (n: number, s: string, p: string) => `${n.toLocaleString("es-PE")} ${n === 1 ? s : p}`;
-  return [
-    pl(r.agrupaciones_activas, "agrupación activa", "agrupaciones activas"),
-    `${pl(r.con_curva_vigente, "con curva vigente", "con curva vigente")}`,
-    `${pl(r.sin_curva_con_venta, "sin curva con venta", "sin curva con venta")}`,
-    pl(r.obsoletas, "obsoleta", "obsoletas"),
-    `${r.sin_revisar_toda_temporada.toLocaleString("es-PE")} ${r.sin_revisar_toda_temporada === 1 ? "sigue" : "siguen"} en Toda temporada`,
-  ].join(" · ");
+/**
+ * Resumen de la cabecera de la lista: «15 agrupaciones activas · 3 con curva al día · 1 aprobada distinta de la
+ * recomendada · 2 obsoletas · 9 sin curva (5 bloqueadas, 4 calculables) · 10 siguen en Toda temporada (revísalas)».
+ */
+export function textoResumen(r: ResumenEstadoCurvas): string {
+  const n = (v: number) => formatearNumero(v);
+  const partes = [
+    `${n(r.agrupaciones_activas)} ${r.agrupaciones_activas === 1 ? "agrupación activa" : "agrupaciones activas"}`,
+    `${n(r.al_dia)} con curva al día`,
+    `${n(r.al_dia_distintas)} ${r.al_dia_distintas === 1 ? "aprobada distinta de la recomendada" : "aprobadas distintas de la recomendada"}`,
+    `${n(r.obsoletas)} ${r.obsoletas === 1 ? "obsoleta" : "obsoletas"}`,
+  ];
+  partes.push(
+    r.sin_curva === 0
+      ? "0 sin curva"
+      : `${n(r.sin_curva)} sin curva (${n(r.bloqueadas_sin_curva)} ${r.bloqueadas_sin_curva === 1 ? "bloqueada" : "bloqueadas"}, ${n(r.calculables_sin_curva)} ${r.calculables_sin_curva === 1 ? "calculable" : "calculables"})`
+  );
+  if (r.inactivas_con_curva > 0) partes.push(`${n(r.inactivas_con_curva)} ${r.inactivas_con_curva === 1 ? "inactiva con curva" : "inactivas con curva"}`);
+  partes.push(`${n(r.sin_revisar_toda_temporada)} ${r.sin_revisar_toda_temporada === 1 ? "sigue" : "siguen"} en Toda temporada${r.sin_revisar_toda_temporada > 0 ? " (revísalas)" : ""}`);
+  return partes.join(" · ");
 }
 
-/** Vista previa de la corrida: «45 meses, 2023-01 a 2026-09; 2023, 2024 y 2025 completos; 2026 parcial (9); 4 periodos activos; …». */
-export function vistaPreviaDatos(
-  datos: { desde: string | null; hasta: string | null; meses_publicados: number; faltantes: string[] },
-  periodosActivos: number,
-  porTemporada: Record<TemporadaAgrupacion, number>
-): string {
-  if (!datos.desde || !datos.hasta) return "Todavía no hay meses publicados en M5.";
-  const desdeAnio = Number(datos.desde.slice(0, 4));
-  const hastaAnio = Number(datos.hasta.slice(0, 4));
-  const faltan = new Set(datos.faltantes);
-  const completos: number[] = [];
-  const parciales: { anio: number; meses: number }[] = [];
-  for (let anio = desdeAnio; anio <= hastaAnio; anio++) {
-    let cargados = 0;
-    for (let m = 1; m <= 12; m++) {
-      const periodo = `${anio}-${String(m).padStart(2, "0")}`;
-      if (periodo < datos.desde || periodo > datos.hasta) continue;
-      if (!faltan.has(periodo)) cargados++;
-    }
-    if (cargados === 12) completos.push(anio);
-    else if (cargados > 0) parciales.push({ anio, meses: cargados });
+/** Qué muestra la columna «Sistema hoy» de una fila antes de pulsar Comparar. */
+export type SistemaHoy =
+  | { tipo: "igual"; texto: string }
+  | { tipo: "distinta"; texto: string }
+  | { tipo: "comparar" }
+  | { tipo: "ninguno" };
+
+/**
+ * Sin calcular: con la curva al día el sistema (determinista) propondría lo mismo que
+ * al aprobar → «= (A)»; si se aprobó otra candidata, «A (vs B)» (de la foto);
+ * obsoleta o sin curva → se puede comparar a demanda; inactiva → nada.
+ */
+export function sistemaHoy(a: Pick<AgrupacionCurvasApi, "estado" | "vigente" | "bloqueada_por">): SistemaHoy {
+  const v = a.vigente;
+  switch (a.estado) {
+    case "al_dia":
+      return v ? { tipo: "igual", texto: `= (${v.modelo})` } : { tipo: "ninguno" };
+    case "al_dia_distinta":
+      return v ? { tipo: "distinta", texto: `${v.recomendada_entonces ?? "?"} (vs ${v.modelo})` } : { tipo: "ninguno" };
+    case "obsoleta":
+    case "sin_curva":
+      return a.bloqueada_por.length > 0 && a.estado === "sin_curva" ? { tipo: "ninguno" } : { tipo: "comparar" };
+    default:
+      return { tipo: "ninguno" };
   }
-  const lista = (xs: number[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`);
-  const partes = [`${datos.meses_publicados} meses, ${datos.desde} a ${datos.hasta}`];
-  if (completos.length > 0) partes.push(`${lista(completos)} ${completos.length === 1 ? "completo" : "completos"}`);
-  for (const p of parciales) partes.push(`${p.anio} parcial (${p.meses})`);
-  partes.push(`${periodosActivos} ${periodosActivos === 1 ? "periodo activo" : "periodos activos"}`);
-  partes.push(
-    `${porTemporada.invierno} de invierno, ${porTemporada.verano} de verano, ${porTemporada.todo_el_ano} de toda temporada`
-  );
-  return partes.join("; ");
+}
+
+/** Lo que deja «Comparar con el sistema» de una fila (vive en memoria de la pantalla; no se guarda nada). */
+export type ResultadoComparar =
+  | { tipo: "bloqueada"; detalle: string }
+  | { tipo: "sin_candidata" }
+  | { tipo: "sin_vigente"; modelo: ModeloCurva; eat: number | null; curva: number[] | null }
+  | { tipo: "comparada"; modelo: ModeloCurva; eat: number | null; curva: number[] | null; eat_vs_vigente: number; difiere: boolean; comparable: boolean | null };
+
+/** Resume una respuesta de `calcular` para la columna «Sistema hoy». */
+export function resumirComparacion(t: Pick<TrabajoAgrupacionApi, "prerrequisitos" | "calculo" | "comparador">): ResultadoComparar {
+  if (t.prerrequisitos.bloquea.length > 0 || !t.calculo) return { tipo: "bloqueada", detalle: t.prerrequisitos.bloquea[0]?.detalle ?? "No se puede calcular todavía." };
+  const r = t.calculo.resultado;
+  const modelo = r.recomendada;
+  if (modelo === null) return { tipo: "sin_candidata" };
+  const candidata = r.candidatas.find((c) => c.modelo === modelo);
+  const eat = candidata?.eat ?? null;
+  const curva = modelo === "T" ? (t.calculo.temporada_curva?.curva_T ?? null) : (candidata?.curva ?? null);
+  const c = t.comparador;
+  if (!c) return { tipo: "sin_vigente", modelo, eat, curva };
+  return { tipo: "comparada", modelo, eat, curva, eat_vs_vigente: c.eat_vs_vigente, difiere: c.difiere, comparable: c.comparable_con_vigente };
+}
+
+/** «A · difiere 4.1 pp de la vigente», «A · igual a la vigente», «A · sin vigente». */
+export function textoComparacionFila(r: ResultadoComparar): string {
+  switch (r.tipo) {
+    case "bloqueada":
+      return `No se puede calcular: ${r.detalle}`;
+    case "sin_candidata":
+      return "Sin curva posible (sin años utilizables)";
+    case "sin_vigente":
+      return `${r.modelo} · sin vigente con la que comparar`;
+    case "comparada":
+      return r.difiere
+        ? `${r.modelo} · difiere ${formatearPp(r.eat_vs_vigente)} de la vigente${r.comparable === false ? " (EAT no comparable: otros años)" : ""}`
+        : `${r.modelo} · igual a la vigente`;
+  }
 }
 
 // ─── Comparador vigente / propuesta ───
@@ -388,6 +464,88 @@ export function fraseComparacion(c: Comparacion): string {
   return `EAT entre ambas: ${formatearPp(c.eat)}; el mes que más cambia: ${nombreMes(c.mesMayorCambio)} (${formatearDiferenciaPp(c.diferenciaMayor)})`;
 }
 
+// ─── Lo que propone el sistema ───
+
+export const ETIQUETA_MOTIVO_TRATAMIENTO: Record<MotivoTratamiento, string> = {
+  excluido_manual: "excluido a mano",
+  parametro: "por el parámetro de tratamiento",
+  forma_cambia: "su forma cambia más que el ruido",
+  sin_referencia: "sin referencia con qué compararlo",
+};
+
+function listaAnios(xs: readonly number[]): string {
+  return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`;
+}
+
+/**
+ * La frase de recomendación: qué propone, con qué años (y qué pasa con los del Niño y con los que
+ * quedaron fuera) y por qué, con el texto comparativo que genera el servidor (EAT, pruebas, margen).
+ * Ejemplo: «Propone A · Promedio simple de 2023, 2024 y 2025 (2023, año del Niño, entra incluido).
+ * B se equivoca 27.4 pp frente a 29.1 de A en 3 pruebas; …».
+ */
+export function textoPropone(r: Pick<AgrupacionResultado, "recomendada" | "anios" | "comparacion" | "origen">): string {
+  if (r.recomendada === null) return "El sistema no puede proponer una curva: la agrupación no tiene años utilizables y su temporada tampoco. Revisa los avisos y los meses cargados.";
+  if (r.recomendada === "T")
+    return "Propone T · Curva de la temporada (prestada): la agrupación no tiene años suficientes para una curva propia y usa la de las demás agrupaciones de su temporada.";
+  const usados = r.anios.filter((a) => a.en_ajuste).sort((a, b) => a.anio - b.anio);
+  const nino = usados.filter((a) => a.clase !== "normal" && a.tratamiento !== null);
+  const notaNino =
+    nino.length === 0
+      ? ""
+      : ` (${nino
+          .map((a) => `${a.anio}, ${a.clase === "atipico_completo" ? "año del Niño" : "con meses atípicos"}, entra ${ETIQUETA_TRATAMIENTO[a.tratamiento as TratamientoAnio]}`)
+          .join("; ")})`;
+  const fuera = r.anios.filter((a) => a.tratamiento === "descartado").sort((a, b) => a.anio - b.anio);
+  const notaFuera = fuera.length === 0 ? "" : ` Fuera del ajuste: ${fuera.map((a) => `${a.anio} (${a.tratamiento_motivo ? ETIQUETA_MOTIVO_TRATAMIENTO[a.tratamiento_motivo] : "descartado"})`).join("; ")}.`;
+  const base = `Propone ${modeloConNombre(r.recomendada)} de ${usados.length === 0 ? "ningún año" : listaAnios(usados.map((a) => a.anio))}${notaNino}.${notaFuera}`;
+  return r.comparacion ? `${base} ${r.comparacion.frase}` : base;
+}
+
+/**
+ * «EAT 29.1 · ruido 33.0»: el EAT de una curva aprobada SIEMPRE con el ruido entre años normales al lado
+ * (lista y Versiones). `ruido` `null` = no medible; `undefined` = la respuesta no lo trae (versiones anteriores).
+ * `null` si no hay EAT (curva prestada o un solo año de ajuste).
+ */
+export function textoEatConRuido(eat: number | null, ruido: number | null | undefined): string | null {
+  if (eat === null) return null;
+  const r = ruido === undefined ? "ruido sin dato" : ruido === null ? "ruido no medible" : `ruido ${formatearDecimal(ruido, 1)}`;
+  return `EAT ${formatearDecimal(eat, 1)} · ${r}`;
+}
+
+/** Ruido entre años normales siempre junto al EAT: «ruido 33.0 pp (2024 frente a 2025)» o «ruido no medible». */
+export function textoRuido(r: Pick<AgrupacionResultado, "ruido_normal" | "ruido_normal_detalle">): string {
+  if (r.ruido_normal === null) return "Ruido entre años normales: no medible (hacen falta dos años normales completos).";
+  const pares = r.ruido_normal_detalle.map((p) => `${p.anios[0]} frente a ${p.anios[1]}: ${formatearPp(p.eat)}`).join("; ");
+  return `Ruido entre años normales: ${formatearPp(r.ruido_normal)}${pares ? ` (${pares})` : ""}. Se muestra aunque no haya Niño.`;
+}
+
+/**
+ * «EAT no comparable con el cálculo anterior (la vigente usó 2024 y 2025; hoy 2023, 2024 y 2025)», o `null`
+ * si es comparable o no hay con qué comparar.
+ */
+export function textoNoComparable(comparable: boolean | null | undefined, aniosVigente: readonly number[] | null, aniosHoy: readonly number[]): string | null {
+  if (comparable !== false) return null;
+  const antes = aniosVigente && aniosVigente.length > 0 ? listaAnios([...aniosVigente].sort((a, b) => a - b)) : "otros años";
+  const hoy = aniosHoy.length > 0 ? listaAnios([...aniosHoy].sort((a, b) => a - b)) : "ningún año";
+  return `EAT no comparable con el cálculo anterior (la vigente usó ${antes}; hoy ${hoy}).`;
+}
+
+/** Años que entran al ajuste en el cálculo de hoy. */
+export function aniosDeAjuste(anios: readonly Pick<AnioAgrupacion, "anio" | "en_ajuste">[]): number[] {
+  return anios.filter((a) => a.en_ajuste).map((a) => a.anio).sort((a, b) => a - b);
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** ¿Es un id de agrupación válido (UUID)? (el de `?agrupacion=` de la URL). */
+export function esIdAgrupacion(v: string | null | undefined): v is string {
+  return typeof v === "string" && UUID.test(v);
+}
+
+/** ¿Es el código de una candidata (A a E o T)? (el de `?modelo=` de la URL). */
+export function esModeloCurva(v: string | null | undefined): v is ModeloCurva {
+  return MODELOS.some((m) => m.codigo === v);
+}
+
 // ─── Aprobar una curva ───
 
 /** Años que entraron al ajuste, con su clase y tratamiento: `2023 (atípico completo, incluido) · 2024 · 2025`. */
@@ -404,6 +562,7 @@ export function textoAniosFuera(anios: readonly AnioAgrupacion[]): string {
 
 export type EntradaConfirmar = {
   agrupacion: string;
+  temporada: TemporadaAgrupacion;
   modelo: ModeloCurva;
   recomendada: ModeloCurva | null;
   anios: readonly AnioAgrupacion[];
@@ -412,28 +571,56 @@ export type EntradaConfirmar = {
   /** Versión de la curva vigente (se reemplaza); `null` si no hay. */
   versionVigente: number | null;
   comparacion: Comparacion | null;
-  avisos: readonly AvisoCurva[];
+  /** El conjunto de años de ajuste coincide con el de la vigente (`null` sin vigente o de la 0.9.6). */
+  comparableConVigente: boolean | null;
+  /** Años de ajuste de la vigente (para decir con cuáles ajustó). */
+  aniosAjusteVigente: readonly number[] | null;
+  /** Años y tiendas que el planner sacó a mano (las tiendas, por código). */
+  aniosExcluidos: readonly number[];
+  tiendasExcluidas: readonly string[];
+  tratamiento: TratamientoAtipicos;
+  /** `aaaa-mm` hasta el que se calculó. */
+  hasta: string;
+  avisos: readonly { detalle: string }[];
   nota: string;
 };
 
-/** Texto del `confirm` de «Aprobar esta curva»: modelo, años con su clase, EAT frente al ruido, diferencia con la vigente y avisos. */
+function listaTexto(xs: readonly (string | number)[]): string {
+  return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`;
+}
+
+/**
+ * Texto del `confirm` de «Aprobar esta curva»: agrupación, temporada, candidata, años con su clase y
+ * tratamiento, lo excluido a mano, EAT frente al ruido (y «no comparable» si cambió el conjunto de años),
+ * diferencia con la vigente, el mes hasta el que se calculó y los avisos.
+ */
 export function textoConfirmarAprobacion(e: EntradaConfirmar): string {
   const lineas: string[] = [];
   const prestada = e.modelo === "T";
   lineas.push(`¿Aprobar la curva ${modeloConNombre(e.modelo)} de ${e.agrupacion}?`);
+  lineas.push(`Temporada: ${ETIQUETA_TEMPORADA[e.temporada]}.`);
   if (e.recomendada !== null && e.recomendada !== e.modelo) lineas.push(`No es la recomendada (${e.recomendada}).`);
   if (prestada) lineas.push("Curva prestada de la temporada: la agrupación no tiene años suficientes para una curva propia.");
   const usados = textoAniosUsados(e.anios);
   lineas.push(`Años usados: ${usados === "" ? "ninguno" : usados}.`);
   const fuera = textoAniosFuera(e.anios);
   if (fuera !== "") lineas.push(`Fuera del ajuste: ${fuera}.`);
+  if (e.aniosExcluidos.length > 0) lineas.push(`Años excluidos a mano: ${listaTexto(e.aniosExcluidos)}.`);
+  if (e.tiendasExcluidas.length > 0) lineas.push(`Tiendas excluidas a mano: ${listaTexto(e.tiendasExcluidas)}.`);
+  if (e.tratamiento !== "auto") lineas.push(`Tratamiento del Niño: ${e.tratamiento} (no es el automático).`);
   if (!prestada) {
     lineas.push(
       e.eat === null
         ? "EAT: sin backtesting (un solo año de ajuste)."
         : `EAT: ${formatearPp(e.eat)}; ruido entre años normales: ${e.ruidoNormal === null ? "no medible" : formatearPp(e.ruidoNormal)}.`
     );
+    if (e.comparableConVigente === false && e.versionVigente !== null) {
+      const antes = e.aniosAjusteVigente && e.aniosAjusteVigente.length > 0 ? listaTexto(e.aniosAjusteVigente) : "otros años";
+      const hoy = e.anios.filter((a) => a.en_ajuste).map((a) => a.anio).sort((x, y) => x - y);
+      lineas.push(`EAT no comparable con el de la v${e.versionVigente}: aquella ajustó con ${antes}; esta, con ${hoy.length > 0 ? listaTexto(hoy) : "ningún año"}.`);
+    }
   }
+  lineas.push(`Datos hasta ${e.hasta}.`);
   if (e.versionVigente === null) lineas.push("No hay curva vigente: esta será la versión 1.");
   else if (e.comparacion)
     lineas.push(
@@ -502,97 +689,6 @@ export function filasVolumen(efecto: EfectoAtipicoCorrida, filtro: FiltroTempora
   return efecto.por_temporada
     .filter((f) => filtro === "todas" || f.temporada === filtro)
     .sort((a, b) => orden(a.temporada) - orden(b.temporada) || a.anio - b.anio);
-}
-
-export type FilaForma = {
-  clave: string;
-  agrupacionId: string;
-  agrupacion: string;
-  temporada: TemporadaAgrupacion;
-  anio: number;
-  clase: ClaseAnioCurva | null;
-  parcial: boolean;
-  veredicto: VeredictoForma | null;
-  diferencia: number | null;
-  ruido: number | null;
-  umbralEfectivo: number | null;
-  pico: number | null;
-  corrimiento: number | null;
-  tratamiento: TratamientoAnio | null;
-  /** Solo año en curso: las dos formas parciales. */
-  parcialRed: number | null;
-  parcialComunes: number | null;
-  parcialTiendas: number | null;
-};
-
-/** Una fila por agrupación y año con medición de forma (la tabla filtrable del bloque Forma). */
-export function filasForma(
-  agrupaciones: {
-    id: string;
-    nombre: string;
-    temporada: TemporadaAgrupacion;
-    efecto_atipico: { forma: { ruido_normal: number | null; umbral_efectivo: number; por_anio: FormaAnio[] } | null };
-  }[],
-  anios: { anio: number; clase_por_temporada: Record<TemporadaAgrupacion, ClaseAnioCurva> }[]
-): FilaForma[] {
-  const filas: FilaForma[] = [];
-  for (const a of agrupaciones) {
-    const forma = a.efecto_atipico.forma;
-    if (!forma) continue;
-    for (const f of forma.por_anio) {
-      const clase = anios.find((x) => x.anio === f.anio)?.clase_por_temporada[a.temporada] ?? (f.parcial ? "en_curso" : null);
-      if (f.parcial) {
-        filas.push({
-          clave: `${a.id}-${f.anio}`,
-          agrupacionId: a.id,
-          agrupacion: a.nombre,
-          temporada: a.temporada,
-          anio: f.anio,
-          clase,
-          parcial: true,
-          veredicto: null,
-          diferencia: null,
-          ruido: forma.ruido_normal,
-          umbralEfectivo: forma.umbral_efectivo,
-          pico: f.red_completa?.pico ?? f.tiendas_comunes?.pico ?? null,
-          corrimiento: null,
-          tratamiento: null,
-          parcialRed: f.red_completa?.diferencia_anio ?? null,
-          parcialComunes: f.tiendas_comunes?.diferencia_anio ?? null,
-          parcialTiendas: f.tiendas_comunes?.tiendas ?? null,
-        });
-      } else {
-        filas.push({
-          clave: `${a.id}-${f.anio}`,
-          agrupacionId: a.id,
-          agrupacion: a.nombre,
-          temporada: a.temporada,
-          anio: f.anio,
-          clase,
-          parcial: false,
-          veredicto: f.veredicto,
-          diferencia: f.diferencia_anio,
-          ruido: forma.ruido_normal,
-          umbralEfectivo: forma.umbral_efectivo,
-          pico: f.pico,
-          corrimiento: f.corrimiento_pico,
-          tratamiento: f.tratamiento_aplicado,
-          parcialRed: null,
-          parcialComunes: null,
-          parcialTiendas: null,
-        });
-      }
-    }
-  }
-  return filas.sort((x, y) => x.agrupacion.localeCompare(y.agrupacion, "es") || x.anio - y.anio);
-}
-
-export type FiltroVeredicto = "todos" | VeredictoForma | "parcial";
-
-export function filtrarFilasForma(filas: readonly FilaForma[], temporada: FiltroTemporada, veredicto: FiltroVeredicto): FilaForma[] {
-  return filas
-    .filter((f) => temporada === "todas" || f.temporada === temporada)
-    .filter((f) => veredicto === "todos" || (veredicto === "parcial" ? f.parcial : f.veredicto === veredicto));
 }
 
 // ─── Red comparable ───
@@ -827,7 +923,8 @@ export function textoMesesImputados(imputados: readonly number[]): string {
 export function celdaAnioMes(a: AnioAgrupacion, mes: number): { participacion: number | null; unidades: number | null; imputado: boolean; atipico: boolean; liquidacion: boolean } {
   const periodo = `${a.anio}-${String(mes + 1).padStart(2, "0")}`;
   const cargado = (a.clase === "en_curso" || a.clase === "incompleto") ? mes < a.meses_cargados : true;
-  const base = a.clase === "en_curso" ? a.participacion_parcial : a.participacion;
+  // Un año descartado (por tratamiento o excluido a mano) no tiene `participacion` pero sí su curva real: la tabla la muestra (regla 47).
+  const base = a.clase === "en_curso" ? a.participacion_parcial : (a.participacion ?? a.participacion_real);
   return {
     participacion: cargado && base ? base[mes] : null,
     unidades: cargado ? (a.meses[mes] ?? null) : null,
@@ -837,21 +934,70 @@ export function celdaAnioMes(a: AnioAgrupacion, mes: number): { participacion: n
   };
 }
 
-/** CSV de la tabla año × mes: participación (%) y unidades de cada año, propuesta y vigente (%). */
+/**
+ * Por qué un año no se puede dibujar (`null` si tiene curva): sin red comparable, meses sin cargar (año pasado
+ * incompleto: no hay año entero que repartir), sin volumen. La tabla lo lista con «—» y este motivo (regla 47).
+ */
+export function motivoAnioSinDatos(a: AnioAgrupacion, ctx: { sinRed: boolean; faltantes: readonly string[] }): string | null {
+  if (a.participacion ?? a.participacion_real ?? a.participacion_parcial) return null;
+  if (ctx.sinRed) return "sin red comparable";
+  if (a.clase === "incompleto") {
+    const f = ctx.faltantes.filter((m) => m.startsWith(`${a.anio}-`));
+    return f.length > 0 ? `meses sin cargar: ${f.join(", ")}` : "meses sin cargar";
+  }
+  if (a.unidades <= 0) return "sin volumen en la red";
+  return "sin datos para dibujar";
+}
+
+export type ResumenMensual = {
+  /** Promedio de unidades del mes entre los años que entraron al ajuste; `null` sin años. */
+  promedio: (number | null)[];
+  /** `promedio ÷ promedio de los promedios`: 1.00 es un mes promedio. */
+  indice: (number | null)[];
+  /** Cuántos años aportan al mes. */
+  considerados: number[];
+};
+
+/**
+ * Las tres filas del visor de estacionalidad de Vector-One, por mes: promedio de unidades, índice (1.00 =
+ * mes promedio) y años considerados. Solo cuentan los años del ajuste (con sus meses cargados); cada año
+ * se mide sobre la red de ese año, así que son unidades de redes comparables, no del total de la agrupación.
+ */
+export function resumenMensual(anios: readonly AnioAgrupacion[]): ResumenMensual {
+  const ajuste = anios.filter((a) => a.en_ajuste);
+  const promedio: (number | null)[] = [];
+  const considerados: number[] = [];
+  for (let m = 0; m < 12; m++) {
+    const valores = ajuste.filter((a) => m < a.meses_cargados).map((a) => a.meses[m] ?? 0);
+    considerados.push(valores.length);
+    promedio.push(valores.length === 0 ? null : valores.reduce((s, v) => s + v, 0) / valores.length);
+  }
+  const con = promedio.filter((p): p is number => p !== null);
+  const media = con.length === 0 ? 0 : con.reduce((s, v) => s + v, 0) / con.length;
+  const indice = promedio.map((p) => (p === null || media <= 0 ? null : p / media));
+  return { promedio, indice, considerados };
+}
+
+/** CSV de la tabla año × mes: participación (%) y unidades de cada año, propuesta y aprobada (%), diferencia, y las tres filas del visor (promedio de unidades, índice y años considerados). */
 export function filasCsvAnioMes(
   anios: readonly AnioAgrupacion[],
   propuesta: readonly number[] | null,
   vigente: readonly number[] | null
 ): { campos: string[]; datos: (string | number)[][] } {
   const ordenados = [...anios].sort((a, b) => a.anio - b.anio);
+  const resumen = resumenMensual(ordenados);
   const campos = [
     "MES",
     ...ordenados.flatMap((a) => [`${a.anio} (%)`, `${a.anio} (unidades)`]),
     "PROPUESTA (%)",
-    "VIGENTE (%)",
+    "APROBADA (%)",
     "DIFERENCIA (pp)",
+    "PROMEDIO (unidades)",
+    "INDICE (1.00 = promedio)",
+    "ANIOS CONSIDERADOS",
   ];
   const r1 = (n: number) => Math.round(n * 10) / 10;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
   const datos = MESES_CORTOS.map((nombre, mes) => {
     const fila: (string | number)[] = [nombre];
     for (const a of ordenados) {
@@ -861,7 +1007,10 @@ export function filasCsvAnioMes(
     fila.push(
       propuesta ? r1(propuesta[mes] * 100) : "",
       vigente ? r1(vigente[mes] * 100) : "",
-      propuesta && vigente ? r1((propuesta[mes] - vigente[mes]) * 100) : ""
+      propuesta && vigente ? r1((propuesta[mes] - vigente[mes]) * 100) : "",
+      resumen.promedio[mes] === null ? "" : Math.round(resumen.promedio[mes] as number),
+      resumen.indice[mes] === null ? "" : r2(resumen.indice[mes] as number),
+      resumen.considerados[mes]
     );
     return fila;
   });

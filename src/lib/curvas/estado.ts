@@ -1,27 +1,25 @@
-import { eatEntreCurvas, difiereDeVigente } from "./obsolescencia";
-import { sumar } from "./anios";
+import type { PeriodoParaClase } from "./atipicos";
+import type { EvaluacionVigente } from "./obsolescencia";
+import { armarPrerrequisitosGlobales, bloqueadaPor, contarPeriodosAplicables } from "./prerrequisitos";
 import type {
   AgrupacionCurvasApi,
   AgrupacionResultado,
-  CorridaResumenApi,
-  EfectoAtipicoCorrida,
+  EstadoAgrupacion,
   EstadoCurvasApi,
-  FormaAnio,
   MotivoObsoletaApi,
   ObsoletaApi,
   PeriodoAtipicoApi,
-  PropuestaApi,
-  ResultadoCorrida,
   ResumenEstadoCurvas,
   TemporadaAgrupacion,
   TemporadaResultado,
   VigenteResumenApi,
 } from "./tipos-api";
+import type { TiendaMaestro, VentaTiendaMes } from "./tipos";
 
 /**
- * Armado puro de las respuestas de lectura de M6 (`GET /api/curvas` y el detalle
- * de una agrupación): propuesta de la corrida frente a la curva vigente,
- * obsolescencia y conteos del resumen. Sin base ni HTTP: reciben lo ya leído.
+ * Armado puro de la lista de curvas (`GET /api/curvas` v2, 06b): estado de cada
+ * agrupación sin corrida, avisos de la vigente, prerrequisitos y conteos del
+ * resumen. Sin base ni HTTP: reciben lo ya leído. La lista NUNCA calcula.
  */
 
 /** Curva de la candidata recomendada (la `T` de la temporada si es `T`); `null` si no hay. */
@@ -29,66 +27,6 @@ export function curvaDeRecomendada(a: AgrupacionResultado, temporada: Pick<Tempo
   if (a.recomendada === null) return null;
   if (a.recomendada === "T") return temporada?.curva_T ?? null;
   return a.candidatas.find((c) => c.modelo === a.recomendada)?.curva ?? null;
-}
-
-/** ¿La agrupación tuvo venta sobre la red comparable en la corrida? */
-export function conVenta(a: AgrupacionResultado | undefined): boolean {
-  return a ? sumar(a.anios.map((x) => x.unidades)) > 0 : false;
-}
-
-/** Propuesta de la corrida para una agrupación, comparada con su vigente (si la hay). */
-export function propuestaDe(
-  corridaId: string,
-  a: AgrupacionResultado,
-  temporada: Pick<TemporadaResultado, "curva_T"> | null,
-  vigente: Pick<VigenteResumenApi, "modelo" | "curva" | "eat"> | null
-): PropuestaApi {
-  const curva = curvaDeRecomendada(a, temporada);
-  const recomendada = a.recomendada;
-  const candidata = recomendada && recomendada !== "T" ? a.candidatas.find((c) => c.modelo === recomendada) : null;
-  const eat = candidata?.eat ?? null;
-  const veredicto = a.efecto_atipico.forma?.veredicto ?? null;
-  const forma = a.efecto_atipico.forma;
-  const comparable = curva !== null && recomendada !== null && vigente !== null;
-  return {
-    corrida_id: corridaId,
-    recomendada,
-    motivo_recomendacion: a.motivo_recomendacion,
-    origen: a.origen,
-    eat,
-    curva,
-    estabilidad: a.estabilidad,
-    nivel_estabilidad: a.nivel_estabilidad,
-    difiere_de_vigente: comparable ? difiereDeVigente({ modelo: recomendada, curva, eat }, vigente) : false,
-    eat_vs_vigente: comparable ? eatEntreCurvas(curva, vigente.curva) : null,
-    veredicto_forma: veredicto,
-    anios: a.anios.map((x) => ({
-      anio: x.anio,
-      clase: x.clase,
-      tratamiento: x.tratamiento,
-      escaso: x.escaso,
-      en_ajuste: x.en_ajuste,
-      meses_atipicos: x.meses_atipicos,
-    })),
-    nino: {
-      volumen: a.efecto_atipico.volumen.map((v) => ({ anio: v.anio, ratio_volumen: v.ratio_volumen })),
-      forma: forma
-        ? {
-            veredicto: forma.veredicto,
-            diferencia_anio: maxDiferencia(forma.por_anio),
-            ruido_normal: forma.ruido_normal,
-            umbral_efectivo: forma.umbral_efectivo,
-          }
-        : null,
-    },
-    avisos: a.avisos,
-  };
-}
-
-function maxDiferencia(porAnio: readonly FormaAnio[]): number | null {
-  const valores: number[] = [];
-  for (const x of porAnio) if (!x.parcial) valores.push(x.diferencia_anio);
-  return valores.length === 0 ? null : Math.max(...valores);
 }
 
 export function aObsoleta(motivos: readonly MotivoObsoletaApi[] | undefined): ObsoletaApi | null {
@@ -108,40 +46,63 @@ export type AgrupacionLeida = {
   equivalencias_activas: number;
 };
 
-export type CorridaVista = {
-  resumen: CorridaResumenApi;
-  resultado: ResultadoCorrida;
-  efecto_atipico: EfectoAtipicoCorrida;
-};
+/**
+ * Regla 40. Estado de una agrupación en la lista: `inactiva_con_curva` (gana a los
+ * demás), `sin_curva`, `obsoleta` (con motivos), `al_dia` (se aprobó la recomendada)
+ * o `al_dia_distinta` (se aprobó otra candidata).
+ */
+export function estadoDeAgrupacion(
+  vigente: Pick<VigenteResumenApi, "recomendada"> | null,
+  obsoleta: ObsoletaApi | null,
+  activo: boolean
+): EstadoAgrupacion {
+  if (!vigente) return "sin_curva";
+  if (!activo) return "inactiva_con_curva";
+  if (obsoleta && obsoleta.motivos.length > 0) return "obsoleta";
+  return vigente.recomendada ? "al_dia" : "al_dia_distinta";
+}
 
 export type EntradaEstado = {
   datos: EstadoCurvasApi["datos"];
-  corrida: CorridaVista | null;
-  corridas: EstadoCurvasApi["corridas"];
   agrupaciones: readonly AgrupacionLeida[];
   /** Curva vigente por agrupación. */
   vigentes: ReadonlyMap<string, VigenteResumenApi>;
-  obsoletas: ReadonlyMap<string, readonly MotivoObsoletaApi[]>;
+  /** Motivos y avisos de cada vigente (`evaluarObsolescencia`). */
+  evaluaciones: ReadonlyMap<string, EvaluacionVigente>;
+  /** Versiones guardadas por agrupación. */
+  versiones: ReadonlyMap<string, number>;
   periodos: PeriodoAtipicoApi[];
+  /** Lo que necesitan los prerrequisitos que se saben sin calcular. */
+  prerrequisitos: {
+    meses_publicados: readonly string[];
+    /** Último mes publicado y cerrado; `null` si ninguno. */
+    hasta_periodo: string | null;
+    tiendas: readonly TiendaMaestro[];
+    venta_tienda: readonly VentaTiendaMes[];
+  };
+  equivalencias_sin_agrupacion: number;
 };
 
 /**
- * `GET /api/curvas`: activas por orden y nombre y, al final, las inactivas que
- * aún tienen curva vigente. El resumen sale de la corrida que se está viendo
- * (incluidas las unidades sin agrupación, rotuladas "agregado refrescado el …").
+ * `GET /api/curvas` v2: activas por orden y nombre y, al final, las inactivas que
+ * aún tienen curva vigente.
  */
 export function armarEstadoCurvas(e: EntradaEstado): EstadoCurvasApi {
   const visibles = e.agrupaciones.filter((a) => a.activo || e.vigentes.has(a.id));
   const ordenadas = [...visibles].sort(
     (a, b) => Number(b.activo) - Number(a.activo) || a.orden - b.orden || a.nombre.localeCompare(b.nombre, "es") || a.id.localeCompare(b.id)
   );
+  const periodosActivos: PeriodoParaClase[] = e.periodos.filter((p) => p.activo);
+  const p = e.prerrequisitos;
 
-  const resultadoDe = (id: string) => e.corrida?.resultado.agrupaciones.find((x) => x.agrupacion_id === id);
+  // Las agrupaciones cuya última aprobación confirmó "sin años atípicos" no se cuentan como faltantes de periodos.
+  const confirmadas = new Set<string>();
+  for (const [id, v] of e.vigentes) if (v.parametros?.sin_periodos_confirmado) confirmadas.add(id);
 
   const agrupaciones: AgrupacionCurvasApi[] = ordenadas.map((a) => {
-    const r = resultadoDe(a.id);
     const vigente = e.vigentes.get(a.id) ?? null;
-    const temporada = r ? (e.corrida?.resultado.temporadas.find((t) => t.temporada === r.temporada) ?? null) : null;
+    const evaluacion = e.evaluaciones.get(a.id);
+    const obsoleta = aObsoleta(evaluacion?.motivos);
     return {
       id: a.id,
       nombre: a.nombre,
@@ -151,42 +112,65 @@ export function armarEstadoCurvas(e: EntradaEstado): EstadoCurvasApi {
       temporada_sugerida: a.temporada_sugerida,
       generos: a.generos,
       equivalencias_activas: a.equivalencias_activas,
-      con_venta: conVenta(r),
+      periodos_aplicables: contarPeriodosAplicables(periodosActivos, a.temporada),
       vigente,
-      obsoleta: aObsoleta(e.obsoletas.get(a.id)),
-      propuesta: r && e.corrida ? propuestaDe(e.corrida.resumen.id, r, temporada, vigente) : null,
+      obsoleta,
+      avisos_vigente: evaluacion?.avisos ?? [],
+      estado: estadoDeAgrupacion(vigente, obsoleta, a.activo),
+      bloqueada_por: a.activo
+        ? bloqueadaPor({
+            agrupacion: { id: a.id, nombre: a.nombre, activo: a.activo, temporada: a.temporada, equivalencias_activas: a.equivalencias_activas },
+            versiones: e.versiones.get(a.id) ?? 0,
+            parametros: {
+              solo_tiendas_completas: vigente?.parametros?.solo_tiendas_completas ?? true,
+              tiendas_excluidas: vigente?.parametros?.tiendas_excluidas ?? [],
+              sin_periodos_confirmado: confirmadas.has(a.id),
+            },
+            meses_publicados: p.meses_publicados,
+            hasta_periodo: p.hasta_periodo,
+            periodos: periodosActivos,
+            tiendas: p.tiendas,
+            venta_tienda: p.venta_tienda,
+          })
+        : [],
+      versiones: e.versiones.get(a.id) ?? 0,
     };
   });
 
   const activas = agrupaciones.filter((a) => a.activo);
   const porTemporada: Record<TemporadaAgrupacion, number> = { invierno: 0, verano: 0, todo_el_ano: 0 };
   for (const a of activas) porTemporada[a.temporada] += 1;
-
-  const forma = { forma_estable: 0, forma_cambia: 0, sin_comparacion: 0 };
-  for (const a of activas) {
-    const v = a.propuesta?.veredicto_forma;
-    if (v) forma[v] += 1;
-  }
+  const sinCurva = activas.filter((a) => a.estado === "sin_curva");
+  const bloqueadasSinCurva = sinCurva.filter((a) => a.bloqueada_por.length > 0).length;
 
   const resumen: ResumenEstadoCurvas = {
     agrupaciones_activas: activas.length,
     por_temporada: porTemporada,
     sin_revisar_toda_temporada: porTemporada.todo_el_ano,
     con_curva_vigente: activas.filter((a) => a.vigente).length,
-    sin_curva_con_venta: activas.filter((a) => !a.vigente && a.con_venta).length,
-    sin_venta: e.corrida ? activas.filter((a) => !a.con_venta).length : 0,
+    al_dia: activas.filter((a) => a.estado === "al_dia").length,
+    al_dia_distintas: activas.filter((a) => a.estado === "al_dia_distinta").length,
+    obsoletas: activas.filter((a) => a.estado === "obsoleta").length,
+    sin_curva: sinCurva.length,
+    bloqueadas: activas.filter((a) => a.bloqueada_por.length > 0).length,
+    bloqueadas_sin_curva: bloqueadasSinCurva,
+    calculables_sin_curva: sinCurva.length - bloqueadasSinCurva,
     vigentes_prestadas: activas.filter((a) => a.vigente?.origen === "prestada").length,
-    obsoletas: activas.filter((a) => a.obsoleta).length,
-    propuestas_distintas: activas.filter((a) => a.propuesta?.difiere_de_vigente).length,
     inactivas_con_curva: agrupaciones.filter((a) => !a.activo && a.vigente).length,
-    unidades_sin_agrupacion: e.corrida?.resumen.resumen.unidades_sin_agrupacion ?? 0,
-    forma,
+    equivalencias_sin_agrupacion: e.equivalencias_sin_agrupacion,
   };
 
   return {
     datos: e.datos,
-    corrida: e.corrida?.resumen ?? null,
-    corridas: e.corridas,
+    prerrequisitos_globales: armarPrerrequisitosGlobales({
+      meses_publicados: p.meses_publicados,
+      hasta_periodo: p.hasta_periodo,
+      periodos: periodosActivos,
+      agrupaciones: activas,
+      confirmadas_sin_periodos: confirmadas,
+      tiendas: p.tiendas,
+      venta_tienda: p.venta_tienda,
+    }),
     agrupaciones,
     periodos_atipicos: e.periodos,
     resumen,

@@ -58,7 +58,10 @@ describe("M6 paso 1: rutas de periodos atípicos", () => {
   });
 
   it("los errores de Postgres pasan por traducirErrorDb", () => {
-    for (const f of rutasM6) expect(f.texto, f.ruta).toContain("traducirErrorDb");
+    // Los handlers del trabajo por agrupación delegan la lectura en `lectura.ts` (leerContextoTrabajo, calcularEfectoNino), que traduce.
+    const delegan = /leerContextoTrabajo|calcularEfectoNino/;
+    for (const f of rutasM6) expect(delegan.test(f.texto) || f.texto.includes("traducirErrorDb"), f.ruta).toBe(true);
+    expect(src.find((f) => f.ruta === "src/lib/curvas/lectura.ts")?.texto).toContain("traducirErrorDb");
   });
 });
 

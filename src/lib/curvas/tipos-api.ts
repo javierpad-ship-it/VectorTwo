@@ -1,13 +1,16 @@
 /**
- * Contrato de la API de M6 para el frontend (docs/modulos/06-curvas-estacionalidad.md,
- * "Contratos de API"): paso 1 (temporada de la agrupación, periodos atípicos y
- * la lectura de años atípicos que M7 consumirá) y paso 2 (corridas, curvas,
- * red comparable, efecto del Niño, elegir/retirar). Describe el JSON que viaja,
- * no las filas de la base.
+ * Contrato de la API de M6 para el frontend (docs/modulos/06-curvas-estacionalidad.md
+ * y docs/modulos/06b-curvas-trabajo-por-agrupacion.md, "Contratos de API"): paso 1
+ * (temporada de la agrupación, periodos atípicos y la lectura de años atípicos que
+ * M7 consumirá) y paso 2 (curvas, red comparable, efecto del Niño, aprobar/retirar),
+ * que desde la 0.9.7 trabaja UNA agrupación a la vez (06b): se calcula a demanda
+ * (`POST /api/curvas/agrupaciones/[id]/calcular`, nunca escribe) y solo se guarda
+ * la foto de cada aprobación (`PUT /api/curvas/agrupaciones/[id]`). Describe el
+ * JSON que viaja, no las filas de la base.
  *
  * CONTRATO CON M7: M7 lee `periodos[].temporadas` (y `claseDeAnio`, `/anios`,
- * `efecto_atipico.por_temporada[]` de la corrida de referencia); `alcance` es un
- * espejo heredado del paso 1 y NO debe usarse.
+ * `efecto_atipico.por_temporada[]` calculado a demanda con `?con_volumen=1`);
+ * `alcance` es un espejo heredado del paso 1 y NO debe usarse.
  *
  * Autocontenido a propósito: no importa nada (ni componentes, ni acceso a la
  * base, ni código de cliente), así que lo pueden usar tanto el servidor como la
@@ -147,15 +150,16 @@ export type ClaseDeAnioApi = {
 /** Un año de `GET /api/periodos-atipicos/anios`. */
 export type AnioAtipicidadApi = ClaseDeAnioApi & {
   /**
-   * Ratio de volumen de la TEMPORADA de la agrupación (o la pedida) de la
-   * corrida de REFERENCIA; `null` sin corrida de referencia o sin comparación.
+   * Ratio de volumen de la TEMPORADA de la agrupación (o la pedida), calculado a
+   * demanda con `?con_volumen=1` (sin corrida de referencia, 06b); `null` sin
+   * `con_volumen` o sin comparación.
    */
   ratio_volumen: number | null;
-  /** Detalle del factor (nivel temporada); `null` sin corrida de referencia o si el año no es atípico. */
+  /** Detalle del factor (nivel temporada); `null` sin `con_volumen` o si el año no es atípico. */
   volumen: VolumenAnioApi | null;
 };
 
-/** Factor de volumen de un año atípico, a nivel de temporada (I3), de la corrida de referencia. */
+/** Factor de volumen de un año atípico, a nivel de temporada (I3), calculado a demanda (06b). */
 export type VolumenAnioApi = {
   nivel: "temporada";
   temporada: TemporadaAgrupacion;
@@ -169,7 +173,8 @@ export type VolumenAnioApi = {
   agrupaciones: number;
   /** Diagnóstico: el ratio de la agrupación pedida (solo con `?agrupacion_id=`). */
   ratio_agrupacion: number | null;
-  corrida_id: string;
+  /** Siempre `null` desde la 0.9.7: ya no hay corrida de referencia. */
+  corrida_id: null;
 };
 
 /** Lo que se evaluó: o una agrupación concreta (`agrupacion_id`) o una temporada (`agrupacion_id: null`). */
@@ -185,15 +190,29 @@ export type ResumenAnios = {
 /**
  * `data` de `GET /api/periodos-atipicos/anios`, con `?agrupacion_id=<uuid>` o
  * `?temporada=invierno|verano|todo_el_ano` (por defecto `invierno`) y,
- * opcional, `?desde=2023&hasta=2026` (años).
+ * opcional, `?desde=2023&hasta=2026` (años) y `?con_volumen=1`.
+ *
+ * Sin `con_volumen` es barato (no lee venta): `ratio_volumen` y `volumen` son
+ * `null`. Con `con_volumen=1` calcula a demanda con UNA lectura de
+ * `venta_estacionalidad_agrupacion` y los parámetros POR DEFECTO (avisa en
+ * `avisos`); con `?agrupacion_id=` la lectura incluye la agrupación y suma su
+ * `ratio_agrupacion`.
  */
 export type AniosAtipicosRespuesta = {
   criterio: CriterioAnios;
-  /** Corrida de referencia de la que salen `ratio_volumen` y `volumen`; `null` si no hay. */
-  corrida_id: string | null;
+  /** Siempre `null` desde la 0.9.7 (sin corrida de referencia). Se conserva para no romper a M7. */
+  corrida_id: null;
+  /** Con `con_volumen=1`: huella de las cargas publicadas con las que se calculó el volumen; si no, `null`. */
+  huella_cargas: string | null;
+  /** Con `con_volumen=1`: instante del cálculo (ISO); si no, `null`. */
+  calculado_at: string | null;
+  /** Con `con_volumen=1`: `parametros_por_defecto` (el volumen se midió con los valores por defecto). */
+  avisos: AvisoAnios[];
   anios: AnioAtipicidadApi[];
   resumen: ResumenAnios;
 };
+
+export type AvisoAnios = { codigo: "parametros_por_defecto"; detalle: string };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PASO 2: curvas de estacionalidad
@@ -226,6 +245,15 @@ export type ClaseAnioCurva = (typeof CLASES_ANIO)[number];
 export const TRATAMIENTOS_ANIO = ["incluido", "imputado", "descartado"] as const;
 export type TratamientoAnio = (typeof TRATAMIENTOS_ANIO)[number];
 
+/**
+ * Por qué un año quedó `descartado`: lo excluyó el planner (`excluido_manual`,
+ * parámetro `anios_excluidos`), lo pidió el parámetro `tratamiento_atipicos`
+ * (`parametro`), su forma se aparta más que el ruido (`forma_cambia`, modo `auto`)
+ * o no había con qué compararlo o imputarlo (`sin_referencia`).
+ */
+export const MOTIVOS_TRATAMIENTO = ["excluido_manual", "parametro", "forma_cambia", "sin_referencia"] as const;
+export type MotivoTratamiento = (typeof MOTIVOS_TRATAMIENTO)[number];
+
 export const TRATAMIENTOS_ATIPICOS = ["auto", "incluir", "imputar", "descartar"] as const;
 export type TratamientoAtipicos = (typeof TRATAMIENTOS_ATIPICOS)[number];
 
@@ -242,6 +270,7 @@ export const MOTIVOS_RED = [
   "apertura_dudosa",
   "cierre_dudoso",
   "tienda_sin_apertura",
+  "excluida_manual",
 ] as const;
 export type MotivoRed = (typeof MOTIVOS_RED)[number];
 /** Los motivos que SACAN a la tienda de la red del año; los demás son avisos y la tienda entra. */
@@ -251,6 +280,7 @@ export const MOTIVOS_EXCLUSION_RED: readonly MotivoRed[] = [
   "no_abierta_todo_el_ano",
   "tienda_nueva",
   "meses_sin_venta",
+  "excluida_manual",
 ];
 
 export const ETIQUETA_MOTIVO_RED: Record<MotivoRed, string> = {
@@ -262,6 +292,7 @@ export const ETIQUETA_MOTIVO_RED: Record<MotivoRed, string> = {
   apertura_dudosa: "Apertura dudosa",
   cierre_dudoso: "Cierre dudoso",
   tienda_sin_apertura: "Sin fecha de apertura",
+  excluida_manual: "Excluida a mano",
 };
 
 export const MOTIVOS_OBSOLETA = [
@@ -271,6 +302,8 @@ export const MOTIVOS_OBSOLETA = [
   "carga_nueva",
   "periodo_cambiado",
   "temporada_cambiada",
+  /** Solo para una curva PRESTADA (`T`): cambió la composición o la temporada de otra agrupación de su temporada (o de toda temporada). */
+  "temporada_recompuesta",
 ] as const;
 export type MotivoObsoleta = (typeof MOTIVOS_OBSOLETA)[number];
 
@@ -314,6 +347,7 @@ export const CODIGOS_AVISO = [
   "tienda_distinta",
   "sin_red_comparable",
   "prestada",
+  "anio_excluido",
 ] as const;
 export type CodigoAviso = (typeof CODIGOS_AVISO)[number];
 
@@ -325,7 +359,12 @@ export type MedidaCurva = "unidades";
 
 // ─── Parámetros ───
 
-/** Parámetros de una corrida (los que guarda `corridas_estacionalidad.parametros`). */
+/**
+ * Parámetros del cálculo de UNA agrupación (los que guarda
+ * `corridas_estacionalidad.parametros`, la foto de la aprobación). `hasta_periodo`
+ * NO va aquí: nunca se hereda de una aprobación a la siguiente (arranca en el
+ * defecto: último mes publicado y cerrado) y se guarda en la columna de la foto.
+ */
 export type ParametrosCurvas = {
   solo_tiendas_completas: boolean;
   exigir_venta_todo_el_ano: boolean;
@@ -342,6 +381,12 @@ export type ParametrosCurvas = {
   margen_ruido: number;
   peso_minimo_diagnostico: number;
   umbral_liquidacion: number;
+  /** Años que el planner saca del ajuste de ESTA agrupación (`descartado` con motivo `excluido_manual`; siguen contando para el volumen). */
+  anios_excluidos: number[];
+  /** Tiendas que el planner saca de la red de ESTA agrupación (motivo `excluida_manual`, en todos los años). */
+  tiendas_excluidas: string[];
+  /** "Confirmo que esta temporada no tiene años atípicos": levanta `periodos_temporada_faltantes`. */
+  sin_periodos_confirmado: boolean;
 };
 
 export const PARAMETROS_POR_DEFECTO: Readonly<ParametrosCurvas> = {
@@ -357,14 +402,25 @@ export const PARAMETROS_POR_DEFECTO: Readonly<ParametrosCurvas> = {
   margen_ruido: MARGEN_RUIDO,
   peso_minimo_diagnostico: PESO_MINIMO_DIAGNOSTICO,
   umbral_liquidacion: UMBRAL_LIQUIDACION,
+  anios_excluidos: [],
+  tiendas_excluidas: [],
+  sin_periodos_confirmado: false,
 };
 
-/** Cuerpo de `POST /api/curvas/calcular`; todo es opcional (valen los defectos). */
-export type CalcularCuerpo = Partial<ParametrosCurvas> & {
-  /** `aaaa-mm`; por defecto `min(último publicado, último cerrado en Lima)`. */
+/**
+ * Cuerpo de `POST /api/curvas/agrupaciones/[id]/calcular` (lectura con cuerpo: NUNCA
+ * escribe). Todo es opcional (valen los defectos).
+ */
+export type CalcularAgrupacionCuerpo = Partial<ParametrosCurvas> & {
+  /** `aaaa-mm`; por defecto el último mes publicado y cerrado en Lima. Nunca se hereda. */
   hasta_periodo?: string;
-  /** La corrida nueva pasa a ser la de referencia (si no hay ninguna, siempre lo es). */
-  marcar_referencia?: boolean;
+  /**
+   * Punto de partida al abrir la agrupación: con `true` el servidor usa los
+   * parámetros de la última aprobación (los de su foto) e IGNORA los demás
+   * parámetros del cuerpo (no `hasta_periodo`). Sin aprobación, los defectos. La
+   * respuesta trae los parámetros efectivos en `parametros`.
+   */
+  partir_de_vigente?: boolean;
 };
 
 // ─── Red comparable ───
@@ -440,6 +496,8 @@ export type AnioAgrupacion = {
   atipicos: string[];
   /** `null` para `incompleto`, `en_curso` o sin red. */
   tratamiento: TratamientoAnio | null;
+  /** Solo con `tratamiento = 'descartado'`; `null` en cualquier otro caso. */
+  tratamiento_motivo: MotivoTratamiento | null;
   /** Unidades del año sobre la red (los meses cargados en el año en curso). */
   unidades: number;
   /** Unidades de la red por mes (12; ceros en meses sin cargar). */
@@ -532,6 +590,8 @@ export type CandidataApi = {
   motivo: string | null;
   eat: number | null;
   error_max: number | null;
+  /** Número de pruebas (pliegues) del backtesting; `0` si no hay EAT. Es lo mismo que `pliegues`. */
+  pruebas: number;
   pliegues: number;
   eat_por_pliegue: { anio: number; eat: number; error_max: number }[];
   eat_parcial: number | null;
@@ -548,7 +608,11 @@ export type ComparacionRecomendacion = {
   eat_a: number | null;
   margen: number;
   pliegues: number;
-  /** Frase lista para pantalla ("B se equivoca 27,4 pp frente a 29,1 de A en 2 pruebas; …"). */
+  /** Ruido entre años normales de la agrupación con el que se calculó el margen; `null` si no es medible. */
+  ruido_normal: number | null;
+  /** `margen_ruido` del cálculo: el margen es `max(0.05, margen_ruido × ruido_normal)`. */
+  margen_ruido: number;
+  /** Frase lista para pantalla, con el formato numérico es-PE de la pantalla ("B se equivoca 27.4 pp frente a 29.1 de A en 2 pruebas; …"). */
   frase: string;
 };
 
@@ -568,6 +632,15 @@ export type AgrupacionResultado = {
   /** Puntos de EAT que otra candidata debe ganar a `A` para desbancarla. */
   margen: number | null;
   comparacion: ComparacionRecomendacion | null;
+  /**
+   * Ruido entre años normales de la agrupación (EAT entre los años `normal`
+   * completos y no escasos; promedio de pares con tres o más), calculado SIEMPRE
+   * que haya dos, tenga o no periodo atípico. `null` ("no medible") con menos de
+   * dos años normales. Es el mismo valor de `efecto_atipico.forma.ruido_normal`.
+   */
+  ruido_normal: number | null;
+  /** Los pares que dan `ruido_normal` (vacío si es `null`). */
+  ruido_normal_detalle: { anios: [number, number]; eat: number }[];
   /** 0 a 1 (1 − Σ desviación típica mensual); `null` con menos de dos años de ajuste. */
   estabilidad: number | null;
   nivel_estabilidad: "alta" | "media" | "baja" | null;
@@ -591,24 +664,6 @@ export type TemporadaResultado = {
 };
 
 export type ResultadoCorrida = { agrupaciones: AgrupacionResultado[]; temporadas: TemporadaResultado[] };
-
-export type ResumenCorrida = {
-  agrupaciones_activas: number;
-  propias: number;
-  prestadas: number;
-  /** Sin curva posible (sin venta utilizable): `activas = propias + prestadas + sin_venta`. */
-  sin_venta: number;
-  con_avisos: number;
-  anios_por_clase: Record<ClaseAnioCurva, number>;
-  agregado: { filas_mv: number; refrescada_at: string | null; duracion_ms: number };
-  meses_publicados: { desde: string; hasta: string; faltantes: string[] };
-  unidades_sin_agrupacion: number;
-  /** Huella del maestro de tiendas (obsolescencia por red). */
-  red_huella: string;
-  /** `{ "aaaa-mm": carga_id }` de los meses publicados usados. */
-  cargas: Record<string, string>;
-  duracion_ms: number;
-};
 
 // ─── Efecto del Niño a nivel de corrida (lo que lee la pestaña Años Niño y M7) ───
 
@@ -655,86 +710,180 @@ export type EfectoAtipicoCorrida = {
   avisos: AvisoCurva[];
 };
 
-// ─── Corridas ───
+// ═══════════════════════════════════════════════════════════════════════════
+// 06b · Trabajo por agrupación (0.9.7)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Flujo: lista (`GET /api/curvas`) → abrir una agrupación
+// (`POST /api/curvas/agrupaciones/[id]/calcular`, lectura con cuerpo, NUNCA escribe)
+// → ajustar parámetros (se vuelve a pedir `calcular`) → aprobar UNA curva
+// (`PUT /api/curvas/agrupaciones/[id]`, guarda la foto y la versión).
+//
+// Errores de negocio de M6: `{ error, codigo }` con estos códigos (el `error` es
+// castellano llano, para mostrarlo tal cual):
+//   400  zod (sin código) · 401 · 403 · 404 (agrupación o foto inexistente, o id no UUID)
+//   409  `agrupacion_inactiva`, `prerrequisitos`, `datos_cambiados`,
+//        `vigente_cambiada`, `sin_curva_posible`, `candidata_no_disponible`,
+//        `sin_cambio`, `nota_requerida`, `sin_datos`, `hasta_periodo_sin_cargar`.
+//
+// Orden de los 409 de `PUT /api/curvas/agrupaciones/[id]` (el primero que aplica gana):
+//   `agrupacion_inactiva` · `hasta_periodo_sin_cargar` · `prerrequisitos` · `sin_curva_posible` ·
+//   `candidata_no_disponible` · `datos_cambiados` · `vigente_cambiada` · `sin_cambio` · `nota_requerida`;
+//   y, al guardar, `vigente_cambiada` otra vez si alguien movió la vigente entre la lectura y el cambio de estado.
 
-export type CorridaResumenApi = {
+export const CODIGOS_ERROR_CURVAS = [
+  "agrupacion_inactiva",
+  "prerrequisitos",
+  "datos_cambiados",
+  "vigente_cambiada",
+  "sin_curva_posible",
+  "candidata_no_disponible",
+  "sin_cambio",
+  "nota_requerida",
+  "sin_datos",
+  "hasta_periodo_sin_cargar",
+] as const;
+export type CodigoErrorCurvas = (typeof CODIGOS_ERROR_CURVAS)[number];
+
+// ─── Foto de aprobación (fila de `corridas_estacionalidad` con agrupación) ───
+
+/**
+ * `corridas_estacionalidad.resumen` de una foto. Todo menos `cargas` y `red_huella`
+ * es opcional porque la corrida global heredada de la 0.9.6 no lo traía.
+ */
+export type ResumenFoto = {
+  /** `{ "aaaa-mm": carga_id }` de los meses ≤ `hasta_periodo` usados. */
+  cargas: Record<string, string>;
+  /** md5 de `cargas`. */
+  cargas_huella?: string;
+  /** Huella del maestro de tiendas (obsolescencia por red). */
+  red_huella: string;
+  composicion_huella?: string;
+  /** Temporada de la agrupación al aprobar. */
+  temporada?: TemporadaAgrupacion;
+  /** Los tríos `(id, temporada, huella de composición)` con los que se calculó `huella_temporada` (para nombrar la agrupación que cambió). */
+  agrupaciones_temporada?: { id: string; temporada: TemporadaAgrupacion; huella: string }[];
+  huella_calculo?: string;
+  /**
+   * md5 de las agrupaciones activas de la temporada y de toda temporada (id,
+   * temporada, composición): de ellas sale la curva prestada `T` y el control del Niño.
+   */
+  huella_temporada?: string;
+  hasta_periodo?: string;
+  /** El `hasta_periodo` era el defecto (último publicado y cerrado) al aprobar. */
+  hasta_fue_por_defecto?: boolean;
+  /** Meses `aaaa-mm` atípicos que aplicaban a su temporada, ordenados. */
+  atipicos?: string[];
+  ruido_normal?: number | null;
+  version_modelo?: number;
+  sin_periodos_confirmado?: boolean;
+  meses_publicados?: { desde: string; hasta: string; faltantes: string[] };
+  duracion_ms?: number;
+};
+
+export type FotoResumenApi = {
   id: string;
   created_at: string;
+  /** `aaaa-mm`. */
   hasta_periodo: string;
-  referencia: boolean;
   parametros: ParametrosCurvas;
-  resumen: ResumenCorrida;
+  resumen: ResumenFoto;
   usuario_nombre: string | null;
 };
 
-/** `POST /api/curvas/calcular` → `201`. */
-export type CalcularRespuesta = { corrida: CorridaResumenApi };
+// ─── Curvas vigentes, obsolescencia y estado ───
 
-/** Fila de `GET /api/curvas/corridas` (las últimas 50, sin `resultado`). */
-export type CorridaListaApi = CorridaResumenApi;
-
-/** `PATCH /api/curvas/corridas/[id]` con `{ referencia: true }`. */
-export type MarcarReferenciaRespuesta = { corrida: CorridaResumenApi };
-
-/** `GET /api/curvas/corridas/[id]`. */
-export type CorridaDetalleApi = {
-  corrida: CorridaResumenApi;
-  resultado: ResultadoCorrida;
-  red_comparable: RedAnioApi[];
-  efecto_atipico: EfectoAtipicoCorrida;
-  agrupaciones: {
-    id: string;
-    nombre: string;
-    codigo: string;
-    activo: boolean;
-    temporada: TemporadaAgrupacion;
-    generos: string[];
-    vigente: VigenteResumenApi | null;
-  }[];
-};
-
-// ─── Curvas vigentes, obsolescencia y propuesta ───
-
+/** La curva vigente de una agrupación tal como la ven la lista y la vista de trabajo. */
 export type VigenteResumenApi = {
   id: string;
   version: number;
   modelo: ModeloCurva;
   origen: "propia" | "prestada";
   recomendada: boolean;
+  /** La candidata que el sistema recomendaba al aprobar; `null` en curvas de la 0.9.6. */
+  recomendada_entonces: ModeloCurva | null;
   eat: number | null;
+  /** Ruido entre años normales al aprobar (el de `resumen.ruido_normal` de la foto), siempre junto al EAT; `null` = no medible o curva de la 0.9.6. */
+  ruido_normal: number | null;
   aprobada_at: string;
   usuario_nombre: string | null;
-  corrida_id: string;
+  /** La foto de la aprobación (fila de `corridas_estacionalidad`): "Ver foto". */
+  foto_id: string;
+  /** `aaaa-mm`; `null` en curvas de la 0.9.6 sin el dato. */
+  hasta_periodo: string | null;
+  hasta_fue_por_defecto: boolean | null;
+  nota: string | null;
   curva: number[];
+  /** Parámetros con los que se aprobó (punto de partida al reabrir; no incluyen `hasta_periodo`); `null` en curvas de la 0.9.6. */
+  parametros: ParametrosCurvas | null;
+  huella_calculo: string | null;
+  /** Versión de las fórmulas con las que se calculó la foto; `null` en curvas de la 0.9.6. */
+  version_modelo: number | null;
+  /** Años que entraron en el ajuste al aprobar; `null` en curvas de la 0.9.6. */
+  anios_ajuste: number[] | null;
 };
 
 export type MotivoObsoletaApi = { codigo: MotivoObsoleta; detalle: string };
 export type ObsoletaApi = { motivos: MotivoObsoletaApi[] };
 
-export type PropuestaApi = {
-  corrida_id: string;
-  recomendada: ModeloCurva | null;
-  motivo_recomendacion: MotivoRecomendacion | null;
-  origen: "propia" | "prestada" | null;
-  eat: number | null;
-  /** Curva de la recomendada (para la mini curva); `null` si no hay. */
-  curva: number[] | null;
-  estabilidad: number | null;
-  nivel_estabilidad: "alta" | "media" | "baja" | null;
-  /** Hay vigente y la propuesta difiere de ella (`difiereDeVigente`). */
-  difiere_de_vigente: boolean;
-  /** EAT entre la propuesta y la vigente (puntos); `null` sin vigente o sin propuesta. */
-  eat_vs_vigente: number | null;
-  veredicto_forma: VeredictoForma | null;
-  /** Para la columna Años de la tabla. */
-  anios: { anio: number; clase: ClaseAnioCurva; tratamiento: TratamientoAnio | null; escaso: boolean; en_ajuste: boolean; meses_atipicos: number }[];
-  /** Para la columna Niño: ratios de volumen por año y el veredicto de forma con sus tres cifras. */
-  nino: {
-    volumen: { anio: number; ratio_volumen: number | null }[];
-    forma: { veredicto: VeredictoForma; diferencia_anio: number | null; ruido_normal: number | null; umbral_efectivo: number } | null;
-  };
-  avisos: AvisoCurva[];
+export const CODIGOS_AVISO_VIGENTE = ["datos_posteriores", "modelo_anterior", "temporada_recompuesta"] as const;
+/**
+ * Avisos de una curva vigente que NO la vuelven obsoleta: `datos_posteriores`
+ * ("hay 1 mes publicado después de 2026-08; la curva sigue al día hasta ese mes"),
+ * `modelo_anterior` (la foto se calculó con una `VERSION_MODELO` menor: hoy el
+ * sistema puede proponer otra cosa) y `temporada_recompuesta` (cambió otra
+ * agrupación de su temporada; solo avisa si la curva es propia, si es prestada `T`
+ * es un motivo de obsolescencia).
+ */
+export type AvisoVigenteApi = { codigo: (typeof CODIGOS_AVISO_VIGENTE)[number]; detalle: string };
+
+export const ESTADOS_AGRUPACION = ["sin_curva", "al_dia", "al_dia_distinta", "obsoleta", "inactiva_con_curva"] as const;
+/**
+ * Estado de una agrupación en la lista (sin corrida): `sin_curva`; `al_dia` (vigente,
+ * sin motivos y se aprobó la recomendada); `al_dia_distinta` (vigente, sin motivos,
+ * pero se aprobó una candidata distinta de la recomendada); `obsoleta` (con motivo);
+ * `inactiva_con_curva` (gana a los demás).
+ */
+export type EstadoAgrupacion = (typeof ESTADOS_AGRUPACION)[number];
+
+// ─── Prerrequisitos ───
+
+/** Los que bloquean el cálculo / la aprobación y los que solo avisan. */
+export const CODIGOS_PRERREQUISITO_BLOQUEA = [
+  "sin_meses_publicados",
+  "sin_anio_completo",
+  "periodos_temporada_faltantes",
+  "tienda_sin_apertura",
+  "sin_venta",
+  "composicion_vacia",
+] as const;
+export const CODIGOS_PRERREQUISITO_AVISA = [
+  "temporada_sin_confirmar",
+  "meses_sin_cargar",
+  "periodo_fuera_de_datos",
+  "apertura_dudosa",
+  "cierre_dudoso",
+  /** Con `sin_periodos_confirmado = true`: `periodos_temporada_faltantes` baja a aviso con este mismo código. */
+  "periodos_temporada_faltantes",
+] as const;
+export type CodigoPrerrequisito = (typeof CODIGOS_PRERREQUISITO_BLOQUEA)[number] | (typeof CODIGOS_PRERREQUISITO_AVISA)[number];
+
+/** Pantalla donde se arregla (la tarjeta "Antes de calcular" enlaza a ella). */
+export type PantallaArreglo = "venta_stock" | "periodos" | "tiendas" | "agrupaciones";
+
+export type Prerrequisito = {
+  codigo: CodigoPrerrequisito;
+  nivel: "bloquea" | "avisa";
+  /** Castellano llano, para mostrarlo tal cual. */
+  detalle: string;
+  /** `id` de la fila a la que ir (por ejemplo la tienda); sin él, la pantalla entera. */
+  enlace: { pantalla: PantallaArreglo; id?: string } | null;
 };
+
+/** `bloquea` y `avisa` en orden estable. Con `bloquea` no vacío no hay cálculo (`calculo: null`) ni aprobación. */
+export type PrerrequisitosApi = { bloquea: Prerrequisito[]; avisa: Prerrequisito[] };
+
+// ─── Lista: `GET /api/curvas` ───
 
 export type AgrupacionCurvasApi = {
   id: string;
@@ -746,11 +895,17 @@ export type AgrupacionCurvasApi = {
   temporada_sugerida: TemporadaAgrupacion | null;
   generos: string[];
   equivalencias_activas: number;
-  /** Tiene venta en la corrida que se está viendo (`false` sin corrida). */
-  con_venta: boolean;
+  /** Periodos activos que aplican a su temporada. */
+  periodos_aplicables: number;
   vigente: VigenteResumenApi | null;
   obsoleta: ObsoletaApi | null;
-  propuesta: PropuestaApi | null;
+  /** `datos_posteriores` y `temporada_recompuesta` (si la curva es propia): avisan, no obsoletan. */
+  avisos_vigente: AvisoVigenteApi[];
+  estado: EstadoAgrupacion;
+  /** Prerrequisitos que bloquean y se evalúan SIN calcular: `periodos_temporada_faltantes`, `composicion_vacia`, `tienda_sin_apertura`. */
+  bloqueada_por: CodigoPrerrequisito[];
+  /** Versiones guardadas (vigente, reemplazadas y retiradas). */
+  versiones: number;
 };
 
 export type ResumenEstadoCurvas = {
@@ -758,37 +913,51 @@ export type ResumenEstadoCurvas = {
   por_temporada: Record<TemporadaAgrupacion, number>;
   /** Agrupaciones activas que siguen en `todo_el_ano` (hay que revisarlas). */
   sin_revisar_toda_temporada: number;
+  /** `al_dia + al_dia_distintas + obsoletas` (solo activas). */
   con_curva_vigente: number;
-  sin_curva_con_venta: number;
-  sin_venta: number;
-  vigentes_prestadas: number;
+  al_dia: number;
+  al_dia_distintas: number;
   obsoletas: number;
-  propuestas_distintas: number;
+  /** Activas sin curva vigente: `sin_curva = bloqueadas_sin_curva + calculables_sin_curva`. */
+  sin_curva: number;
+  /** Activas (con o sin curva) con algún prerrequisito bloqueante evaluable sin calcular. */
+  bloqueadas: number;
+  /** De las `sin_curva`, las que tienen algún `bloqueada_por`. */
+  bloqueadas_sin_curva: number;
+  calculables_sin_curva: number;
+  /** Activas con curva vigente prestada (`T`). */
+  vigentes_prestadas: number;
   inactivas_con_curva: number;
-  /** Del resumen de la corrida ("agregado refrescado el …"), no de la MV. */
-  unidades_sin_agrupacion: number;
-  forma: { forma_estable: number; forma_cambia: number; sin_comparacion: number };
+  /** Equivalencias activas sin agrupación (faltantes de M3). */
+  equivalencias_sin_agrupacion: number;
 };
 
-/** `GET /api/curvas` (`?corrida_id=`; por defecto la de referencia y, sin referencia, la última). */
+/**
+ * `GET /api/curvas` (`requirePlanner`). La lista NUNCA calcula ni llama a
+ * `venta_estacionalidad_agrupacion`: estado, obsolescencia y prerrequisitos salen de
+ * las fotos de las vigentes, el maestro de tiendas, los periodos y la venta por tienda.
+ */
 export type EstadoCurvasApi = {
   datos: { desde: string | null; hasta: string | null; meses_publicados: number; faltantes: string[]; ultimo_mes_cerrado: string };
-  corrida: CorridaResumenApi | null;
-  /** Las últimas 20, para el selector. */
-  corridas: {
-    id: string;
-    created_at: string;
-    hasta_periodo: string;
-    referencia: boolean;
-    usuario_nombre: string | null;
-    resumen: Pick<ResumenCorrida, "propias" | "prestadas" | "sin_venta">;
-  }[];
+  /** Prerrequisitos que no dependen de la agrupación (meses, periodos por temporada, tiendas sin apertura). */
+  prerrequisitos_globales: Prerrequisito[];
   agrupaciones: AgrupacionCurvasApi[];
   periodos_atipicos: PeriodoAtipicoApi[];
   resumen: ResumenEstadoCurvas;
 };
 
-// ─── Detalle de una agrupación en una corrida ───
+// ─── Vista de trabajo: `POST /api/curvas/agrupaciones/[id]/calcular` ───
+
+export type AgrupacionTrabajoApi = {
+  id: string;
+  nombre: string;
+  codigo: string;
+  activo: boolean;
+  temporada: TemporadaAgrupacion;
+  temporada_sugerida: TemporadaAgrupacion | null;
+  generos: string[];
+  equivalencias_activas: number;
+};
 
 export type ComparadorApi = {
   /** Modelo de la propuesta comparada (por defecto la recomendada; `?modelo=` elige otro). */
@@ -802,52 +971,74 @@ export type ComparadorApi = {
   /** Mes (1 a 12) con la mayor diferencia absoluta. */
   mes_mayor_cambio: number;
   difiere: boolean;
+  /**
+   * `true` si el conjunto de años de ajuste de la propuesta coincide con `anios_ajuste` de
+   * la vigente (la EAT entre ambas es comparable); `false` si no (la pantalla avisa: "EAT
+   * no comparable con el cálculo anterior"); `null` sin comparación posible (vigente de la 0.9.6).
+   */
+  comparable_con_vigente: boolean | null;
 };
 
-/** `GET /api/curvas/corridas/[id]/agrupaciones/[agrupacionId]`: tal como lo guardó la corrida; no lee la MV. */
-export type DetalleAgrupacionApi = {
-  corrida: CorridaResumenApi;
-  agrupacion: {
-    id: string;
-    nombre: string;
-    codigo: string;
-    activo: boolean;
-    temporada: TemporadaAgrupacion;
-    temporada_sugerida: TemporadaAgrupacion | null;
-    generos: string[];
-    equivalencias_activas: number;
-  };
+/** Lo que se calculó (solo si ningún prerrequisito bloquea). Todo sale del cálculo a demanda; nada se guarda. */
+export type CalculoAgrupacionApi = {
+  /** `ruido_normal` y `ruido_normal_detalle` a nivel de agrupación; `anios[].participacion_real ?? participacion` para dibujar todos los años. */
   resultado: AgrupacionResultado;
-  /** La `T` de su temporada (la curva y los años de la serie agregada). */
+  /** La `T` de su temporada (la curva y las series agregadas); `null` si la temporada no tiene serie. */
   temporada_curva: TemporadaResultado | null;
-  /** Red comparable de la corrida (pesos sobre la venta total); los pesos de la agrupación están en `resultado.anios[].por_tienda`. */
+  /** Efecto del Niño (volumen) de su temporada y de `todo_el_ano` (control). */
+  efecto_temporada: EfectoTemporadaAnio[];
+  /** Red comparable de cada año (pesos sobre la venta total); los pesos de la agrupación están en `resultado.anios[].por_tienda`. */
   red: RedAnioApi[];
   tiendas: TiendaIdentidad[];
+  duracion_ms: number;
+};
+
+export type DatosTrabajoApi = {
+  desde: string | null;
+  hasta: string | null;
+  meses_publicados: number;
+  faltantes: string[];
+  /** El `hasta_periodo` efectivo del cálculo (`aaaa-mm`); `null` si no hay meses publicados y cerrados. Es el que `PUT` exige. Nunca se hereda de la vigente. */
+  hasta_periodo: string | null;
+  /** `hasta_periodo` es el último mes publicado y cerrado en Lima (el defecto). */
+  hasta_fue_por_defecto: boolean;
+  ultimo_mes_cerrado: string;
+  /** Meses publicados DESPUÉS de `hasta_periodo` (no entran en el cálculo). */
+  meses_posteriores: string[];
+  /** md5 de las cargas ≤ `hasta_periodo` con las que se calculó. */
+  cargas_huella: string;
+};
+
+export type TrabajoAgrupacionApi = {
+  agrupacion: AgrupacionTrabajoApi;
+  datos: DatosTrabajoApi;
+  /** Parámetros efectivos (defectos aplicados; con `partir_de_vigente`, los de la última aprobación). */
+  parametros: ParametrosCurvas;
+  prerrequisitos: PrerrequisitosApi;
+  /** md5 de la entrada del cálculo; `PUT` lo devuelve para rechazar con `datos_cambiados` si cambió. Viene también con `calculo: null`. */
+  huella_calculo: string;
+  /** md5 de las agrupaciones activas de su temporada y de toda temporada (de ellas salen `T` y el control del Niño). */
+  huella_temporada: string;
+  /** `VERSION_MODELO` del servidor que calculó. */
+  version_modelo: number;
+  /** `null` si algún prerrequisito bloquea. */
+  calculo: CalculoAgrupacionApi | null;
   vigente: VigenteResumenApi | null;
   obsoleta: ObsoletaApi | null;
+  avisos_vigente: AvisoVigenteApi[];
+  /** La candidata pedida (`?modelo=`) o la recomendada frente a la vigente; `null` sin vigente o sin candidata. */
   comparador: ComparadorApi | null;
+  versiones: number;
 };
 
-// ─── Años Niño ───
-
-export type AniosAtipicosNinoApi = {
-  corrida: CorridaResumenApi | null;
-  efecto: EfectoAtipicoCorrida | null;
-  periodos: PeriodoAtipicoApi[];
-  anios: { anio: number; clase_por_temporada: Record<TemporadaAgrupacion, ClaseAnioCurva>; completo: boolean }[];
-  agrupaciones: { id: string; nombre: string; temporada: TemporadaAgrupacion; efecto_atipico: EfectoAtipicoAgrupacion; avisos: AvisoCurva[] }[];
-  temporadas: TemporadaResultado[];
-};
-
-// ─── Elegir, aprobar y retirar (una por una) ───
-
-export type ElegirCurvaCuerpo = { corrida_id: string; modelo: ModeloCurva; nota?: string };
+// ─── Aprobar y retirar ───
 
 export type CurvaAprobadaApi = {
   id: string;
   agrupacion_id: string;
   version: number;
   estado: "vigente" | "reemplazada" | "retirada";
+  /** La foto de la aprobación (`corridas_estacionalidad.id`). */
   corrida_id: string;
   modelo: ModeloCurva;
   origen: "propia" | "prestada";
@@ -861,11 +1052,93 @@ export type CurvaAprobadaApi = {
   usuario_nombre: string | null;
 };
 
+/** Cuerpo de `PUT /api/curvas/agrupaciones/[id]`. */
+export type AprobarCurvaCuerpo = {
+  modelo: ModeloCurva;
+  /** Los que vio el planner; `hasta_periodo` es OBLIGATORIO (el que devolvió `calcular`: nunca se hereda ni se infiere). */
+  parametros: ParametrosCurvas & { hasta_periodo: string };
+  /** La `huella_calculo` que devolvió `calcular` con esos parámetros. */
+  huella_calculo: string;
+  /** Versión de la vigente que vio el planner (`null` si no había): si ya cambió, `409 vigente_cambiada`. */
+  version_vigente: number | null;
+  /**
+   * Obligatoria (`409 nota_requerida`) si `modelo` no es la recomendada, o hay
+   * `anios_excluidos` / `tiendas_excluidas`, o `tratamiento_atipicos` no es `auto`.
+   */
+  nota?: string;
+};
+
 /** `PUT /api/curvas/agrupaciones/[id]` → `201`. */
-export type ElegirCurvaRespuesta = { curva: CurvaAprobadaApi };
+export type AprobarCurvaRespuesta = { curva: CurvaAprobadaApi; foto_id: string };
 /** `DELETE /api/curvas/agrupaciones/[id]`. */
 export type RetirarCurvaRespuesta = { id: string; estado: "retirada" };
-export type MarcarReferenciaCuerpo = { referencia: true };
+
+// ─── Versiones: `GET /api/curvas/agrupaciones/[id]/versiones` ───
+
+export type VersionAgrupacionApi = {
+  id: string;
+  version: number;
+  estado: "vigente" | "reemplazada" | "retirada";
+  modelo: ModeloCurva;
+  origen: "propia" | "prestada";
+  recomendada: boolean;
+  recomendada_entonces: ModeloCurva | null;
+  eat: number | null;
+  /** Ruido entre años normales de la foto de esa versión (junto al EAT); `null` = no medible o curva de la 0.9.6. */
+  ruido_normal: number | null;
+  curva: number[];
+  nota: string | null;
+  aprobada_at: string;
+  usuario_nombre: string | null;
+  /** La foto de esa versión ("Ver foto"). */
+  foto_id: string;
+  /** Solo los parámetros distintos del valor por defecto (texto de pantalla: "años excluidos: 2023"). */
+  parametros_resumen: string[];
+};
+
+export type VersionesAgrupacionApi = { versiones: VersionAgrupacionApi[] };
+
+// ─── "Ver foto": `GET /api/curvas/corridas/[id]/agrupaciones/[agrupacionId]` ───
+
+/**
+ * El detalle CONGELADO de una foto de aprobación (`?modelo=A..E|T` elige la candidata
+ * dibujada; por defecto la recomendada de entonces). El comparador la confronta con
+ * la curva que se aprobó con ESA foto y no hay obsolescencia (es historia). `404` si
+ * la foto no es de esa agrupación.
+ */
+export type DetalleFotoApi = {
+  foto: FotoResumenApi;
+  agrupacion: AgrupacionTrabajoApi;
+  resultado: AgrupacionResultado;
+  temporada_curva: TemporadaResultado | null;
+  red: RedAnioApi[];
+  tiendas: TiendaIdentidad[];
+  /** La versión de curva aprobada con esta foto; `null` si la foto quedó sin curva (fallo al guardar). */
+  curva_de_la_foto: VigenteResumenApi | null;
+  comparador: ComparadorApi | null;
+};
+
+// ─── Años Niño a demanda: `GET /api/curvas/anios-atipicos` ───
+
+export type AniosAtipicosNinoApi = {
+  /** Instante del cálculo (ISO). El cálculo es a demanda y no se guarda. */
+  calculado_at: string;
+  /** Huella de las cargas publicadas con las que se calculó. */
+  huella_cargas: string;
+  /** Parámetros por defecto con los que se midió. */
+  parametros: ParametrosCurvas;
+  datos: { desde: string | null; hasta_periodo: string | null; meses_publicados: number };
+  /** `por_temporada` (volumen con control y relativo), `crecimiento_normal`, `avisos`; `forma` va vacía (requiere abrir cada agrupación). */
+  efecto: EfectoAtipicoCorrida;
+  periodos: PeriodoAtipicoApi[];
+  anios: { anio: number; clase_por_temporada: Record<TemporadaAgrupacion, ClaseAnioCurva>; completo: boolean }[];
+  /** Series agregadas por temporada (años, clases, tratamiento y `curva_T`). */
+  temporadas: TemporadaResultado[];
+  /** Agrupaciones activas por temporada (para "Ver" → Trabajar). */
+  agrupaciones: { id: string; nombre: string; temporada: TemporadaAgrupacion }[];
+};
+
+// ─── Curvas vigentes para M7 (sin cambios) ───
 
 /** Huellas con las que se calculó una curva (M7 las guarda junto al `id`). */
 export type HuellasCurva = { composicion: string; red_huella: string; cargas_huella: string };
@@ -885,6 +1158,7 @@ export type CurvaVigenteApi = {
   /** Curva acumulada (`C_12 = 1`): lo que M7 usará para el "avance de la estacionalidad". */
   acumulada: number[];
   huellas: HuellasCurva;
+  /** La foto de la aprobación. */
   corrida_id: string;
   aprobada_at: string;
 };

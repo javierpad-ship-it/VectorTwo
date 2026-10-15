@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vitest";
-import type { AgrupacionResultado, EfectoAtipicoCorrida, EfectoTemporadaAnio, RedAnioApi } from "../src/lib/curvas/tipos-api";
+import type { AgrupacionResultado, EfectoAtipicoCorrida, EfectoTemporadaAnio, RedAnioApi, TrabajoAgrupacionApi } from "../src/lib/curvas/tipos-api";
 import {
-  cumpleEstado,
   celdaAnioMes,
   compararCurvas,
   contarEstados,
+  cumpleEstado,
   descripcionClase,
+  esIdAgrupacion,
+  esModeloCurva,
+  etiquetaAprobada,
+  etiquetaPropuesta,
   filasCsvAnioMes,
   filasCsvFactoresM7,
   filasCsvVigentes,
-  filasForma,
   filtrarAgrupaciones,
-  filtrarFilasForma,
   formatearDiferenciaPp,
   formatearFactor,
   formatearFechaHora,
@@ -20,21 +22,30 @@ import {
   formatearRatio,
   fraseComparacion,
   lecturaVolumen,
+  motivoAnioSinDatos,
   pideCorregirApertura,
   redVistaDeAgrupacion,
   redVistaDesdeRed,
   referenciaForma,
+  resumenMensual,
+  resumirComparacion,
+  sistemaHoy,
   textoAnio,
   textoAniosUsados,
+  textoBloqueo,
+  textoComparacionFila,
   textoConfirmarAprobacion,
+  textoEatConRuido,
   textoMotivoRed,
+  textoNoComparable,
   textoObsoleta,
+  textoPropone,
   textoResumen,
+  textoRuido,
   textoTotalRed,
   textoVeredictoForma,
-  vistaPreviaDatos,
 } from "../src/app/(app)/planificacion/curvas-estacionalidad/vista";
-import { agrupacion, anio, aviso, curvaConPico, PLANA, propuesta, vigente } from "./curvas.pantalla.fixture";
+import { agrupacion, anio, curvaConPico, PLANA, vigente } from "./curvas.pantalla.fixture";
 
 describe("formatos", () => {
   it("porcentaje, puntos, ratio y factor (es-PE)", () => {
@@ -118,6 +129,7 @@ describe("confirm de aprobación", () => {
   const anios = [anio(2023, { clase: "atipico_completo", tratamiento: "incluido", meses_atipicos: 12 }), anio(2024), anio(2025), anio(2026, { clase: "en_curso", en_ajuste: false })];
   const base = {
     agrupacion: "ABRIGO SINTÉTICO",
+    temporada: "invierno" as const,
     modelo: "B" as const,
     recomendada: "A" as const,
     anios,
@@ -125,24 +137,42 @@ describe("confirm de aprobación", () => {
     ruidoNormal: 33,
     versionVigente: 2,
     comparacion: compararCurvas(PLANA, curvaConPico(1, 0.1), false),
-    avisos: [aviso("pocos_anos_normales", "2 años normales (2024, 2025)")],
+    comparableConVigente: true as boolean | null,
+    aniosAjusteVigente: [2023, 2024, 2025] as number[] | null,
+    aniosExcluidos: [] as number[],
+    tiendasExcluidas: [] as string[],
+    tratamiento: "auto" as const,
+    hasta: "2026-09",
+    avisos: [{ detalle: "2 años normales (2024, 2025)" }],
     nota: "",
   };
 
-  it("resume modelo, años con su clase, EAT frente al ruido, diferencia con la vigente y avisos", () => {
+  it("resume agrupación, temporada, modelo, años con su clase, EAT frente al ruido, hasta, diferencia con la vigente y avisos", () => {
     const t = textoConfirmarAprobacion(base);
     expect(t).toContain("B · Ponderado por volumen");
     expect(t).toContain("ABRIGO SINTÉTICO");
+    expect(t).toContain("Temporada: Invierno.");
     expect(t).toContain("No es la recomendada (A)");
     expect(t).toContain("Años usados: 2023 (atípico completo, incluido) · 2024 · 2025.");
     expect(t).toContain("Fuera del ajuste: 2026 parcial.");
     expect(t).toContain("EAT: 27.4 pp; ruido entre años normales: 33.0 pp.");
+    expect(t).toContain("Datos hasta 2026-09.");
     expect(t).toContain("Reemplaza la v2: difiere");
     expect(t).toContain("el mes que más cambia es enero");
     expect(t).toContain("Avisos: 2 años normales (2024, 2025)");
+    expect(t).not.toContain("no comparable");
+    expect(t).not.toContain("excluidos a mano");
+    expect(t).not.toContain("Tratamiento del Niño");
+  });
+  it("lo excluido a mano, el tratamiento distinto de auto y el EAT no comparable se dicen", () => {
+    const t = textoConfirmarAprobacion({ ...base, comparableConVigente: false, aniosAjusteVigente: [2024, 2025], aniosExcluidos: [2023], tiendasExcluidas: ["T10", "T04"], tratamiento: "descartar" });
+    expect(t).toContain("Años excluidos a mano: 2023.");
+    expect(t).toContain("Tiendas excluidas a mano: T10 y T04.");
+    expect(t).toContain("Tratamiento del Niño: descartar");
+    expect(t).toContain("EAT no comparable con el de la v2: aquella ajustó con 2024 y 2025; esta, con 2023, 2024 y 2025.");
   });
   it("sin vigente será la versión 1; sin ruido medible lo dice; con nota la repite", () => {
-    const t = textoConfirmarAprobacion({ ...base, versionVigente: null, comparacion: null, ruidoNormal: null, recomendada: "B", avisos: [], nota: " porque sí " });
+    const t = textoConfirmarAprobacion({ ...base, versionVigente: null, comparacion: null, comparableConVigente: null, aniosAjusteVigente: null, ruidoNormal: null, recomendada: "B", avisos: [], nota: " porque sí " });
     expect(t).toContain("será la versión 1");
     expect(t).toContain("no medible");
     expect(t).not.toContain("No es la recomendada");
@@ -159,72 +189,205 @@ describe("confirm de aprobación", () => {
   });
 });
 
-describe("filtros de la tabla de Curvas", () => {
+describe("lista de agrupaciones (v2): estados, filtros y resumen", () => {
   const sinCurva = agrupacion({ id: "1", nombre: "A SIN CURVA" });
+  const bloqueada = agrupacion({ id: "6", nombre: "A2 BLOQUEADA", bloqueada_por: ["periodos_temporada_faltantes"] });
+  const alDia = agrupacion({ id: "2", nombre: "B AL DIA", estado: "al_dia", vigente: vigente() });
+  const distinta = agrupacion({ id: "3", nombre: "C DISTINTA", temporada: "verano", estado: "al_dia_distinta", vigente: vigente({ modelo: "B", recomendada: false, recomendada_entonces: "A" }) });
   const obsoleta = agrupacion({
-    id: "2",
-    nombre: "B OBSOLETA",
+    id: "4",
+    nombre: "D OBSOLETA",
+    estado: "obsoleta",
     vigente: vigente(),
     obsoleta: { motivos: [{ codigo: "tienda_entra_red", detalle: "la tienda X entra en la red de 2026" }] },
-    propuesta: propuesta({ difiere_de_vigente: true, eat_vs_vigente: 4.1, avisos: [aviso("pocos_anos_normales")] }),
   });
-  const prestada = agrupacion({ id: "3", nombre: "C PRESTADA", temporada: "verano", vigente: vigente({ origen: "prestada", modelo: "T" }), propuesta: propuesta({ origen: "prestada", veredicto_forma: "forma_cambia" }) });
-  const inactiva = agrupacion({ id: "4", nombre: "0 INACTIVA", activo: false, vigente: vigente() });
-  const todas = [inactiva, prestada, obsoleta, sinCurva];
+  const inactiva = agrupacion({ id: "5", nombre: "0 INACTIVA", activo: false, estado: "inactiva_con_curva", vigente: vigente() });
+  const todas = [inactiva, distinta, alDia, obsoleta, bloqueada, sinCurva];
+  const f = (o: Partial<{ temporada: "todas" | "invierno" | "verano" | "todo_el_ano"; estado: "todas" | "sin_curva" | "obsoletas" | "distintas" | "al_dia" | "bloqueadas"; genero: string; busqueda: string }> = {}) =>
+    filtrarAgrupaciones(todas, { temporada: "todas", estado: "todas", genero: "", busqueda: "", ...o }).map((a) => a.id);
 
-  it("cada chip de estado", () => {
+  it("cada chip de estado sale del campo `estado` y de `bloqueada_por`", () => {
     expect(cumpleEstado(sinCurva, "sin_curva")).toBe(true);
-    expect(cumpleEstado(obsoleta, "sin_curva")).toBe(false);
+    expect(cumpleEstado(alDia, "sin_curva")).toBe(false);
+    expect(cumpleEstado(alDia, "al_dia")).toBe(true);
+    expect(cumpleEstado(distinta, "distintas")).toBe(true);
+    expect(cumpleEstado(distinta, "al_dia")).toBe(false);
     expect(cumpleEstado(obsoleta, "obsoletas")).toBe(true);
-    expect(cumpleEstado(obsoleta, "distinta")).toBe(true);
-    expect(cumpleEstado(obsoleta, "con_avisos")).toBe(true);
-    expect(cumpleEstado(prestada, "prestadas")).toBe(true);
-    expect(cumpleEstado(prestada, "forma_cambia")).toBe(true);
-    expect(cumpleEstado(sinCurva, "con_avisos")).toBe(false);
+    expect(cumpleEstado(bloqueada, "bloqueadas")).toBe(true);
+    expect(cumpleEstado(sinCurva, "bloqueadas")).toBe(false);
   });
   it("los conteos solo cuentan agrupaciones activas", () => {
     const c = contarEstados(todas);
-    expect(c.todas).toBe(3);
-    expect(c.sin_curva).toBe(1);
-    expect(c.obsoletas).toBe(1);
-    expect(c.prestadas).toBe(1);
+    expect(c).toEqual({ todas: 5, sin_curva: 2, obsoletas: 1, distintas: 1, al_dia: 1, bloqueadas: 1 });
   });
   it("sin chips: alfabético y las inactivas al final; con chip, solo activas", () => {
-    expect(filtrarAgrupaciones(todas, { temporada: "todas", estado: "todas", genero: "", busqueda: "" }).map((a) => a.id)).toEqual(["1", "2", "3", "4"]);
-    expect(filtrarAgrupaciones(todas, { temporada: "invierno", estado: "todas", genero: "", busqueda: "" }).map((a) => a.id)).toEqual(["1", "2"]);
-    expect(filtrarAgrupaciones(todas, { temporada: "todas", estado: "obsoletas", genero: "", busqueda: "" }).map((a) => a.id)).toEqual(["2"]);
+    expect(f()).toEqual(["1", "6", "2", "3", "4", "5"]);
+    expect(f({ temporada: "invierno" })).toEqual(["1", "6", "2", "4"]);
+    expect(f({ estado: "obsoletas" })).toEqual(["4"]);
+    expect(f({ estado: "bloqueadas" })).toEqual(["6"]);
   });
   it("género y buscador", () => {
-    const m = agrupacion({ id: "5", nombre: "MUJER ALGO", generos: ["MUJER"] });
-    expect(filtrarAgrupaciones([...todas, m], { temporada: "todas", estado: "todas", genero: "MUJER", busqueda: "" }).map((a) => a.id)).toEqual(["5"]);
-    expect(filtrarAgrupaciones(todas, { temporada: "todas", estado: "todas", genero: "", busqueda: "prestada" }).map((a) => a.id)).toEqual(["3"]);
+    const m = agrupacion({ id: "7", nombre: "MUJER ALGO", generos: ["MUJER"] });
+    expect(filtrarAgrupaciones([...todas, m], { temporada: "todas", estado: "todas", genero: "MUJER", busqueda: "" }).map((a) => a.id)).toEqual(["7"]);
+    expect(f({ busqueda: "distinta" })).toEqual(["3"]);
   });
   it("texto de obsolescencia con todos los motivos", () => {
     expect(textoObsoleta(obsoleta.obsoleta)).toBe("Obsoleta: la tienda X entra en la red de 2026");
     expect(textoObsoleta(null)).toBeNull();
     expect(textoObsoleta({ motivos: [] })).toBeNull();
   });
-  it("resumen de la cabecera", () => {
-    expect(textoResumen({ agrupaciones_activas: 15, con_curva_vigente: 12, sin_curva_con_venta: 3, obsoletas: 2, sin_revisar_toda_temporada: 10 })).toBe(
-      "15 agrupaciones activas · 12 con curva vigente · 3 sin curva con venta · 2 obsoletas · 10 siguen en Toda temporada"
+  it("resumen de la cabecera con bloqueadas y calculables", () => {
+    const r = { agrupaciones_activas: 15, por_temporada: { invierno: 4, verano: 1, todo_el_ano: 10 }, sin_revisar_toda_temporada: 10, con_curva_vigente: 6, al_dia: 3, al_dia_distintas: 1, obsoletas: 2, sin_curva: 9, bloqueadas: 5, bloqueadas_sin_curva: 5, calculables_sin_curva: 4, vigentes_prestadas: 0, inactivas_con_curva: 0, equivalencias_sin_agrupacion: 0 };
+    expect(textoResumen(r)).toBe(
+      "15 agrupaciones activas · 3 con curva al día · 1 aprobada distinta de la recomendada · 2 obsoletas · 9 sin curva (5 bloqueadas, 4 calculables) · 10 siguen en Toda temporada (revísalas)"
     );
-    expect(textoResumen({ agrupaciones_activas: 1, con_curva_vigente: 1, sin_curva_con_venta: 0, obsoletas: 1, sin_revisar_toda_temporada: 1 })).toBe(
-      "1 agrupación activa · 1 con curva vigente · 0 sin curva con venta · 1 obsoleta · 1 sigue en Toda temporada"
+    expect(textoResumen({ ...r, agrupaciones_activas: 1, al_dia: 1, al_dia_distintas: 0, obsoletas: 1, sin_curva: 0, bloqueadas_sin_curva: 0, calculables_sin_curva: 0, sin_revisar_toda_temporada: 0, inactivas_con_curva: 2 })).toBe(
+      "1 agrupación activa · 1 con curva al día · 0 aprobadas distintas de la recomendada · 1 obsoleta · 0 sin curva · 2 inactivas con curva · 0 siguen en Toda temporada"
     );
+  });
+  it("bloqueos legibles por código", () => {
+    expect(textoBloqueo("periodos_temporada_faltantes", "invierno")).toBe("Bloqueada: sin periodos para invierno");
+    expect(textoBloqueo("periodos_temporada_faltantes", "todo_el_ano")).toBe("Bloqueada: sin periodos para toda temporada");
+    expect(textoBloqueo("composicion_vacia", "verano")).toContain("sin equivalencias");
+    expect(textoBloqueo("tienda_sin_apertura", "verano")).toContain("fecha de apertura");
+  });
+  it("«Sistema hoy» sin calcular: = (A) al día, A (vs B) distinta, comparar si obsoleta o sin curva calculable, nada si bloqueada o inactiva", () => {
+    expect(sistemaHoy(alDia)).toEqual({ tipo: "igual", texto: "= (A)" });
+    expect(sistemaHoy(distinta)).toEqual({ tipo: "distinta", texto: "A (vs B)" });
+    expect(sistemaHoy(obsoleta)).toEqual({ tipo: "comparar" });
+    expect(sistemaHoy(sinCurva)).toEqual({ tipo: "comparar" });
+    expect(sistemaHoy(bloqueada)).toEqual({ tipo: "ninguno" });
+    expect(sistemaHoy(inactiva)).toEqual({ tipo: "ninguno" });
   });
 });
 
-describe("vista previa de los datos", () => {
-  it("45 meses: tres años completos y 2026 parcial", () => {
-    const t = vistaPreviaDatos({ desde: "2023-01", hasta: "2026-09", meses_publicados: 45, faltantes: [] }, 4, { invierno: 4, verano: 1, todo_el_ano: 10 });
-    expect(t).toBe("45 meses, 2023-01 a 2026-09; 2023, 2024 y 2025 completos; 2026 parcial (9); 4 periodos activos; 4 de invierno, 1 de verano, 10 de toda temporada");
+describe("Comparar con el sistema (por fila)", () => {
+  const prerreq = { bloquea: [], avisa: [] };
+  const resultado = {
+    recomendada: "A",
+    candidatas: [
+      { modelo: "A", curva: PLANA, eat: 29.1 },
+      { modelo: "T", curva: null, eat: null },
+    ],
+  };
+  const t = (extra: Partial<Pick<TrabajoAgrupacionApi, "prerrequisitos" | "calculo" | "comparador">>) =>
+    ({ prerrequisitos: prerreq, calculo: { resultado, temporada_curva: { curva_T: PLANA } }, comparador: null, ...extra }) as unknown as Pick<TrabajoAgrupacionApi, "prerrequisitos" | "calculo" | "comparador">;
+
+  it("bloqueada por prerrequisitos: dice cuál", () => {
+    const r = resumirComparacion(t({ calculo: null, prerrequisitos: { bloquea: [{ codigo: "periodos_temporada_faltantes", nivel: "bloquea", detalle: "No hay periodos atípicos para invierno.", enlace: null }], avisa: [] } }));
+    expect(r).toEqual({ tipo: "bloqueada", detalle: "No hay periodos atípicos para invierno." });
+    expect(textoComparacionFila(r)).toBe("No se puede calcular: No hay periodos atípicos para invierno.");
   });
-  it("un mes faltante deja el año como parcial; sin datos lo dice", () => {
-    const t = vistaPreviaDatos({ desde: "2024-01", hasta: "2025-12", meses_publicados: 23, faltantes: ["2024-05"] }, 1, { invierno: 0, verano: 0, todo_el_ano: 1 });
-    expect(t).toContain("2025 completo");
-    expect(t).toContain("2024 parcial (11)");
-    expect(t).toContain("1 periodo activo");
-    expect(vistaPreviaDatos({ desde: null, hasta: null, meses_publicados: 0, faltantes: [] }, 0, { invierno: 0, verano: 0, todo_el_ano: 0 })).toContain("Todavía no hay meses");
+  it("sin vigente: la candidata recomendada y su curva", () => {
+    const r = resumirComparacion(t({}));
+    expect(r).toEqual({ tipo: "sin_vigente", modelo: "A", eat: 29.1, curva: PLANA });
+    expect(textoComparacionFila(r)).toBe("A · sin vigente con la que comparar");
+  });
+  it("con vigente: diferencia en pp, igualdad y comparabilidad", () => {
+    const comp = { modelo: "A", propuesta: PLANA, vigente: PLANA, eat_vs_vigente: 4.1, diferencia_por_mes: [], mes_mayor_cambio: 1, difiere: true, comparable_con_vigente: true };
+    const r = resumirComparacion(t({ comparador: comp as TrabajoAgrupacionApi["comparador"] }));
+    expect(textoComparacionFila(r)).toBe("A · difiere 4.1 pp de la vigente");
+    expect(textoComparacionFila(resumirComparacion(t({ comparador: { ...comp, comparable_con_vigente: false } as TrabajoAgrupacionApi["comparador"] })))).toContain("EAT no comparable");
+    expect(textoComparacionFila(resumirComparacion(t({ comparador: { ...comp, eat_vs_vigente: 0, difiere: false } as TrabajoAgrupacionApi["comparador"] })))).toBe("A · igual a la vigente");
+  });
+  it("sin candidata recomendada: sin curva posible", () => {
+    const r = resumirComparacion(t({ calculo: { resultado: { ...resultado, recomendada: null } } as unknown as TrabajoAgrupacionApi["calculo"] }));
+    expect(r.tipo).toBe("sin_candidata");
+  });
+});
+
+describe("lo que propone el sistema", () => {
+  const frase = "B se equivoca 27.4 pp frente a 29.1 de A en 3 pruebas; la diferencia (1.7) no llega al margen (8.3 = 25.0 % del ruido entre años normales, 33.0): se recomienda A.";
+  const anios = [
+    anio(2023, { clase: "atipico_completo", tratamiento: "incluido", meses_atipicos: 12 }),
+    anio(2024),
+    anio(2025),
+    anio(2026, { clase: "en_curso", en_ajuste: false }),
+  ];
+  const r = (extra: Partial<AgrupacionResultado> = {}) =>
+    ({ recomendada: "A", anios, comparacion: { frase }, origen: "propia", ruido_normal: 33, ruido_normal_detalle: [{ anios: [2024, 2025], eat: 33 }], ...extra }) as unknown as AgrupacionResultado;
+
+  it("la frase: propone, con qué años, qué pasa con el del Niño y por qué no otra", () => {
+    const t = textoPropone(r());
+    expect(t.startsWith("Propone A · Promedio simple de 2023, 2024 y 2025 (2023, año del Niño, entra incluido).")).toBe(true);
+    expect(t).toContain(frase);
+    expect(t).not.toMatch(/\d\.\d{3}/);
+  });
+  it("nombra los años que quedaron fuera por tratamiento o por exclusión manual", () => {
+    const t = textoPropone(r({ anios: [anio(2023, { clase: "atipico_completo", tratamiento: "descartado", tratamiento_motivo: "excluido_manual", en_ajuste: false }), anio(2024), anio(2025)], comparacion: null }));
+    expect(t).toBe("Propone A · Promedio simple de 2024 y 2025. Fuera del ajuste: 2023 (excluido a mano).");
+  });
+  it("prestada (T) y sin curva posible", () => {
+    expect(textoPropone(r({ recomendada: "T", comparacion: null }))).toContain("Curva de la temporada (prestada)");
+    expect(textoPropone(r({ recomendada: null, comparacion: null }))).toContain("no puede proponer una curva");
+  });
+  it("el ruido entre años normales se muestra siempre: con los pares, o «no medible»", () => {
+    expect(textoRuido(r())).toBe("Ruido entre años normales: 33.0 pp (2024 frente a 2025: 33.0 pp). Se muestra aunque no haya Niño.");
+    expect(textoRuido(r({ ruido_normal: null, ruido_normal_detalle: [] }))).toContain("no medible");
+  });
+  it("EAT no comparable: dice con qué años ajustó la vigente y con cuáles hoy", () => {
+    expect(textoNoComparable(false, [2025, 2024], [2023, 2024, 2025])).toBe("EAT no comparable con el cálculo anterior (la vigente usó 2024 y 2025; hoy 2023, 2024 y 2025).");
+    expect(textoNoComparable(true, [2024], [2024])).toBeNull();
+    expect(textoNoComparable(null, null, [2024])).toBeNull();
+    expect(textoNoComparable(undefined, null, [2024])).toBeNull();
+    expect(textoNoComparable(false, null, [])).toContain("otros años");
+  });
+  it("etiquetas de la propuesta y de la aprobada", () => {
+    expect(etiquetaPropuesta("A")).toBe("Propuesta A · Promedio simple");
+    expect(etiquetaAprobada(2, "A")).toBe("Aprobada v2 (A)");
+  });
+  it("la agrupación y la candidata de la URL se validan", () => {
+    expect(esIdAgrupacion("0b8b6f0e-1c2d-4e3f-8a9b-0c1d2e3f4a5b")).toBe(true);
+    expect(esIdAgrupacion("abc")).toBe(false);
+    expect(esIdAgrupacion(null)).toBe(false);
+    expect(esModeloCurva("T")).toBe(true);
+    expect(esModeloCurva("F")).toBe(false);
+    expect(esModeloCurva(null)).toBe(false);
+  });
+});
+
+describe("EAT siempre con el ruido al lado (lista y Versiones)", () => {
+  it("con ruido, no medible, sin dato y sin EAT", () => {
+    expect(textoEatConRuido(29.14, 33)).toBe("EAT 29.1 · ruido 33.0");
+    expect(textoEatConRuido(0, 33)).toBe("EAT 0.0 · ruido 33.0");
+    expect(textoEatConRuido(29.1, null)).toBe("EAT 29.1 · ruido no medible");
+    expect(textoEatConRuido(29.1, undefined)).toBe("EAT 29.1 · ruido sin dato");
+    expect(textoEatConRuido(null, 33)).toBeNull();
+  });
+});
+
+describe("tabla año × mes: promedio, índice, años considerados y años sin datos", () => {
+  it("promedio y años considerados cuentan solo los años del ajuste; el índice es 1.00 en el mes promedio", () => {
+    const a = anio(2024, { meses: [100, 200, ...Array(10).fill(100)] });
+    const b = anio(2025, { meses: [300, 200, ...Array(10).fill(100)] });
+    const fuera = anio(2023, { en_ajuste: false, meses: Array(12).fill(9999) });
+    const r = resumenMensual([a, b, fuera]);
+    expect(r.considerados).toEqual(Array(12).fill(2));
+    expect(r.promedio[0]).toBe(200);
+    expect(r.promedio[1]).toBe(200);
+    expect(r.promedio[2]).toBe(100);
+    // promedio de los doce promedios: (200 + 200 + 10 × 100) / 12 = 116.67
+    expect(r.indice[0]).toBeCloseTo(200 / (1400 / 12), 9);
+    expect(r.indice[2]).toBeLessThan(1);
+    expect(r.indice.reduce<number>((s, v) => s + (v ?? 0), 0)).toBeCloseTo(12, 9);
+  });
+  it("sin años de ajuste (curva prestada) todo es «—» (null)", () => {
+    const r = resumenMensual([anio(2024, { en_ajuste: false })]);
+    expect(r.promedio.every((p) => p === null)).toBe(true);
+    expect(r.indice.every((p) => p === null)).toBe(true);
+    expect(r.considerados.every((n) => n === 0)).toBe(true);
+  });
+  it("un año del ajuste con meses sin cargar no aporta a los meses que le faltan", () => {
+    const r = resumenMensual([anio(2024), anio(2025, { clase: "normal", meses_cargados: 6 })]);
+    expect(r.considerados.slice(0, 6)).toEqual(Array(6).fill(2));
+    expect(r.considerados.slice(6)).toEqual(Array(6).fill(1));
+  });
+  it("motivo de un año sin curva: sin red, meses sin cargar (con la lista), sin volumen; con curva, null", () => {
+    const vacio = { participacion: null, participacion_real: null, participacion_parcial: null };
+    expect(motivoAnioSinDatos(anio(2024), { sinRed: false, faltantes: [] })).toBeNull();
+    expect(motivoAnioSinDatos(anio(2022, vacio), { sinRed: true, faltantes: [] })).toBe("sin red comparable");
+    expect(motivoAnioSinDatos(anio(2024, { ...vacio, clase: "incompleto", meses_cargados: 7 }), { sinRed: false, faltantes: ["2024-05", "2025-02"] })).toBe("meses sin cargar: 2024-05");
+    expect(motivoAnioSinDatos(anio(2024, { ...vacio, unidades: 0 }), { sinRed: false, faltantes: [] })).toBe("sin volumen en la red");
   });
 });
 
@@ -271,37 +434,6 @@ describe("efecto del Niño: lecturas", () => {
     expect(textoVeredictoForma({ veredicto: "forma_estable", diferencia: 2, ruido: null, umbralEfectivo: 3 })).toContain("manda el piso de 3.0 pp");
     expect(textoVeredictoForma({ veredicto: "sin_comparacion", diferencia: null, ruido: null, umbralEfectivo: 3 })).toContain("Sin año normal");
   });
-
-  it("filas de forma: una por agrupación y año, con filtros", () => {
-    const forma = (veredicto: "forma_estable" | "forma_cambia") => ({
-      ruido_normal: 33 as number | null,
-      umbral_efectivo: 33,
-      por_anio: [
-        { anio: 2023, parcial: false as const, diferencia_anio: veredicto === "forma_cambia" ? 48 : 31, pico: 6, pico_referencia: 6, corrimiento_pico: 0, mes_mayor_diferencia: 4, veredicto, tratamiento_aplicado: "incluido" as const },
-        { anio: 2026, parcial: true as const, meses_comparados: 9, red_completa: { diferencia_anio: 12.1, pico: 7 }, tiendas_comunes: { diferencia_anio: 9.4, pico: 7, tiendas: 9 }, veredicto: null, tratamiento_aplicado: null },
-      ],
-    });
-    const filas = filasForma(
-      [
-        { id: "b", nombre: "B", temporada: "invierno", efecto_atipico: { forma: forma("forma_cambia") } },
-        { id: "a", nombre: "A", temporada: "invierno", efecto_atipico: { forma: forma("forma_estable") } },
-        { id: "c", nombre: "C", temporada: "todo_el_ano", efecto_atipico: { forma: null } },
-      ],
-      [
-        { anio: 2023, clase_por_temporada: { invierno: "atipico_completo", verano: "con_huecos", todo_el_ano: "normal" } },
-        { anio: 2026, clase_por_temporada: { invierno: "en_curso", verano: "en_curso", todo_el_ano: "en_curso" } },
-      ]
-    );
-    expect(filas.map((f) => f.clave)).toEqual(["a-2023", "a-2026", "b-2023", "b-2026"]);
-    expect(filas[0].clase).toBe("atipico_completo");
-    expect(filas[1].parcial).toBe(true);
-    expect(filas[1].parcialRed).toBe(12.1);
-    expect(filas[1].parcialComunes).toBe(9.4);
-    expect(filtrarFilasForma(filas, "todas", "forma_cambia").map((f) => f.agrupacion)).toEqual(["B"]);
-    expect(filtrarFilasForma(filas, "todas", "parcial")).toHaveLength(2);
-    expect(filtrarFilasForma(filas, "verano", "todos")).toHaveLength(0);
-    expect(filtrarFilasForma(filas, "invierno", "todos")).toHaveLength(4);
-  });
 });
 
 describe("referencia de forma y celdas año × mes", () => {
@@ -331,13 +463,27 @@ describe("referencia de forma y celdas año × mes", () => {
 
   it("CSV año × mes: 12 filas, dos columnas por año y diferencia", () => {
     const { campos, datos } = filasCsvAnioMes([anio(2025), anio(2024)], PLANA, curvaConPico(1, 0.1));
-    expect(campos).toEqual(["MES", "2024 (%)", "2024 (unidades)", "2025 (%)", "2025 (unidades)", "PROPUESTA (%)", "VIGENTE (%)", "DIFERENCIA (pp)"]);
+    expect(campos).toEqual([
+      "MES",
+      "2024 (%)",
+      "2024 (unidades)",
+      "2025 (%)",
+      "2025 (unidades)",
+      "PROPUESTA (%)",
+      "APROBADA (%)",
+      "DIFERENCIA (pp)",
+      "PROMEDIO (unidades)",
+      "INDICE (1.00 = promedio)",
+      "ANIOS CONSIDERADOS",
+    ]);
     expect(datos).toHaveLength(12);
     expect(datos[0][0]).toBe("Ene");
     expect(datos[0][1]).toBe(8.3);
     expect(datos[0][2]).toBe(100);
     expect(datos[0]).toHaveLength(campos.length);
-    expect(filasCsvAnioMes([anio(2024)], null, null).datos[0].slice(-3)).toEqual(["", "", ""]);
+    expect(filasCsvAnioMes([anio(2024)], null, null).datos[0].slice(-6, -3)).toEqual(["", "", ""]);
+    // promedio, índice (1.00 si todos los meses valen igual) y años considerados de enero
+    expect(datos[0].slice(-3)).toEqual([100, 1, 2]);
   });
 });
 

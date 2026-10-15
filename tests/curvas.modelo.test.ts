@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { listarMeses } from "@/lib/ventas/periodo";
-import { banda, estabilidad, formatearPuntos, nivelEstabilidad, recomendar, redondearJson } from "@/lib/curvas/modelo";
+import { formatearPuntos } from "@/lib/formato";
+import { banda, estabilidad, nivelEstabilidad, recomendar, redondearJson } from "@/lib/curvas/modelo";
 import { eat } from "@/lib/curvas/backtesting";
 import type { CodigoAviso } from "@/lib/curvas/tipos-api";
 import {
@@ -423,7 +424,8 @@ describe("caso 8 · pocos años", () => {
       expect(a.recomendada).toBeNull();
       expect(a.origen).toBeNull();
       expect(aviso(a, "sin_anos_utilizables")).toHaveLength(1);
-      expect(s.resumen.sin_venta).toBeGreaterThan(0);
+      // Hay venta (2023): no es `sin_venta` (regla 50); lo que falta es curva posible.
+      expect(s.resumen.sin_venta).toBe(0);
     }
   });
   it("con auto → sin_comparacion, 2023 incluido, pero un solo año de ajuste → prestada igualmente (pocos_anos_ajuste)", () => {
@@ -518,10 +520,10 @@ describe("regla 23 · identidad del resumen", () => {
     expect(texto.match(/\d+\.\d{7,}/g)).toBeNull();
     expect(redondearJson({ a: 1.23456789, b: [0.1234567891] })).toEqual({ a: 1.234568, b: [0.123457] });
   });
-  it("formatearPuntos: coma decimal y sin ,0", () => {
-    expect(formatearPuntos(33)).toBe("33");
-    expect(formatearPuntos(27.43)).toBe("27,4");
-    expect(formatearPuntos(8.25)).toBe("8,3");
+  it("formatearPuntos: formato es-PE de la pantalla (decimal con punto, un decimal)", () => {
+    expect(formatearPuntos(33)).toBe("33.0");
+    expect(formatearPuntos(27.43)).toBe("27.4");
+    expect(formatearPuntos(8.25)).toBe("8.3");
   });
   it("los pesos y la EAT entre curvas usan puntos (eat de curvas iguales = 0)", () => {
     expect(eat([0.5, 0.5], [0.5, 0.5])).toBe(0);

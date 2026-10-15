@@ -1,30 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { leerAgregado } from "@/lib/curvas/agregado";
+import { leerVentaEstacionalidad } from "@/lib/curvas/agregado";
 import { armarEntradaCorrida, unidadesSinAgrupacion, ventaPorTienda } from "@/lib/curvas/entrada";
 import { datosFixture, filasFixture, parametros, T1 } from "./curvas.fixture";
 
-describe("leerAgregado", () => {
+describe("leerVentaEstacionalidad", () => {
   const ok = {
-    refresco: { filas: 85385, duracion_ms: 2300, refrescada_at: "2026-10-14T10:00:00Z" },
-    filas: [
-      { agrupacion_id: "a1", tienda_id: "t1", periodo: "2024-03-01", unidades: 10, venta_soles: "1500.50", costo_vendido: 700 },
-      { agrupacion_id: null, tienda_id: "t1", periodo: "2024-03-01", unidades: "7", venta_soles: 700, costo_vendido: null },
+    agrupacion: [
+      { tienda_id: "t1", periodo: "2024-03-01", unidades: 10, venta_soles: "1500.50", costo_vendido: 700 },
+      { tienda_id: "t2", periodo: "2024-04-01", unidades: "7", venta_soles: 700, costo_vendido: null },
     ],
+    temporadas: [
+      { temporada: "invierno", tienda_id: "t1", periodo: "2024-03-01", unidades: 12030 },
+      { temporada: "sin_agrupacion", tienda_id: "t1", periodo: "2024-03-01", unidades: "7" },
+    ],
+    meses_publicados: ["2024-03-01", "2024-04-01"],
+    cargas: { "2024-04-01": "c2", "2024-03-01": "c1" },
   };
-  it("normaliza periodos (aaaa-mm), números como texto y la agrupación nula", () => {
-    const r = leerAgregado(ok)!;
-    expect(r.refresco).toEqual({ filas: 85385, duracion_ms: 2300, refrescada_at: "2026-10-14T10:00:00Z" });
-    expect(r.filas[0]).toEqual({ agrupacion_id: "a1", tienda_id: "t1", periodo: "2024-03", unidades: 10, venta_soles: 1500.5, costo_vendido: 700 });
-    expect(r.filas[1]).toMatchObject({ agrupacion_id: null, unidades: 7, costo_vendido: 0 });
+  it("normaliza periodos (aaaa-mm), números como texto y las cargas; meses_publicados sale de las llaves de cargas, ordenadas", () => {
+    const r = leerVentaEstacionalidad(ok)!;
+    expect(r.agrupacion![0]).toEqual({ tienda_id: "t1", periodo: "2024-03", unidades: 10, venta_soles: 1500.5, costo_vendido: 700 });
+    expect(r.agrupacion![1]).toMatchObject({ unidades: 7, costo_vendido: 0 });
+    expect(r.temporadas[1]).toEqual({ temporada: "sin_agrupacion", tienda_id: "t1", periodo: "2024-03", unidades: 7 });
+    expect(r.cargas).toEqual({ "2024-03": "c1", "2024-04": "c2" });
+    expect(r.meses_publicados).toEqual(["2024-03", "2024-04"]);
   });
-  it("devuelve null si la forma no es la esperada", () => {
-    expect(leerAgregado(null)).toBeNull();
-    expect(leerAgregado({ refresco: {} })).toBeNull();
-    expect(leerAgregado({ filas: [{ tienda_id: 1, periodo: "2024-03-01" }] })).toBeNull();
-    expect(leerAgregado({ filas: [{ tienda_id: "t", periodo: "2024-03-01", unidades: "abc" }] })).toBeNull();
+  it("agrupacion nula (Años Niño) se conserva como null", () => {
+    expect(leerVentaEstacionalidad({ ...ok, agrupacion: null })!.agrupacion).toBeNull();
   });
-  it("sin refresco usa valores neutros", () => {
-    expect(leerAgregado({ filas: [] })).toEqual({ refresco: { filas: 0, duracion_ms: 0, refrescada_at: null }, filas: [] });
+  it("devuelve null si la forma no es la esperada (incluida la falta de cargas)", () => {
+    expect(leerVentaEstacionalidad(null)).toBeNull();
+    expect(leerVentaEstacionalidad({ ...ok, temporadas: undefined })).toBeNull();
+    const { cargas: _c, ...sinCargas } = ok;
+    void _c;
+    expect(leerVentaEstacionalidad(sinCargas)).toBeNull();
+    expect(leerVentaEstacionalidad({ ...ok, cargas: { "2024-03-01": 5 } })).toBeNull();
+    expect(leerVentaEstacionalidad({ ...ok, agrupacion: [{ tienda_id: 1, periodo: "2024-03-01" }] })).toBeNull();
+    expect(leerVentaEstacionalidad({ ...ok, temporadas: [{ temporada: "otoño", tienda_id: "t", periodo: "2024-03-01", unidades: 1 }] })).toBeNull();
+    expect(leerVentaEstacionalidad({ ...ok, temporadas: [{ temporada: "invierno", tienda_id: "t", periodo: "2024-03-01", unidades: "abc" }] })).toBeNull();
   });
 });
 

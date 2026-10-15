@@ -1,9 +1,10 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useId, useState } from "react";
+import { formatearDecimal } from "@/lib/formato";
 import { MODELOS, type AgrupacionResultado, type CandidataApi, type ModeloCurva } from "@/lib/curvas/tipos-api";
 import { Badge } from "@/components/ui/badge";
-import { formatearPp, ETIQUETA_MOTIVO_RECOMENDACION } from "./vista";
+import { formatearPp, ETIQUETA_MOTIVO_RECOMENDACION, textoPropone, textoRuido } from "./vista";
 
 const MOTIVO_NO_DISPONIBLE: Record<string, string> = {
   sin_tiendas_validas: "ninguna tienda de la red tiene unidades suficientes en la agrupación",
@@ -12,21 +13,26 @@ const MOTIVO_NO_DISPONIBLE: Record<string, string> = {
 };
 
 /**
- * Tabla de candidatas `A`…`E` y `T`: nombre y descripción, EAT con su número de
- * pliegues (desplegable por pliegue), error máximo, EAT parcial, badges
- * Recomendada / Igual a A / No disponible, y un radio para dibujar la candidata
- * en el gráfico. La aprobación no está aquí: la barra de abajo aprueba la
- * seleccionada.
+ * «Lo que propone el sistema»: la frase de recomendación y la tabla de candidatas `A`…`E`
+ * y `T` con su EAT, el número de pruebas (desplegable por pliegue) y el ruido entre años
+ * normales SIEMPRE junto al EAT, error máximo, EAT parcial, badges Recomendada / Igual a A /
+ * No disponible, y un radio para dibujar la candidata en el gráfico y en la tabla. La
+ * aprobación no está aquí: el bloque «Aprobada frente a propuesta» aprueba la seleccionada.
  */
 export function CandidatasTabla({
   resultado,
   seleccionada,
   onSeleccionar,
+  avisoNoComparable = null,
 }: {
   resultado: AgrupacionResultado;
   seleccionada: ModeloCurva | null;
   onSeleccionar: (m: ModeloCurva) => void;
+  /** «EAT no comparable con el cálculo anterior (…)» cuando los años de ajuste no son los de la vigente. */
+  avisoNoComparable?: string | null;
 }) {
+  const grupo = useId();
+  const ruido = resultado.ruido_normal;
   const [abiertas, setAbiertas] = useState<ReadonlySet<ModeloCurva>>(new Set());
   const alternar = (m: ModeloCurva) =>
     setAbiertas((prev) => {
@@ -40,12 +46,10 @@ export function CandidatasTabla({
 
   return (
     <div className="space-y-3">
-      {resultado.comparacion && (
-        <p className="rounded-md border border-marca/30 bg-marca-suave px-3 py-2 text-sm text-marca-oscura">{resultado.comparacion.frase}</p>
-      )}
-      {resultado.origen === "prestada" && (
-        <p className="rounded-md border border-alerta/30 bg-alerta-suave px-3 py-2 text-sm text-alerta">
-          Sin años suficientes para una curva propia: la agrupación usa la curva de su temporada (T).
+      <p className="rounded-md border border-marca/30 bg-marca-suave px-3 py-2 text-sm text-marca-oscura">{textoPropone(resultado)}</p>
+      {avisoNoComparable && (
+        <p role="note" className="rounded-md border border-alerta/30 bg-alerta-suave px-3 py-2 text-sm text-alerta">
+          {avisoNoComparable}
         </p>
       )}
       <div className="overflow-x-auto rounded-lg border border-borde">
@@ -85,7 +89,7 @@ export function CandidatasTabla({
                     <td className="px-3 py-2">
                       <input
                         type="radio"
-                        name="candidata"
+                        name={grupo}
                         value={d.codigo}
                         checked={esSel}
                         disabled={!disponible}
@@ -105,7 +109,7 @@ export function CandidatasTabla({
                         <div>
                           <span className="font-medium">{formatearPp(c.eat)}</span>
                           <span className="block text-xs text-tinta-suave">
-                            {c.pliegues} {c.pliegues === 1 ? "prueba" : "pruebas"}
+                            {c.pruebas} {c.pruebas === 1 ? "prueba" : "pruebas"} · {ruido === null ? "ruido no medible" : `ruido ${formatearPp(ruido)}`}
                           </span>
                           {c.eat_por_pliegue.length > 0 && (
                             <button
@@ -162,9 +166,10 @@ export function CandidatasTabla({
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-tinta-suave">{textoRuido(resultado)}</p>
       {resultado.margen !== null && (
         <p className="text-xs text-tinta-suave">
-          Para apartarse del promedio simple (A), otra candidata debe mejorarlo en más de {formatearPp(resultado.margen)} (el margen sale del ruido entre años normales y del parámetro «margen sobre el ruido» de la corrida).
+          Para apartarse del promedio simple (A), otra candidata debe mejorarlo en más de {formatearPp(resultado.margen)} (el margen es {formatearDecimal(resultado.comparacion?.margen_ruido ?? 0.25, 2)} × el ruido entre años normales, con un mínimo).
         </p>
       )}
     </div>

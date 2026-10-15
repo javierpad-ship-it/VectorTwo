@@ -2,48 +2,29 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { descargarCsv } from "@/components/importador/csv";
+import { formatearNumero } from "@/lib/formato";
 import { MESES_CORTOS } from "@/lib/reportes/histograma";
-import type { AniosAtipicosNinoApi, EfectoTemporadaAnio, TemporadaAgrupacion } from "@/lib/curvas/tipos-api";
+import type { AniosAtipicosNinoApi, EfectoTemporadaAnio } from "@/lib/curvas/tipos-api";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Chips, type ChipItem } from "@/components/ui/chips";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Field, Input } from "@/components/ui/form";
-import { AniosAtipicosCard } from "./anios-atipicos-card";
-import type { FormularioParametros } from "./parametros-form";
-import { useAniosAtipicosPorTemporada } from "./use-anios-atipicos";
+import { BadgeTemporada } from "@/components/estacionalidad/temporada";
 import { useRecurso } from "./use-recurso";
 import {
   ETIQUETA_AVISO,
-  ETIQUETA_CLASE,
-  ETIQUETA_TRATAMIENTO,
-  ETIQUETA_VEREDICTO,
-  claseColorAnio,
   etiquetaTemporadaORed,
   filasCsvFactoresM7,
-  filasForma,
   filasVolumen,
-  filtrarFilasForma,
   formatearFechaHora,
-  formatearPp,
   formatearRatio,
   lecturaVolumen,
-  mesPico,
   rangoPrimerosMeses,
-  textoCorrimiento,
   type FiltroTemporada,
-  type FiltroVeredicto,
 } from "./vista";
 
 const CODIGOS_NINO = new Set(["pocos_anos_normales", "sin_referencia_volumen", "ano_atipico_completo"]);
-
-/** La tarjeta «Años marcados como atípicos» por temporada (sin corrida solo hay periodos, no ratios). */
-function AniosMarcados() {
-  const anios = useAniosAtipicosPorTemporada();
-  return <AniosAtipicosCard porTemporada={anios.filas} />;
-}
 
 function Celda({ v, decimales = 2 }: { v: number | null; decimales?: number }) {
   return <span className="tabular-nums">{v === null ? <span className="text-tinta-suave">—</span> : formatearRatio(v, decimales)}</span>;
@@ -101,7 +82,7 @@ function BloqueVolumen({ filas }: { filas: EfectoTemporadaAnio[] }) {
                     <td className="px-3 py-2 text-right font-semibold"><Celda v={f.ratio_relativo} /></td>
                     <td className="px-3 py-2 text-right"><Celda v={f.crecimiento_normal} /></td>
                     <td className="px-3 py-2 text-right text-xs tabular-nums text-tinta-suave">
-                      {Math.round(f.unidades).toLocaleString("es-PE")} / {Math.round(f.unidades_referencia).toLocaleString("es-PE")}
+                      {formatearNumero(Math.round(f.unidades))} / {formatearNumero(Math.round(f.unidades_referencia))}
                     </td>
                     <td className="px-3 py-2 text-xs text-tinta-suave">
                       {textoComparacion(f)}
@@ -158,136 +139,47 @@ function BloqueVolumen({ filas }: { filas: EfectoTemporadaAnio[] }) {
   );
 }
 
-const FILTROS_VEREDICTO: { id: FiltroVeredicto; label: string }[] = [
-  { id: "todos", label: "Todos" },
-  { id: "forma_estable", label: "Estable" },
-  { id: "forma_cambia", label: "Cambia" },
-  { id: "sin_comparacion", label: "Sin comparación" },
-  { id: "parcial", label: "Año en curso" },
-];
-
+/**
+ * «Forma» no se mide aquí: la forma de cada año atípico frente al ruido entre años normales sale del cálculo de
+ * cada agrupación, así que este bloque lista las agrupaciones de la temporada y «Ver» abre su vista de trabajo.
+ */
 function BloqueForma({ datos, temporada, onVer }: { datos: AniosAtipicosNinoApi; temporada: FiltroTemporada; onVer: (id: string) => void }) {
-  const [veredicto, setVeredicto] = useState<FiltroVeredicto>("todos");
-  const todas = useMemo(() => filasForma(datos.agrupaciones, datos.anios), [datos.agrupaciones, datos.anios]);
-  const filas = useMemo(() => filtrarFilasForma(todas, temporada, veredicto), [todas, temporada, veredicto]);
-  const conteos = datos.efecto?.forma ?? {};
-  const itemsVeredicto: ChipItem<FiltroVeredicto>[] = FILTROS_VEREDICTO.map((f) => ({
-    id: f.id,
-    label: f.label,
-    conteo: filtrarFilasForma(todas, temporada, f.id).length,
-  }));
-
+  const lista = datos.agrupaciones.filter((a) => temporada === "todas" || a.temporada === temporada).sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
   return (
     <div className="space-y-3">
-      <ul className="flex flex-wrap gap-x-6 gap-y-1 text-sm" aria-label="Conteo de formas por temporada">
-        {(["invierno", "verano"] as TemporadaAgrupacion[]).map((t) => {
-          const c = conteos[t];
-          if (!c) return null;
-          return (
-            <li key={t} className="text-tinta-suave">
-              <strong className="text-tinta">{etiquetaTemporadaORed(t)}:</strong> {c.forma_estable} estables · {c.forma_cambia} cambian · {c.sin_comparacion} sin comparación
-              {c.ruido_normal.length > 0 && <> · ruido entre años normales {c.ruido_normal.map((r) => Math.round(r)).join(", ")} pp</>}
-            </li>
-          );
-        })}
-      </ul>
-      <Chips<FiltroVeredicto> items={itemsVeredicto} activo={veredicto} onCambiar={setVeredicto} etiqueta="Filtrar por veredicto de forma" />
-      {filas.length === 0 ? (
-        <p className="text-sm text-tinta-suave">Ninguna fila coincide con los filtros.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-borde">
-          <table className="w-full text-sm">
-            <caption className="sr-only">Forma de cada año atípico por agrupación frente a la referencia de los años normales.</caption>
-            <thead className="bg-neutro-suave text-left text-xs uppercase tracking-wide text-tinta-suave">
-              <tr>
-                <th scope="col" className="px-3 py-2 font-medium">Agrupación</th>
-                <th scope="col" className="px-3 py-2 font-medium">Año</th>
-                <th scope="col" className="px-3 py-2 font-medium">Clase</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">Diferencia</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium" title="EAT entre los años normales">Ruido normal</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium" title="El mayor entre el piso y el ruido">Umbral efectivo</th>
-                <th scope="col" className="px-3 py-2 font-medium">Pico</th>
-                <th scope="col" className="px-3 py-2 font-medium">Veredicto</th>
-                <th scope="col" className="px-3 py-2 font-medium">Tratamiento</th>
-                <th scope="col" className="px-3 py-2 font-medium" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-borde">
-              {filas.map((f) => (
-                <tr key={f.clave} className="hover:bg-fondo/60">
-                  <td className="px-3 py-2">
-                    <span className="font-medium">{f.agrupacion}</span>
-                    <span className="block text-xs text-tinta-suave">{etiquetaTemporadaORed(f.temporada)}</span>
-                  </td>
-                  <td className="px-3 py-2">{f.anio}</td>
-                  <td className={`px-3 py-2 text-xs ${f.clase ? claseColorAnio(f.clase) : ""}`}>{f.clase ? ETIQUETA_CLASE[f.clase] : "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {f.parcial ? (
-                      <span className="text-xs" title="Forma parcial sobre los meses cargados: red completa frente a tiendas comunes con el año de referencia">
-                        red {formatearPp(f.parcialRed)}
-                        <span className="block text-tinta-suave">
-                          comunes {formatearPp(f.parcialComunes)}
-                          {f.parcialTiendas !== null && ` (${f.parcialTiendas})`}
-                        </span>
-                      </span>
-                    ) : (
-                      formatearPp(f.diferencia)
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatearPp(f.ruido)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatearPp(f.umbralEfectivo)}</td>
-                  <td className="px-3 py-2 text-xs text-tinta-suave">
-                    {f.pico !== null ? mesPico(f.pico) : "—"}
-                    {f.corrimiento !== null && <span className="block">{textoCorrimiento(f.corrimiento)}</span>}
-                  </td>
-                  <td className="px-3 py-2">
-                    {f.parcial ? (
-                      <Badge tono="neutro">Parcial (informativa)</Badge>
-                    ) : f.veredicto ? (
-                      <Badge tono={f.veredicto === "forma_cambia" ? "alerta" : f.veredicto === "forma_estable" ? "exito" : "neutro"}>{ETIQUETA_VEREDICTO[f.veredicto]}</Badge>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-xs">{f.tratamiento ? ETIQUETA_TRATAMIENTO[f.tratamiento] : "—"}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Button variante="secundario" tamano="sm" onClick={() => onVer(f.agrupacionId)}>
-                      Ver
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <p className="text-xs text-tinta-suave">
-        «La forma cambia» solo si el año se aparta de la referencia más que lo que se apartan entre sí los años normales (con un piso). Con dos años normales que difieren mucho,
-        casi cualquier año resulta estable respecto al ruido: léelo junto al ruido, no solo con el veredicto.
+      <p className="text-sm text-tinta-suave">
+        La forma (si el año atípico cambió cuándo se vende, medida contra el ruido entre años normales) se calcula agrupación por agrupación: ábrela para ver sus tres cifras (diferencia,
+        ruido entre años normales y umbral) y el veredicto de cada año del Niño.
       </p>
+      {lista.length === 0 ? (
+        <p className="text-sm text-tinta-suave">No hay agrupaciones activas en este filtro.</p>
+      ) : (
+        <ul className="grid gap-2 md:grid-cols-2" aria-label="Agrupaciones para revisar la forma">
+          {lista.map((a) => (
+            <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-borde px-3 py-2 text-sm">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{a.nombre}</span>
+                <BadgeTemporada temporada={a.temporada} />
+              </span>
+              <Button variante="secundario" tamano="sm" onClick={() => onVer(a.id)}>
+                Ver
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
 /**
- * Pestaña Años Niño (versión reducida): lo que el Niño le hizo a cada temporada,
- * medido en volumen (tabla de ratios con control y relativo) y en forma (por
- * agrupación frente al ruido), y «Lo que recibirá M7» (factores por temporada y
- * crecimiento normal, con descarga). Lee `GET /api/curvas/anios-atipicos` de la corrida elegida.
+ * Pestaña Años Niño (vista de apoyo, a demanda): lo que el Niño le hizo a cada temporada, medido en volumen (tabla
+ * de ratios con control y relativo), y «Lo que recibirá M7» (factores por temporada y crecimiento normal, con
+ * descarga). Se calcula al entrar (`GET /api/curvas/anios-atipicos`, sin corrida ni nada guardado) con los
+ * parámetros por defecto, no con los de cada curva aprobada; «Volver a calcular» lo repite con los datos de hoy.
  */
-export function AniosNinoTab({
-  corridaId,
-  formulario,
-  onFormulario,
-  onVer,
-}: {
-  corridaId: string | null;
-  formulario: FormularioParametros;
-  onFormulario: (f: FormularioParametros) => void;
-  onVer: (agrupacionId: string) => void;
-}) {
-  const url = corridaId ? `/api/curvas/anios-atipicos?corrida_id=${corridaId}` : "/api/curvas/anios-atipicos";
-  const { datos, cargando, error, setError } = useRecurso<AniosAtipicosNinoApi>(url);
+export function AniosNinoTab({ onVer }: { onVer: (agrupacionId: string) => void }) {
+  const { datos, cargando, error, setError, recargar } = useRecurso<AniosAtipicosNinoApi>("/api/curvas/anios-atipicos");
   const [temporada, setTemporada] = useState<FiltroTemporada>("todas");
 
   const efecto = datos?.efecto ?? null;
@@ -299,12 +191,7 @@ export function AniosNinoTab({
     { id: "todo_el_ano", label: "Toda temporada" },
   ];
   const veranoUnaAgrupacion = efecto?.por_temporada.some((f) => f.temporada === "verano" && f.agrupaciones === 1) ?? false;
-  const avisos = useMemo(() => {
-    const lista: { origen: string; codigo: keyof typeof ETIQUETA_AVISO; detalle: string }[] = [];
-    for (const a of datos?.efecto?.avisos ?? []) if (CODIGOS_NINO.has(a.codigo)) lista.push({ origen: "Temporadas", codigo: a.codigo, detalle: a.detalle });
-    for (const g of datos?.agrupaciones ?? []) for (const a of g.avisos) if (CODIGOS_NINO.has(a.codigo)) lista.push({ origen: g.nombre, codigo: a.codigo, detalle: a.detalle });
-    return lista;
-  }, [datos]);
+  const avisos = useMemo(() => (datos?.efecto.avisos ?? []).filter((a) => CODIGOS_NINO.has(a.codigo)), [datos]);
 
   function descargar() {
     if (!efecto) return;
@@ -314,32 +201,30 @@ export function AniosNinoTab({
 
   return (
     <div className="space-y-6">
-      {error && <Alert onCerrar={() => setError(null)}>No se pudo cargar la pestaña: {error}</Alert>}
+      {error && <Alert onCerrar={() => setError(null)}>No se pudo calcular el efecto del Niño: {error}</Alert>}
 
-      {!datos ? (
-        !error && <p className="py-6 text-center text-sm text-tinta-suave">{cargando ? "Cargando…" : "Sin información."}</p>
-      ) : datos.corrida === null || efecto === null ? (
-        <>
-          <EmptyState titulo="Calcula para ver el efecto del Niño" detalle="Sin corridas todavía: calcula en la pestaña Curvas. Mientras tanto, estos son los años que los periodos activos marcan como atípicos." />
-          <AniosMarcados />
-        </>
+      {!datos || !efecto ? (
+        !error && (
+          <p className="py-6 text-center text-sm text-tinta-suave" aria-live="polite">
+            {cargando ? "Calculando el efecto del Niño por temporada…" : "Sin información."}
+          </p>
+        )
       ) : (
         <>
-          <Card titulo="Corrida" descripcion="El efecto se calcula en cada corrida. Los factores que lee M7 salen de la corrida de referencia.">
+          <Card
+            titulo="Efecto del Niño por temporada"
+            descripcion="Una vista de apoyo: se calcula a demanda con los datos de hoy y no se guarda."
+            acciones={
+              <Button variante="secundario" tamano="sm" onClick={() => void recargar()} disabled={cargando}>
+                {cargando ? "Calculando…" : "Volver a calcular"}
+              </Button>
+            }
+          >
             <div className="space-y-4">
               <p className="text-sm text-tinta">
-                Corrida del {formatearFechaHora(datos.corrida.created_at)} · hasta {datos.corrida.hasta_periodo}
-                {datos.corrida.referencia ? <> · <Badge tono="exito">Referencia</Badge></> : <> · <span className="text-tinta-suave">no es la de referencia</span></>}
+                Calculado ahora ({formatearFechaHora(datos.calculado_at)}) con los datos hasta {datos.datos.hasta_periodo ?? "—"} · con los parámetros por defecto (no con los de cada curva
+                aprobada).
               </p>
-              <div className="grid gap-4 md:grid-cols-3">
-                <Field label="Piso del umbral de forma (pp)" hint="El umbral efectivo es el mayor entre este piso y el ruido entre años normales.">
-                  <Input inputMode="decimal" value={formulario.umbral_forma} onChange={(e) => onFormulario({ ...formulario, umbral_forma: e.target.value })} />
-                </Field>
-                <Field label="Margen sobre el ruido" hint="Una candidata desbanca al promedio solo si lo mejora en más de margen × ruido.">
-                  <Input inputMode="decimal" value={formulario.margen_ruido} onChange={(e) => onFormulario({ ...formulario, margen_ruido: e.target.value })} />
-                </Field>
-                <div className="flex items-end pb-6 text-xs text-tinta-suave">Se guardan para la próxima corrida: calcula desde la pestaña Curvas para aplicarlos.</div>
-              </div>
               <Chips<FiltroTemporada> items={itemsTemporada} activo={temporada} onCambiar={setTemporada} etiqueta="Filtrar por temporada" />
             </div>
           </Card>
@@ -354,7 +239,7 @@ export function AniosNinoTab({
 
           <Card
             titulo="Lo que recibirá M7"
-            descripcion="El factor de volumen por temporada y año (de la corrida de referencia) y el crecimiento entre años normales."
+            descripcion="El factor de volumen por temporada y año, calculado a demanda, y el crecimiento entre años normales."
             acciones={
               <Button variante="secundario" tamano="sm" onClick={descargar}>
                 Descargar CSV
@@ -422,7 +307,7 @@ export function AniosNinoTab({
                 </table>
               </div>
               <p className="text-xs text-tinta-suave">
-                En M7 el factor es calculado y editable: lo que edites vivirá en M7, no aquí.
+                Calculado a demanda con los parámetros por defecto: M7 guarda el valor que use y puede editarlo; lo que edite vivirá en M7, no aquí.
                 {veranoUnaAgrupacion && " El factor de verano sale hoy de una sola agrupación."}
               </p>
             </div>
@@ -432,11 +317,9 @@ export function AniosNinoTab({
             <Card titulo="Avisos del Niño">
               <ul className="space-y-1" aria-label="Avisos relativos al Niño">
                 {avisos.map((a, i) => (
-                  <li key={`${a.origen}-${a.codigo}-${i}`} className="flex flex-wrap items-baseline gap-2 text-sm">
+                  <li key={`${a.codigo}-${i}`} className="flex flex-wrap items-baseline gap-2 text-sm">
                     <Badge tono="alerta">{ETIQUETA_AVISO[a.codigo]}</Badge>
-                    <span className="text-xs text-tinta-suave">
-                      {a.origen}: {a.detalle}
-                    </span>
+                    <span className="text-xs text-tinta-suave">{a.detalle}</span>
                   </li>
                 ))}
               </ul>

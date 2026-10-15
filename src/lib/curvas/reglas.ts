@@ -1,28 +1,34 @@
 import type { Json, Tables, TablesInsert } from "@/lib/supabase/database.types";
-import { curvaAcumulada, normalizarCurva } from "./anios";
+import { formatearDecimal } from "@/lib/formato";
+import { curvaAcumulada, hastaPorDefecto, normalizarCurva } from "./anios";
 import { difiereDeVigente, eatEntreCurvas } from "./obsolescencia";
 import {
   MODELOS_CURVA,
+  PARAMETROS_POR_DEFECTO,
   type AgrupacionResultado,
+  type CodigoErrorCurvas,
   type ComparadorApi,
   type CurvaAprobadaApi,
   type CurvaVigenteApi,
   type HuellasCurva,
   type ModeloCurva,
-  type ResumenCorrida,
+  type ParametrosCurvas,
+  type PrerrequisitosApi,
   type TemporadaResultado,
+  type VersionAgrupacionApi,
   type VigenteResumenApi,
 } from "./tipos-api";
 
 /**
- * Reglas de negocio de elegir, retirar y marcar la referencia (docs/modulos/06-curvas-estacionalidad.md,
- * reglas 26 a 28). Funciones puras: el handler las llama y no las reimplementa.
+ * Reglas de negocio de aprobar, retirar y mostrar curvas
+ * (docs/modulos/06b-curvas-trabajo-por-agrupacion.md, reglas 26, 27, 41 a 43, 53 y 56).
+ * Funciones puras: el handler las llama y no las reimplementa.
  */
 
 export const MENSAJE_AGRUPACION_NO_ENCONTRADA = "Agrupación de estacionalidad no encontrada.";
 export const MENSAJE_CORRIDA_NO_ENCONTRADA = "Corrida no encontrada.";
 
-export type RechazoElegir = { status: 404 | 409; mensaje: string; codigo: string };
+export type RechazoAprobar = { status: 404 | 409; mensaje: string; codigo: CodigoErrorCurvas | "agrupacion_no_encontrada" };
 
 export function esModeloCurva(valor: unknown): valor is ModeloCurva {
   return typeof valor === "string" && (MODELOS_CURVA as readonly string[]).includes(valor);
@@ -33,44 +39,158 @@ export function curvaDeFila(fila: Pick<Tables<"curvas_estacionalidad">, "p01" | 
   return [fila.p01, fila.p02, fila.p03, fila.p04, fila.p05, fila.p06, fila.p07, fila.p08, fila.p09, fila.p10, fila.p11, fila.p12].map(Number);
 }
 
+// ─── Parámetros guardados ───
+
+function comoObjeto(json: unknown): Record<string, unknown> | null {
+  return json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+}
+
 /**
- * Regla 26. Por qué NO se puede elegir una candidata, o `null` si se puede:
- * agrupación inexistente → `404`; corrida inexistente → `404`; agrupación
- * inactiva → `409`; candidata no disponible (la agrupación no está en la corrida,
- * la candidata no tiene curva o, para `T`, su temporada no tiene curva en esa
- * corrida) → `409 candidata_no_disponible`; misma corrida y modelo que la
- * vigente → `409 sin_cambio`.
+ * `parametros` guardados (jsonb de la foto) → `ParametrosCurvas`: lo que falte o no
+ * sea del tipo esperado toma el valor por defecto (fotos de la 0.9.6 sin
+ * `anios_excluidos`, `tiendas_excluidas` ni `sin_periodos_confirmado`).
  */
-export function motivoRechazoElegir(
-  agrupacion: { id: string; activo: boolean } | null,
-  corrida: { id: string; resultado: { agrupaciones: readonly AgrupacionResultado[]; temporadas: readonly TemporadaResultado[] } } | null,
+export function parametrosDeJson(json: unknown): ParametrosCurvas {
+  const o = comoObjeto(json) ?? {};
+  const salida: Record<string, unknown> = { ...PARAMETROS_POR_DEFECTO };
+  for (const [clave, defecto] of Object.entries(PARAMETROS_POR_DEFECTO)) {
+    const valor = o[clave];
+    if (Array.isArray(defecto)) continue;
+    if (typeof valor === typeof defecto) salida[clave] = valor;
+  }
+  const anios = o.anios_excluidos;
+  salida.anios_excluidos = Array.isArray(anios) ? anios.filter((a): a is number => typeof a === "number") : [];
+  const tiendas = o.tiendas_excluidas;
+  salida.tiendas_excluidas = Array.isArray(tiendas) ? tiendas.filter((t): t is string => typeof t === "string") : [];
+  return salida as ParametrosCurvas;
+}
+
+/**
+ * Regla 53. Parámetros con los que se abre una agrupación: los de su última
+ * aprobación, con UNA excepción: `hasta_periodo` nunca se hereda y arranca en el
+ * último mes publicado y cerrado de hoy (`null` si no hay ninguno). Sin aprobación,
+ * los valores por defecto.
+ */
+export function parametrosIniciales(
+  foto: { parametros: Json } | null,
+  mesesPublicados: Iterable<string>,
+  hoy: string
+): { parametros: ParametrosCurvas; hasta_periodo: string | null } {
+  return {
+    parametros: foto ? parametrosDeJson(foto.parametros) : { ...PARAMETROS_POR_DEFECTO, anios_excluidos: [], tiendas_excluidas: [] },
+    hasta_periodo: hastaPorDefecto(mesesPublicados, hoy),
+  };
+}
+
+/** Por qué falta la nota (`null` si no se exige): apartarse de la recomendada, excluir años o tiendas, o un tratamiento del Niño distinto de `auto`. */
+export function notaRequeridaPor(
   modelo: ModeloCurva,
-  vigente: { corrida_id: string; modelo: string } | null = null
-): RechazoElegir | null {
-  if (!agrupacion) return { status: 404, mensaje: MENSAJE_AGRUPACION_NO_ENCONTRADA, codigo: "agrupacion_no_encontrada" };
-  if (!corrida) return { status: 404, mensaje: MENSAJE_CORRIDA_NO_ENCONTRADA, codigo: "corrida_no_encontrada" };
-  if (!agrupacion.activo) {
+  recomendada: ModeloCurva | null,
+  parametros: Pick<ParametrosCurvas, "anios_excluidos" | "tiendas_excluidas" | "tratamiento_atipicos">
+): string | null {
+  if (recomendada !== null && modelo !== recomendada) return `elegiste ${modelo} y el sistema recomienda ${recomendada}`;
+  if (parametros.anios_excluidos.length > 0) return `excluiste ${parametros.anios_excluidos.length === 1 ? "un año" : "años"} del ajuste (${[...parametros.anios_excluidos].sort((a, b) => a - b).join(", ")})`;
+  if (parametros.tiendas_excluidas.length > 0) {
+    const n = parametros.tiendas_excluidas.length;
+    return `excluiste ${n} ${n === 1 ? "tienda" : "tiendas"} de la red`;
+  }
+  if (parametros.tratamiento_atipicos !== "auto") return `fijaste el tratamiento del Niño en «${parametros.tratamiento_atipicos}»`;
+  return null;
+}
+
+// ─── Regla 41: por qué NO se puede aprobar ───
+
+export type EntradaRechazoAprobar = {
+  /** `null` si la agrupación no existe. */
+  agrupacion: { id: string; activo: boolean } | null;
+  prerrequisitos: PrerrequisitosApi;
+  /** Lo calculado para la agrupación (con los parámetros que mandó el planner). */
+  resultado: AgrupacionResultado | null;
+  temporada: Pick<TemporadaResultado, "curva_T"> | null;
+  modelo: ModeloCurva;
+  huella_enviada: string;
+  huella_actual: string;
+  /** La vigente de hoy; `huella_calculo` es `null` en curvas de la 0.9.6. */
+  vigente: { version: number; modelo: string; huella_calculo: string | null } | null;
+  version_vigente: number | null;
+  parametros: Pick<ParametrosCurvas, "anios_excluidos" | "tiendas_excluidas" | "tratamiento_atipicos">;
+  nota: string | undefined;
+};
+
+/**
+ * Regla 41 (sustituye a `motivoRechazoElegir`). Por qué NO se puede aprobar, o
+ * `null`. En este orden: agrupación inexistente `404`; inactiva `agrupacion_inactiva`;
+ * algún prerrequisito que bloquea `prerrequisitos`; `origen = null` `sin_curva_posible`;
+ * candidata sin curva (o `T` sin `curva_T`) `candidata_no_disponible`; huella enviada
+ * distinta de la recalculada `datos_cambiados`; `version_vigente` distinta de la
+ * vigente de hoy `vigente_cambiada`; misma candidata y misma huella que la vigente
+ * `sin_cambio`; nota vacía en alguno de los tres casos `nota_requerida`. Todos `409`.
+ */
+export function motivoRechazoAprobar(e: EntradaRechazoAprobar): RechazoAprobar | null {
+  if (!e.agrupacion) return { status: 404, mensaje: MENSAJE_AGRUPACION_NO_ENCONTRADA, codigo: "agrupacion_no_encontrada" };
+  if (!e.agrupacion.activo) {
     return { status: 409, mensaje: "La agrupación está inactiva: actívala antes de aprobarle una curva.", codigo: "agrupacion_inactiva" };
   }
-  const delResultado = corrida.resultado.agrupaciones.find((a) => a.agrupacion_id === agrupacion.id);
-  const noDisponible: RechazoElegir = {
+  if (e.prerrequisitos.bloquea.length > 0) {
+    return {
+      status: 409,
+      mensaje: `Antes de aprobar falta resolver: ${e.prerrequisitos.bloquea.map((p) => p.detalle).join(" ")}`,
+      codigo: "prerrequisitos",
+    };
+  }
+  if (!e.resultado || e.resultado.origen === null) {
+    return {
+      status: 409,
+      mensaje: "Esta agrupación no tiene curva posible: ni años de ajuste propios ni una curva de su temporada de la que prestar.",
+      codigo: "sin_curva_posible",
+    };
+  }
+  const noDisponible: RechazoAprobar = {
     status: 409,
-    mensaje: "Esa candidata no está disponible para esta agrupación en la corrida elegida.",
+    mensaje: "Esa candidata no está disponible para esta agrupación con estos parámetros.",
     codigo: "candidata_no_disponible",
   };
-  if (!delResultado) return noDisponible;
-  if (modelo === "T") {
-    const temporada = corrida.resultado.temporadas.find((t) => t.temporada === delResultado.temporada);
-    if (!temporada?.curva_T) return noDisponible;
-  } else {
-    const candidata = delResultado.candidatas.find((c) => c.modelo === modelo);
-    if (!candidata?.curva) return noDisponible;
+  if (e.modelo === "T") {
+    if (!e.temporada?.curva_T) return noDisponible;
+  } else if (!e.resultado.candidatas.find((c) => c.modelo === e.modelo)?.curva) {
+    return noDisponible;
   }
-  if (vigente && vigente.corrida_id === corrida.id && vigente.modelo === modelo) {
-    return { status: 409, mensaje: "Esa curva ya es la vigente de la agrupación.", codigo: "sin_cambio" };
+  if (e.huella_enviada !== e.huella_actual) {
+    return {
+      status: 409,
+      mensaje: "Los datos cambiaron desde que abriste la agrupación: vuelve a cargar.",
+      codigo: "datos_cambiados",
+    };
+  }
+  if ((e.vigente?.version ?? null) !== e.version_vigente) {
+    return {
+      status: 409,
+      mensaje: "Otra persona aprobó o retiró una curva de esta agrupación: vuelve a cargar.",
+      codigo: "vigente_cambiada",
+    };
+  }
+  if (e.vigente && e.vigente.modelo === e.modelo && e.vigente.huella_calculo === e.huella_actual) {
+    return { status: 409, mensaje: "Esa curva ya es la vigente de la agrupación y los datos no cambiaron.", codigo: "sin_cambio" };
+  }
+  const porQue = notaRequeridaPor(e.modelo, e.resultado.recomendada, e.parametros);
+  if (porQue !== null && (e.nota ?? "").trim() === "") {
+    return { status: 409, mensaje: `Escribe una nota que explique el motivo: ${porQue}.`, codigo: "nota_requerida" };
   }
   return null;
 }
+
+// ─── Regla 27/42: fila de la curva aprobada ───
+
+/** Lo que se guarda de la foto en la curva (y en `corridas_estacionalidad.resumen`). */
+export type DatosFotoCurva = {
+  huella_calculo: string;
+  huella_temporada: string;
+  version_modelo: number;
+  /** `aaaa-mm`. */
+  hasta_periodo: string;
+  hasta_fue_por_defecto: boolean;
+  parametros: ParametrosCurvas;
+};
 
 /** `md5(resumen.cargas)` ya calculado por quien llama: lo que va en `cargas_huella`. */
 export type EntradaFilaCurva = {
@@ -78,23 +198,26 @@ export type EntradaFilaCurva = {
   temporada: TemporadaResultado | null;
   modelo: ModeloCurva;
   corrida_id: string;
-  resumen: Pick<ResumenCorrida, "red_huella">;
+  red_huella: string;
   cargas_huella: string;
   /** Última versión existente de la agrupación (0 si no hay). */
   version_anterior: number;
   perfil: { id: string | null; nombre: string | null };
   nota?: string | null;
+  foto: DatosFotoCurva;
 };
 
 /** Redondeo a dos decimales de las columnas `numeric(6,2)`. */
 const a2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * Regla 27. Fila de `curvas_estacionalidad` para la candidata elegida: copia la
+ * Regla 27 y 42. Fila de `curvas_estacionalidad` para la candidata elegida: copia la
  * curva (la `T` de la temporada), `recomendada = (modelo === recomendada)`,
  * `origen = prestada` si es `T`, `medida = 'unidades'`, `eat` y `error_max`
- * (nulos para `T`), `anios_utilizados` con los años y las tres huellas, y
- * `version = anterior + 1`. Devuelve `null` si la curva no existe.
+ * (nulos para `T`), `anios_utilizados` con los años, las tres huellas y lo que
+ * necesitan la lista y el comparador (`huella_calculo`, `huella_temporada`,
+ * `version_modelo`, `hasta_periodo`, `hasta_fue_por_defecto`, `recomendada_entonces`,
+ * `anios_ajuste`, parámetros) y `version = anterior + 1`. Devuelve `null` si la curva no existe.
  */
 export function filaCurva(e: EntradaFilaCurva): TablesInsert<"curvas_estacionalidad"> | null {
   let curva: number[] | null;
@@ -110,13 +233,26 @@ export function filaCurva(e: EntradaFilaCurva): TablesInsert<"curvas_estacionali
   }
   if (!curva || curva.length !== 12) return null;
   const c = normalizarCurva(curva);
+  const p = e.foto.parametros;
 
   const aniosUtilizados: Json = {
     anios: e.agrupacion.anios.map((a) => ({ anio: a.anio, clase: a.clase, tratamiento: a.tratamiento, en_ajuste: a.en_ajuste })),
+    anios_ajuste: e.agrupacion.anios.filter((a) => a.en_ajuste).map((a) => a.anio),
     composicion: { equivalencias: e.agrupacion.composicion.equivalencias, huella: e.agrupacion.composicion.huella },
-    red_huella: e.resumen.red_huella,
+    red_huella: e.red_huella,
     cargas_huella: e.cargas_huella,
     temporada: e.agrupacion.temporada,
+    huella_calculo: e.foto.huella_calculo,
+    huella_temporada: e.foto.huella_temporada,
+    version_modelo: e.foto.version_modelo,
+    ruido_normal: e.agrupacion.ruido_normal,
+    hasta_periodo: e.foto.hasta_periodo,
+    hasta_fue_por_defecto: e.foto.hasta_fue_por_defecto,
+    recomendada_entonces: e.agrupacion.recomendada,
+    anios_excluidos: [...p.anios_excluidos].sort((a, b) => a - b),
+    tiendas_excluidas: [...p.tiendas_excluidas].sort(),
+    sin_periodos_confirmado: p.sin_periodos_confirmado,
+    parametros: p as unknown as Json,
   };
 
   return {
@@ -149,50 +285,58 @@ export function filaCurva(e: EntradaFilaCurva): TablesInsert<"curvas_estacionali
   };
 }
 
-// ─── Regla 28: corrida de referencia ───
+// ─── Mapeo de filas a la API ───
 
-type CorridaParaReferencia = { id: string; created_at: string; referencia: boolean };
+type ExtrasCurva = {
+  recomendada_entonces: ModeloCurva | null;
+  hasta_periodo: string | null;
+  hasta_fue_por_defecto: boolean | null;
+  version_modelo: number | null;
+  ruido_normal: number | null;
+  anios_ajuste: number[] | null;
+  parametros: ParametrosCurvas | null;
+  huella_calculo: string | null;
+};
 
-/** La corrida de referencia: la marcada y, sin ninguna, la última por `created_at` (desempate por `id`). */
-export function corridaDeReferencia<T extends CorridaParaReferencia>(corridas: readonly T[]): T | null {
-  const marcada = corridas.find((c) => c.referencia);
-  if (marcada) return marcada;
-  let ultima: T | null = null;
-  for (const c of corridas) {
-    if (ultima === null || c.created_at > ultima.created_at || (c.created_at === ultima.created_at && c.id > ultima.id)) ultima = c;
-  }
-  return ultima;
-}
-
-/**
- * Regla 28. Marcar una corrida como referencia quita la anterior (a lo sumo una
- * con `referencia`). `existe` es falso si el id no está en la lista.
- */
-export function planificarReferencia(
-  corridas: readonly CorridaParaReferencia[],
-  id: string
-): { existe: boolean; quitar: string[]; marcar: string } {
+/** Lo que `filaCurva` guardó en `anios_utilizados` (todo `null` en curvas de la 0.9.6). */
+export function extrasDeCurva(aniosUtilizados: Json): ExtrasCurva {
+  const o = comoObjeto(aniosUtilizados) ?? {};
+  const texto = (v: unknown) => (typeof v === "string" ? v : null);
+  const ajuste = o.anios_ajuste;
   return {
-    existe: corridas.some((c) => c.id === id),
-    quitar: corridas.filter((c) => c.referencia && c.id !== id).map((c) => c.id),
-    marcar: id,
+    recomendada_entonces: esModeloCurva(o.recomendada_entonces) ? o.recomendada_entonces : null,
+    hasta_periodo: texto(o.hasta_periodo),
+    hasta_fue_por_defecto: typeof o.hasta_fue_por_defecto === "boolean" ? o.hasta_fue_por_defecto : null,
+    version_modelo: typeof o.version_modelo === "number" ? o.version_modelo : null,
+    ruido_normal: typeof o.ruido_normal === "number" ? o.ruido_normal : null,
+    anios_ajuste: Array.isArray(ajuste) ? ajuste.filter((a): a is number => typeof a === "number") : null,
+    parametros: comoObjeto(o.parametros) ? parametrosDeJson(o.parametros) : null,
+    huella_calculo: texto(o.huella_calculo),
   };
 }
 
-// ─── Mapeo de filas a la API ───
-
 export function aVigenteResumen(fila: Tables<"curvas_estacionalidad">): VigenteResumenApi {
+  const x = extrasDeCurva(fila.anios_utilizados);
   return {
     id: fila.id,
     version: fila.version,
     modelo: esModeloCurva(fila.modelo) ? fila.modelo : "A",
     origen: fila.origen === "prestada" ? "prestada" : "propia",
     recomendada: fila.recomendada,
+    recomendada_entonces: x.recomendada_entonces,
     eat: fila.eat === null ? null : Number(fila.eat),
     aprobada_at: fila.aprobada_at,
     usuario_nombre: fila.usuario_nombre,
-    corrida_id: fila.corrida_id,
+    foto_id: fila.corrida_id,
+    hasta_periodo: x.hasta_periodo,
+    hasta_fue_por_defecto: x.hasta_fue_por_defecto,
+    nota: fila.nota,
     curva: curvaDeFila(fila),
+    parametros: x.parametros,
+    huella_calculo: x.huella_calculo,
+    version_modelo: x.version_modelo,
+    anios_ajuste: x.anios_ajuste,
+    ruido_normal: x.ruido_normal,
   };
 }
 
@@ -218,19 +362,15 @@ export function aCurvaAprobada(fila: Tables<"curvas_estacionalidad">): CurvaApro
 
 /** Las huellas guardadas en `anios_utilizados` (cadenas vacías si faltan). */
 export function huellasDeCurva(aniosUtilizados: Json): HuellasCurva {
-  const o = aniosUtilizados && typeof aniosUtilizados === "object" && !Array.isArray(aniosUtilizados) ? aniosUtilizados : {};
-  const composicion = (o as Record<string, Json | undefined>).composicion;
-  const huellaComposicion =
-    composicion && typeof composicion === "object" && !Array.isArray(composicion) && typeof composicion.huella === "string"
-      ? composicion.huella
-      : typeof composicion === "string"
-        ? composicion
-        : "";
-  const texto = (v: Json | undefined) => (typeof v === "string" ? v : "");
+  const o = comoObjeto(aniosUtilizados) ?? {};
+  const composicion = o.composicion;
+  const c = comoObjeto(composicion);
+  const huellaComposicion = c && typeof c.huella === "string" ? c.huella : typeof composicion === "string" ? composicion : "";
+  const texto = (v: unknown) => (typeof v === "string" ? v : "");
   return {
     composicion: huellaComposicion,
-    red_huella: texto((o as Record<string, Json | undefined>).red_huella),
-    cargas_huella: texto((o as Record<string, Json | undefined>).cargas_huella),
+    red_huella: texto(o.red_huella),
+    cargas_huella: texto(o.cargas_huella),
   };
 }
 
@@ -256,11 +396,79 @@ export function aCurvaVigente(
   };
 }
 
+// ─── Regla 43: versiones de una agrupación ───
+
+const ETIQUETA_PARAMETRO: Partial<Record<keyof ParametrosCurvas, string>> = {
+  solo_tiendas_completas: "solo tiendas completas",
+  exigir_venta_todo_el_ano: "exigir venta todo el año",
+  meses_tienda_nueva: "meses de tienda nueva",
+  umbral_tienda_dominante: "umbral de tienda dominante",
+  umbral_forma: "piso de forma",
+  max_meses_hueco: "máximo de huecos",
+  min_unidades_ano: "mínimo de unidades por año",
+  umbral_cambio_volumen: "cambio de volumen extremo",
+  margen_ruido: "margen sobre el ruido",
+  peso_minimo_diagnostico: "peso mínimo del diagnóstico",
+  umbral_liquidacion: "umbral de liquidación",
+};
+
+/** Los parámetros distintos del valor por defecto, en castellano ("años excluidos: 2023"); vacío si todo es por defecto. */
+export function resumenParametros(p: ParametrosCurvas): string[] {
+  const salida: string[] = [];
+  if (p.anios_excluidos.length > 0) salida.push(`años excluidos: ${[...p.anios_excluidos].sort((a, b) => a - b).join(", ")}`);
+  if (p.tiendas_excluidas.length > 0) salida.push(`${p.tiendas_excluidas.length} ${p.tiendas_excluidas.length === 1 ? "tienda excluida" : "tiendas excluidas"}`);
+  if (p.tratamiento_atipicos !== PARAMETROS_POR_DEFECTO.tratamiento_atipicos) salida.push(`tratamiento del Niño: ${p.tratamiento_atipicos}`);
+  if (p.sin_periodos_confirmado) salida.push("confirmó que la temporada no tiene años atípicos");
+  for (const [clave, etiqueta] of Object.entries(ETIQUETA_PARAMETRO) as [keyof ParametrosCurvas, string][]) {
+    const valor = p[clave];
+    if (valor !== PARAMETROS_POR_DEFECTO[clave]) {
+      salida.push(`${etiqueta}: ${typeof valor === "number" ? formatearDecimal(valor, Number.isInteger(valor) ? 0 : 2) : valor ? "sí" : "no"}`);
+    }
+  }
+  return salida;
+}
+
+export function versionesDeAgrupacion(filas: readonly Tables<"curvas_estacionalidad">[]): VersionAgrupacionApi[] {
+  return [...filas]
+    .sort((a, b) => b.version - a.version)
+    .map((f) => {
+      const x = extrasDeCurva(f.anios_utilizados);
+      return {
+        id: f.id,
+        version: f.version,
+        estado: f.estado === "reemplazada" ? "reemplazada" : f.estado === "retirada" ? "retirada" : "vigente",
+        modelo: esModeloCurva(f.modelo) ? f.modelo : "A",
+        origen: f.origen === "prestada" ? "prestada" : "propia",
+        recomendada: f.recomendada,
+        recomendada_entonces: x.recomendada_entonces,
+        eat: f.eat === null ? null : Number(f.eat),
+        ruido_normal: x.ruido_normal,
+        curva: curvaDeFila(f),
+        nota: f.nota,
+        aprobada_at: f.aprobada_at,
+        usuario_nombre: f.usuario_nombre,
+        foto_id: f.corrida_id,
+        parametros_resumen: x.parametros ? resumenParametros(x.parametros) : [],
+      } satisfies VersionAgrupacionApi;
+    });
+}
+
+// ─── Comparador ───
+
+/** Regla 56. ¿El conjunto de años de ajuste coincide? `null` si la vigente no guardó el suyo (curvas de la 0.9.6). */
+export function mismosAniosDeAjuste(propuesta: readonly number[], vigente: readonly number[] | null): boolean | null {
+  if (vigente === null) return null;
+  const a = [...propuesta].sort((x, y) => x - y).join(",");
+  const b = [...vigente].sort((x, y) => x - y).join(",");
+  return a === b;
+}
+
 /** Comparador vigente / propuesta: EAT entre ambas, diferencia mes a mes en puntos y el mes que más cambia. */
 export function armarComparador(
   modelo: ModeloCurva,
   propuesta: { curva: readonly number[]; eat: number | null },
-  vigente: { modelo: string; curva: readonly number[]; eat: number | null }
+  vigente: { modelo: string; curva: readonly number[]; eat: number | null },
+  comparable: boolean | null = null
 ): ComparadorApi {
   const diferencia = propuesta.curva.map((p, m) => (p - (vigente.curva[m] ?? 0)) * 100);
   let mayor = 0;
@@ -273,5 +481,6 @@ export function armarComparador(
     diferencia_por_mes: diferencia,
     mes_mayor_cambio: mayor + 1,
     difiere: difiereDeVigente({ modelo, curva: propuesta.curva, eat: propuesta.eat }, vigente),
+    comparable_con_vigente: comparable,
   };
 }

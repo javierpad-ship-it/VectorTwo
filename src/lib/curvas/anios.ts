@@ -37,6 +37,33 @@ export function sumar(valores: readonly number[]): number {
   return s;
 }
 
+/**
+ * Regla 50, la ÚNICA definición de `sin_venta`: la agrupación no tiene unidades
+ * positivas en NINGÚN mes publicado (hasta `hasta`), medida sobre su venta cruda
+ * (todas las tiendas, antes de aplicar la red comparable). Es la misma en el
+ * prerrequisito, en el aviso del modelo y en el resumen. Una agrupación CON venta
+ * pero sin años de ajuste suficientes NO es `sin_venta`: es `prestada` (`T`).
+ */
+export function sinVenta(
+  filas: ReadonlyArray<{ periodo: string; unidades: number }>,
+  mesesPublicados: Iterable<string>,
+  hasta: string
+): boolean {
+  const publicados = new Set<string>();
+  const tope = recortarPeriodo(hasta);
+  for (const m of mesesPublicados) {
+    const p = recortarPeriodo(m);
+    if (p <= tope) publicados.add(p);
+  }
+  const porMes = new Map<string, number>();
+  for (const f of filas) {
+    const p = recortarPeriodo(f.periodo);
+    if (publicados.has(p)) porMes.set(p, (porMes.get(p) ?? 0) + f.unidades);
+  }
+  for (const u of porMes.values()) if (u > 0) return false;
+  return true;
+}
+
 // ─── Regla 1: clase de un año ───
 
 export type ClasificacionAnio = {

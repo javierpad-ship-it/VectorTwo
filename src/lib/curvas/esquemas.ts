@@ -11,10 +11,11 @@ import {
 } from "./tipos-api";
 
 /**
- * Esquemas zod de M6 (docs/modulos/06-curvas-estacionalidad.md, "Contratos de
- * API" y regla 29): periodos atípicos con `temporadas`, temporada de la
- * agrupación, `calcularSchema`, `elegirCurvaSchema` y `marcarReferenciaSchema`.
- * No existe esquema de aprobación en bloque: cada curva se elige una por una.
+ * Esquemas zod de M6 (docs/modulos/06-curvas-estacionalidad.md y
+ * 06b-curvas-trabajo-por-agrupacion.md, "Contratos de API"): periodos atípicos con
+ * `temporadas`, temporada de la agrupación, `calcularAgrupacionSchema` y
+ * `aprobarCurvaSchema`. No existe esquema de aprobación en bloque: cada curva se
+ * aprueba una por una (regla 44).
  */
 
 export const MAX_MOTIVO = 120;
@@ -145,6 +146,8 @@ export type ConsultaAnios = {
   temporada: TemporadaAgrupacion;
   desde?: number;
   hasta?: number;
+  /** `?con_volumen=1`: calcula `ratio_volumen` y `volumen` a demanda (con una lectura de venta). */
+  con_volumen: boolean;
 };
 
 export type RechazoConsultaAnios = { status: 400 | 404; mensaje: string };
@@ -201,9 +204,15 @@ export function leerConsultaAnios(
     }
   }
 
+  const conVolumen = params.get("con_volumen");
+  if (conVolumen !== null && conVolumen !== "" && !["1", "0", "true", "false"].includes(conVolumen.trim())) {
+    return rechazar(400, "con_volumen debe ser 1 o 0.");
+  }
+
   return {
     consulta: {
       agrupacion_id: hayAgrupacion ? agrupacionId : null,
+      con_volumen: conVolumen !== null && ["1", "true"].includes(conVolumen.trim()),
       temporada,
       ...(desde.valor !== undefined ? { desde: desde.valor } : {}),
       ...(hasta.valor !== undefined ? { hasta: hasta.valor } : {}),
@@ -219,13 +228,11 @@ export function leerConsultaAnios(
 const uuidValido = z.uuid("El identificador no es válido.");
 
 /**
- * `POST /api/curvas/calcular`. Todo es opcional (valen los valores por defecto de
- * la ficha). Las claves desconocidas se ignoran: NO se aceptan `medida`,
- * `referencia_volumen` ni `umbral_sustitucion` (recortados), y por eso nunca
- * llegan a los parámetros guardados.
+ * Los parámetros del cálculo de una agrupación (con sus defectos de la ficha 06 y los
+ * tres de la 06b). NO se aceptan `medida`, `referencia_volumen` ni
+ * `umbral_sustitucion` (recortados) y por eso nunca llegan a los parámetros guardados.
  */
-export const calcularSchema = z.object({
-  hasta_periodo: mes.optional(),
+const camposParametros = {
   solo_tiendas_completas: z.boolean("solo_tiendas_completas debe ser verdadero o falso.").default(PARAMETROS_POR_DEFECTO.solo_tiendas_completas),
   exigir_venta_todo_el_ano: z.boolean("exigir_venta_todo_el_ano debe ser verdadero o falso.").default(PARAMETROS_POR_DEFECTO.exigir_venta_todo_el_ano),
   meses_tienda_nueva: z
@@ -236,16 +243,16 @@ export const calcularSchema = z.object({
     .default(PARAMETROS_POR_DEFECTO.meses_tienda_nueva),
   umbral_tienda_dominante: z
     .number("El umbral de tienda dominante debe ser un número.")
-    .min(0.1, "El umbral de tienda dominante va de 0,1 a 0,9.")
-    .max(0.9, "El umbral de tienda dominante va de 0,1 a 0,9.")
+    .min(0.1, "El umbral de tienda dominante va de 0.1 a 0.9.")
+    .max(0.9, "El umbral de tienda dominante va de 0.1 a 0.9.")
     .default(PARAMETROS_POR_DEFECTO.umbral_tienda_dominante),
   tratamiento_atipicos: z
     .enum(TRATAMIENTOS_ATIPICOS, "El tratamiento debe ser auto, incluir, imputar o descartar.")
     .default(PARAMETROS_POR_DEFECTO.tratamiento_atipicos),
   umbral_forma: z
     .number("El piso del umbral de forma debe ser un número.")
-    .min(0.5, "El piso del umbral de forma va de 0,5 a 50 puntos.")
-    .max(50, "El piso del umbral de forma va de 0,5 a 50 puntos.")
+    .min(0.5, "El piso del umbral de forma va de 0.5 a 50 puntos.")
+    .max(50, "El piso del umbral de forma va de 0.5 a 50 puntos.")
     .default(PARAMETROS_POR_DEFECTO.umbral_forma),
   max_meses_hueco: z
     .number("El máximo de meses con hueco debe ser un número.")
@@ -257,11 +264,12 @@ export const calcularSchema = z.object({
     .number("El mínimo de unidades por año debe ser un número.")
     .int("El mínimo de unidades por año debe ser un número entero.")
     .min(0, "El mínimo de unidades por año no puede ser negativo.")
+    .max(10_000_000, "El mínimo de unidades por año no puede pasar de 10 000 000.")
     .default(PARAMETROS_POR_DEFECTO.min_unidades_ano),
   umbral_cambio_volumen: z
     .number("El umbral de cambio de volumen debe ser un número.")
-    .min(1.5, "El umbral de cambio de volumen va de 1,5 a 10.")
-    .max(10, "El umbral de cambio de volumen va de 1,5 a 10.")
+    .min(1.5, "El umbral de cambio de volumen va de 1.5 a 10.")
+    .max(10, "El umbral de cambio de volumen va de 1.5 a 10.")
     .default(PARAMETROS_POR_DEFECTO.umbral_cambio_volumen),
   margen_ruido: z
     .number("El margen sobre el ruido debe ser un número.")
@@ -270,21 +278,71 @@ export const calcularSchema = z.object({
     .default(PARAMETROS_POR_DEFECTO.margen_ruido),
   peso_minimo_diagnostico: z
     .number("El peso mínimo del diagnóstico debe ser un número.")
-    .min(0, "El peso mínimo del diagnóstico va de 0 a 0,5.")
-    .max(0.5, "El peso mínimo del diagnóstico va de 0 a 0,5.")
+    .min(0, "El peso mínimo del diagnóstico va de 0 a 0.5.")
+    .max(0.5, "El peso mínimo del diagnóstico va de 0 a 0.5.")
     .default(PARAMETROS_POR_DEFECTO.peso_minimo_diagnostico),
   umbral_liquidacion: z
     .number("El umbral de liquidación debe ser un número.")
-    .min(0.05, "El umbral de liquidación va de 0,05 a 0,5.")
-    .max(0.5, "El umbral de liquidación va de 0,05 a 0,5.")
+    .min(0.05, "El umbral de liquidación va de 0.05 a 0.5.")
+    .max(0.5, "El umbral de liquidación va de 0.05 a 0.5.")
     .default(PARAMETROS_POR_DEFECTO.umbral_liquidacion),
-  marcar_referencia: z.boolean("marcar_referencia debe ser verdadero o falso.").default(false),
-});
+  anios_excluidos: z
+    .array(z.number("Cada año excluido debe ser un número.").int("Cada año excluido debe ser un número entero.").min(ANIO_MINIMO, `Los años van de ${ANIO_MINIMO} a ${ANIO_MAXIMO}.`).max(ANIO_MAXIMO, `Los años van de ${ANIO_MINIMO} a ${ANIO_MAXIMO}.`), "anios_excluidos debe ser una lista de años.")
+    .max(20, "Se pueden excluir hasta 20 años.")
+    .default([]),
+  tiendas_excluidas: z
+    .array(z.uuid("Cada tienda excluida debe ser un identificador válido."), "tiendas_excluidas debe ser una lista de tiendas.")
+    .max(100, "Se pueden excluir hasta 100 tiendas.")
+    .default([]),
+  sin_periodos_confirmado: z.boolean("sin_periodos_confirmado debe ser verdadero o falso.").default(false),
+};
 
-export type CalcularCuerpoValidado = z.infer<typeof calcularSchema>;
+/**
+ * `POST /api/curvas/agrupaciones/[id]/calcular` (lectura con cuerpo: nunca escribe).
+ * Todo es opcional (valen los valores por defecto). Es ESTRICTO: una clave que no
+ * existe (por ejemplo la `marcar_referencia` de la 0.9.6) se rechaza con `400`.
+ * `partir_de_vigente` usa los parámetros de la última aprobación (nunca su `hasta_periodo`).
+ */
+export const calcularAgrupacionSchema = z
+  .object({
+    hasta_periodo: mes.optional(),
+    ...camposParametros,
+    partir_de_vigente: z.boolean("partir_de_vigente debe ser verdadero o falso.").default(false),
+  })
+  .strict();
 
-/** Los parámetros del modelo (sin `hasta_periodo` ni `marcar_referencia`): lo que se guarda en `corridas.parametros`. */
-export function parametrosDeCuerpo(cuerpo: CalcularCuerpoValidado): ParametrosCurvas {
+export type CalcularCuerpoValidado = z.infer<typeof calcularAgrupacionSchema>;
+
+/** Caracteres de control (`Cc`) y de dirección de texto (bidi): no tienen sitio en una nota de una línea y sirven para disfrazar texto. */
+const CARACTERES_PROHIBIDOS_NOTA = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
+
+/**
+ * `PUT /api/curvas/agrupaciones/[id]`. `parametros` son los que vio el planner, con
+ * `hasta_periodo` OBLIGATORIO (el que devolvió `calcular` en `datos.hasta_periodo`);
+ * `huella_calculo` la que devolvió `calcular`; `version_vigente` la versión vigente que
+ * vio (`null` si no había). Es ESTRICTO (raíz y `parametros`): una clave desconocida es `400`. Rechaza `F`, `G`, `H` y cualquier modelo fuera de `A`…`E`, `T`.
+ */
+export const aprobarCurvaSchema = z.object({
+  modelo: z.enum(MODELOS_CURVA, "El modelo debe ser A, B, C, D, E o T."),
+  parametros: z.object({ hasta_periodo: mes, ...camposParametros }).strict(),
+  huella_calculo: z.string("La huella del cálculo debe ser texto.").regex(/^[0-9a-f]{32}$/, "La huella del cálculo no es válida: vuelve a cargar la agrupación."),
+  version_vigente: z
+    .number("version_vigente debe ser un número (o null si no había curva vigente).")
+    .int("version_vigente debe ser un número entero.")
+    .min(1, "version_vigente debe ser 1 o más (o null si no había curva vigente).")
+    .nullable(),
+  nota: z
+    .string("La nota debe ser texto.")
+    .trim()
+    .max(300, "La nota no puede superar 300 caracteres.")
+    .refine((v) => !CARACTERES_PROHIBIDOS_NOTA.test(v), "La nota no puede llevar saltos de línea ni caracteres de control o de dirección de texto.")
+    .optional(),
+}).strict();
+
+export type AprobarCurvaCuerpoValidado = z.infer<typeof aprobarCurvaSchema>;
+
+/** Los parámetros del modelo (sin `hasta_periodo` ni `partir_de_vigente`): lo que se guarda en `corridas.parametros`; las listas sin repetidos y ordenadas. */
+export function parametrosDeCuerpo(cuerpo: Omit<CalcularCuerpoValidado, "hasta_periodo" | "partir_de_vigente"> & { hasta_periodo?: string; partir_de_vigente?: boolean }): ParametrosCurvas {
   return {
     solo_tiendas_completas: cuerpo.solo_tiendas_completas,
     exigir_venta_todo_el_ano: cuerpo.exigir_venta_todo_el_ano,
@@ -298,6 +356,9 @@ export function parametrosDeCuerpo(cuerpo: CalcularCuerpoValidado): ParametrosCu
     margen_ruido: cuerpo.margen_ruido,
     peso_minimo_diagnostico: cuerpo.peso_minimo_diagnostico,
     umbral_liquidacion: cuerpo.umbral_liquidacion,
+    anios_excluidos: [...new Set(cuerpo.anios_excluidos)].sort((a, b) => a - b),
+    tiendas_excluidas: [...new Set(cuerpo.tiendas_excluidas)].sort(),
+    sin_periodos_confirmado: cuerpo.sin_periodos_confirmado,
   };
 }
 
@@ -314,37 +375,11 @@ export function leerModeloConsulta(params: Pick<URLSearchParams, "get">): { mode
   return r.success ? { modelo: r.data, invalido: false } : { modelo: null, invalido: true };
 }
 
-/** `PUT /api/curvas/agrupaciones/[id]`. Rechaza `F`, `G`, `H` y cualquier modelo fuera de `A`…`E`, `T`. */
-export const elegirCurvaSchema = z.object({
-  corrida_id: uuidValido,
-  modelo: z.enum(MODELOS_CURVA, "El modelo debe ser A, B, C, D, E o T."),
-  nota: z
-    .string("La nota debe ser texto.")
-    .trim()
-    .max(300, "La nota no puede superar 300 caracteres.")
-    .optional(),
-});
-
-/** `PATCH /api/curvas/corridas/[id]`: solo `{ referencia: true }`. */
-export const marcarReferenciaSchema = z.object({
-  referencia: z.literal(true, "referencia solo puede ser true: marcar una corrida quita la anterior."),
-});
-
 // ─── Lectura de query strings ───
 
 export type RechazoConsulta = { status: 400 | 404; mensaje: string };
 
 export const CORRIDA_NO_ENCONTRADA = "Corrida no encontrada.";
-
-/** `?corrida_id=`: ausente o vacío → `null` (la de referencia); un valor que no es UUID → `404`. */
-export function leerCorridaId(
-  params: Pick<URLSearchParams, "get">
-): { corridaId: string | null; rechazo: null } | { corridaId: null; rechazo: RechazoConsulta } {
-  const crudo = params.get("corrida_id");
-  if (crudo === null || crudo.trim() === "") return { corridaId: null, rechazo: null };
-  if (!uuid.safeParse(crudo.trim()).success) return { corridaId: null, rechazo: { status: 404, mensaje: CORRIDA_NO_ENCONTRADA } };
-  return { corridaId: crudo.trim(), rechazo: null };
-}
 
 const booleano = (nombre: string) =>
   z
@@ -414,5 +449,4 @@ export function leerConsultaRed(
   };
 }
 
-export type ElegirCurva = z.infer<typeof elegirCurvaSchema>;
-export type CalcularCuerpoEntrada = z.input<typeof calcularSchema>;
+export type CalcularCuerpoEntrada = z.input<typeof calcularAgrupacionSchema>;

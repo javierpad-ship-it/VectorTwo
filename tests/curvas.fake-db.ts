@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 
 /**
  * Base falsa en memoria para probar los handlers de M6 sin red ni datos reales.
- * Implementa solo lo que usan las consultas: `select`, filtros (`eq`, `neq`,
- * `in`, `not … is null`), `order`, `limit`, `range`, `maybeSingle`, `single`,
- * `insert`, `update`, `delete` y los dos `rpc` de M6. Hace cumplir los dos únicos
- * parciales de M6 (una curva vigente por agrupación, una corrida de referencia)
- * con el mismo código y mensaje que Postgres.
+ * Implementa solo lo que usan las consultas: `select` (con proyección de columnas
+ * y `count` con `head`), filtros (`eq`, `neq`, `in`, `is`, `not … is null`), `order`,
+ * `limit`, `range`, `maybeSingle`, `single`, `insert`, `update`, `delete` y los dos
+ * `rpc` de M6 (`venta_estacionalidad_agrupacion` y `venta_mensual_tienda`). Hace
+ * cumplir el parcial de M6 (una curva vigente por agrupación y su versión única)
+ * con el mismo código y mensaje que Postgres, y anota qué columnas se pidieron de
+ * cada tabla (para probar que la lista no lee `resultado`).
  */
 
 export type Fila = Record<string, unknown>;
@@ -15,12 +17,16 @@ export type EstadoFalso = {
   tablas: Record<string, Fila[]>;
   rol: "planner" | "comprador" | "sin_sesion";
   siguienteId: number;
-  /** Respuesta de `refrescar_y_leer_agregado_estacionalidad` (o un error). */
-  agregado: { data: unknown; error: { code: string; message: string } | null };
+  /** Respuesta de `venta_estacionalidad_agrupacion(id)` por id (`"null"` sin agrupación), o un error que se devuelve en cualquier llamada. */
+  venta: { porId: Record<string, unknown>; error: { code: string; message: string } | null };
   /** Filas de `venta_mensual_tienda()`. */
   ventaTienda: Fila[];
-  /** Cuántas veces se llamó al agregado (para probar que nada más lo lee). */
-  llamadasAgregado: number;
+  /** Una anotación por llamada a `venta_estacionalidad_agrupacion` (el id pedido, o null). */
+  llamadasVenta: (string | null)[];
+  /** Cuántas veces se llamó a `venta_mensual_tienda()`. */
+  llamadasVentaTienda: number;
+  /** Los `select` pedidos de cada tabla (`*` o las columnas), en orden. */
+  columnasLeidas: Record<string, string[]>;
   /** Tablas que se consultaron con `from` (para comprobar que no se lee la vista materializada). */
   tablasLeidas: Set<string>;
   /** Hace fallar el próximo insert en esa tabla (código y mensaje de Postgres). */
@@ -31,9 +37,11 @@ export const estadoFalso: EstadoFalso = {
   tablas: {},
   rol: "planner",
   siguienteId: 1,
-  agregado: { data: null, error: null },
+  venta: { porId: {}, error: null },
   ventaTienda: [],
-  llamadasAgregado: 0,
+  llamadasVenta: [],
+  llamadasVentaTienda: 0,
+  columnasLeidas: {},
   tablasLeidas: new Set<string>(),
   fallarInsert: {},
 };
@@ -54,7 +62,7 @@ export function guardFalso() {
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
-type Resultado = { data: unknown; error: { code: string; message: string; details: null; hint: null } | null };
+type Resultado = { data: unknown; count?: number | null; error: { code: string; message: string; details: null; hint: null } | null };
 
 class Consulta implements PromiseLike<Resultado> {
   private modo: "select" | "insert" | "update" | "delete" = "select";
@@ -65,11 +73,16 @@ class Consulta implements PromiseLike<Resultado> {
   private desde = 0;
   private hasta = Infinity;
   private tope = Infinity;
+  private columnas: string[] | null = null;
+  private soloConteo = false;
   constructor(
     private readonly tabla: string,
     private readonly origen: Fila[] | null = null
   ) {}
-  select() {
+  select(columnas = "*", opciones?: { count?: string; head?: boolean }) {
+    (estadoFalso.columnasLeidas[this.tabla] ??= []).push(columnas);
+    if (columnas.trim() !== "*") this.columnas = columnas.split(",").map((c) => c.trim());
+    this.soloConteo = opciones?.head === true && opciones.count === "exact";
     return this;
   }
   insert(f: Fila) {
@@ -96,6 +109,10 @@ class Consulta implements PromiseLike<Resultado> {
   }
   in(c: string, v: unknown[]) {
     this.filtros.push((f) => v.includes(f[c]));
+    return this;
+  }
+  is(c: string, v: unknown) {
+    this.filtros.push((f) => (v === null ? f[c] === null || f[c] === undefined : f[c] === v));
     return this;
   }
   not(c: string, op: string, v: unknown) {
@@ -138,11 +155,6 @@ class Consulta implements PromiseLike<Resultado> {
         return { code: "23505", message: 'duplicate key value violates unique constraint "curvas_estacionalidad_agrupacion_version_key"' };
       }
     }
-    if (this.tabla === "corridas_estacionalidad" && nueva.referencia === true) {
-      if (filas.some((f) => f !== nueva && f.referencia === true)) {
-        return { code: "23505", message: 'duplicate key value violates unique constraint "corridas_estacionalidad_referencia_uniq"' };
-      }
-    }
     return null;
   }
 
@@ -165,7 +177,7 @@ class Consulta implements PromiseLike<Resultado> {
         activo: true,
         created_at: `2026-10-14T10:${String(estadoFalso.siguienteId).padStart(2, "0")}:00Z`,
         updated_at: "2026-10-14T10:00:00Z",
-        ...(this.tabla === "corridas_estacionalidad" ? { referencia: false } : {}),
+        ...(this.tabla === "corridas_estacionalidad" ? { agrupacion_estacionalidad_id: null } : {}),
         ...(this.tabla === "curvas_estacionalidad" ? { estado: "vigente", aprobada_at: "2026-10-14T10:00:00Z", nota: null } : {}),
         ...this.carga,
       };
@@ -196,8 +208,11 @@ class Consulta implements PromiseLike<Resultado> {
           return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1);
         });
       }
+      if (this.soloConteo) return { data: null, count: afectadas.length, error: null };
       afectadas = afectadas.slice(this.desde, this.hasta === Infinity ? undefined : this.hasta + 1);
       if (this.tope !== Infinity) afectadas = afectadas.slice(0, this.tope);
+      const columnas = this.columnas;
+      if (columnas) afectadas = afectadas.map((f) => Object.fromEntries(columnas.filter((c) => c in f).map((c) => [c, f[c]])));
     }
     if (this.una) return { data: afectadas[0] ?? null, error: null };
     return { data: afectadas, error: null };
@@ -207,13 +222,18 @@ class Consulta implements PromiseLike<Resultado> {
 export function clienteFalso() {
   return {
     from: (t: string) => new Consulta(t),
-    rpc: (nombre: string) => {
-      if (nombre === "refrescar_y_leer_agregado_estacionalidad") {
-        estadoFalso.llamadasAgregado += 1;
-        const { data, error } = estadoFalso.agregado;
-        return Promise.resolve({ data: error ? null : data, error: error ? { ...error, details: null, hint: null } : null });
+    rpc: (nombre: string, args?: { p_agrupacion_id?: string }) => {
+      if (nombre === "venta_estacionalidad_agrupacion") {
+        const id = args?.p_agrupacion_id ?? null;
+        estadoFalso.llamadasVenta.push(id);
+        const { porId, error } = estadoFalso.venta;
+        if (error) return Promise.resolve({ data: null, error: { ...error, details: null, hint: null } });
+        return Promise.resolve({ data: porId[String(id)] ?? null, error: null });
       }
-      if (nombre === "venta_mensual_tienda") return new Consulta("__venta_mensual_tienda", estadoFalso.ventaTienda);
+      if (nombre === "venta_mensual_tienda") {
+        estadoFalso.llamadasVentaTienda += 1;
+        return new Consulta("__venta_mensual_tienda", estadoFalso.ventaTienda);
+      }
       throw new Error(`rpc inesperado: ${nombre}`);
     },
   };

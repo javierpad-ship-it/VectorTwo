@@ -28,6 +28,7 @@ const candidata = (modelo: CandidataApi["modelo"], extra: Partial<CandidataApi> 
   motivo: null,
   eat: 29.1,
   error_max: 7,
+  pruebas: 2,
   pliegues: 2,
   eat_por_pliegue: [
     { anio: 2024, eat: 28, error_max: 6 },
@@ -75,6 +76,8 @@ const resultado = {
   recomendada: "A",
   motivo_recomendacion: "sin_evidencia",
   margen: 8.25,
+  ruido_normal: 33,
+  ruido_normal_detalle: [{ anios: [2024, 2025], eat: 33 }],
   comparacion: { mejor: "B", eat_mejor: 27.4, eat_a: 29.1, margen: 8.25, pliegues: 2, frase: "B se equivoca 27.4 pp frente a 29.1 de A en 2 pruebas; se recomienda A" },
   estabilidad: 0.7,
   nivel_estabilidad: "media",
@@ -105,13 +108,13 @@ describe("humo de render de la pantalla de curvas", () => {
     expect(h).toContain("Participación (%)");
   });
 
-  it("tabla año × mes: 12 meses, cabeceras por año, propuesta, vigente y diferencia; «—» en el año en curso", () => {
+  it("tabla año × mes: 12 meses, una fila por año, propuesta, aprobada, diferencia, promedio, índice y años considerados; «—» en el año en curso", () => {
     const h = html(
       createElement(TablaAnioMes, {
         id: "t",
         anios,
-        propuesta: { etiqueta: "A", curva: PLANA },
-        vigente: { etiqueta: "v1", curva: curvaConPico(1, 0.2) },
+        propuesta: { etiqueta: "Propuesta A · Promedio simple", curva: PLANA },
+        vigente: { etiqueta: "Aprobada v1 (A)", curva: curvaConPico(1, 0.2) },
         umbralDominante: 0.3,
         nombreArchivo: "x.csv",
       })
@@ -120,14 +123,44 @@ describe("humo de render de la pantalla de curvas", () => {
     expect(h).toContain("parcial, ene–set, atípico");
     expect(h).toContain("Dominante");
     expect(h).toContain("Escaso");
+    expect(h).toContain("Propuesta A · Promedio simple");
+    expect(h).toContain("Aprobada v1 (A)");
     expect(h).toContain("Diferencia (pp)");
+    expect(h).toContain("propuesta − aprobada");
+    expect(h).toContain("Promedio de unidades");
+    expect(h).toContain("Índice del mes");
+    expect(h).toContain("1.00 = mes promedio");
+    expect(h).toContain("Años considerados");
     expect(h).toContain("Mes sin cargar");
     expect(h).toContain("<caption");
+    expect(h).toContain('scope="row"');
+    expect(h).toContain('scope="col"');
+    expect(h).toMatch(/EAT \d+\.\d pp/);
   });
 
-  it("candidatas: frase comparativa, recomendada, igual a A, no disponible y prestada; sin botón de aprobar", () => {
+  it("tabla año × mes: un año sin curva se lista con «—» y su motivo; sin aprobada lo dice", () => {
+    const h = html(
+      createElement(TablaAnioMes, {
+        id: "t",
+        anios: [anio(2024), anio(2022, { participacion: null, participacion_real: null, unidades: 0, meses: Array(12).fill(0) })],
+        propuesta: { etiqueta: "Propuesta A", curva: PLANA },
+        vigente: null,
+        umbralDominante: 0.3,
+        nombreArchivo: "x.csv",
+        motivos: new Map([[2022, "sin red comparable"]]),
+      })
+    );
+    expect(h).toContain("— sin red comparable");
+    expect(h).toContain("sin curva aprobada");
+  });
+
+  it("candidatas: frase de recomendación, N pruebas con el ruido junto al EAT, recomendada, igual a A, no disponible y prestada; sin botón de aprobar", () => {
     const h = html(createElement(CandidatasTabla, { resultado, seleccionada: "A", onSeleccionar: () => {} }));
+    expect(h).toContain("Propone A · Promedio simple de 2023, 2024 y 2025");
     expect(h).toContain("B se equivoca 27.4 pp");
+    expect(h).toContain("2 pruebas · ruido 33.0 pp");
+    expect(h).toContain("Ruido entre años normales: 33.0 pp (2024 frente a 2025: 33.0 pp)");
+    expect(h).not.toContain("EAT no comparable");
     expect(h).toContain("Recomendada");
     expect(h).toContain("Igual a A");
     expect(h).toContain("No disponible");
@@ -136,12 +169,20 @@ describe("humo de render de la pantalla de curvas", () => {
     expect(h).not.toContain("Aprobar");
   });
 
+  it("candidatas: «EAT no comparable» cuando los años de ajuste no son los de la vigente, y «ruido no medible» con menos de dos años normales", () => {
+    const aviso = "EAT no comparable con el cálculo anterior (la vigente usó 2024 y 2025; hoy 2023, 2024 y 2025).";
+    const h = html(createElement(CandidatasTabla, { resultado: { ...resultado, ruido_normal: null, ruido_normal_detalle: [] }, seleccionada: "A", onSeleccionar: () => {}, avisoNoComparable: aviso }));
+    expect(h).toContain(aviso);
+    expect(h).toContain("ruido no medible");
+  });
+
   it("comparador: con vigente muestra diferencia y EAT; sin vigente avisa de la versión 1", () => {
     const prop = { etiqueta: "A", curva: PLANA };
     const vig = { etiqueta: "v1 · A", curva: curvaConPico(1, 0.2) };
     const con = html(createElement(ComparadorCurvas, { propuesta: prop, vigente: vig, comparacion: compararCurvas(vig.curva, prop.curva, true) }));
     expect(con).toContain("EAT entre ambas");
     expect(con).toContain("Diferencia (pp)");
+    expect(html(createElement(ComparadorCurvas, { propuesta: prop, vigente: vig, comparacion: compararCurvas(vig.curva, prop.curva, true), avisoNoComparable: "EAT no comparable con el cálculo anterior (x)." }))).toContain("EAT no comparable");
     const sin = html(createElement(ComparadorCurvas, { propuesta: prop, vigente: null, comparacion: null }));
     expect(sin).toContain("versión 1");
   });

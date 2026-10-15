@@ -5,6 +5,7 @@ import {
   aniosConAtipicos,
   bandaParaGrafico,
   construirSeries,
+  esAnioNino,
   etiquetaSerieAnio,
   puntosLiquidacion,
   serieDeAnio,
@@ -46,14 +47,25 @@ describe("serieDeAnio", () => {
     expect(serieDeAnio(anio(2022, { unidades: 0, meses: Array(12).fill(0) }), "unidades")).toBeNull();
   });
 
-  it("escasos y descartados se atenúan; los descartados, además, van en gris y apagados por defecto", () => {
+  it("escasos y descartados se atenúan; los descartados, además, van en gris; todos se ven al abrir (se pueden apagar en la leyenda)", () => {
     const escaso = serieDeAnio(anio(2023, { escaso: true }), "participacion")!;
     expect(escaso.opacidad).toBeLessThan(1);
     expect(escaso.porDefecto).toBe(true);
     const descartado = serieDeAnio(anio(2023, { clase: "atipico_completo", tratamiento: "descartado" }), "participacion")!;
     expect(descartado.color).toBe(COLOR_DESCARTADO);
     expect(descartado.opacidad).toBeLessThan(1);
-    expect(descartado.porDefecto).toBe(false);
+    expect(descartado.porDefecto).toBe(true);
+  });
+
+  it("los años del Niño llevan otro trazo (guion y punto); el año en curso, discontinuo; el resto, continuo", () => {
+    expect(serieDeAnio(anio(2023, { clase: "atipico_completo", tratamiento: "incluido" }), "participacion")!.trazo).toBe("punteado");
+    expect(serieDeAnio(anio(2023, { clase: "con_huecos", tratamiento: "imputado" }), "participacion")!.trazo).toBe("punteado");
+    expect(serieDeAnio(anio(2023, { clase: "atipico_completo", tratamiento: "descartado" }), "participacion")!.trazo).toBe("punteado");
+    expect(serieDeAnio(anio(2024), "participacion")!.trazo).toBe("continuo");
+    const parcial = Array.from({ length: 12 }, (_, i) => (i < 9 ? 1 / 9 : 0));
+    expect(serieDeAnio(anio(2026, { clase: "en_curso", meses_cargados: 9, participacion: null, participacion_parcial: parcial }), "participacion")!.trazo).toBe("discontinuo");
+    expect(esAnioNino(anio(2023, { clase: "atipico_completo" }))).toBe(true);
+    expect(esAnioNino(anio(2023))).toBe(false);
   });
 
   it("imputados se mantienen en 1-12 (contrato del backend) y en unidades no hay imputación", () => {
@@ -130,5 +142,59 @@ describe("ayudas para la geometría del backend", () => {
     expect(g.bandasAtipicas.map((b) => b.mes)).toEqual([3]);
     expect(g.puntosLiquidacion.map((p) => [p.clave, p.mes])).toEqual([["anio-2024", 6]]);
     expect(g.lineas[0].aria).toContain("2024");
+  });
+});
+
+// ─── 06b, regla 47 y caso 21: todos los años con red se ven ───
+
+import { celdaAnioMes, filasCsvAnioMes, formatearPp as formatearPpPantalla } from "../src/app/(app)/planificacion/curvas-estacionalidad/vista";
+import { formatearPp } from "../src/lib/formato";
+import { ABRIGO_ID, agrupacionDe, corridaFixture } from "./curvas.fixture";
+import { prepararTrabajo } from "../src/lib/curvas/trabajo";
+import { insumosFixture, parametros } from "./curvas.fixture";
+
+describe("regla 47 · un año descartado sigue dibujado (participacion_real ?? participacion)", () => {
+  it("un año descartado (participacion null, participacion_real con curva) produce serie gris y tenue, visible al abrir; y celdas en la tabla", () => {
+    const d = anio(2023, { tratamiento: "descartado", participacion: null, participacion_real: curvaConPico(6, 0.3), en_ajuste: false });
+    const s = serieDeAnio(d, "participacion")!;
+    expect(s.color).toBe(COLOR_DESCARTADO);
+    expect(s.porDefecto).toBe(true);
+    expect(s.opacidad).toBeLessThan(1);
+    expect(s.valores[5]).toBeCloseTo(0.3, 9);
+    const celda = celdaAnioMes(d, 5);
+    expect(celda.participacion).toBeCloseTo(0.3, 9);
+  });
+  it("un año imputado dibuja la participación imputada con sus meses imputados (la real queda para el detalle)", () => {
+    const imputada = curvaConPico(3, 0.2);
+    const d = anio(2024, { tratamiento: "imputado", participacion: imputada, participacion_real: curvaConPico(3, 0.4), imputados: [3, 4] });
+    const s = serieDeAnio(d, "participacion")!;
+    expect(s.valores[2]).toBeCloseTo(0.2, 9);
+    expect(s.imputados).toEqual([3, 4]);
+  });
+  it("un año sin red, sin volumen o incompleto (sin participación real) no se dibuja", () => {
+    expect(serieDeAnio(anio(2022, { participacion: null, participacion_real: null, unidades: 0, meses: Array(12).fill(0) }), "participacion")).toBeNull();
+    expect(serieDeAnio(anio(2022, { clase: "incompleto", meses_cargados: 7, participacion: null, participacion_real: null, unidades: 0, meses: Array(12).fill(0) }), "participacion")).toBeNull();
+    expect(celdaAnioMes(anio(2022, { participacion: null, participacion_real: null }), 0).participacion).toBeNull();
+  });
+  it("caso 21 · fixture «forma corrida» (2023 descartado): el gráfico tiene cuatro series y el CSV incluye 2023 con su participación real", () => {
+    const a = agrupacionDe(corridaFixture("forma_corrida"), ABRIGO_ID);
+    expect(a.anios.find((x) => x.anio === 2023)).toMatchObject({ tratamiento: "descartado", participacion: null });
+    const series = construirSeries(a.anios, { modo: "participacion" });
+    expect(series.map((s) => s.anio)).toEqual([2023, 2024, 2025, 2026]);
+    expect(series.find((s) => s.anio === 2023)).toMatchObject({ color: COLOR_DESCARTADO, porDefecto: true });
+    const csv = filasCsvAnioMes(a.anios, null, null);
+    const col2023 = csv.campos.indexOf("2023 (%)");
+    expect(col2023).toBeGreaterThan(0);
+    expect(csv.datos.every((fila) => typeof fila[col2023] === "number")).toBe(true);
+  });
+  it("con anios_excluidos = [2024] el año sigue en el gráfico, en gris", () => {
+    const r = prepararTrabajo(insumosFixture(ABRIGO_ID), parametros({ anios_excluidos: [2024] }), undefined);
+    const a = r.trabajo!.salida!.resultado.agrupaciones[0];
+    const series = construirSeries(a.anios, { modo: "participacion" });
+    expect(series.find((s) => s.anio === 2024)).toMatchObject({ color: COLOR_DESCARTADO, porDefecto: true });
+  });
+  it("formato (Q4): formatearPp de la pantalla y el compartido dan el mismo texto", () => {
+    expect(formatearPpPantalla(27.43)).toBe(formatearPp(27.43));
+    expect(formatearPpPantalla(27.43)).toBe("27.4 pp");
   });
 });

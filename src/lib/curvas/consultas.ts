@@ -3,19 +3,19 @@ import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "@/lib/s
 import { leerLineas, leerNodos, leerTodo } from "@/lib/arbol/consultas";
 import { temporadasDeLineasPorAgrupacion } from "@/lib/estacionalidad/reglas";
 import { recortarPeriodo } from "@/lib/ventas/periodo";
-import { leerAgregado, type AgregadoLeido } from "./agregado";
+import { leerVentaEstacionalidad, type VentaEstacionalidad } from "./agregado";
 import { alcanceEspejo, temporadaSugerida, temporadasDePeriodo, temporadaSugeridaVisible } from "./atipicos";
 import { huellaComposicion } from "./huellas";
+import { parametrosDeJson } from "./reglas";
 import { temporadaDeFila, type TiendaMaestro, type VentaTiendaMes } from "./tipos";
 import {
-  PARAMETROS_POR_DEFECTO,
-  type CorridaResumenApi,
   type EfectoAtipicoCorrida,
+  type FotoResumenApi,
   type ParametrosCurvas,
   type PeriodoAtipicoApi,
   type RedAnio,
   type ResultadoCorrida,
-  type ResumenCorrida,
+  type ResumenFoto,
   type TemporadaAgrupacion,
 } from "./tipos-api";
 import type { AgrupacionLeida } from "./estado";
@@ -23,11 +23,10 @@ import type { AgrupacionLeida } from "./estado";
 /**
  * Acceso a datos de M6 (solo servidor). ÚNICO archivo de `src/` que lee o
  * escribe `periodos_atipicos`, `corridas_estacionalidad` y `curvas_estacionalidad`
- * y que nombra la vista materializada del agregado, su función de refresco y
- * lectura y `venta_mensual_tienda`
- * (docs/modulos/06-curvas-estacionalidad.md, "Contratos de API" y regla 31).
- * El agregado se lee SOLO con la función `jsonb` (sin paginar la vista: un
- * refresco concurrente la dejaría a medias).
+ * y que nombra `venta_estacionalidad_agrupacion` y `venta_mensual_tienda`
+ * (docs/modulos/06b-curvas-trabajo-por-agrupacion.md, "Contratos de API" y regla 46).
+ * La venta se lee SOLO con la función `jsonb` (un solo estado de los datos); la
+ * vista materializada y la función de refresco de la 0.9.6 ya no se usan.
  */
 
 type Db = SupabaseClient<Database>;
@@ -175,21 +174,24 @@ export async function leerMesesPublicados(db: Db): Promise<{ data: string[]; err
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Paso 2
+// Paso 2 / 06b
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Agregado (la única lectura de la vista materializada) ───
+// ─── Venta de una agrupación (la única lectura de venta de M6) ───
 
 /**
- * Refresca la vista materializada y devuelve su grano agrupación × tienda × mes en
- * UNA sola llamada atómica, bajo lock de aviso: si otro cálculo está refrescando,
- * el error es `55P03` / `calculo_en_curso` (el handler lo traduce a `409`).
- * `data` es `null` si la respuesta no tiene la forma esperada.
+ * UNA llamada a `venta_estacionalidad_agrupacion(id)`: la venta de la agrupación
+ * (tienda × mes; con `id` nulo, `agrupacion: null`), la venta por temporada
+ * (temporada × tienda × mes) y las cargas publicadas, todo del mismo estado. `data`
+ * es `null` si la respuesta no tiene la forma esperada (el handler responde 500).
  */
-export async function refrescarYLeerAgregado(db: Db): Promise<{ data: AgregadoLeido | null; error: PostgrestError | null }> {
-  const { data, error } = await db.rpc("refrescar_y_leer_agregado_estacionalidad");
+export async function leerVentaDeEstacionalidad(
+  db: Db,
+  agrupacionId: string | null
+): Promise<{ data: VentaEstacionalidad | null; error: PostgrestError | null }> {
+  const { data, error } = await db.rpc("venta_estacionalidad_agrupacion", agrupacionId === null ? {} : { p_agrupacion_id: agrupacionId });
   if (error) return { data: null, error };
-  return { data: leerAgregado(data), error: null };
+  return { data: leerVentaEstacionalidad(data), error: null };
 }
 
 // ─── Tiendas, venta por tienda y cargas ───
@@ -213,7 +215,7 @@ export async function leerTiendas(db: Db): Promise<{ data: TiendaMaestro[]; erro
 /** Venta total por tienda y mes (`venta_mensual_tienda()`, del orden de 500 filas): la red comparable sin corrida y la obsolescencia por red. */
 export async function leerVentaMensualTienda(db: Db): Promise<{ data: VentaTiendaMes[]; error: PostgrestError | null }> {
   const { data, error } = await leerTodo<{ periodo: string; tienda_id: string; unidades: number }>((d, h) =>
-    db.rpc("venta_mensual_tienda").range(d, h)
+    db.rpc("venta_mensual_tienda").order("periodo").order("tienda_id").range(d, h)
   );
   return { data: data.map((v) => ({ tienda_id: v.tienda_id, periodo: recortarPeriodo(v.periodo), unidades: Number(v.unidades) })), error };
 }
@@ -245,26 +247,29 @@ export type AgrupacionConDatos = AgrupacionLeida & {
 /** Agrupaciones (activas o todas) con géneros, equivalencias activas, huella y temporada sugerida. */
 export async function leerAgrupacionesConDatos(
   db: Db,
-  opciones: { soloActivas: boolean }
+  opciones: { soloActivas: boolean; id?: string }
 ): Promise<{ data: AgrupacionConDatos[]; error: PostgrestError | null }> {
   const [filas, equivalencias, vinculos, generos, nodos, lineas] = await Promise.all([
     leerTodo<Tables<"agrupaciones_estacionalidad">>((d, h) => {
       let q = db.from("agrupaciones_estacionalidad").select("*");
       if (opciones.soloActivas) q = q.eq("activo", true);
+      if (opciones.id) q = q.eq("id", opciones.id);
       return q.order("orden").order("nombre").order("id").range(d, h);
     }),
-    leerTodo<{ id: string; agrupacion_estacionalidad_id: string | null; activo: boolean; genero_mundo_linea_id: string }>((d, h) =>
-      db
+    leerTodo<{ id: string; agrupacion_estacionalidad_id: string | null; activo: boolean; genero_mundo_linea_id: string }>((d, h) => {
+      let q = db
         .from("equivalencias")
         .select("id, agrupacion_estacionalidad_id, activo, genero_mundo_linea_id")
         .not("agrupacion_estacionalidad_id", "is", null)
-        .eq("activo", true)
-        .order("id")
-        .range(d, h)
-    ),
-    leerTodo<{ agrupacion_estacionalidad_id: string; genero_id: string }>((d, h) =>
-      db.from("agrupacion_estacionalidad_genero").select("id, agrupacion_estacionalidad_id, genero_id").order("id").range(d, h)
-    ),
+        .eq("activo", true);
+      if (opciones.id) q = q.eq("agrupacion_estacionalidad_id", opciones.id);
+      return q.order("id").range(d, h);
+    }),
+    leerTodo<{ agrupacion_estacionalidad_id: string; genero_id: string }>((d, h) => {
+      let q = db.from("agrupacion_estacionalidad_genero").select("id, agrupacion_estacionalidad_id, genero_id");
+      if (opciones.id) q = q.eq("agrupacion_estacionalidad_id", opciones.id);
+      return q.order("id").range(d, h);
+    }),
     leerTodo<{ id: string; nombre: string; orden: number }>((d, h) => db.from("generos").select("id, nombre, orden").order("orden").order("id").range(d, h)),
     leerNodos(db),
     leerLineas(db),
@@ -320,108 +325,139 @@ export async function leerAgrupacionPorId(db: Db, id: string) {
   return { data, error };
 }
 
-// ─── Corridas ───
+/** Una agrupación (activa o no) con géneros, equivalencias activas, huella y temporada sugerida; `data` es `null` si no existe. */
+export async function leerAgrupacionConDatos(
+  db: Db,
+  id: string
+): Promise<{ data: AgrupacionConDatos | null; error: PostgrestError | null }> {
+  const { data, error } = await leerAgrupacionesConDatos(db, { soloActivas: false, id });
+  return { data: data[0] ?? null, error };
+}
+
+/** Lo que alimenta la huella de temporada: id, temporada y huella de composición. */
+export type AgrupacionParaTemporada = { id: string; nombre: string; temporada: TemporadaAgrupacion; huella: string };
+
+/**
+ * Las agrupaciones ACTIVAS de una temporada y las de `todo_el_ano` (el control del
+ * Niño) con la huella de su composición: lo que `T` y el control necesitan para la
+ * `huella_temporada`. Dos lecturas pequeñas (agrupaciones y sus equivalencias activas).
+ */
+export async function leerAgrupacionesDeTemporada(
+  db: Db,
+  temporada: TemporadaAgrupacion
+): Promise<{ data: AgrupacionParaTemporada[]; error: PostgrestError | null }> {
+  const temporadas = temporada === "todo_el_ano" ? ["todo_el_ano"] : [temporada, "todo_el_ano"];
+  const agrupaciones = await leerTodo<{ id: string; nombre: string; temporada: string }>((d, h) =>
+    db.from("agrupaciones_estacionalidad").select("id, nombre, temporada").eq("activo", true).in("temporada", temporadas).order("id").range(d, h)
+  );
+  if (agrupaciones.error) return { data: [], error: agrupaciones.error };
+  const ids = agrupaciones.data.map((a) => a.id);
+  if (ids.length === 0) return { data: [], error: null };
+  const equivalencias = await leerTodo<{ id: string; agrupacion_estacionalidad_id: string | null }>((d, h) =>
+    db.from("equivalencias").select("id, agrupacion_estacionalidad_id").eq("activo", true).in("agrupacion_estacionalidad_id", ids).order("id").range(d, h)
+  );
+  if (equivalencias.error) return { data: [], error: equivalencias.error };
+  const porAgrupacion = new Map<string, string[]>();
+  for (const e of equivalencias.data) {
+    if (e.agrupacion_estacionalidad_id === null) continue;
+    porAgrupacion.set(e.agrupacion_estacionalidad_id, [...(porAgrupacion.get(e.agrupacion_estacionalidad_id) ?? []), e.id]);
+  }
+  return {
+    data: agrupaciones.data.map((a) => ({
+      id: a.id,
+      nombre: a.nombre,
+      temporada: temporadaDeFila(a.temporada),
+      huella: huellaComposicion(porAgrupacion.get(a.id) ?? []),
+    })),
+    error: null,
+  };
+}
+
+/** Id, nombre y temporada de las agrupaciones ACTIVAS (lectura mínima para Años Niño y `/anios`). */
+export async function leerAgrupacionesActivasBasicas(
+  db: Db
+): Promise<{ data: { id: string; nombre: string; temporada: TemporadaAgrupacion }[]; error: PostgrestError | null }> {
+  const { data, error } = await leerTodo<{ id: string; nombre: string; temporada: string }>((d, h) =>
+    db.from("agrupaciones_estacionalidad").select("id, nombre, temporada").eq("activo", true).order("orden").order("nombre").order("id").range(d, h)
+  );
+  return { data: data.map((x) => ({ id: x.id, nombre: x.nombre, temporada: temporadaDeFila(x.temporada) })), error };
+}
+
+/** Equivalencias activas sin agrupación (faltantes de M3), sin traer las filas. */
+export async function contarEquivalenciasSinAgrupacion(db: Db): Promise<{ data: number; error: PostgrestError | null }> {
+  const { count, error } = await db
+    .from("equivalencias")
+    .select("id", { count: "exact", head: true })
+    .is("agrupacion_estacionalidad_id", null)
+    .eq("activo", true);
+  return { data: count ?? 0, error };
+}
+
+// ─── Fotos de aprobación (corridas_estacionalidad con agrupación) ───
 
 export type CorridaFila = Tables<"corridas_estacionalidad">;
 
-const COLUMNAS_CORRIDA_RESUMEN = "id, created_at, hasta_periodo, referencia, parametros, resumen, usuario_nombre";
+/** La foto SIN `resultado`: lo único que leen la lista y la obsolescencia (regla 52). */
+export type FotoLigera = Pick<
+  CorridaFila,
+  "id" | "created_at" | "updated_at" | "activo" | "hasta_periodo" | "parametros" | "red_comparable" | "resumen" | "usuario_nombre" | "perfil_id" | "agrupacion_estacionalidad_id"
+> & { resultado?: Json };
+
+const COLUMNAS_FOTO_LIGERA = "id, created_at, updated_at, activo, hasta_periodo, parametros, red_comparable, resumen, usuario_nombre, perfil_id, agrupacion_estacionalidad_id";
 
 /** `parametros` guardados → `ParametrosCurvas` (lo que falte o no sea del tipo esperado toma el valor por defecto). */
 export function leerParametros(json: Json): ParametrosCurvas {
-  const o = json && typeof json === "object" && !Array.isArray(json) ? json : {};
-  const salida: Record<string, unknown> = { ...PARAMETROS_POR_DEFECTO };
-  for (const [clave, defecto] of Object.entries(PARAMETROS_POR_DEFECTO)) {
-    const valor = (o as Record<string, Json | undefined>)[clave];
-    if (typeof valor === typeof defecto) salida[clave] = valor;
-  }
-  return salida as ParametrosCurvas;
+  return parametrosDeJson(json);
 }
 
 /**
  * `jsonb` guardado por este mismo código → su tipo. Es el único lugar donde se
- * afirma la forma: lo escribe `calcular` con estos mismos tipos.
+ * afirma la forma: lo escribe `PUT` con estos mismos tipos.
  */
 export const comoResultado = (json: Json) => json as unknown as ResultadoCorrida;
 export const comoEfecto = (json: Json) => json as unknown as EfectoAtipicoCorrida;
 export const comoRed = (json: Json) => json as unknown as RedAnio[];
-export const comoResumen = (json: Json) => json as unknown as ResumenCorrida;
+export const comoResumen = (json: Json) => json as unknown as ResumenFoto;
 
-type FilaResumenCorrida = Pick<CorridaFila, "id" | "created_at" | "hasta_periodo" | "referencia" | "parametros" | "resumen" | "usuario_nombre">;
+type FilaResumenFoto = Pick<CorridaFila, "id" | "created_at" | "hasta_periodo" | "parametros" | "resumen" | "usuario_nombre">;
 
-export function aCorridaResumen(fila: FilaResumenCorrida): CorridaResumenApi {
+export function aFotoResumen(fila: FilaResumenFoto): FotoResumenApi {
   return {
     id: fila.id,
     created_at: fila.created_at,
     hasta_periodo: recortarPeriodo(fila.hasta_periodo),
-    referencia: fila.referencia,
     parametros: leerParametros(fila.parametros),
     resumen: comoResumen(fila.resumen),
     usuario_nombre: fila.usuario_nombre,
   };
 }
 
-/** Las últimas `limite` corridas SIN `resultado` (por fecha descendente). */
-export async function leerCorridasLista(db: Db, limite: number) {
-  const { data, error } = await db
-    .from("corridas_estacionalidad")
-    .select(COLUMNAS_CORRIDA_RESUMEN)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(limite);
-  return { data: data ?? [], error };
-}
-
-/** Todos los campos de una corrida; `data` es `null` si no existe. */
+/** Todos los campos de una foto (con `resultado`: solo "Ver foto"); `data` es `null` si no existe. */
 export async function leerCorridaPorId(db: Db, id: string) {
   const { data, error } = await db.from("corridas_estacionalidad").select("*").eq("id", id).maybeSingle();
   return { data, error };
 }
 
-export async function leerCorridasPorIds(db: Db, ids: readonly string[]) {
-  if (ids.length === 0) return { data: [] as CorridaFila[], error: null };
-  const { data, error } = await db.from("corridas_estacionalidad").select("*").in("id", [...ids]);
-  return { data: data ?? [], error };
-}
-
-/** La corrida marcada como referencia (completa); `null` si no hay ninguna marcada. */
-export async function leerCorridaReferencia(db: Db) {
-  const { data, error } = await db.from("corridas_estacionalidad").select("*").eq("referencia", true).maybeSingle();
-  return { data, error };
-}
-
-/** La corrida más reciente (completa); `null` si no hay corridas. */
-export async function leerUltimaCorrida(db: Db) {
-  const { data, error } = await db
-    .from("corridas_estacionalidad")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return { data, error };
-}
-
-/** `id`, fecha y marca de todas las corridas (para decidir cuál es la de referencia; son pocas). */
-export async function leerMarcasDeCorridas(db: Db) {
-  const { data, error } = await leerTodo<Pick<CorridaFila, "id" | "created_at" | "referencia">>((d, h) =>
-    db.from("corridas_estacionalidad").select("id, created_at, referencia").order("created_at").order("id").range(d, h)
-  );
-  return { data, error };
+/**
+ * Las fotos dadas SIN `resultado` (ni `efecto_atipico`). Las de la 0.9.6 (corrida
+ * global, sin `agrupacion_estacionalidad_id`) traen además `resultado`, porque su
+ * `resumen` no guardaba `temporada` ni `atipicos`.
+ */
+export async function leerFotosPorIds(db: Db, ids: readonly string[]): Promise<{ data: FotoLigera[]; error: PostgrestError | null }> {
+  if (ids.length === 0) return { data: [], error: null };
+  const { data, error } = await db.from("corridas_estacionalidad").select(COLUMNAS_FOTO_LIGERA).in("id", [...ids]);
+  if (error) return { data: [], error };
+  const filas: FotoLigera[] = data ?? [];
+  const heredadas = filas.filter((f) => f.agrupacion_estacionalidad_id === null).map((f) => f.id);
+  if (heredadas.length === 0) return { data: filas, error: null };
+  const completas = await db.from("corridas_estacionalidad").select("id, resultado").in("id", heredadas);
+  if (completas.error) return { data: [], error: completas.error };
+  const resultados = new Map((completas.data ?? []).map((c) => [c.id, c.resultado]));
+  return { data: filas.map((f) => (resultados.has(f.id) ? { ...f, resultado: resultados.get(f.id) } : f)), error: null };
 }
 
 export async function insertarCorrida(db: Db, fila: TablesInsert<"corridas_estacionalidad">) {
   return db.from("corridas_estacionalidad").insert(fila).select("*").single();
-}
-
-/** Quita la marca de referencia a las demás corridas (a lo sumo una la tiene). */
-export async function quitarReferencia(db: Db, exceptoId?: string) {
-  let q = db.from("corridas_estacionalidad").update({ referencia: false }).eq("referencia", true);
-  if (exceptoId) q = q.neq("id", exceptoId);
-  return q;
-}
-
-export async function marcarReferencia(db: Db, id: string) {
-  return db.from("corridas_estacionalidad").update({ referencia: true }).eq("id", id).select(COLUMNAS_CORRIDA_RESUMEN).maybeSingle();
 }
 
 // ─── Curvas ───
@@ -458,10 +494,51 @@ export async function leerUltimaVersion(db: Db, agrupacionId: string): Promise<{
   return { data: data?.version ?? 0, error };
 }
 
-export async function cambiarEstadoCurva(db: Db, id: string, estado: "vigente" | "reemplazada" | "retirada") {
-  return db.from("curvas_estacionalidad").update({ estado }).eq("id", id).select("*").maybeSingle();
+/**
+ * Cambio de estado CONDICIONAL: solo si la curva sigue en el estado `desde` (reemplazar o
+ * retirar desde `vigente`; volver atrás desde `reemplazada`). Si otro usuario ya la movió,
+ * no se toca nada y `data` es `null` (el handler responde 409).
+ */
+export async function cambiarEstadoCurva(
+  db: Db,
+  id: string,
+  desde: "vigente" | "reemplazada" | "retirada",
+  hasta: "vigente" | "reemplazada" | "retirada"
+) {
+  return db.from("curvas_estacionalidad").update({ estado: hasta }).eq("id", id).eq("estado", desde).select("*").maybeSingle();
 }
 
 export async function insertarCurva(db: Db, fila: TablesInsert<"curvas_estacionalidad">) {
   return db.from("curvas_estacionalidad").insert(fila).select("*").single();
+}
+
+/** Todas las versiones de la agrupación (vigente, reemplazadas y retiradas). */
+export async function leerVersiones(db: Db, agrupacionId: string) {
+  const { data, error } = await leerTodo<CurvaFila>((d, h) =>
+    db.from("curvas_estacionalidad").select("*").eq("agrupacion_estacionalidad_id", agrupacionId).order("version", { ascending: false }).order("id").range(d, h)
+  );
+  return { data, error };
+}
+
+/** Versiones guardadas por agrupación (para la lista). */
+export async function contarVersiones(db: Db): Promise<{ data: Map<string, number>; error: PostgrestError | null }> {
+  const { data, error } = await leerTodo<{ id: string; agrupacion_estacionalidad_id: string }>((d, h) =>
+    db.from("curvas_estacionalidad").select("id, agrupacion_estacionalidad_id").order("id").range(d, h)
+  );
+  const conteo = new Map<string, number>();
+  for (const c of data) conteo.set(c.agrupacion_estacionalidad_id, (conteo.get(c.agrupacion_estacionalidad_id) ?? 0) + 1);
+  return { data: conteo, error };
+}
+
+/** La versión de curva aprobada con una foto (`corrida_id`) de la agrupación; `data` es `null` si la foto quedó sin curva. */
+export async function leerCurvaDeFoto(db: Db, fotoId: string, agrupacionId: string) {
+  const { data, error } = await db
+    .from("curvas_estacionalidad")
+    .select("*")
+    .eq("corrida_id", fotoId)
+    .eq("agrupacion_estacionalidad_id", agrupacionId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return { data, error };
 }

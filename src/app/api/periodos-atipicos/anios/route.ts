@@ -4,17 +4,10 @@ import { requirePlanner } from "@/lib/auth/guard";
 import { error, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { aniosAtipicidad } from "@/lib/curvas/atipicos";
-import {
-  aPeriodoApi,
-  comoEfecto,
-  comoResultado,
-  leerCorridaReferencia,
-  leerMesesPublicados,
-  leerPeriodos,
-  leerTemporadaDeAgrupacion,
-} from "@/lib/curvas/consultas";
+import { aPeriodoApi, leerMesesPublicados, leerPeriodos, leerTemporadaDeAgrupacion } from "@/lib/curvas/consultas";
 import { AGRUPACION_NO_ENCONTRADA_ANIOS, leerConsultaAnios } from "@/lib/curvas/esquemas";
-import type { AniosAtipicosRespuesta, TemporadaAgrupacion, VolumenAnioApi } from "@/lib/curvas/tipos-api";
+import { calcularEfectoNino } from "@/lib/curvas/lectura";
+import type { AniosAtipicosRespuesta, AvisoAnios, TemporadaAgrupacion, VolumenAnioApi } from "@/lib/curvas/tipos-api";
 
 /**
  * Qué años fueron atípicos (contrato estable para M7; `requirePlanner`).
@@ -23,12 +16,16 @@ import type { AniosAtipicosRespuesta, TemporadaAgrupacion, VolumenAnioApi } from
  * (por defecto `invierno`) evalúa una temporada. `?desde=2023&hasta=2026`
  * fija los años; sin ellos, del primer mes publicado al último más los años de
  * periodos activos futuros. `400` si vienen los dos criterios o algo no es
- * válido; `404` si la agrupación no existe. No lee ventas ni la vista
- * materializada: `ratio_volumen` y `volumen` salen de la corrida de REFERENCIA
- * (nivel temporada, con control, relativo y crecimiento normal; con
- * `?agrupacion_id=` suma el ratio de la agrupación como diagnóstico) y son `null`
- * sin corrida de referencia o en un año sin comparación. `corrida_id` es la de
- * referencia (o `null`).
+ * válido; `404` si la agrupación no existe.
+ *
+ * Sin `?con_volumen=1` es barato: no lee venta y `ratio_volumen` / `volumen` son
+ * `null`. Con `con_volumen=1` (M7 y la pestaña Años Niño) calcula a demanda, con UNA
+ * llamada a `venta_estacionalidad_agrupacion(agrupacion_id ?? null)` y los parámetros
+ * POR DEFECTO (lo dice el aviso `parametros_por_defecto`): `ratio_volumen` y `volumen`
+ * a nivel de temporada, con control, relativo y crecimiento normal; con `?agrupacion_id=`
+ * suma el ratio de la agrupación como diagnóstico. `corrida_id` es siempre `null`
+ * (ya no hay corrida de referencia); `calculado_at` y `huella_cargas` dicen cuándo y
+ * con qué cargas.
  */
 export async function GET(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -46,39 +43,49 @@ export async function GET(request: NextRequest) {
     temporada = data.temporada;
   }
 
-  const [periodos, publicados, referencia] = await Promise.all([
-    leerPeriodos(db, { soloActivos: true }),
-    leerMesesPublicados(db),
-    leerCorridaReferencia(db),
-  ]);
+  const [periodos, publicados] = await Promise.all([leerPeriodos(db, { soloActivos: true }), leerMesesPublicados(db)]);
   if (periodos.error) return traducirErrorDb(periodos.error, "años atípicos: leer periodos");
   if (publicados.error) return traducirErrorDb(publicados.error, "años atípicos: leer meses publicados");
-  if (referencia.error) return traducirErrorDb(referencia.error, "años atípicos: leer la corrida de referencia");
 
-  const corrida = referencia.data;
-  const filasEfecto = corrida ? comoEfecto(corrida.efecto_atipico).por_temporada : [];
-  const deAgrupacion =
-    corrida && consulta.agrupacion_id !== null
-      ? comoResultado(corrida.resultado).agrupaciones.find((a) => a.agrupacion_id === consulta.agrupacion_id)
-      : undefined;
-  const volumenDeAnio = (anio: number) => {
-    const fila = filasEfecto.find((f) => f.anio === anio && f.temporada === temporada);
-    if (!corrida || !fila) return null;
-    const volumen: VolumenAnioApi = {
-      nivel: "temporada",
-      temporada,
-      ratio_control: fila.ratio_control,
-      ratio_relativo: fila.ratio_relativo,
-      crecimiento_normal: fila.crecimiento_normal,
-      anio_referencia: fila.anio_referencia,
-      tiendas_comunes: fila.tiendas_comunes,
-      meses_comparados: fila.meses_comparados,
-      agrupaciones: fila.agrupaciones,
-      ratio_agrupacion: deAgrupacion?.efecto_atipico.volumen.find((v) => v.anio === anio)?.ratio_volumen ?? null,
-      corrida_id: corrida.id,
+  let volumenDeAnio: ((anio: number) => { ratio_volumen: number | null; volumen: VolumenAnioApi } | null) | undefined;
+  let huellaCargas: string | null = null;
+  let calculadoAt: string | null = null;
+  const avisos: AvisoAnios[] = [];
+  if (consulta.con_volumen) {
+    const calculo = await calcularEfectoNino(db, consulta.agrupacion_id);
+    if (calculo.respuesta) return calculo.respuesta;
+    const c = calculo.data;
+    if (!c) return error(AGRUPACION_NO_ENCONTRADA_ANIOS, 404);
+    const filasEfecto = c.salida?.efecto_atipico.por_temporada ?? [];
+    const deAgrupacion =
+      consulta.agrupacion_id !== null ? c.salida?.resultado.agrupaciones.find((a) => a.agrupacion_id === consulta.agrupacion_id) : undefined;
+    volumenDeAnio = (anio) => {
+      const fila = filasEfecto.find((f) => f.anio === anio && f.temporada === temporada);
+      if (!fila) return null;
+      return {
+        ratio_volumen: fila.ratio_volumen,
+        volumen: {
+          nivel: "temporada",
+          temporada,
+          ratio_control: fila.ratio_control,
+          ratio_relativo: fila.ratio_relativo,
+          crecimiento_normal: fila.crecimiento_normal,
+          anio_referencia: fila.anio_referencia,
+          tiendas_comunes: fila.tiendas_comunes,
+          meses_comparados: fila.meses_comparados,
+          agrupaciones: fila.agrupaciones,
+          ratio_agrupacion: deAgrupacion?.efecto_atipico.volumen.find((v) => v.anio === anio)?.ratio_volumen ?? null,
+          corrida_id: null,
+        },
+      };
     };
-    return { ratio_volumen: fila.ratio_volumen, volumen };
-  };
+    huellaCargas = c.huella_cargas;
+    calculadoAt = new Date().toISOString();
+    avisos.push({
+      codigo: "parametros_por_defecto",
+      detalle: "El factor se calculó con los parámetros por defecto, no con los de cada curva aprobada.",
+    });
+  }
 
   const { anios, resumen } = aniosAtipicidad({
     agrupacion: { temporada },
@@ -90,7 +97,10 @@ export async function GET(request: NextRequest) {
   });
   const cuerpo: AniosAtipicosRespuesta = {
     criterio: { agrupacion_id: consulta.agrupacion_id, temporada },
-    corrida_id: corrida?.id ?? null,
+    corrida_id: null,
+    huella_cargas: huellaCargas,
+    calculado_at: calculadoAt,
+    avisos,
     anios,
     resumen,
   };

@@ -1,6 +1,8 @@
 import { listarMeses } from "@/lib/ventas/periodo";
 import { mesesAtipicos, type PeriodoParaClase } from "@/lib/curvas/atipicos";
+import type { VentaEstacionalidad, FilaVentaAgrupacion, FilaVentaTemporada, TemporadaDeVenta } from "@/lib/curvas/agregado";
 import { armarEntradaCorrida, type AgrupacionParaCorrida, type DatosCorrida } from "@/lib/curvas/entrada";
+import type { AgrupacionTrabajo, InsumosTrabajo } from "@/lib/curvas/trabajo";
 import { calcularCorrida, type EntradaCorrida, type SalidaCorrida } from "@/lib/curvas/modelo";
 import { PARAMETROS_POR_DEFECTO, type ParametrosCurvas, type TemporadaAgrupacion } from "@/lib/curvas/tipos-api";
 import type { FilaAgregado, TiendaMaestro } from "@/lib/curvas/tipos";
@@ -252,3 +254,102 @@ export function agrupacionDe(salida: SalidaCorrida, id: string) {
 /** Unidades de un conjunto de meses publicados (para pruebas sobre series). */
 export const suma = (v: readonly number[]) => v.reduce((s, x) => s + x, 0);
 export { mesesAtipicos };
+
+// ─── 06b: la forma `{ agrupacion, temporadas, meses_publicados, cargas }` de la función SQL ───
+
+const NOMBRES: Record<string, string> = {
+  [ABRIGO_ID]: "ABRIGO SINTÉTICO",
+  [VERANO_ID]: "VERANO SINTÉTICO",
+  [PEQUENA_ID]: "PEQUEÑA SINTÉTICA",
+  [CONSTANTE_ID]: "CONSTANTE SINTÉTICA",
+  vacia: "VACÍA SINTÉTICA",
+};
+
+export type OpcionesVenta = SobrescribirFixture & {
+  /** Meses publicados; por defecto `PUBLICADOS`. */
+  publicados?: string[];
+  agrupaciones?: AgrupacionParaCorrida[];
+  /** Agrupaciones inactivas: su venta va como `sin_agrupacion` en `temporadas`. */
+  inactivas?: string[];
+  /** `carga_id` por mes (para probar republicaciones); por defecto `carga-<mes>`. */
+  cargas?: Record<string, string>;
+};
+
+/**
+ * Lo que devuelve `venta_estacionalidad_agrupacion(agrupacionId)` derivado de las
+ * series del fixture: la venta de la agrupación (tienda × mes), la de cada temporada
+ * (la `sin_agrupacion` para las filas sin agrupación o de agrupaciones inactivas) y las cargas.
+ */
+export function fixtureVentaEstacionalidad(agrupacionId: string | null, variante: VarianteFixture = "base", opciones: OpcionesVenta = {}): VentaEstacionalidad {
+  const filas = filasFixture(variante, opciones);
+  const agrupaciones = opciones.agrupaciones ?? agrupacionesFixture(variante);
+  const publicados = opciones.publicados ?? PUBLICADOS;
+  const inactivas = new Set(opciones.inactivas ?? []);
+  const temporadaDe = (id: string | null): TemporadaDeVenta => {
+    if (id === null || inactivas.has(id)) return "sin_agrupacion";
+    return agrupaciones.find((a) => a.id === id)?.temporada ?? "sin_agrupacion";
+  };
+
+  const porClave = <T extends { tienda_id: string; periodo: string }>(filasT: T[]) => filasT;
+  const agr = new Map<string, FilaVentaAgrupacion>();
+  const tem = new Map<string, FilaVentaTemporada>();
+  for (const f of porClave(filas)) {
+    if (!publicados.includes(f.periodo)) continue;
+    if (agrupacionId !== null && f.agrupacion_id === agrupacionId) {
+      const k = `${f.tienda_id}|${f.periodo}`;
+      const a = agr.get(k) ?? { tienda_id: f.tienda_id, periodo: f.periodo, unidades: 0, venta_soles: 0, costo_vendido: 0 };
+      a.unidades += f.unidades;
+      a.venta_soles += f.venta_soles;
+      a.costo_vendido += f.costo_vendido;
+      agr.set(k, a);
+    }
+    const t = temporadaDe(f.agrupacion_id);
+    const kt = `${t}|${f.tienda_id}|${f.periodo}`;
+    const x = tem.get(kt) ?? { temporada: t, tienda_id: f.tienda_id, periodo: f.periodo, unidades: 0 };
+    x.unidades += f.unidades;
+    tem.set(kt, x);
+  }
+  const ord = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const cargas = opciones.cargas ?? Object.fromEntries(publicados.map((m) => [m, `carga-${m}`]));
+  return {
+    agrupacion: agrupacionId === null ? null : [...agr.values()].sort((a, b) => ord(a.tienda_id, b.tienda_id) || ord(a.periodo, b.periodo)),
+    temporadas: [...tem.values()].sort((a, b) => ord(a.temporada, b.temporada) || ord(a.tienda_id, b.tienda_id) || ord(a.periodo, b.periodo)),
+    meses_publicados: [...publicados].sort(),
+    cargas,
+  };
+}
+
+/** Los insumos de `prepararTrabajo` para una agrupación del fixture (todas activas salvo `inactivas`). */
+export function insumosFixture(
+  agrupacionId: string,
+  variante: VarianteFixture = "base",
+  opciones: OpcionesVenta & { periodos?: PeriodoParaClase[]; versiones?: number; hoy?: string; tiendas?: TiendaMaestro[] } = {}
+): InsumosTrabajo {
+  const agrupaciones = opciones.agrupaciones ?? agrupacionesFixture(variante);
+  const a = agrupaciones.find((x) => x.id === agrupacionId);
+  const inactivas = new Set(opciones.inactivas ?? []);
+  const agrupacion: AgrupacionTrabajo = {
+    id: agrupacionId,
+    nombre: NOMBRES[agrupacionId] ?? agrupacionId,
+    codigo: agrupacionId.toUpperCase(),
+    activo: !inactivas.has(agrupacionId),
+    temporada: a?.temporada ?? "todo_el_ano",
+    temporada_sugerida: null,
+    generos: [],
+    equivalencias_activas: a?.composicion.equivalencias ?? 0,
+    huella: a?.composicion.huella ?? "sin-huella",
+    temporadas_mezcladas: false,
+  };
+  const activas = agrupaciones.filter((x) => !inactivas.has(x.id));
+  return {
+    agrupacion,
+    de_temporada: activas
+      .filter((x) => x.temporada === agrupacion.temporada || x.temporada === "todo_el_ano")
+      .map((x) => ({ id: x.id, nombre: NOMBRES[x.id] ?? x.id, temporada: x.temporada, huella: x.composicion.huella })),
+    tiendas: opciones.tiendas ?? tiendasFixture(variante),
+    periodos: opciones.periodos ?? periodosFixture(variante),
+    venta: fixtureVentaEstacionalidad(agrupacionId, variante, opciones),
+    versiones: opciones.versiones ?? 0,
+    hoy: opciones.hoy ?? "2026-10-15",
+  };
+}

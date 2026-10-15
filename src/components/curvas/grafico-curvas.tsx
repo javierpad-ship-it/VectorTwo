@@ -1,16 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { calcularGeometriaCurvas, lecturaMes } from "@/lib/curvas/grafico";
+import { calcularGeometriaCurvas, lecturaMes, type EstiloTrazo } from "@/lib/curvas/grafico";
 import type { AgrupacionResultado, TemporadaResultado } from "@/lib/curvas/tipos-api";
 import { Chips, type ChipItem } from "@/components/ui/chips";
 import { Select } from "@/components/ui/form";
 import { COLOR_LIQUIDACION, aniosConAtipicos, bandaParaGrafico, construirSeries, puntosLiquidacion, type ModoGrafico } from "./series";
 
+/** Trazos: discontinuo = año en curso; punteado (guion y punto) = año del Niño; continuo = el resto. */
+function dasharray(trazo: EstiloTrazo | undefined, donde: "leyenda" | "linea"): string | undefined {
+  if (trazo === "discontinuo") return donde === "linea" ? "7 5" : "5 3";
+  if (trazo === "punteado") return donde === "linea" ? "10 3 2 3" : "6 2 1.5 2";
+  return undefined;
+}
+
 /**
  * Gráfico principal del detalle: la participación mensual de TODOS los años
- * superpuestos (el año en curso discontinuo; imputados punteados; escasos y
- * descartados apagados), la banda mín–máx entre años de ajuste, la curva `T` de la
+ * superpuestos (el año en curso discontinuo; los años del Niño con guion y punto;
+ * imputados punteados; escasos y descartados tenues, los descartados en gris, todos
+ * encendidos al abrir), la banda mín–máx entre años de ajuste, la curva `T` de la
  * temporada (se enciende a mano), la vigente en gris oscuro y la propuesta en
  * trazo grueso. SVG propio, sin librerías; la geometría sale de
  * `src/lib/curvas/grafico.ts`. Conmutador Participación / Unidades; los meses
@@ -96,7 +104,7 @@ export function GraficoCurvas({
                 className={`inline-flex items-center gap-1.5 rounded px-1 py-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-marca ${on ? "text-tinta" : "text-tinta-suave line-through opacity-70"}`}
               >
                 <svg width="22" height="8" aria-hidden>
-                  <line x1="1" x2="21" y1="4" y2="4" stroke={s.color} strokeWidth={Math.min(s.grosor ?? 2, 3.5)} strokeDasharray={s.trazo === "discontinuo" ? "5 3" : undefined} strokeOpacity={s.opacidad ?? 1} />
+                  <line x1="1" x2="21" y1="4" y2="4" stroke={s.color} strokeWidth={Math.min(s.grosor ?? 2, 3.5)} strokeDasharray={dasharray(s.trazo, "leyenda")} strokeOpacity={s.opacidad ?? 1} />
                 </svg>
                 {s.etiqueta}
               </button>
@@ -155,7 +163,7 @@ export function GraficoCurvas({
           {geom.lineas.map((l) => (
             <g key={l.clave} role="img" aria-label={l.aria} opacity={l.opacidad} pointerEvents="none">
               {l.tramos.map((d, i) => (
-                <path key={i} d={d} fill="none" stroke={l.color} strokeWidth={l.grosor} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={l.trazo === "discontinuo" ? "7 5" : undefined} />
+                <path key={i} d={d} fill="none" stroke={l.color} strokeWidth={l.grosor} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={dasharray(l.trazo, "linea")} />
               ))}
               {l.tramosImputados.map((d, i) => (
                 <g key={`i${i}`}>
@@ -178,7 +186,7 @@ export function GraficoCurvas({
       </div>
       <figcaption className="text-xs text-tinta-suave">
         Cada línea es la participación de un mes en el total de su año, sobre las tiendas de la red comparable de ese año. El año en curso se dibuja discontinuo hasta el
-        último mes cargado; los meses imputados, punteados; los años escasos y los descartados (apagados por defecto), tenues. La franja rojiza marca los meses atípicos del año elegido.
+        último mes cargado; los años del Niño, con guion y punto; los meses imputados, punteados; los años escasos y los descartados (en gris), tenues. La franja rojiza marca los meses atípicos del año elegido.
       </figcaption>
     </figure>
   );

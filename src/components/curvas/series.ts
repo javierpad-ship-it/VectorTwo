@@ -14,7 +14,12 @@ export type ModoGrafico = "participacion" | "unidades";
 export type SerieConMeta = SerieGrafico & {
   /** Año al que pertenece (las series de curva no lo tienen). */
   anio?: number;
-  /** ¿Se dibuja encendida al abrir? (años descartados y curva `T` empiezan apagados). */
+  /**
+   * ¿Se dibuja encendida al abrir? DECISIÓN DEL DUEÑO (2026-10-15): todos los años se ven al abrir, también los
+   * descartados por tratamiento o excluidos a mano (en gris y tenues), para que ninguno «desaparezca» (Q1); el
+   * planner puede apagarlos en la leyenda. Solo la curva `T` empieza apagada. (La ficha 06b, regla 47, decía
+   * `porDefecto = false` para los descartados: no se sigue.)
+   */
   porDefecto: boolean;
   /** Meses 1-12 atípicos del año. */
   mesesAtipicos: number[];
@@ -49,17 +54,24 @@ export function etiquetaSerieAnio(a: Pick<AnioAgrupacion, "anio" | "clase" | "tr
   return notas.length === 0 ? String(a.anio) : `${a.anio} (${notas.join(", ")})`;
 }
 
+/** Año del Niño: clase atípica (completo o con meses atípicos). Se dibuja con otro trazo (guion y punto). */
+export function esAnioNino(a: Pick<AnioAgrupacion, "clase">): boolean {
+  return a.clase === "atipico_completo" || a.clase === "con_huecos";
+}
+
 /**
  * Serie de un año. En participación usa la participación usada (la imputada si
- * el año se imputó; la parcial, solo con los meses cargados, en el año en curso);
+ * el año se imputó; la parcial, solo con los meses cargados, en el año en curso) y,
+ * si el año no tiene (descartado por el tratamiento o excluido a mano), su curva
+ * REAL (`participacion_real`): un año descartado sigue dibujado, en gris y tenue (regla 47);
  * en unidades, las unidades de la red por mes. `null` si no hay nada que dibujar
- * (año sin volumen o sin red).
+ * (año sin red, sin volumen o incompleto).
  */
 export function serieDeAnio(a: AnioAgrupacion, modo: ModoGrafico): SerieConMeta | null {
   const recortar = a.clase === "en_curso" || a.clase === "incompleto";
   let valores: (number | null)[];
   if (modo === "participacion") {
-    const base = a.clase === "en_curso" ? a.participacion_parcial : a.participacion;
+    const base = a.clase === "en_curso" ? a.participacion_parcial : (a.participacion ?? a.participacion_real);
     if (!base) return null;
     valores = [...base];
   } else {
@@ -74,12 +86,13 @@ export function serieDeAnio(a: AnioAgrupacion, modo: ModoGrafico): SerieConMeta 
     etiqueta: etiquetaSerieAnio(a),
     valores,
     color: descartado ? COLOR_DESCARTADO : colorAnio(a.anio),
-    trazo: a.clase === "en_curso" ? "discontinuo" : "continuo",
+    trazo: a.clase === "en_curso" ? "discontinuo" : esAnioNino(a) ? "punteado" : "continuo",
     grosor: 1.75,
     opacidad: a.escaso || descartado ? 0.45 : 1,
     imputados: modo === "participacion" ? a.imputados : [],
     anio: a.anio,
-    porDefecto: !descartado,
+    // Todos visibles por defecto, descartados incluidos (decisión del dueño; ver `SerieConMeta.porDefecto`).
+    porDefecto: true,
     mesesAtipicos: a.atipicos.map(mesDe).filter((m) => m >= 1 && m <= 12),
     mesesLiquidacion: a.liquidacion.map(mesDe).filter((m) => m >= 1 && m <= 12),
   };

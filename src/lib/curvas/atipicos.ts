@@ -251,8 +251,8 @@ export function aniosAEvaluar(entrada: {
 
 /**
  * Los años evaluados con su clase y el resumen. `volumenDeAnio` (opcional) da el
- * factor de volumen de la corrida de referencia para un año atípico; sin él (o
- * sin corrida de referencia) `ratio_volumen` y `volumen` son `null`.
+ * factor de volumen (calculado a demanda) para un año atípico; sin él
+ * `ratio_volumen` y `volumen` son `null`.
  */
 export function aniosAtipicidad(entrada: {
   agrupacion: AgrupacionParaClase;

@@ -2,10 +2,8 @@
 
 import { ETIQUETA_TEMPORADA, type AniosAtipicosRespuesta, type TemporadaAgrupacion } from "@/lib/curvas/tipos-api";
 import { Alert } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { BadgeTemporada } from "@/components/estacionalidad/temporada";
-import { formatearRatio } from "./vista";
 import { resumirMeses } from "./meses";
 
 export type AniosDeTemporada = {
@@ -18,18 +16,18 @@ export type AniosDeTemporada = {
 
 /**
  * «Años marcados como atípicos»: lo que `GET /api/periodos-atipicos/anios`
- * entrega a M7 por temporada (qué años fueron de El Niño y con qué meses),
- * con el `ratio_volumen` de la corrida de referencia al lado cuando existe.
+ * entrega a M7 por temporada (qué años fueron de El Niño y con qué meses). No
+ * muestra el ratio de volumen: ese es de la pestaña Años Niño, que lo calcula a demanda.
  */
 export function AniosAtipicosCard({ porTemporada }: { porTemporada: AniosDeTemporada[] }) {
   return (
-    <Card titulo="Años marcados como atípicos" descripcion="Por temporada de agrupación, según los periodos activos. El ratio sale de la corrida de referencia.">
+    <Card titulo="Años marcados como atípicos" descripcion="Por temporada de agrupación, según los periodos activos. El efecto en el volumen se mide en la pestaña Años Niño.">
       <div className="space-y-4">
         {porTemporada.map((t) => (
           <FilaTemporada key={t.temporada} {...t} />
         ))}
         <p className="text-xs text-tinta-suave">
-          M7 lee esta lista por temporada al proyectar. El ratio compara el año atípico con el año normal más cercano sobre las mismas tiendas.
+          M7 lee esta lista por temporada al proyectar.
         </p>
       </div>
     </Card>
@@ -44,7 +42,6 @@ function FilaTemporada({ temporada, datos, cargando, error, onCerrarError }: Ani
     <div className="space-y-1 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <BadgeTemporada temporada={temporada} />
-        {datos?.corrida_id === null && <span className="text-xs text-tinta-suave">sin corrida de referencia todavía</span>}
       </div>
       {error && <Alert onCerrar={onCerrarError}>No se pudo leer los años atípicos de {ETIQUETA_TEMPORADA[temporada].toLowerCase()}: {error}</Alert>}
       {!datos ? (
@@ -63,15 +60,6 @@ function FilaTemporada({ temporada, datos, cargando, error, onCerrarError }: Ani
                     {i > 0 && " · "}
                     <strong>{a.anio}</strong> ({motivos}: {resumirMeses(a.meses_atipicos, false)}
                     {a.completo ? "" : "; año aún sin cargar completo"})
-                    {a.ratio_volumen !== null && (
-                      <>
-                        {" "}
-                        <Badge tono="marca">ratio {formatearRatio(a.ratio_volumen)}</Badge>
-                        {a.volumen?.ratio_relativo != null && (
-                          <span className="ml-1 text-xs text-tinta-suave">relativo {formatearRatio(a.volumen.ratio_relativo)}</span>
-                        )}
-                      </>
-                    )}
                   </span>
                 );
               })

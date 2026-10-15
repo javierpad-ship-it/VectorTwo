@@ -95,6 +95,12 @@ function FormaParcial({ f }: { f: FormaAnioParcial }) {
   );
 }
 
+/** ¿Hay algo que mostrar en «Efecto del Niño»? (volumen, forma o meses imputados). */
+export function hayEfectoNino(resultado: AgrupacionResultado): boolean {
+  const { volumen, forma } = resultado.efecto_atipico;
+  return volumen.length > 0 || forma !== null || resultado.anios.some((a) => a.imputados.length > 0 && a.peso_imputado !== null);
+}
+
 /**
  * «Efecto del Niño» del detalle (solo si hay años atípicos): Volumen (ratio
  * frente al año normal más cercano sobre tiendas comunes, con el ratio mes a mes)

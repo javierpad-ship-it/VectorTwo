@@ -52,7 +52,7 @@ function valoresDeAlta(a: AltaPrellenada): ValoresPeriodo {
 /**
  * Pestaña Periodos atípicos (M6): el mantenimiento de los rangos de meses
  * distorsionados (El Niño costero 2023 y 2026), cada uno con el conjunto de
- * temporadas de agrupación a las que aplica. Funciona sin corridas ni agregado:
+ * temporadas de agrupación a las que aplica. Funciona sin cálculos ni venta:
  * alta, edición en diálogo, activar/desactivar y eliminar. Cambiar un periodo no
  * recalcula nada: las curvas afectadas se marcan obsoletas (`periodo_cambiado`).
  */
@@ -61,7 +61,7 @@ export function PeriodosTab({
   onIrACurvas,
 }: {
   agrupaciones: AgrupacionConTemporada[];
-  /** Lleva a la pestaña Curvas filtrada por «Toda temporada» (las que el planner aún no revisó). */
+  /** Lleva a la pestaña Agrupaciones filtrada por «Toda temporada» (las que el planner aún no revisó). */
   onIrACurvas: () => void;
 }) {
   const periodosApi = useRecurso<PeriodoAtipicoLista[] | { periodos: PeriodoAtipicoLista[] }>("/api/periodos-atipicos?incluir_inactivos=1");
@@ -312,7 +312,7 @@ export function PeriodosTab({
           claseFila={(p) => (p.activo ? undefined : "bg-neutro-suave/60 text-tinta-suave")}
         />
         <p className="mt-3 text-xs text-tinta-suave">
-          Cambiar un periodo no recalcula nada: las curvas afectadas se marcan obsoletas (periodo cambiado) y el planner recalcula y vuelve a aprobar.
+          Cambiar un periodo no recalcula nada: las curvas aprobadas afectadas se marcan obsoletas (periodo cambiado) y las agrupaciones de invierno y verano no se pueden calcular sin al menos un periodo para su temporada (o la confirmación explícita de que no hubo años atípicos).
           Desactivar un periodo lo saca del cálculo sin perder el registro.
         </p>
       </Card>

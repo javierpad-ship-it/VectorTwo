@@ -4,34 +4,37 @@ import { requirePlanner } from "@/lib/auth/guard";
 import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { nombreDeUsuario } from "@/lib/ventas/http";
-import { errorConCodigo } from "@/lib/curvas/lectura";
-import {
-  cambiarEstadoCurva,
-  comoResultado,
-  comoResumen,
-  insertarCurva,
-  leerAgrupacionPorId,
-  leerCorridaPorId,
-  leerCurvaVigente,
-  leerUltimaVersion,
-} from "@/lib/curvas/consultas";
-import { elegirCurvaSchema } from "@/lib/curvas/esquemas";
-import { huellaCargas } from "@/lib/curvas/huellas";
-import { aCurvaAprobada, filaCurva, MENSAJE_AGRUPACION_NO_ENCONTRADA, motivoRechazoElegir } from "@/lib/curvas/reglas";
-import type { ElegirCurvaRespuesta, RetirarCurvaRespuesta } from "@/lib/curvas/tipos-api";
+import { errorConCodigo, leerContextoTrabajo } from "@/lib/curvas/lectura";
+import { cambiarEstadoCurva, insertarCorrida, insertarCurva, leerCurvaVigente } from "@/lib/curvas/consultas";
+import { aprobarCurvaSchema, parametrosDeCuerpo } from "@/lib/curvas/esquemas";
+import { aCurvaAprobada, extrasDeCurva, filaCurva, MENSAJE_AGRUPACION_NO_ENCONTRADA, motivoRechazoAprobar } from "@/lib/curvas/reglas";
+import { VERSION_MODELO } from "@/lib/curvas/modelo";
+import { armarFoto, piezasDeSalida, prepararTrabajo } from "@/lib/curvas/trabajo";
+import type { AprobarCurvaRespuesta, RetirarCurvaRespuesta } from "@/lib/curvas/tipos-api";
 
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * Aprueba UNA curva para la agrupación (`requirePlanner`; no hay aprobación en
- * bloque): copia la candidata `modelo` de la corrida `corrida_id` (la `T` de su
- * temporada si es `T`), pasa la vigente a `reemplazada` y crea la versión
- * siguiente como `vigente`. `201 { curva }`.
+ * APRUEBA UNA curva para la agrupación (`requirePlanner`; no hay aprobación en
+ * bloque). Contrato para el frontend (docs/modulos/06b…):
  *
- * `404` agrupación o corrida inexistente · `409` agrupación inactiva ·
- * `409 candidata_no_disponible` · `409 sin_cambio` (misma corrida y modelo que la
- * vigente) · `400` zod. Sin transacción: si el alta falla tras reemplazar, se
- * intenta devolver la anterior a vigente.
+ *   cuerpo  `AprobarCurvaCuerpo`: `modelo`, `parametros` (los que vio el planner, con
+ *           `hasta_periodo` OBLIGATORIO: el de `datos.hasta_periodo` de `calcular`),
+ *           `huella_calculo` (la de `calcular`), `version_vigente` (la versión vigente que vio, o
+ *           `null`) y `nota`.
+ *   201     `{ curva, foto_id }` (`AprobarCurvaRespuesta`). El servidor recalcula con esos
+ *           parámetros, guarda la FOTO en `corridas_estacionalidad`, pasa la vigente a
+ *           `reemplazada` y crea la versión siguiente como `vigente`.
+ *   404     agrupación inexistente · 400 zod (estricto: sin `hasta_periodo`, clave desconocida, modelo fuera de A…E/T,
+ *           nota con caracteres de control…).
+ *   409     `{ error, codigo }`, en este orden: `agrupacion_inactiva` · `hasta_periodo_sin_cargar` ·
+ *           `prerrequisitos` · `sin_curva_posible` · `candidata_no_disponible` · `datos_cambiados` ·
+ *           `vigente_cambiada` · `sin_cambio` · `nota_requerida` (modelo distinto de la recomendada,
+ *           años o tiendas excluidos, o tratamiento del Niño distinto de `auto`, sin nota). Al guardar,
+ *           `vigente_cambiada` también si otro usuario movió la vigente entre la lectura y el cambio.
+ *
+ * Sin transacción: si el alta falla tras reemplazar, se intenta devolver la anterior a
+ * vigente; una foto sin curva es basura inofensiva (nadie la referencia).
  */
 export async function PUT(request: NextRequest, { params }: Params) {
   const { perfil, response } = await requirePlanner();
@@ -39,58 +42,84 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const { id, respuesta: respuestaId } = await idDeRuta(params, MENSAJE_AGRUPACION_NO_ENCONTRADA);
   if (respuestaId) return respuestaId;
-  const { datos, respuesta } = await leerCuerpo(request, elegirCurvaSchema);
+  const { datos, respuesta } = await leerCuerpo(request, aprobarCurvaSchema);
   if (respuesta) return respuesta;
 
+  const inicio = Date.now();
   const db = supabaseAdmin();
-  const [agrupacion, corrida, vigente] = await Promise.all([
-    leerAgrupacionPorId(db, id),
-    leerCorridaPorId(db, datos.corrida_id),
-    leerCurvaVigente(db, id),
-  ]);
-  const fallo = agrupacion.error ?? corrida.error ?? vigente.error;
-  if (fallo) return traducirErrorDb(fallo, "elegir curva: leer datos");
+  const contexto = await leerContextoTrabajo(db, id);
+  if (contexto.respuesta) return contexto.respuesta;
+  if (!contexto.data) return error(MENSAJE_AGRUPACION_NO_ENCONTRADA, 404);
+  const { insumos, vigente, ultima_version } = contexto.data;
+  if (!insumos.agrupacion.activo) {
+    return errorConCodigo("La agrupación está inactiva: actívala antes de aprobarle una curva.", 409, "agrupacion_inactiva");
+  }
 
-  const resultado = corrida.data ? comoResultado(corrida.data.resultado) : null;
-  const rechazo = motivoRechazoElegir(
-    agrupacion.data ? { id: agrupacion.data.id, activo: agrupacion.data.activo } : null,
-    corrida.data && resultado ? { id: corrida.data.id, resultado } : null,
-    datos.modelo,
-    vigente.data ? { corrida_id: vigente.data.corrida_id, modelo: vigente.data.modelo } : null
-  );
-  if (rechazo) return rechazo.status === 404 ? error(rechazo.mensaje, 404) : errorConCodigo(rechazo.mensaje, 409, rechazo.codigo);
-  if (!corrida.data || !resultado) return error("Corrida no encontrada.", 404);
+  const parametros = parametrosDeCuerpo(datos.parametros);
+  const preparado = prepararTrabajo(insumos, parametros, datos.parametros.hasta_periodo);
+  if (preparado.rechazo) return errorConCodigo(preparado.rechazo.mensaje, preparado.rechazo.status, preparado.rechazo.codigo);
+  const trabajo = preparado.trabajo;
+  const piezas = piezasDeSalida(trabajo.salida, id);
 
-  const delResultado = resultado.agrupaciones.find((a) => a.agrupacion_id === id);
-  if (!delResultado) return errorConCodigo("Esa candidata no está disponible para esta agrupación en la corrida elegida.", 409, "candidata_no_disponible");
-
-  const ultima = await leerUltimaVersion(db, id);
-  if (ultima.error) return traducirErrorDb(ultima.error, "elegir curva: última versión");
-
-  const fila = filaCurva({
-    agrupacion: delResultado,
-    temporada: resultado.temporadas.find((t) => t.temporada === delResultado.temporada) ?? null,
+  const rechazo = motivoRechazoAprobar({
+    agrupacion: { id: insumos.agrupacion.id, activo: insumos.agrupacion.activo },
+    prerrequisitos: trabajo.prerrequisitos,
+    resultado: piezas?.resultado ?? null,
+    temporada: piezas?.temporada ?? null,
     modelo: datos.modelo,
-    corrida_id: corrida.data.id,
-    resumen: comoResumen(corrida.data.resumen),
-    cargas_huella: huellaCargas(comoResumen(corrida.data.resumen).cargas ?? {}),
-    version_anterior: ultima.data,
-    perfil: { id: perfil.id, nombre: nombreDeUsuario(perfil) },
-    nota: datos.nota ?? null,
+    huella_enviada: datos.huella_calculo,
+    huella_actual: trabajo.huella_calculo,
+    vigente: vigente ? { version: vigente.version, modelo: vigente.modelo, huella_calculo: extrasDeCurva(vigente.anios_utilizados).huella_calculo } : null,
+    version_vigente: datos.version_vigente,
+    parametros,
+    nota: datos.nota,
   });
-  if (!fila) return errorConCodigo("Esa candidata no está disponible para esta agrupación en la corrida elegida.", 409, "candidata_no_disponible");
+  if (rechazo) return rechazo.status === 404 ? error(rechazo.mensaje, 404) : errorConCodigo(rechazo.mensaje, 409, rechazo.codigo);
+  if (!piezas || trabajo.hasta_periodo === null) return errorConCodigo("Esta agrupación no tiene curva posible.", 409, "sin_curva_posible");
 
-  // Transición sin transacción: primero la vigente actual pasa a `reemplazada`, luego se inserta la nueva.
-  if (vigente.data) {
-    const { error: errReemplazo } = await cambiarEstadoCurva(db, vigente.data.id, "reemplazada");
-    if (errReemplazo) return traducirErrorDb(errReemplazo, "elegir curva: reemplazar la vigente");
+  const foto = armarFoto(trabajo, insumos.agrupacion, insumos.periodos, Date.now() - inicio);
+  if (!foto) return errorConCodigo("Esta agrupación no tiene curva posible.", 409, "sin_curva_posible");
+  const usuario = { id: perfil.id, nombre: nombreDeUsuario(perfil) };
+
+  // La fila de la curva se comprueba ANTES de guardar la foto: así un fallo aquí no deja una foto huérfana.
+  // El id de la foto se pone después (la fila solo lo necesita para `corrida_id`).
+  const fila = filaCurva({
+    agrupacion: piezas.resultado,
+    temporada: piezas.temporada,
+    modelo: datos.modelo,
+    corrida_id: "",
+    red_huella: trabajo.red_huella,
+    cargas_huella: trabajo.cargas_huella,
+    version_anterior: ultima_version,
+    perfil: usuario,
+    nota: datos.nota ?? null,
+    foto: {
+      huella_calculo: trabajo.huella_calculo,
+      huella_temporada: trabajo.huella_temporada,
+      version_modelo: VERSION_MODELO,
+      hasta_periodo: trabajo.hasta_periodo,
+      hasta_fue_por_defecto: trabajo.hasta_fue_por_defecto,
+      parametros,
+    },
+  });
+  if (!fila) return errorConCodigo("Esa candidata no está disponible para esta agrupación con estos parámetros.", 409, "candidata_no_disponible");
+
+  const { data: fotoGuardada, error: errFoto } = await insertarCorrida(db, { ...foto, perfil_id: usuario.id, usuario_nombre: usuario.nombre });
+  if (errFoto) return traducirErrorDb(errFoto, "aprobar curva: guardar la foto");
+
+  // Transición sin transacción y CONDICIONAL: la vigente pasa a `reemplazada` solo si sigue vigente; luego se inserta la nueva.
+  const MENSAJE_VIGENTE_CAMBIADA = "Otra persona aprobó o retiró una curva de esta agrupación: vuelve a cargar.";
+  if (vigente) {
+    const { data: movida, error: errReemplazo } = await cambiarEstadoCurva(db, vigente.id, "vigente", "reemplazada");
+    if (errReemplazo) return traducirErrorDb(errReemplazo, "aprobar curva: reemplazar la vigente");
+    if (!movida) return errorConCodigo(MENSAJE_VIGENTE_CAMBIADA, 409, "vigente_cambiada");
   }
-  const { data: nueva, error: errInsert } = await insertarCurva(db, fila);
+  const { data: nueva, error: errInsert } = await insertarCurva(db, { ...fila, corrida_id: fotoGuardada.id });
   if (errInsert) {
-    if (vigente.data) await cambiarEstadoCurva(db, vigente.data.id, "vigente");
-    return traducirErrorDb(errInsert, "elegir curva: guardar la versión nueva");
+    if (vigente) await cambiarEstadoCurva(db, vigente.id, "reemplazada", "vigente");
+    return traducirErrorDb(errInsert, "aprobar curva: guardar la versión nueva");
   }
-  const cuerpo: ElegirCurvaRespuesta = { curva: aCurvaAprobada(nueva) };
+  const cuerpo: AprobarCurvaRespuesta = { curva: aCurvaAprobada(nueva), foto_id: fotoGuardada.id };
   return ok(cuerpo, 201);
 }
 
@@ -111,9 +140,9 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   if (err) return traducirErrorDb(err, "retirar curva: buscar la vigente");
   if (!vigente) return error("Esa agrupación no tiene una curva vigente que retirar.", 404);
 
-  const { data, error: errRetiro } = await cambiarEstadoCurva(db, vigente.id, "retirada");
+  const { data, error: errRetiro } = await cambiarEstadoCurva(db, vigente.id, "vigente", "retirada");
   if (errRetiro) return traducirErrorDb(errRetiro, "retirar curva");
-  if (!data) return error("Esa agrupación no tiene una curva vigente que retirar.", 404);
+  if (!data) return errorConCodigo("Otra persona cambió la curva de esta agrupación mientras tanto: vuelve a cargar.", 409, "vigente_cambiada");
   const cuerpo: RetirarCurvaRespuesta = { id: data.id, estado: "retirada" };
   return ok(cuerpo);
 }

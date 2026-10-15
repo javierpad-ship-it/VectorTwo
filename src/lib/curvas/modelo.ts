@@ -1,3 +1,4 @@
+import { formatearPuntos } from "@/lib/formato";
 import {
   compararFormaAgrupacion,
   compararFormaAnio,
@@ -5,7 +6,6 @@ import {
   imputarHuecos,
   pocosAniosNormales,
   referencia as referenciaDe,
-  ruidoNormal,
   temporadaSugeridaDistinta,
   tratamientoEfectivo,
   type ComparacionForma,
@@ -33,6 +33,7 @@ import {
   type FormaAnio,
   type FormaAnioCompleto,
   type ModeloCurva,
+  type MotivoTratamiento,
   type ModeloPropio,
   type MotivoRecomendacion,
   type ParametrosCurvas,
@@ -58,6 +59,14 @@ import type { SerieAnual, TiendaMaestro } from "./tipos";
 
 // ─── Entrada ───
 
+/**
+ * Versión de las fórmulas del modelo. Sube cuando cambia una fórmula o un valor por
+ * defecto que altera el resultado con la misma entrada. Entra en la huella del
+ * cálculo y se guarda en la foto (`version_modelo`): una foto con una versión menor
+ * recibe el aviso `modelo_anterior`.
+ */
+export const VERSION_MODELO = 1;
+
 export type EntradaAgrupacion = {
   agrupacion_id: string;
   temporada: TemporadaAgrupacion;
@@ -75,6 +84,26 @@ export type EntradaAgrupacion = {
   temporadas_mezcladas: boolean;
   /** Meses `aaaa-mm` que sumaron negativo sobre la red y se truncaron a 0. */
   meses_negativos: string[];
+  /** `sinVenta` (anios.ts, regla 50): sin unidades positivas en ningún mes publicado, sobre la venta cruda (antes de la red). */
+  sin_venta: boolean;
+};
+
+/**
+ * Serie agregada de una temporada entera (06b): la suma de TODAS sus agrupaciones
+ * activas sobre la red comparable de cada año, tal como la lee
+ * `venta_estacionalidad_agrupacion` (`temporadas`). Con ella `T` y el control del
+ * Niño no dependen de qué agrupaciones se calculen en esta llamada.
+ */
+export type EntradaTemporada = {
+  temporada: TemporadaAgrupacion;
+  /** Agrupaciones ACTIVAS de la temporada (para `TemporadaResultado.agrupaciones` y "N agrupaciones"). */
+  agrupaciones: number;
+  /** Un elemento por año de la corrida. */
+  unidades: SerieAnual[];
+  /** Solo tiendas de la red de cada año. */
+  por_tienda: { tienda_id: string; unidades: SerieAnual[] }[];
+  /** `mesesAtipicos(periodos, { temporada })`. */
+  atipicos: ReadonlySet<string>;
 };
 
 export type EntradaCorrida = {
@@ -85,6 +114,13 @@ export type EntradaCorrida = {
   redes: RedAnio[];
   /** Para nombrar tiendas en los avisos. */
   tiendas: TiendaMaestro[];
+  /**
+   * Series agregadas por temporada (06b). Con ellas, `calcularCorrida` recorre las
+   * temporadas PRESENTES aquí (aunque ninguna agrupación calculada sea de esa
+   * temporada) y no suma las de `agrupaciones`; sin ellas, como en la 0.9.6
+   * (suma de las agrupaciones de la entrada).
+   */
+  series_temporada?: EntradaTemporada[];
 };
 
 export type SalidaCorrida = {
@@ -94,6 +130,7 @@ export type SalidaCorrida = {
     agrupaciones_activas: number;
     propias: number;
     prestadas: number;
+    /** Agrupaciones con `sin_venta` (regla 50): ningún mes con unidades positivas (venta cruda). */
     sin_venta: number;
     con_avisos: number;
     anios_por_clase: Record<ClaseAnioCurva, number>;
@@ -101,11 +138,6 @@ export type SalidaCorrida = {
 };
 
 // ─── Textos ───
-
-/** Número con coma decimal y un decimal (sin ",0"): 33 → "33", 27,43 → "27,4". */
-export function formatearPuntos(n: number): string {
-  return redondear(n, 1).toFixed(1).replace(/\.0$/, "").replace(".", ",");
-}
 
 const porcentaje = (peso: number) => `${Math.round(peso * 100)} %`;
 
@@ -138,6 +170,29 @@ export function banda(aniosAjuste: ReadonlyArray<readonly number[]>): { min: num
     const v = aniosAjuste.map((p) => p[m]);
     return { min: Math.min(...v), max: Math.max(...v) };
   });
+}
+
+// ─── Regla 48: ruido entre años normales de una agrupación ───
+
+/**
+ * Ruido entre años normales (regla 8a) con el detalle de los pares: EAT entre las
+ * participaciones REALES de los años `normal` completos, no escasos y no excluidos
+ * a mano; `null` con menos de dos, y con tres o más el promedio de los pares. Se
+ * calcula SIEMPRE que haya dos, exista o no periodo atípico (es la vara del margen
+ * de empate de `recomendar`, no solo del veredicto de forma).
+ */
+export function ruidoNormalAgrupacion(
+  normales: ReadonlyArray<{ anio: number; participacion: readonly number[] }>
+): { ruido_normal: number | null; ruido_normal_detalle: { anios: [number, number]; eat: number }[] } {
+  const ordenados = [...normales].sort((a, b) => a.anio - b.anio);
+  const detalle: { anios: [number, number]; eat: number }[] = [];
+  for (let i = 0; i < ordenados.length; i++) {
+    for (let j = i + 1; j < ordenados.length; j++) {
+      detalle.push({ anios: [ordenados[i].anio, ordenados[j].anio], eat: calcularEat(ordenados[i].participacion, ordenados[j].participacion) });
+    }
+  }
+  if (detalle.length === 0) return { ruido_normal: null, ruido_normal_detalle: [] };
+  return { ruido_normal: sumar(detalle.map((d) => d.eat)) / detalle.length, ruido_normal_detalle: detalle };
 }
 
 // ─── Regla 17: recomendación ───
@@ -194,7 +249,8 @@ export function recomendar(
 function fraseComparativa(
   rec: Recomendacion,
   candidatas: readonly CandidataApi[],
-  ruido: number | null
+  ruido: number | null,
+  margenRuido: number
 ): ComparacionRecomendacion | null {
   if (!rec.mejor || rec.margen === null) return null;
   const mejor = candidatas.find((c) => c.modelo === rec.mejor);
@@ -208,11 +264,12 @@ function fraseComparativa(
     const diferencia = a.eat - mejor.eat;
     const base = `${rec.mejor} se equivoca ${formatearPuntos(mejor.eat)} pp frente a ${formatearPuntos(a.eat)} de A en ${pruebas} pruebas; la diferencia (${formatearPuntos(diferencia)})`;
     if (rec.motivo === "sin_evidencia") {
-      const porRuido =
-        ruido !== null
-          ? ` un cuarto de lo que se apartan entre sí dos años normales (${formatearPuntos(ruido)})`
-          : " el margen mínimo";
-      frase = `${base} no llega al margen (${formatearPuntos(rec.margen)}),${porRuido}: se recomienda A.`;
+      // El margen es `max(EMPATE_EAT, margen_ruido × ruido)`: el texto dice cuál de los dos manda y el porcentaje real del parámetro.
+      const manda = ruido !== null && margenRuido * ruido > EMPATE_EAT;
+      const origen = manda
+        ? `${formatearPuntos(rec.margen)} = ${porcentaje(margenRuido)} del ruido entre años normales, ${formatearPuntos(ruido as number)}`
+        : formatearPuntos(rec.margen);
+      frase = `${base} no llega al margen${manda ? "" : " mínimo"} (${origen}): se recomienda A.`;
     } else {
       frase = `${base} supera el margen (${formatearPuntos(rec.margen)}): se recomienda ${rec.mejor}.`;
     }
@@ -223,6 +280,8 @@ function fraseComparativa(
     eat_a: a?.eat ?? null,
     margen: rec.margen,
     pliegues: pruebas,
+    ruido_normal: ruido,
+    margen_ruido: margenRuido,
     frase,
   };
 }
@@ -251,6 +310,10 @@ type AnioPreparado = {
   /** Participación usada en el ajuste (tal cual o imputada). */
   p: number[] | null;
   tratamiento: TratamientoAnio | null;
+  /** Solo con `tratamiento = 'descartado'`. */
+  motivoTratamiento: MotivoTratamiento | null;
+  /** El planner lo sacó del ajuste (`anios_excluidos`); solo en el análisis de la agrupación, nunca en `T` ni en el control. */
+  excluidoManual: boolean;
   imputados: number[];
   pesoImputado: number | null;
   escaso: boolean;
@@ -263,6 +326,8 @@ type Preparacion = {
   anios: AnioPreparado[];
   referencia: number[] | null;
   ruido: number | null;
+  /** Los pares que dan `ruido` (regla 48). */
+  ruidoDetalle: { anios: [number, number]; eat: number }[];
   /** Años normales completos con red (sirven para el volumen, aunque sean escasos). */
   normalesVolumen: AnioPreparado[];
   /** Hay algún año atípico completo y no hay referencia. */
@@ -276,10 +341,14 @@ const CLASES_COMPLETAS: readonly ClaseAnioCurva[] = ["normal", "con_huecos", "at
  * los años normales no escasos, compara la forma de cada año atípico completo
  * (relativa al ruido, B1), fija el tratamiento efectivo (regla 8c), imputa los
  * huecos si toca (regla 7) y marca los años `escaso`. `anios_ajuste` son los
- * utilizables no escasos; el año en curso NUNCA entra.
+ * utilizables no escasos; el año en curso NUNCA entra. Con `conExclusiones`
+ * (solo el análisis de la agrupación) los `anios_excluidos` quedan `descartado`
+ * con motivo `excluido_manual`, fuera del ajuste y de la referencia y el ruido;
+ * siguen en `normalesVolumen` (el volumen es diagnóstico).
  */
-function prepararAnios(series: readonly SerieAnual[], atipicos: ReadonlySet<string>, ctx: Contexto): Preparacion {
+function prepararAnios(series: readonly SerieAnual[], atipicos: ReadonlySet<string>, ctx: Contexto, conExclusiones = false): Preparacion {
   const p = ctx.parametros;
+  const excluidos = new Set(conExclusiones ? p.anios_excluidos : []);
   const base: AnioPreparado[] = series.map((serie) => {
     const c = clasificarAnio(serie.anio, ctx.publicados, atipicos, p.max_meses_hueco, ctx.hasta);
     const sinRed = ctx.redes.get(serie.anio)?.sin_red ?? true;
@@ -299,6 +368,8 @@ function prepararAnios(series: readonly SerieAnual[], atipicos: ReadonlySet<stri
       tratamiento: null,
       imputados: [],
       pesoImputado: null,
+      motivoTratamiento: null,
+      excluidoManual: pReal !== null && excluidos.has(serie.anio),
       escaso: pReal !== null && total < p.min_unidades_ano,
       utilizable: false,
       enAjuste: false,
@@ -306,18 +377,33 @@ function prepararAnios(series: readonly SerieAnual[], atipicos: ReadonlySet<stri
     };
   });
 
-  const normales = base.filter((a) => a.clase === "normal" && a.pReal !== null && !a.escaso);
+  const normales = base.filter((a) => a.clase === "normal" && a.pReal !== null && !a.escaso && !a.excluidoManual);
   const referencia = referenciaDe(normales.map((a) => a.pReal as number[]));
-  const ruido = ruidoNormal(normales.map((a) => a.pReal as number[]));
+  const { ruido_normal: ruido, ruido_normal_detalle: ruidoDetalle } = ruidoNormalAgrupacion(
+    normales.map((a) => ({ anio: a.anio, participacion: a.pReal as number[] }))
+  );
 
   for (const a of base) {
     if (a.pReal === null) continue;
+    if (a.clase !== "normal") a.forma = compararFormaAnio(a.pReal, referencia, p.umbral_forma, ruido);
+    if (a.excluidoManual) {
+      a.tratamiento = "descartado";
+      a.motivoTratamiento = "excluido_manual";
+      continue;
+    }
     if (a.clase === "normal") {
       a.tratamiento = "incluido";
       a.p = a.pReal;
     } else {
-      a.forma = compararFormaAnio(a.pReal, referencia, p.umbral_forma, ruido);
-      a.tratamiento = tratamientoEfectivo(p.tratamiento_atipicos, a.forma.veredicto, a.clase);
+      a.tratamiento = tratamientoEfectivo(p.tratamiento_atipicos, (a.forma as ComparacionForma).veredicto, a.clase);
+      if (a.tratamiento === "descartado") {
+        a.motivoTratamiento =
+          p.tratamiento_atipicos === "auto"
+            ? "forma_cambia"
+            : p.tratamiento_atipicos === "imputar" && a.clase === "con_huecos"
+              ? "sin_referencia"
+              : "parametro";
+      }
       if (a.tratamiento === "incluido") a.p = a.pReal;
       if (a.tratamiento === "imputado" && referencia) {
         const meses = a.atipicos.map(mesDe);
@@ -328,6 +414,7 @@ function prepararAnios(series: readonly SerieAnual[], atipicos: ReadonlySet<stri
           a.pesoImputado = imputado.pesoImputado;
         } else {
           a.tratamiento = "descartado";
+          a.motivoTratamiento = "sin_referencia";
         }
       }
     }
@@ -339,6 +426,7 @@ function prepararAnios(series: readonly SerieAnual[], atipicos: ReadonlySet<stri
     anios: base,
     referencia,
     ruido,
+    ruidoDetalle,
     normalesVolumen: base.filter((a) => a.clase === "normal" && a.serie.completo && !a.sinRed),
     sinReferencia: referencia === null && base.some((a) => a.clase === "con_huecos" || a.clase === "atipico_completo"),
   };
@@ -390,6 +478,7 @@ function proponer(
           motivo: c.motivo,
           eat: null,
           error_max: null,
+          pruebas: 0,
           pliegues: 0,
           eat_por_pliegue: [],
           eat_parcial: null,
@@ -414,6 +503,7 @@ function proponer(
         motivo: null,
         eat: promedio?.eat ?? null,
         error_max: promedio?.error_max ?? null,
+        pruebas: porPliegue.length,
         pliegues: porPliegue.length,
         eat_por_pliegue: porPliegue,
         eat_parcial: enCurso
@@ -431,6 +521,7 @@ function proponer(
         motivo: "sin_anos_ajuste",
         eat: null,
         error_max: null,
+        pruebas: 0,
         pliegues: 0,
         eat_por_pliegue: [],
         eat_parcial: null,
@@ -445,6 +536,7 @@ function proponer(
     motivo: curvaT === null ? "sin_anos_utilizables" : null,
     eat: null,
     error_max: null,
+    pruebas: 0,
     pliegues: 0,
     eat_por_pliegue: [],
     eat_parcial: null,
@@ -505,6 +597,8 @@ function sumarSeriesAnio(series: readonly SerieAnual[]): SerieAnual {
 type GrupoTemporada = {
   temporada: TemporadaAgrupacion;
   agrupaciones: EntradaAgrupacion[];
+  /** Agrupaciones activas que suman la serie (con serie agregada, las de toda la temporada y no solo las calculadas). */
+  nAgrupaciones: number;
   unidades: SerieAnual[];
   porTienda: PorTiendaPorAnio;
   atipicos: ReadonlySet<string>;
@@ -518,24 +612,54 @@ type GrupoTemporada = {
  * agrupaciones de la temporada sobre la red comparable de cada año, con la misma
  * clasificación de años (misma temporada → mismos meses atípicos) y el mismo
  * tratamiento; `T` es `A` sobre sus años de ajuste. Sin años de ajuste → `null`.
- * (Se suman las series ya truncadas de cada agrupación.)
+ * (Se suman las series ya truncadas de cada agrupación.) Con `agregada` (06b, las
+ * series de la temporada entera que lee `venta_estacionalidad_agrupacion`) se usa
+ * esa serie y sus meses atípicos en vez de sumar `agrupaciones`. `T` NO aplica
+ * `anios_excluidos`: es la curva de la temporada, no la de una agrupación.
  */
-function armarGrupoTemporada(temporada: TemporadaAgrupacion, agrupaciones: EntradaAgrupacion[], ctx: Contexto): GrupoTemporada {
-  const unidades = ctx.anios.map((anio) =>
-    sumarSeriesAnio(agrupaciones.map((a) => a.unidades.find((s) => s.anio === anio) as SerieAnual))
-  );
+function armarGrupoTemporada(
+  temporada: TemporadaAgrupacion,
+  agrupaciones: EntradaAgrupacion[],
+  ctx: Contexto,
+  agregada?: EntradaTemporada
+): GrupoTemporada {
+  let unidades: SerieAnual[];
   const porTienda: PorTiendaPorAnio = new Map();
-  for (const anio of ctx.anios) {
-    porTienda.set(
-      anio,
-      sumarPorTienda(agrupaciones.map((a) => indexarPorTienda(a).get(anio) ?? new Map<string, number[]>()))
+  let atipicos: ReadonlySet<string>;
+  let nAgrupaciones: number;
+  if (agregada) {
+    unidades = ctx.anios.map(
+      (anio) =>
+        agregada.unidades.find((s) => s.anio === anio) ??
+        ({ anio, meses: Array.from({ length: MESES_ANIO }, () => 0), publicados: Array.from({ length: MESES_ANIO }, () => false), completo: false } satisfies SerieAnual)
     );
+    for (const t of agregada.por_tienda) {
+      for (const s of t.unidades) {
+        const delAnio = porTienda.get(s.anio) ?? new Map<string, number[]>();
+        delAnio.set(t.tienda_id, s.meses);
+        porTienda.set(s.anio, delAnio);
+      }
+    }
+    for (const anio of ctx.anios) if (!porTienda.has(anio)) porTienda.set(anio, new Map<string, number[]>());
+    atipicos = agregada.atipicos;
+    nAgrupaciones = agregada.agrupaciones;
+  } else {
+    unidades = ctx.anios.map((anio) =>
+      sumarSeriesAnio(agrupaciones.map((a) => a.unidades.find((s) => s.anio === anio) as SerieAnual))
+    );
+    for (const anio of ctx.anios) {
+      porTienda.set(
+        anio,
+        sumarPorTienda(agrupaciones.map((a) => indexarPorTienda(a).get(anio) ?? new Map<string, number[]>()))
+      );
+    }
+    atipicos = agrupaciones[0]?.atipicos ?? new Set<string>();
+    nAgrupaciones = agrupaciones.length;
   }
-  const atipicos = agrupaciones[0]?.atipicos ?? new Set<string>();
   const prep = prepararAnios(unidades, atipicos, ctx);
   const anios_ajuste = aniosAjusteDe(prep, () => []);
   const curva_T = anios_ajuste.length > 0 ? curvaA(anios_ajuste) : null;
-  return { temporada, agrupaciones, unidades, porTienda, atipicos, prep, anios_ajuste, curva_T };
+  return { temporada, agrupaciones, nAgrupaciones, unidades, porTienda, atipicos, prep, anios_ajuste, curva_T };
 }
 
 /** Un conjunto de agrupaciones de la misma temporada comparte los meses atípicos (la unión de los periodos que aplican). */
@@ -596,6 +720,7 @@ function construirAnio(
       meses_atipicos: a.atipicos.length,
       atipicos: a.atipicos,
       tratamiento: a.tratamiento,
+      tratamiento_motivo: a.motivoTratamiento,
       unidades: a.total,
       meses: a.serie.meses,
       escaso: a.escaso,
@@ -637,7 +762,7 @@ type Analisis = {
 
 function analizarAgrupacion(entrada: EntradaAgrupacion, grupoT: GrupoTemporada | undefined, ctx: Contexto): Analisis {
   const p = ctx.parametros;
-  const prep = prepararAnios(entrada.unidades, entrada.atipicos, ctx);
+  const prep = prepararAnios(entrada.unidades, entrada.atipicos, ctx, true);
   const porTienda = indexarPorTienda(entrada);
   const enCurso = prep.anios.find((a) => a.clase === "en_curso");
   const nombreTienda = (id: string) => ctx.tiendas.get(id)?.codigo ?? id;
@@ -756,11 +881,11 @@ function analizarAgrupacion(entrada: EntradaAgrupacion, grupoT: GrupoTemporada |
   const avisos: AvisoCurva[] = [];
   const avisar = (codigo: CodigoAviso, detalle: string) => avisos.push({ codigo, detalle });
   const utilizables = prep.anios.filter((a) => a.utilizable);
-  const totalUnidades = sumar(prep.anios.map((a) => a.total));
 
-  if (totalUnidades === 0) avisar("sin_venta", "Sin ventas en ningún año sobre la red comparable.");
+  if (entrada.sin_venta) avisar("sin_venta", "Sin ventas en ningún mes publicado.");
   if (utilizables.length === 0) avisar("sin_anos_utilizables", "No hay ningún año completo utilizable.");
-  else if (ajuste.length < 2)
+  // Con años excluidos a mano, "no queda ninguno" también es "pocos años de ajuste": el planner ve por qué la curva es prestada.
+  if (ajuste.length < 2 && (utilizables.length > 0 || prep.anios.some((a) => a.excluidoManual)))
     avisar("pocos_anos_ajuste", `${unidad(ajuste.length, "año de ajuste", "años de ajuste")} (hacen falta dos): sin curva propia.`);
   const escasos = prep.anios.filter((a) => a.escaso);
   if (escasos.length > 0)
@@ -775,6 +900,9 @@ function analizarAgrupacion(entrada: EntradaAgrupacion, grupoT: GrupoTemporada |
         avisar("cambio_volumen_extremo", `${antes.anio} a ${ahora.anio}: de ${antes.total} a ${ahora.total} unidades (×${formatearPuntos(cociente)}).`);
       }
     }
+  }
+  for (const a of prep.anios.filter((x) => x.excluidoManual)) {
+    avisar("anio_excluido", `${a.anio}: excluido del ajuste a mano; se dibuja pero no entra en las candidatas.`);
   }
   const incompletos = prep.anios.filter((a) => a.clase === "incompleto" && !a.sinRed);
   if (incompletos.length > 0)
@@ -824,7 +952,9 @@ function analizarAgrupacion(entrada: EntradaAgrupacion, grupoT: GrupoTemporada |
     recomendada: recomendacion.recomendada,
     motivo_recomendacion: recomendacion.motivo,
     margen: recomendacion.margen,
-    comparacion: fraseComparativa(recomendacion, candidatas, prep.ruido),
+    comparacion: fraseComparativa(recomendacion, candidatas, prep.ruido, p.margen_ruido),
+    ruido_normal: prep.ruido,
+    ruido_normal_detalle: prep.ruidoDetalle,
     estabilidad: estab,
     nivel_estabilidad: nivelEstabilidad(estab),
     banda: bandaMes,
@@ -874,11 +1004,17 @@ export function calcularCorrida(entrada: EntradaCorrida, parametros: ParametrosC
     tiendas: new Map(entrada.tiendas.map((t) => [t.id, t])),
   };
 
-  // Temporadas (T) primero: las agrupaciones prestan su curva.
+  // Temporadas (T) primero: las agrupaciones prestan su curva. Con series agregadas (06b) se recorren las
+  // temporadas presentes en ellas, también las que no tienen ninguna agrupación en esta entrada (el control del Niño).
   const grupos = new Map<TemporadaAgrupacion, GrupoTemporada>();
   for (const t of TEMPORADAS_AGRUPACION) {
     const miembros = entrada.agrupaciones.filter((a) => a.temporada === t);
-    if (miembros.length > 0) grupos.set(t, armarGrupoTemporada(t, miembros, ctx));
+    if (entrada.series_temporada) {
+      const agregada = entrada.series_temporada.find((x) => x.temporada === t);
+      if (agregada) grupos.set(t, armarGrupoTemporada(t, miembros, ctx, agregada));
+    } else if (miembros.length > 0) {
+      grupos.set(t, armarGrupoTemporada(t, miembros, ctx));
+    }
   }
 
   const analisis = entrada.agrupaciones.map((a) => analizarAgrupacion(a, grupos.get(a.temporada), ctx));
@@ -893,7 +1029,7 @@ export function calcularCorrida(entrada: EntradaCorrida, parametros: ParametrosC
     });
     temporadas.push({
       temporada,
-      agrupaciones: g.agrupaciones.length,
+      agrupaciones: g.nAgrupaciones,
       anios: anioDeTemporada,
       curva_T: g.curva_T,
       anios_ajuste: g.anios_ajuste.map((a) => a.anio),
@@ -905,7 +1041,7 @@ export function calcularCorrida(entrada: EntradaCorrida, parametros: ParametrosC
   for (const [temporada, g] of grupos) {
     gruposEfecto.push({
       temporada,
-      agrupaciones: g.agrupaciones.length,
+      agrupaciones: g.nAgrupaciones,
       anios: g.prep.anios.map((a) => ({
         ...seriePara(a, g.porTienda),
         clase: a.clase,
@@ -917,7 +1053,7 @@ export function calcularCorrida(entrada: EntradaCorrida, parametros: ParametrosC
     const todas = [...grupos.values()];
     gruposEfecto.push({
       temporada: "red",
-      agrupaciones: sumar(todas.map((g) => g.agrupaciones.length)),
+      agrupaciones: sumar(todas.map((g) => g.nAgrupaciones)),
       anios: anios.map((anio) => {
         const delAnio = todas.map((g) => g.prep.anios.find((a) => a.anio === anio) as AnioPreparado);
         const porTienda = sumarPorTienda(todas.map((g) => g.porTienda.get(anio) ?? new Map<string, number[]>()));
@@ -981,7 +1117,7 @@ export function calcularCorrida(entrada: EntradaCorrida, parametros: ParametrosC
       agrupaciones_activas: agrupaciones.length,
       propias: agrupaciones.filter((a) => a.origen === "propia").length,
       prestadas: agrupaciones.filter((a) => a.origen === "prestada").length,
-      sin_venta: agrupaciones.filter((a) => a.origen === null).length,
+      sin_venta: entrada.agrupaciones.filter((a) => a.sin_venta).length,
       con_avisos: agrupaciones.filter((a) => a.avisos.length > 0).length,
       anios_por_clase: aniosPorClase,
     },

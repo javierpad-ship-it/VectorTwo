@@ -89,14 +89,14 @@ describe("temporadaAgrupacion", () => {
 
 describe("leerConsultaAnios (?agrupacion_id= | ?temporada= | ?desde= | ?hasta=)", () => {
   it("sin parámetros: temporada=invierno y sin años", () => {
-    expect(leerConsultaAnios(params({}))).toEqual({ consulta: { agrupacion_id: null, temporada: "invierno" }, rechazo: null });
+    expect(leerConsultaAnios(params({}))).toEqual({ consulta: { agrupacion_id: null, con_volumen: false, temporada: "invierno" }, rechazo: null });
   });
   it("por temporada", () => {
     const r = leerConsultaAnios(params({ temporada: "verano", desde: "2023", hasta: "2026" }));
-    expect(r.consulta).toEqual({ agrupacion_id: null, temporada: "verano", desde: 2023, hasta: 2026 });
+    expect(r.consulta).toEqual({ agrupacion_id: null, con_volumen: false, temporada: "verano", desde: 2023, hasta: 2026 });
   });
   it("por agrupación", () => {
-    expect(leerConsultaAnios(params({ agrupacion_id: UUID })).consulta).toEqual({ agrupacion_id: UUID, temporada: "invierno" });
+    expect(leerConsultaAnios(params({ agrupacion_id: UUID })).consulta).toEqual({ agrupacion_id: UUID, con_volumen: false, temporada: "invierno" });
   });
   it("400 si vienen los dos criterios o la temporada no es válida", () => {
     expect(leerConsultaAnios(params({ agrupacion_id: UUID, temporada: "invierno" })).rechazo?.status).toBe(400);
@@ -116,6 +116,7 @@ describe("leerConsultaAnios (?agrupacion_id= | ?temporada= | ?desde= | ?hasta=)"
     }
     expect(leerConsultaAnios(params({ desde: "2026", hasta: "2026" })).consulta).toEqual({
       agrupacion_id: null,
+      con_volumen: false,
       temporada: "invierno",
       desde: 2026,
       hasta: 2026,
@@ -124,6 +125,7 @@ describe("leerConsultaAnios (?agrupacion_id= | ?temporada= | ?desde= | ?hasta=)"
   it("valores vacíos se tratan como ausentes", () => {
     expect(leerConsultaAnios(params({ temporada: "", desde: "", agrupacion_id: "" })).consulta).toEqual({
       agrupacion_id: null,
+      con_volumen: false,
       temporada: "invierno",
     });
   });

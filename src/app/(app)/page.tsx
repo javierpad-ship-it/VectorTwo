@@ -54,9 +54,9 @@ const MODULOS_FASE_2: Modulo[] = [
   {
     id: "M6",
     nombre: "Curvas de estacionalidad",
-    detalle: "Periodos atípicos (El Niño) y temporada de cada agrupación. El cálculo de las curvas llega en el paso 2.",
+    detalle: "Curva mensual de cada agrupación de estacionalidad, una por una: curva aprobada, años y propuesta del sistema en el mismo gráfico; periodos atípicos (El Niño) y años Niño.",
     estado: "parcial",
-    etiqueta: "Paso 1 listo",
+    etiqueta: "En validación",
     href: "/planificacion/curvas-estacionalidad",
   },
 ];

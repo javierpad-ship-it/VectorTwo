@@ -2,8 +2,17 @@ import { recortarPeriodo } from "@/lib/ventas/periodo";
 import { aniosDeCorrida } from "./anios";
 import { mesesAtipicos, type PeriodoParaClase } from "./atipicos";
 import { eat } from "./backtesting";
+import { agrupacionesDeTemporada, huellaTemporada } from "./huellas";
+import { VERSION_MODELO } from "./modelo";
 import { redComparable } from "./red";
-import type { MotivoObsoletaApi, ParametrosCurvas, RedAnio, ResultadoCorrida, TemporadaAgrupacion } from "./tipos-api";
+import type {
+  AvisoVigenteApi,
+  MotivoObsoletaApi,
+  ParametrosCurvas,
+  RedAnio,
+  ResultadoCorrida,
+  TemporadaAgrupacion,
+} from "./tipos-api";
 import type { TiendaMaestro, VentaTiendaMes } from "./tipos";
 
 /**
@@ -30,7 +39,24 @@ export type EstadoGuardado = {
   atipicos: readonly string[];
   /** Temporada de la agrupación en la corrida. */
   temporada: TemporadaAgrupacion;
+  /**
+   * 06b. Último mes (`aaaa-mm`) que entró en la foto. Con él `carga_nueva` solo mira
+   * los meses `≤ hasta_periodo`; sin él (curvas de la 0.9.6) cuentan todos los publicados.
+   */
+  hasta_periodo?: string;
+  /** El `hasta_periodo` era el defecto al aprobar; `false` = el planner paró antes a propósito. Sin dato: `true`. */
+  hasta_fue_por_defecto?: boolean;
+  /** `T` = curva prestada de la temporada (depende de las otras agrupaciones). */
+  modelo?: string | null;
+  /** `huella_temporada` de la foto (sin dato, no se evalúa `temporada_recompuesta`). */
+  huella_temporada?: string | null;
+  /** Los tríos de la foto (para nombrar la agrupación que cambió). */
+  agrupaciones_temporada?: readonly AgrupacionTemporadaHuella[];
+  version_modelo?: number | null;
 };
+
+/** Una agrupación de las que alimentan `T` y el control (la huella de temporada es el md5 de estos tríos). */
+export type AgrupacionTemporadaHuella = { id: string; temporada: TemporadaAgrupacion; huella: string };
 
 /**
  * Lo que hay hoy. `red_comparable` es la red recalculada por el que llama con
@@ -48,6 +74,12 @@ export type EstadoActual = {
   temporada: TemporadaAgrupacion;
   /** Para nombrar tiendas en los motivos. */
   tiendas: ReadonlyMap<string, { codigo: string; nombre: string }>;
+  /** 06b. Último mes publicado y cerrado hoy (`hastaPorDefecto`); `null` si no hay. */
+  hasta_por_defecto?: string | null;
+  /** `huella_temporada` de hoy para la temporada GUARDADA. */
+  huella_temporada?: string | null;
+  /** Los tríos de hoy de esa temporada, con el nombre de cada agrupación. */
+  agrupaciones_temporada?: ReadonlyArray<AgrupacionTemporadaHuella & { nombre: string }>;
 };
 
 function lista(valores: readonly (string | number)[]): string {
@@ -88,18 +120,44 @@ function motivosDeRed(guardada: readonly RedAnio[], actual: EstadoActual): Motiv
   return motivos;
 }
 
+/** Qué cambió en las agrupaciones que alimentan `T`, con el nombre de la que cambió si la foto guardó los tríos. */
+function detalleTemporadaRecompuesta(guardado: EstadoGuardado, actual: EstadoActual): string {
+  const antes = new Map((guardado.agrupaciones_temporada ?? []).map((a) => [a.id, a]));
+  const ahora = new Map((actual.agrupaciones_temporada ?? []).map((a) => [a.id, a]));
+  if (antes.size === 0 || ahora.size === 0) return "cambió la composición o la temporada de otra agrupación de su temporada";
+  const partes: string[] = [];
+  for (const [id, a] of [...ahora].sort(([x], [y]) => (x < y ? -1 : 1))) {
+    const previa = antes.get(id);
+    if (!previa) partes.push(`${a.nombre} entró en la temporada`);
+    else if (previa.temporada !== a.temporada) partes.push(`${a.nombre} cambió de temporada`);
+    else if (previa.huella !== a.huella) partes.push(`cambió la composición de ${a.nombre}`);
+  }
+  for (const id of [...antes.keys()].sort()) if (!ahora.has(id)) partes.push("una agrupación salió de la temporada o se desactivó");
+  return partes.length > 0 ? partes.join("; ") : "cambió la composición o la temporada de otra agrupación de su temporada";
+}
+
+export type EvaluacionVigente = { motivos: MotivoObsoletaApi[]; avisos: AvisoVigenteApi[] };
+
 /**
- * Regla 24. Motivos por los que una curva está obsoleta; `[]` si nada cambió:
+ * Regla 24 (con las correcciones de la 06b, reglas 49, 51 y 55). Motivos por los
+ * que una curva está obsoleta (`[]` si nada cambió) y avisos que NO la obsoletan:
  *   - `tienda_entra_red` / `tienda_sale_red`: la red comparable recalculada difiere
  *     de la guardada en algún año (nombra la tienda y el año; una tienda
  *     desactivada sale con "se desactivó");
  *   - `composicion_cambiada`: la huella de equivalencias difiere (con cuántas más o menos);
- *   - `carga_nueva`: un mes publicado que la corrida no usó, o un mes republicado con otro `carga_id`;
- *   - `periodo_cambiado`: los meses atípicos que aplican hoy difieren de los de la corrida;
- *   - `temporada_cambiada`: la temporada difiere de la guardada.
+ *   - `carga_nueva`: un mes `≤ hasta_periodo` de la foto que la foto no usó, o un
+ *     mes republicado con otro `carga_id`; también un mes posterior a `hasta_periodo`
+ *     que el `hasta` por defecto de hoy ya incluye (solo si `hasta_fue_por_defecto`);
+ *   - `periodo_cambiado`: los meses atípicos que aplican hoy difieren de los de la foto;
+ *   - `temporada_cambiada`: la temporada difiere de la guardada;
+ *   - `temporada_recompuesta` (solo curva prestada `T`): cambió `huella_temporada`.
+ * Avisos: `datos_posteriores` (meses publicados después del `hasta` de la foto que
+ * aún no obsoletan), `modelo_anterior` (`version_modelo` menor que `VERSION_MODELO`)
+ * y `temporada_recompuesta` (curva propia).
  */
-export function motivosObsoleta(guardado: EstadoGuardado, actual: EstadoActual): MotivoObsoletaApi[] {
+export function evaluarEstadoVigente(guardado: EstadoGuardado, actual: EstadoActual): EvaluacionVigente {
   const motivos = motivosDeRed(guardado.red_comparable, actual);
+  const avisos: AvisoVigenteApi[] = [];
 
   if (guardado.huella_composicion !== actual.huella_composicion) {
     const delta = actual.equivalencias - guardado.equivalencias;
@@ -110,15 +168,30 @@ export function motivosObsoleta(guardado: EstadoGuardado, actual: EstadoActual):
     motivos.push({ codigo: "composicion_cambiada", detalle });
   }
 
-  const nuevos = Object.keys(actual.cargas).filter((m) => !(m in guardado.cargas)).sort();
-  const republicados = Object.keys(actual.cargas)
-    .filter((m) => m in guardado.cargas && guardado.cargas[m] !== actual.cargas[m])
-    .sort();
-  if (nuevos.length > 0 || republicados.length > 0) {
+  // Cargas: solo cuentan los meses ≤ hasta de la foto; los posteriores son aviso (o carga nueva si el defecto ya los incluye).
+  const hasta = guardado.hasta_periodo ? recortarPeriodo(guardado.hasta_periodo) : null;
+  const mesesHoy = Object.keys(actual.cargas).sort();
+  const dentro = hasta === null ? mesesHoy : mesesHoy.filter((m) => m <= hasta);
+  const posteriores = hasta === null ? [] : mesesHoy.filter((m) => m > hasta);
+  const porDefecto = actual.hasta_por_defecto ?? null;
+  const cerrados =
+    guardado.hasta_fue_por_defecto !== false && porDefecto !== null ? posteriores.filter((m) => m <= porDefecto) : [];
+  const soloAviso = posteriores.filter((m) => !cerrados.includes(m));
+
+  const nuevos = dentro.filter((m) => !(m in guardado.cargas));
+  const republicados = dentro.filter((m) => m in guardado.cargas && guardado.cargas[m] !== actual.cargas[m]);
+  if (nuevos.length > 0 || cerrados.length > 0 || republicados.length > 0) {
     const partes: string[] = [];
     if (nuevos.length > 0) partes.push(`${nuevos.length === 1 ? "mes publicado" : "meses publicados"} después: ${lista(nuevos)}`);
+    if (cerrados.length > 0) partes.push(`${cerrados.length === 1 ? "mes publicado" : "meses publicados"} después y ya ${cerrados.length === 1 ? "cerrado" : "cerrados"}: ${lista(cerrados)}`);
     if (republicados.length > 0) partes.push(`${republicados.length === 1 ? "mes republicado" : "meses republicados"}: ${lista(republicados)}`);
     motivos.push({ codigo: "carga_nueva", detalle: partes.join("; ") });
+  }
+  if (soloAviso.length > 0) {
+    avisos.push({
+      codigo: "datos_posteriores",
+      detalle: `hay ${soloAviso.length} ${soloAviso.length === 1 ? "mes publicado" : "meses publicados"} después de ${hasta}: ${lista(soloAviso)}; la curva sigue al día hasta ese mes`,
+    });
   }
 
   const antes = new Set(guardado.atipicos);
@@ -135,7 +208,22 @@ export function motivosObsoleta(guardado: EstadoGuardado, actual: EstadoActual):
   if (guardado.temporada !== actual.temporada) {
     motivos.push({ codigo: "temporada_cambiada", detalle: `la temporada pasó de ${guardado.temporada} a ${actual.temporada}` });
   }
-  return motivos;
+
+  if (guardado.huella_temporada && actual.huella_temporada && guardado.huella_temporada !== actual.huella_temporada) {
+    const detalle = detalleTemporadaRecompuesta(guardado, actual);
+    if (guardado.modelo === "T") motivos.push({ codigo: "temporada_recompuesta", detalle });
+    else avisos.push({ codigo: "temporada_recompuesta", detalle });
+  }
+
+  if (guardado.version_modelo !== undefined && guardado.version_modelo !== null && guardado.version_modelo < VERSION_MODELO) {
+    avisos.push({ codigo: "modelo_anterior", detalle: "calculada con un modelo anterior: hoy el sistema puede proponer otra cosa" });
+  }
+  return { motivos, avisos };
+}
+
+/** Los motivos de `evaluarEstadoVigente` (compatibilidad con la 06). */
+export function motivosObsoleta(guardado: EstadoGuardado, actual: EstadoActual): MotivoObsoletaApi[] {
+  return evaluarEstadoVigente(guardado, actual).motivos;
 }
 
 // ─── Regla 25: comparar propuesta y vigente ───
@@ -172,18 +260,33 @@ export type CurvaParaObsolescencia = {
   corrida_id: string;
   /** `anios_utilizados.composicion`. */
   composicion: { equivalencias: number; huella: string } | null;
+  /** `T` = curva prestada de la temporada. */
+  modelo?: string | null;
 };
 
-/** La corrida de la que salió una curva. */
+/**
+ * La foto de la que salió una curva. Basta con `parametros`, `red_comparable` y
+ * `resumen` (regla 52): `resultado` solo se usa como alternativa para las curvas de
+ * la 0.9.6, cuyo `resumen` no traía `temporada` ni `atipicos`.
+ */
 export type CorridaParaObsolescencia = {
   id: string;
   /** `aaaa-mm`. */
   hasta_periodo: string;
   parametros: ParametrosCurvas;
   red_comparable: readonly RedAnio[];
-  /** `resumen.cargas`. */
-  cargas: Readonly<Record<string, string>>;
-  resultado: Pick<ResultadoCorrida, "agrupaciones">;
+  resumen: {
+    /** `{ "aaaa-mm": carga_id }` de los meses ≤ `hasta_periodo`. */
+    cargas?: Readonly<Record<string, string>>;
+    temporada?: TemporadaAgrupacion;
+    atipicos?: readonly string[];
+    huella_temporada?: string;
+    agrupaciones_temporada?: readonly AgrupacionTemporadaHuella[];
+    hasta_fue_por_defecto?: boolean;
+    version_modelo?: number;
+  };
+  /** Solo para fotos de la 0.9.6 (sin `resumen.temporada` / `resumen.atipicos`). */
+  resultado?: Pick<ResultadoCorrida, "agrupaciones">;
 };
 
 export type EstadoGlobalActual = {
@@ -194,58 +297,85 @@ export type EstadoGlobalActual = {
   cargas: Readonly<Record<string, string>>;
   /** Periodos atípicos ACTIVOS. */
   periodos: readonly PeriodoParaClase[];
-  /** Estado actual de cada agrupación. */
+  /** Estado actual de cada agrupación (activa o no). */
   agrupaciones: ReadonlyMap<string, { temporada: TemporadaAgrupacion; equivalencias: number; huella: string }>;
-  /** Último mes que entraría hoy en una corrida (`hastaPorDefecto`); `null` si no hay. */
+  /** Las agrupaciones ACTIVAS (con nombre): de ellas sale la `huella_temporada` de hoy. */
+  activas?: readonly { id: string; nombre: string; temporada: TemporadaAgrupacion; huella: string }[];
+  /**
+   * Si `activas` solo cubre una temporada (y `todo_el_ano`), como en `calcular`, cuál es:
+   * la `huella_temporada` solo se compara para las curvas de esa temporada. Sin él, `activas` es todas.
+   */
+  activas_de_temporada?: TemporadaAgrupacion;
+  /** Último mes que entraría hoy en un cálculo (`hastaPorDefecto`); `null` si no hay. */
   hasta_actual: string | null;
 };
 
 /**
- * Motivos de obsolescencia de cada curva (`Map` por agrupación; vacío = al día).
- * Recalcula la red comparable UNA vez por corrida, con los parámetros de esa
- * corrida y el maestro de tiendas y la venta de hoy, y la compara con la que
- * guardó. Una curva cuya corrida no se encuentra no se puede evaluar: sin motivos.
+ * Evaluación de cada curva vigente (`Map` por agrupación; `motivos` vacío = al día).
+ * Recalcula la red comparable UNA vez por foto (y `hasta`), con los parámetros de esa
+ * foto y el maestro de tiendas y la venta de hoy, y la compara con la que guardó.
+ * Una curva cuya foto no se encuentra no se puede evaluar: sin motivos ni avisos.
  */
 export function evaluarObsolescencia(
   curvas: readonly CurvaParaObsolescencia[],
   corridas: ReadonlyMap<string, CorridaParaObsolescencia>,
   actual: EstadoGlobalActual
-): Map<string, MotivoObsoletaApi[]> {
+): Map<string, EvaluacionVigente> {
   const publicados = Object.keys(actual.cargas).map(recortarPeriodo).sort();
   const redes = new Map<string, RedAnio[]>();
   const tiendasPorId = new Map(actual.tiendas.map((t) => [t.id, { codigo: t.codigo, nombre: t.nombre }]));
-  const salida = new Map<string, MotivoObsoletaApi[]>();
+  const salida = new Map<string, EvaluacionVigente>();
 
   for (const curva of curvas) {
     const corrida = corridas.get(curva.corrida_id);
     const hoy = actual.agrupaciones.get(curva.agrupacion_id);
     if (!corrida || !hoy) continue;
-    const guardada = corrida.resultado.agrupaciones.find((a) => a.agrupacion_id === curva.agrupacion_id);
+    const resumen = corrida.resumen;
+    const guardada = corrida.resultado?.agrupaciones.find((a) => a.agrupacion_id === curva.agrupacion_id);
+    const hastaFoto = recortarPeriodo(corrida.hasta_periodo);
+    const fuePorDefecto = resumen.hasta_fue_por_defecto !== false;
 
-    let red = redes.get(corrida.id);
+    // Si el planner paró antes a propósito, la red se compara hasta ese mes y no se extiende al defecto de hoy.
+    const hastaRed = fuePorDefecto && actual.hasta_actual && actual.hasta_actual > hastaFoto ? actual.hasta_actual : hastaFoto;
+    const claveRed = `${corrida.id}|${hastaRed}`;
+    let red = redes.get(claveRed);
     if (!red) {
-      const hasta = actual.hasta_actual && actual.hasta_actual > corrida.hasta_periodo ? actual.hasta_actual : corrida.hasta_periodo;
-      const meses = publicados.filter((m) => m <= hasta);
-      red = redComparable(actual.tiendas, actual.venta, aniosDeCorrida(meses, hasta), hasta, corrida.parametros, { mesesPublicados: meses });
-      redes.set(corrida.id, red);
+      const meses = publicados.filter((m) => m <= hastaRed);
+      red = redComparable(actual.tiendas, actual.venta, aniosDeCorrida(meses, hastaRed), hastaRed, corrida.parametros, { mesesPublicados: meses });
+      redes.set(claveRed, red);
     }
 
-    const temporadaGuardada = guardada?.temporada ?? hoy.temporada;
-    const atipicosGuardados = [...new Set((guardada?.anios ?? []).flatMap((a) => a.atipicos))].sort();
-    const atipicosHoy = [...mesesAtipicos(actual.periodos, { temporada: temporadaGuardada })]
-      .filter((m) => m <= recortarPeriodo(corrida.hasta_periodo))
-      .sort();
+    const temporadaGuardada = resumen.temporada ?? guardada?.temporada ?? hoy.temporada;
+    const atipicosHoy = [...mesesAtipicos(actual.periodos, { temporada: temporadaGuardada })].filter((m) => m <= hastaFoto).sort();
+    // Sin dato guardado (curvas de la 0.9.6 sin `resultado`) no hay con qué comparar: se toma lo de hoy y no se avisa en falso.
+    const atipicosGuardados = resumen.atipicos
+      ? [...resumen.atipicos].sort()
+      : guardada
+        ? [...new Set(guardada.anios.flatMap((a) => a.atipicos))].sort()
+        : atipicosHoy;
+
+    const cubre =
+      actual.activas !== undefined &&
+      (actual.activas_de_temporada === undefined || actual.activas_de_temporada === temporadaGuardada || temporadaGuardada === "todo_el_ano");
+    const delaTemporada = cubre && actual.activas ? agrupacionesDeTemporada(temporadaGuardada, actual.activas) : null;
+    const huellaTemporadaHoy = delaTemporada ? huellaTemporada(delaTemporada) : null;
 
     salida.set(
       curva.agrupacion_id,
-      motivosObsoleta(
+      evaluarEstadoVigente(
         {
           red_comparable: corrida.red_comparable,
-          cargas: corrida.cargas,
+          cargas: resumen.cargas ?? {},
           equivalencias: curva.composicion?.equivalencias ?? guardada?.composicion.equivalencias ?? hoy.equivalencias,
           huella_composicion: curva.composicion?.huella ?? guardada?.composicion.huella ?? hoy.huella,
           atipicos: atipicosGuardados,
           temporada: temporadaGuardada,
+          hasta_periodo: hastaFoto,
+          hasta_fue_por_defecto: fuePorDefecto,
+          modelo: curva.modelo ?? null,
+          huella_temporada: resumen.huella_temporada ?? null,
+          agrupaciones_temporada: resumen.agrupaciones_temporada,
+          version_modelo: resumen.version_modelo ?? null,
         },
         {
           red_comparable: red,
@@ -255,6 +385,9 @@ export function evaluarObsolescencia(
           atipicos: atipicosHoy,
           temporada: hoy.temporada,
           tiendas: tiendasPorId,
+          hasta_por_defecto: actual.hasta_actual,
+          huella_temporada: huellaTemporadaHoy,
+          agrupaciones_temporada: delaTemporada ?? undefined,
         }
       )
     );

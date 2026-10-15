@@ -13,9 +13,9 @@ import { redComparable } from "@/lib/curvas/red";
 import { MAX_MESES_HUECO, type RedAnioApi, type RedComparableVistaPrevia } from "@/lib/curvas/tipos-api";
 
 /**
- * Vista previa de la red comparable SIN corrida (`requirePlanner`): lee el
+ * Vista previa de la red comparable (`requirePlanner`): lee el
  * maestro de tiendas y la venta por tienda y mes, y aplica los parámetros de red
- * que lleguen en la query (los mismos de `POST /api/curvas/calcular`:
+ * que lleguen en la query (los de red de los parámetros de la agrupación:
  * `solo_tiendas_completas`, `exigir_venta_todo_el_ano`, `meses_tienda_nueva`,
  * `umbral_tienda_dominante`, `umbral_forma`, `peso_minimo_diagnostico`, más
  * `hasta_periodo`). Cada año trae, por tienda, su peso, perfil, `eat_vs_red` y si

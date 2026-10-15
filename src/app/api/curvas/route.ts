@@ -1,61 +1,71 @@
-import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requirePlanner } from "@/lib/auth/guard";
-import { error, ok } from "@/lib/api/respuestas";
+import { ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { hoyLima } from "@/lib/tiendas/estado";
 import { ultimoMesCerrado } from "@/lib/ventas/periodo";
-import { mesesFaltantes } from "@/lib/curvas/anios";
+import { hastaPorDefecto, mesesFaltantes } from "@/lib/curvas/anios";
 import {
-  aCorridaResumen,
   aPeriodoApi,
+  contarEquivalenciasSinAgrupacion,
+  contarVersiones,
   leerAgrupacionesConDatos,
   leerCargasPublicadas,
-  leerCorridasLista,
   leerCurvasVigentes,
   leerPeriodos,
+  leerTiendas,
+  leerVentaMensualTienda,
 } from "@/lib/curvas/consultas";
 import { armarEstadoCurvas, type EntradaEstado } from "@/lib/curvas/estado";
-import { leerCorridaId } from "@/lib/curvas/esquemas";
-import { aCorridaVista, leerObsolescencia, resolverCorrida } from "@/lib/curvas/lectura";
+import { leerObsolescencia } from "@/lib/curvas/lectura";
 import { aVigenteResumen } from "@/lib/curvas/reglas";
+import { estadoGlobalActual } from "@/lib/curvas/trabajo";
 import type { EstadoCurvasApi, VigenteResumenApi } from "@/lib/curvas/tipos-api";
 
 /**
- * Estado general de las curvas (`requirePlanner`; `?corrida_id=` opcional: por
- * defecto la de referencia y, sin referencia, la última). Agrupaciones con su
- * curva vigente, la propuesta de la corrida, la obsolescencia con motivo y el
- * resumen. NO lee la vista materializada: `unidades_sin_agrupacion` sale del
- * resumen de la corrida. `404` si `corrida_id` no existe.
+ * Lista de agrupaciones con su estado (`requirePlanner`; `EstadoCurvasApi` v2, 06b).
+ * NUNCA calcula ni llama a `venta_estacionalidad_agrupacion`: el estado
+ * (`sin_curva` / `al_dia` / `al_dia_distinta` / `obsoleta` / `inactiva_con_curva`), los
+ * avisos de la vigente (`datos_posteriores`, `modelo_anterior`, `temporada_recompuesta`)
+ * y los prerrequisitos salen de las fotos de las vigentes (sin `resultado`), el maestro
+ * de tiendas, los periodos y la venta por tienda (`venta_mensual_tienda()`). Trae los
+ * prerrequisitos globales (meses, periodos por temporada, tiendas sin apertura) y, por
+ * fila, `bloqueada_por` (lo que se sabe sin calcular). Sin corrida, sin selector.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   const { response } = await requirePlanner();
   if (response) return response;
 
-  const { corridaId, rechazo } = leerCorridaId(request.nextUrl.searchParams);
-  if (rechazo) return error(rechazo.mensaje, rechazo.status);
-
   const db = supabaseAdmin();
-  const [agrupaciones, vigentes, lista, periodos, cargas, corrida] = await Promise.all([
+  const [agrupaciones, vigentes, periodos, cargas, tiendas, venta, versiones, sinAgrupacion] = await Promise.all([
     leerAgrupacionesConDatos(db, { soloActivas: false }),
     leerCurvasVigentes(db),
-    leerCorridasLista(db, 20),
     leerPeriodos(db, { soloActivos: true }),
     leerCargasPublicadas(db),
-    resolverCorrida(db, corridaId, { ultimaSiNoHayReferencia: true }),
+    leerTiendas(db),
+    leerVentaMensualTienda(db),
+    contarVersiones(db),
+    contarEquivalenciasSinAgrupacion(db),
   ]);
-  const fallo = agrupaciones.error ?? vigentes.error ?? lista.error ?? periodos.error ?? cargas.error;
+  const fallo = agrupaciones.error ?? vigentes.error ?? periodos.error ?? cargas.error ?? tiendas.error ?? venta.error ?? versiones.error ?? sinAgrupacion.error;
   if (fallo) return traducirErrorDb(fallo, "estado de curvas");
-  if (corrida.respuesta) return corrida.respuesta;
 
   const periodosApi = periodos.data.map(aPeriodoApi);
-  const obsoletas = await leerObsolescencia(
+  const hoy = hoyLima();
+  const evaluadas = await leerObsolescencia(
     db,
     vigentes.data,
-    agrupaciones.data,
-    periodosApi
+    estadoGlobalActual({
+      tiendas: tiendas.data,
+      venta: venta.data,
+      cargas: cargas.data,
+      periodos: periodosApi,
+      agrupaciones: agrupaciones.data,
+      activas: agrupaciones.data.filter((a) => a.activo),
+      hoy,
+    })
   );
-  if (obsoletas.respuesta) return obsoletas.respuesta;
+  if (evaluadas.respuesta) return evaluadas.respuesta;
 
   const meses = Object.keys(cargas.data).sort();
   const ultimoPublicado = meses.length > 0 ? meses[meses.length - 1] : null;
@@ -65,24 +75,20 @@ export async function GET(request: NextRequest) {
       hasta: ultimoPublicado,
       meses_publicados: meses.length,
       faltantes: ultimoPublicado ? mesesFaltantes(meses, ultimoPublicado) : [],
-      ultimo_mes_cerrado: ultimoMesCerrado(hoyLima()),
+      ultimo_mes_cerrado: ultimoMesCerrado(hoy),
     },
-    corrida: corrida.data ? aCorridaVista(corrida.data) : null,
-    corridas: lista.data.map((c) => {
-      const r = aCorridaResumen(c);
-      return {
-        id: r.id,
-        created_at: r.created_at,
-        hasta_periodo: r.hasta_periodo,
-        referencia: r.referencia,
-        usuario_nombre: r.usuario_nombre,
-        resumen: { propias: r.resumen.propias, prestadas: r.resumen.prestadas, sin_venta: r.resumen.sin_venta },
-      };
-    }),
     agrupaciones: agrupaciones.data,
     vigentes: new Map<string, VigenteResumenApi>(vigentes.data.map((v) => [v.agrupacion_estacionalidad_id, aVigenteResumen(v)])),
-    obsoletas: obsoletas.data,
+    evaluaciones: evaluadas.data,
+    versiones: versiones.data,
     periodos: periodosApi,
+    prerrequisitos: {
+      meses_publicados: meses,
+      hasta_periodo: hastaPorDefecto(meses, hoy),
+      tiendas: tiendas.data,
+      venta_tienda: venta.data,
+    },
+    equivalencias_sin_agrupacion: sinAgrupacion.data,
   };
   const cuerpo: EstadoCurvasApi = armarEstadoCurvas(entrada);
   return ok(cuerpo);

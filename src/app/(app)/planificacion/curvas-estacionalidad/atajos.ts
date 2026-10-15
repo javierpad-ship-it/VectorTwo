@@ -24,7 +24,7 @@ export function atajoAnioCompleto(anio: number): RangoMeses {
   return { desde: `${anio}-01`, hasta: `${anio}-12` };
 }
 
-/** «Desde setiembre»: setiembre a diciembre del año base (el verano que adelanta El Niño). */
+/** «Desde setiembre»: setiembre a diciembre del año base (los meses de verano en que se mide El Niño). */
 export function atajoDesdeSetiembre(anio: number): RangoMeses {
   return { desde: `${anio}-09`, hasta: `${anio}-12` };
 }
@@ -89,7 +89,7 @@ export const ALTAS_PRELLENADAS: readonly AltaPrellenada[] = [
     desde: "2023-09",
     hasta: "2023-12",
     motivo: "Niño costero 2023 · verano",
-    descripcion: "El verano arrancó antes: setiembre a diciembre de 2023.",
+    descripcion: "El Niño costero 2023 en las agrupaciones de verano: setiembre a diciembre de 2023. Su efecto se mide en la pestaña Años Niño.",
     temporadas: ["verano"],
   },
   {

@@ -22,7 +22,9 @@ export type ParametrosRed = Pick<
   | "umbral_tienda_dominante"
   | "umbral_forma"
   | "peso_minimo_diagnostico"
->;
+> &
+  /** 06b: las tiendas que el planner saca de la red de la agrupación (motivo `excluida_manual`). Opcional: la vista previa de la red no las usa. */
+  Partial<Pick<ParametrosCurvas, "tiendas_excluidas">>;
 
 export const TIPO_TIENDA = "Tienda";
 
@@ -139,6 +141,8 @@ type Evaluada = {
  * Regla 4. Decide, por año y tienda, quién forma la red comparable (condiciones
  * 1 a 4 de la ficha) y calcula pesos, participaciones, dominante y diagnóstico.
  *
+ *   0. `tiendas_excluidas` (06b): la tienda sale de la red de todos los años con
+ *      motivo `excluida_manual`, antes de mirar tipo, fechas o datos;
  *   1. `tipo = 'Tienda'` y activa (`centro_distribucion`, `tienda_desactivada`);
  *   2. fechas de M4 (`no_abierta_todo_el_ano`; sin apertura entra con `tienda_sin_apertura`);
  *   3. tienda nueva (`tienda_nueva`, solo con `meses_tienda_nueva > 0`);
@@ -159,6 +163,7 @@ export function redComparable(
   const hasta = recortarPeriodo(hastaPeriodo);
   const venta = indexarVenta(ventaMensualPorTienda);
   const publicados = opciones.mesesPublicados ? new Set([...opciones.mesesPublicados].map(recortarPeriodo)) : null;
+  const excluidas = new Set(parametros.tiendas_excluidas ?? []);
 
   // Primer y último mes con venta positiva de cada tienda, en toda su serie.
   const rango = new Map<string, { primero: string | null; ultimo: string | null }>();
@@ -197,6 +202,9 @@ export function redComparable(
         mensual: seriesDeTienda(porMes, anio, habilitados),
       };
       const fuera = (...motivos: MotivoRed[]): Evaluada => ({ ...base, entra: false, motivos });
+
+      // 0. Exclusión manual del planner.
+      if (excluidas.has(tienda.id)) return fuera("excluida_manual");
 
       // 1. Tipo y estado.
       if (tienda.tipo !== TIPO_TIENDA) return fuera("centro_distribucion");
