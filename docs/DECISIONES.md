@@ -729,3 +729,263 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** Mismo caso que la renumeración del 2026-10-13: la versión se asigna en el orden en que cierran las entregas, no en el que se planearon. Una mejora pequeña pedida por Javier no debía esperar al paso 2.
 
 **Descartado.** Etiquetar esta entrega `0.9.0 · M3` (chocaría con la de M6 ya desplegada) o dejarla sin versión (el pie del menú es lo que Javier compara con Railway).
+
+## 2026-10-14 · Equipo de agentes: `seguridad` y `arquitecto-revisor` siempre con opus, `arquitecto` siempre con fable
+
+**Decisión.** Se suman dos agentes de solo lectura a los seis originales: `seguridad` (auditoría de guards, fuga entre roles, permisos y funciones de Supabase, secretos, importadores y XSS) y `arquitecto-revisor` (segunda opinión sobre las fichas del arquitecto: omisiones, contradicciones, casos borde, riesgos, contrastados con la base real). Los dos corren siempre con el modelo `opus`, fijado en el encabezado de su archivo y pasado además al lanzarlos con la herramienta Agent. El `arquitecto` corre siempre con `fable`, para toda especificación nueva y toda revisión de diseño, sin depender del modelo de la sesión. La regla vive en `CLAUDE.md`; aquí solo se registra. Ninguno de los tres modifica código ni fichas ajenas: el `arquitecto-revisor` entrega feedback y el `arquitecto` ajusta la ficha; `seguridad` reporta y `backend` o `datos` corrigen.
+
+**Por qué.** Una ficha grande escrita por un solo agente arrastra sus propios supuestos; la revisión independiente de la tercera pasada de M6 encontró cosas que la ficha daba por buenas (el ruido entre años normales, la lectura no atómica del agregado, cifras que solo salen sobre tiendas comunes). Lo mismo con la seguridad: quien construye no es quien mejor la audita. Fijar el modelo evita que la calidad dependa de la sesión.
+
+**Descartado.** Que el arquitecto revise su propia ficha; que `seguridad` corrija lo que encuentre (mezclaría auditar con construir y dejaría un cambio sin segunda mirada).
+
+## 2026-10-14 · Seguridad: primera auditoría con opus, sin bloqueantes, y correcciones en `0.9.2`
+
+**Decisión.** Antes de abrir los módulos grandes se corrió la primera auditoría del agente `seguridad`. Informe: **cuatro hallazgos importantes (I-1 a I-4), diez menores y ninguno bloqueante**. Las correcciones de código salieron en `0.9.2 · Seguridad`: topes de tamaño en importadores (celdas de 300 caracteres, 1 000 en notas y descripciones, `413` si el cuerpo supera 6 MB) y una lectura no cúbica del importador de agrupaciones; la venta esperada de la tienda (dato de planificación) llega nula al comprador; el destino `next` del login solo acepta rutas internas; desactivar o reactivar un usuario usa `ban_duration` de Auth, con Auth antes que el perfil y rollback, porque el `signOut` anterior no hacía nada; los errores de Auth ya no se devuelven crudos; cabeceras de seguridad y `Cache-Control: no-store` en la API; escape de fórmulas al exportar CSV; y un test global que exige que todo handler de `src/app/api/**` abra con `requireUser`, `requirePlanner` o `requireAdmin`. Los permisos de la base se corrigieron con la migración `0013` (entrada siguiente). El informe completo no está en el repo, y no se transcribe aquí; el detalle de lo corregido está en `docs/CHANGELOG.md` (`0.9.2`) y en los tests. El numeral I-n de cada hallazgo solo consta en comentarios de código y en el encabezado de la `0013` (I-2 e I-3 verificados).
+
+**Por qué.** Una auditoría antes de que entren M6, M7 y M8 cuesta poco y evita que cada módulo nuevo herede un hueco. Entre los importantes estaban los permisos abiertos de `anon` y `authenticated` bajo el RLS (I-2, corregido con la `0013`) y la venta esperada de la tienda visible para el comprador (I-3); el `signOut` de desactivar usuarios que no cerraba nada y el importador de agrupaciones con lectura cúbica fueron de la misma tanda. Las correcciones menores salieron en la misma versión.
+
+**Descartado.** Esperar a terminar M8 para auditar; dejar los menores para después.
+
+**Pendiente (de Javier, no de código).** Rotar la clave del administrador y activar en Supabase Auth la protección contra contraseñas filtradas. Los pendientes menores de QA están en PLAN §7.
+
+## 2026-10-14 · Seguridad: la migración `0013` quita a `anon` y `authenticated` todo privilegio sobre `public`
+
+**Decisión.** `0013_endurecer_permisos.sql` (aplicada en Vector2 el 2026-10-14 con la aprobación de Javier) revoca todos los privilegios de `anon` y `authenticated` sobre tablas, vistas, secuencias y funciones de `public`, y también los privilegios por defecto del rol `postgres` (lo que se cree después), reafirma el acceso total de `service_role` y deja `perfiles.rol` con valor por defecto `comprador`. Es idempotente y no contiene `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`. Verificado: cero permisos de `anon` y `authenticated` en `public`, `service_role` conserva el acceso y las cifras quedaron intactas. Desde aquí, todo objeto nuevo (tabla, vista, función, vista materializada) se cierra con `revoke` a `public`, `anon` y `authenticated` y `grant` a `service_role`. La numeración de las migraciones siguientes se corrió: M11 usó la `0014`, M6 paso 2 la `0015` y la `0016`, M6 por agrupación la `0017` y M7 queda prevista para la `0018`.
+
+**Por qué.** Hasta entonces solo el RLS (activo y sin políticas) impedía que la clave anon, que es pública, leyera o escribiera. Una tabla nueva sin `enable row level security` (ya pasó con una tabla de prueba de conexión) o una función nueva sin `revoke` habría quedado abierta. Con los permisos quitados, un olvido del RLS deja de ser un incidente: es defensa en profundidad bajo el modelo "RLS sin políticas y datos solo con `supabaseAdmin()`". La app no cambia, porque accede solo con `service_role`.
+
+**Descartado.** Confiar solo en el RLS; revisar tabla por tabla a mano en cada migración (se olvida); tocar los privilegios por defecto de `supabase_admin`, que gestiona la plataforma.
+
+## 2026-10-14 · M11: el reporte de agrupación GMLE es de solo lectura, sin migración, y el nodo repartido es "mixto" (construido `0.9.4`)
+
+**Decisión.** Javier pidió "un reporte donde aparezca agrupación GMLE detallado, para poder revisarlo, como un módulo dentro del sistema". M11 es un módulo de **solo lectura**, sin tablas, vistas ni migración propias: el reporte se deriva en memoria del árbol, del nivel de planificación (02b) y de las agrupaciones (M3), con la función pura `armarReporteAgrupacionGmle` y una sola lectura `GET /api/reportes/agrupacion-gmle` con `requirePlanner` (el comprador no lo ve ni lo lee). Un nodo `GML` cuyas equivalencias caen en dos o más agrupaciones es **`mixta`**, no "la de su genérica" ni "la mayoritaria"; la agrupación mayoritaria se muestra al lado como ayuda y **la genérica no vota** (heredó la suya por mayoría y votaría por sí misma). Seis anomalías, avisos para revisar y no errores: sin agrupación, género no incluido, genérica discrepante, nodo GML mixto, línea partida y agrupación vacía. Ubicación: Maestros, debajo de Agrupaciones de estacionalidad; tres pestañas (Resumen, Detalle, Anomalías), filtros comunes, descargas CSV (con escape de fórmulas) y Excel.
+
+**Por qué.** Tras asignar las equivalencias a las agrupaciones y crear 117 genéricas el 2026-10-14, no había dónde ver cómo quedó cada agrupación ni cruzarla con el nivel GML o GMLE, que decide si M7 lee el nodo como una unidad con curva mezclada o cada equivalencia por separado. Que el nodo repartido sea `mixta` refleja `curvaUnidad`: el nodo no tiene una agrupación sino una curva compuesta, y eso puede ser deliberado o un descuido, que es lo que Javier quiere revisar. Sin tablas porque las reglas de vigencia y de faltante de M3 viven en TypeScript y una vista SQL las duplicaría. `requirePlanner` y no `requireUser` porque es herramienta de revisión de la planificación y el comprador no tiene uso para ella.
+
+**Descartado.** Una vista SQL o una tabla de resumen; tomar la agrupación de la genérica como la del nodo (circular); declarar error lo que es una decisión a revisar.
+
+## 2026-10-14 · M11: el histograma de unidades por mes y año usa una función SQL y respeta los filtros del reporte (construido `0.9.5`)
+
+**Decisión.** Al inicio de la pestaña Resumen se añade el histograma **Unidades vendidas por mes y año** (barras agrupadas, una por año, con tabla alternativa mes × año, totales y variación contra el año anterior solo donde ambos meses existen; los meses sin datos quedan vacíos, no en cero). Lo alimenta la función `public.unidades_mensuales(p_equivalencias uuid[] default null)` (migración `0014_unidades_mensuales.sql`, `security invoker`, `search_path` vacío, ejecutable solo por `service_role`), que agrega `venta_stock_vigente`, es decir solo cargas publicadas, y se llama por `POST /api/reportes/agrupacion-gmle/unidades-mensuales` (`requirePlanner`, hasta 5 000 ids de equivalencia; `[]` responde vacío sin consultar). Sin filtros suma toda la venta publicada; con filtros, las equivalencias que pasan.
+
+**Por qué.** Lo pidió Javier para validar la data histórica ya cargada (45 meses, de enero de 2023 a septiembre de 2026) con una mirada. La agregación completa de `venta_stock_vigente` debe hacerse en SQL (decisión de M5), y un `POST` porque la lista de ids no cabe en la URL. La suma de soles se hace en céntimos y un dato ilegible da error claro en vez de un cero falso.
+
+**Descartado.** Calcular en el navegador con la lista plana (cientos de miles de filas); un `GET` con ids en la URL; mostrar los meses sin datos como cero.
+
+## 2026-10-14 · M6: la curva es la participación del mes en el año sobre la red comparable de cada año, por fechas y por datos
+
+**Decisión.** Javier confirmó el 2026-10-14 que la lógica de Vector-One sirve hasta M6: todos los años superpuestos, participación medida sobre las mismas tiendas dentro de cada año (una tienda que abrió en 2025 no cuenta para 2024 ni antes) y una curva propuesta con lógica explicable. La **red comparable** de cada año se decide por las fechas de apertura y cierre de M4 y por los datos de M5 (la venta total de la tienda en el año), con `meses_tienda_nueva = 0`: una tienda abierta a fines de 2025 entra en la red de 2026 porque estuvo abierta sus doce meses, y una tienda cuya apertura se corrigió a mitad de 2023 queda fuera de 2023 por fechas. La concentración **se hace visible, no se corrige**: el peso de cada tienda por año va siempre a la vista, hay un aviso de tienda dominante (35 %) y la candidata `E` sirve de contraste. Esto corrige la primera pasada de la ficha, que fijaba 12 meses para tienda nueva.
+
+**Por qué.** Una red que cambia de un año a otro desforma el reparto mensual; medirla solo con las tiendas que estuvieron todo el año compara lo comparable. Las fechas solas no bastan (una tienda con fecha de apertura equivocada contaminaría la red), por eso se cruzan con la venta real. Corregir la concentración sería decidir por Javier cuánto debe pesar una tienda; mostrarla le deja decidir.
+
+**Descartado.** `meses_tienda_nueva = 12` (dejaba fuera a una tienda que ya tenía el año completo); ponderar o recortar la tienda mayor; una red única para todos los años.
+
+## 2026-10-14 · M6: el Niño de 2023 y 2026 afecta el año completo a invierno y de septiembre a diciembre a verano
+
+**Decisión.** Meses confirmados por Javier el 2026-10-14: para las agrupaciones de **invierno**, el año completo (2023 y 2026, este último en curso); para las de **verano**, de **septiembre a diciembre** de 2023 y de 2026. "Marzo a mayo de 2023" queda descartado. `periodos_atipicos` gana `temporadas text[]` (migración `0015`): un periodo aplica a una agrupación si la temporada de esta está en su conjunto; `alcance` queda como dato heredado. Un año con más de `max_meses_hueco` meses atípicos se trata como atípico completo: se mide su forma y nunca se imputa. Amplía la entrada del 2026-10-13 sobre la temporada ("el Niño solo afecta a las de invierno"): ahora también adelanta el verano. El periodo de verano queda **por medir primero**: si la forma sale estable y el ratio relativo es del orden del crecimiento normal, se desactiva con una fila (confirmación C3 pendiente de Javier, con valor por defecto "mantener y medir").
+
+**Por qué.** Javier conoce el evento y sus meses; el catálogo editable evita meses fijos en el código y permite corregirlos. La evidencia disponible no mostraba todavía un arranque claramente anticipado del verano, por eso el periodo se mide antes de darlo por bueno.
+
+**Descartado.** Un solo `alcance` por periodo (no distingue invierno de verano); declarar atípicos solo marzo a mayo; asumir sin medir que el verano se adelanta.
+
+## 2026-10-14 · M6: el efecto del Niño se mide en volumen y en forma por separado, y el veredicto es relativo al ruido
+
+**Decisión.** Cumpliendo la premisa de Javier ("el Niño cambia sobre todo el volumen, no la forma"), que se mide y no se asume, el efecto de un periodo atípico se mide en dos dimensiones. **Volumen**: ratio por temporada y año sobre tiendas comunes, con ratio de control (toda temporada del mismo año) y ratio relativo (temporada ÷ control), más el crecimiento entre años normales. **Forma**: EAT de la curva del año atípico frente a la referencia, comparado con el ruido entre años normales: `forma_cambia` solo si la diferencia supera `max(umbral_forma, ruido_normal)`, con `umbral_forma` de 3 puntos como piso. La recomendación sigue el mismo criterio: gana el promedio simple (`A`) salvo que otra candidata lo mejore en más de `max(0,05; 0,25 × ruido_normal)`, y el ruido se muestra siempre junto al EAT. Un año con todos sus meses atípicos no se imputa. El **factor de volumen para M7 es por temporada, calculado por M6 y editable en M7** (cierra la pregunta 14 de la ficha de M6; el valor editado vive en M7). Pendiente de confirmación de Javier (C1), construido como parámetros: `umbral_forma` y `margen_ruido`.
+
+**Por qué.** Con dos años normales que difieren entre sí por decenas de puntos, un umbral fijo de 3 puntos declararía "la forma cambia" para todo, y un `argmin` sin margen con dos pliegues de backtesting elegiría ruido. Medir el volumen sobre tiendas comunes es lo que reproduce las cifras que Javier calculó a mano; en crudo, con todas las tiendas, no salen.
+
+**Descartado.** Umbral fijo de 3 puntos; etiqueta de sustitución de temporada y `umbral_sustitucion` (de la segunda pasada); `argmin` sin margen; un factor por agrupación en lugar de por temporada (las agrupaciones pequeñas no dan base estable).
+
+## 2026-10-14 · M6: agrupaciones con pocos años o pocos datos usan la curva de su temporada
+
+**Decisión.** Un año con menos de 120 unidades en la agrupación (`escaso`) no entra en el ajuste; si quedan menos de dos años útiles, la agrupación toma la **curva de su temporada** (candidata `T`, prestada), que sustituye a la antigua candidata por género. El año en curso nunca ajusta una curva: solo valida de forma parcial. Aviso `cambio_volumen_extremo` en saltos de volumen anormales. Confirmación pendiente de Javier (C2), construida con valor por defecto: parámetros `min_unidades_ano` y `umbral_cambio_volumen`.
+
+**Por qué.** Hay agrupaciones con años de pocos cientos de unidades y meses en cero, cuya curva propia sería ruido. Prestar la de la temporada es más honesto que inventar una forma, y la agrupación queda marcada como prestada. El cambio de la candidata por género a la de temporada fue propuesta del `arquitecto-revisor` en la tercera pasada: la temporada es lo que decide qué meses afecta el Niño.
+
+**Descartado.** Calcular igual con años de pocas unidades; prestar la curva del género; excluir la agrupación del cálculo.
+
+## 2026-10-14 · M6: el modelo propone y el planner aprueba una curva por agrupación; no hay aprobación en bloque
+
+**Decisión.** Javier, 2026-10-14: no hay aprobación en bloque. Cada curva se aprueba desde el detalle de su agrupación, después de ver todos los años, la tabla de candidatas y el efecto del Niño, y queda versionada con quién y cuándo. El hito de M6 es "las 15 agrupaciones aprobadas una por una". Retira de la ficha el botón "aprobar recomendadas en bloque" de la segunda pasada.
+
+**Por qué.** Una curva decide cuánto se planifica de una agrupación entera; aprobarla sin mirarla traslada el riesgo a la compra. Con 15 agrupaciones el costo de revisar una por una es asumible.
+
+**Descartado.** Aprobación en bloque de las recomendadas, incluso con "revisar después".
+
+## 2026-10-14 · M6: las curvas son un artefacto vivo, con versión y obsolescencia por motivo
+
+**Decisión.** Requisito de Javier el 2026-10-14: "las curvas no quedan escritas en piedra; una tienda nueva puede modificarlas". Cada curva se versiona y guarda las huellas de la composición de la agrupación, de la red de tiendas y de las cargas con que se calculó. Cuando algo cambia (una tienda entra o sale de la red, cambia la composición, hay una carga nueva, cambia un periodo atípico o la temporada), la pantalla marca la curva como **obsoleta con el motivo nombrado** y ofrece recalcular; el detalle compara la curva vigente con la propuesta antes de aprobar. M7 guarda la versión de curva que usó y avisa "la curva cambió" sin tocar los totales anuales ya decididos, solo su reparto mensual. Hay además un calendario de revisión natural: el cierre de cada año y el primer año completo de una tienda nueva.
+
+**Por qué.** Una curva calculada una vez y olvidada deja de describir la red en cuanto abre o cierra una tienda. Invalidarla en silencio sería peor que dejarla: nadie sabría por qué cambió una proyección. Con huellas, la obsolescencia es un hecho verificable.
+
+**Descartado.** Invalidar curvas solas; recalcular y reemplazar automáticamente; curvas fijas por año.
+
+## 2026-10-14 · M6: lectura atómica del agregado y corrida de referencia (construidas en `0.9.6`, sustituidas al día siguiente)
+
+**Decisión.** Para el paso 2 se decidió leer el agregado de venta con una función `jsonb` (`0016`) que refresca la vista materializada de la `0015` y devuelve la agrupación × tienda × mes bajo un candado de aviso (`409 calculo_en_curso`), sin paginar la vista, y marcar una corrida como **corrida de referencia** (`referencia` en `corridas_estacionalidad`), de donde salían la pestaña Años Niño, `/anios` y el factor de volumen para M7. Se construyó y desplegó en `0.9.6 · M6` el 2026-10-15, a pedido de Javier para probarlo en navegador con Cowork mientras QA terminaba su revisión independiente.
+
+**Por qué.** Paginar la vista materializada eran 86 páginas, no era atómico y un refresco concurrente podía bloquearla; un `setof` se corta en 1 000 filas. La corrida de referencia daba una fuente única para M7.
+
+**Descartado.** Paginar con `leerTodo`; leer la vista fuera de `calcular`.
+
+**Estado (2026-10-15).** Esta entrada queda **sustituida** por el flujo por agrupación de la `0.9.7`; ver "M6: la lectura atómica del agregado y la corrida de referencia quedan sustituidas por el flujo por agrupación".
+
+## 2026-10-14 · M7 vuelve a borrador: de M7 en adelante se diseña casi desde cero
+
+**Decisión.** Javier: "hasta M6 sirvió Vector-One; de M7 en adelante hay que diseñar casi desde cero". El borrador del 2026-10-13 (escenarios con ventana base móvil, crecimiento por unidad y factor de tiendas, inspirado en Vector-One) deja de regir. De él se conservan solo las respuestas del dueño y los contratos que M6, 02b y M5 ya ofrecen. El rediseño se especifica el 2026-10-15 (ver las entradas M7 de esa fecha).
+
+**Por qué.** Las reglas de proyección de Vector-One no reflejan cómo planifica hoy Javier (unidades anuales por línea, mismas tiendas por año, aperturas aparte); heredar su lógica habría obligado a deshacerla.
+
+**Descartado.** Ajustar el borrador antiguo con parches.
+
+## 2026-10-15 · M6: la unidad de trabajo es una agrupación de estacionalidad
+
+**Decisión.** Javier, tras probar la `0.9.6`: "se tiene que trabajar agrupación de estacionalidad una por una" y "tener una vista de la curva que definimos aprobada y las de los últimos años, así como la que genera el sistema en automático". La pantalla lista las agrupaciones con su estado y se trabaja una a la vez: en el mismo gráfico y la misma tabla, la curva aprobada vigente, la de cada año y la propuesta del sistema, con la diferencia mes a mes. Especificado en `docs/modulos/06b-curvas-trabajo-por-agrupacion.md` (revisado por el `arquitecto-revisor` el mismo día); migración `0017` ya aplicada y versión `0.9.7 · M6` **en construcción, no desplegada**. La lógica estadística de la ficha 06 se conserva tal cual.
+
+**Por qué.** La `0.9.6` construyó el motor completo y lo expuso con una corrida global; Javier describió otra manera de trabajar, la de revisar una agrupación a la vez con todo a la vista. Reordenar la pantalla alrededor de eso reutiliza casi todo lo construido.
+
+**Descartado.** La corrida global con tabla de propuestas (construida en `0.9.6` y sustituida).
+
+## 2026-10-15 · M6: el cálculo es a demanda y no se guarda; se guarda la foto de cada aprobación
+
+**Decisión.** Un cálculo es la ejecución determinista del modelo sobre **una** agrupación; dura milisegundos y no se guarda. Lo que se guarda es la **foto de aprobación**: una fila de `corridas_estacionalidad` con `agrupacion_estacionalidad_id` (columna nueva de la `0017`; nula = corrida global heredada de `0.9.6`), con los parámetros, el resultado de esa agrupación, la red comparable y el resumen con las huellas; la curva vigente apunta a ella, de modo que el contrato con M7 no cambia. La lectura de venta pasa a una función `jsonb` filtrada, `venta_estacionalidad_agrupacion(p_agrupacion_id)`, que sustituye a la vista materializada y al candado (medida de 0,6 a 1,5 s).
+
+**Por qué.** Calcular es barato y reproducible; guardar cada cálculo visto llenaría la base de resultados que nadie aprobó. La foto da la trazabilidad que importa: con qué datos y parámetros se aprobó cada versión.
+
+**Descartado.** Guardar cada cálculo visto; una tabla nueva de fotos; seguir refrescando la vista materializada.
+
+## 2026-10-15 · M6: antes de calcular se comprueban los prerrequisitos de la agrupación y se bloquea con motivo
+
+**Decisión.** Una agrupación no se calcula si falta lo imprescindible: sin periodos atípicos para su temporada (invierno o verano), tienda con venta y sin fecha de apertura, ningún año completo, sin venta o sin equivalencias. El planner puede levantar el primero con la casilla "Confirmo que esta temporada no tiene años atípicos", que queda en la foto. Una agrupación de toda temporada solo avisa ("sigue en Toda temporada") hasta su primera aprobación. La pantalla muestra el motivo con el enlace para arreglarlo.
+
+**Por qué.** La `0.9.6` permitió calcular con el catálogo de periodos vacío, sin que nada lo señalara. Bloquear con motivo convierte un descuido silencioso en una acción visible; la casilla evita frenar a quien sabe que esa temporada no tuvo Niño.
+
+**Descartado.** Calcular siempre y solo avisar; bloquear también a toda temporada.
+
+## 2026-10-15 · M6: la aprobación lleva la huella del cálculo que el planner vio
+
+**Decisión.** `PUT /api/curvas/agrupaciones/[id]` envía la huella del cálculo (`huella_calculo`), la versión vigente que el planner vio (`version_vigente`) y los parámetros con `hasta_periodo` explícito. El servidor recalcula y rechaza con `409 datos_cambiados` si la entrada ya no es la misma y con `409 vigente_cambiada` si otro usuario aprobó o retiró mientras tanto; con la misma candidata y la misma huella que la vigente responde `409 sin_cambio`.
+
+**Por qué.** Entre abrir una agrupación y aprobarla pueden pasar minutos en los que se carga un mes o se mueve una tienda; aprobar una curva que ya no corresponde a los datos es justo el error que las curvas vivas quieren evitar. Con dos usuarios la huella y la versión vigente evitan pisarse.
+
+**Descartado.** Aprobar por `corrida_id` (apunta a un cálculo que ya no se guarda).
+
+## 2026-10-15 · M6: el estado de la lista se deriva de las huellas, sin corrida de referencia
+
+**Decisión.** El estado de cada agrupación sale de la curva vigente y las huellas, sin leer una corrida: `sin_curva`, `al_dia`, `al_dia_distinta` (se aprobó una candidata distinta de la recomendada) y `obsoleta` (con motivo), más `inactiva_con_curva`. Como el modelo es determinista, si nada de lo que cubre la huella cambió, la propuesta de hoy es la de la foto; si algo cambió, la curva es obsoleta por definición. **"Comparar con el sistema"** calcula a demanda la propuesta de hoy y muestra la diferencia sin escribir nada. Avisos que no cambian el estado: `datos_posteriores` (un mes publicado después del `hasta` de la curva) y `modelo_anterior` (la foto se hizo con otra versión del modelo).
+
+**Por qué.** No hace falta una corrida global ni guardar propuestas para saber si una curva sigue vigente. Separar "obsoleta" de "hay datos posteriores" evita marcar obsoleta una curva que el planner decidió detener en un mes.
+
+**Descartado.** Una corrida de referencia; recalcular automáticamente al cambiar los datos.
+
+## 2026-10-15 · M6: el factor de volumen del Niño para M7 se calcula a demanda por temporada
+
+**Decisión.** El factor por temporada se calcula a demanda con la misma función SQL sin agrupación (`GET /api/periodos-atipicos/anios?temporada=&con_volumen=1`, y la pestaña Años Niño); M7 guarda el valor que usó, editable allí. `corridas_estacionalidad.referencia` y la vista materializada quedan **sin uso desde `0.9.7`**, documentadas con `comment on` y nunca borradas.
+
+**Por qué.** Sin corrida de referencia, el factor deja de depender de qué corrida marcó alguien y se calcula siempre sobre los datos de hoy. Las migraciones no admiten `DROP`, así que lo que no se usa se documenta.
+
+**Descartado.** Borrar objetos en una migración; mantener la corrida de referencia solo para el factor.
+
+## 2026-10-15 · M6: los parámetros son por agrupación, y los de la última aprobación son el punto de partida
+
+**Decisión.** Los parámetros del cálculo pertenecen a la agrupación, incluidos dos nuevos: `anios_excluidos` (el año queda descartado con motivo `excluido_manual`, fuera del ajuste, y sigue contando para el volumen) y `tiendas_excluidas` (la tienda sale de la red de todos los años con motivo `excluida_manual`; es parámetro, no maestro). Al reabrir una agrupación se parte de los parámetros de su última aprobación, con "Restablecer" a la vista, para que comparar con la vigente sea honesto. La primera entrega del panel edita años, tratamiento del Niño, tiendas y "Calcular hasta".
+
+**Por qué.** Lo que es sensato para una agrupación de invierno no lo es para una de toda temporada, y una tienda que distorsiona una curva puede ser normal en otra.
+
+**Descartado.** Parámetros globales; excluir tiendas como dato del maestro de M4.
+
+## 2026-10-15 · M6: los hallazgos de QA de la `0.9.6` son requisitos del rediseño
+
+**Decisión.** Siete hallazgos del informe de QA (sin bloqueantes) pasan a requisitos de la `0.9.7`: todos los años con red se dibujan (cada serie usa `participacion_real ?? participacion`; los años descartados o excluidos van en gris, los imputados punteados, el en curso discontinuo, y un año desaparece solo si no tiene red o volumen, y entonces la tabla lo lista con su motivo); el ruido entre años normales se calcula a nivel de agrupación y se muestra siempre junto al EAT; `carga_nueva` solo mira los meses hasta el `hasta` de la curva y reaprobar la limpia; una sola definición de "sin venta"; la agrupación abierta va en la URL (`?agrupacion=<id>`); las cifras de texto del servidor y de la pantalla usan el mismo formateador `es-PE`; y la lista lee solo `parametros`, `red_comparable` y `resumen` de las fotos.
+
+**Por qué.** Eran incoherencias reales (un año descartado desaparecía del gráfico; recalcular y aprobar no limpiaba una curva obsoleta por un mes posterior; la coma decimal del servidor y el punto de la pantalla) y el rediseño ya reabría esos módulos.
+
+**Descartado.** Un parche aparte sobre la `0.9.6`.
+
+## 2026-10-15 · M6: la huella cubre también a las otras agrupaciones de la temporada y la versión del modelo
+
+**Decisión.** Javier aceptó el informe del `arquitecto-revisor`. La huella de temporada (`huella_temporada`: tríos id, temporada y composición de las agrupaciones activas de la temporada y de toda temporada) y la constante `VERSION_MODELO` entran en la huella de cálculo y en la foto. Una curva **prestada** (`T`) se marca obsoleta (`temporada_recompuesta`) cuando cambia la composición o la temporada de cualquiera de las otras agrupaciones de su temporada; una curva propia solo recibe un aviso. Una foto con un modelo anterior avisa (`modelo_anterior`), no es obsoleta.
+
+**Por qué.** La curva `T` y el control de toda temporada salen de las otras agrupaciones: sin esto, mover una equivalencia entre dos agrupaciones cambiaba curvas ajenas sin dejar rastro. Subir de versión el modelo sin rastro en las fotos haría que "al día" mintiera.
+
+**Descartado.** Dejar `T` fuera de la obsolescencia; subir el modelo sin marcarlo en las fotos.
+
+## 2026-10-15 · M6: `hasta_periodo` nunca se hereda y la nota se exige en tres casos
+
+**Decisión.** Cada apertura de una agrupación arranca con `hasta_periodo` en el último mes publicado y terminado en Lima; nunca se hereda de la aprobación anterior (la cabecera dice "la vigente usó datos hasta X"). El `PUT` lleva el `hasta` explícito y la foto guarda `hasta_fue_por_defecto`: si es falso, los meses posteriores son siempre aviso `datos_posteriores`. La **nota** (un solo campo "Nota / motivo") es obligatoria (`409 nota_requerida`) al aprobar una candidata distinta de la recomendada, al excluir años o tiendas a mano y con tratamiento del Niño distinto de `auto`.
+
+**Por qué.** Heredar el `hasta` dejaría curvas detenidas en un mes viejo sin que nadie lo notara. La nota convierte una desviación de lo que el sistema propone en un motivo escrito que se ve en la lista y en Versiones.
+
+**Descartado.** Heredar el `hasta`; nota opcional.
+
+## 2026-10-15 · M6: la lectura de venta se cachea en memoria por huella y la foto se basta sin `resultado`
+
+**Decisión.** La salida de `venta_estacionalidad_agrupacion(id)` (que devuelve también `cargas`, para que la huella y los datos salgan del mismo estado) se guarda en memoria del proceso con clave de tres huellas (cargas, composición, temporada), 120 s de vida y a lo sumo 20 entradas, de modo que mover un parámetro tarda milisegundos. La lista y la obsolescencia leen solo `parametros`, `red_comparable` y `resumen` de la foto; `resultado` se lee únicamente en "Ver foto". La caché nunca devuelve un estado distinto del que su huella describe.
+
+**Por qué.** Cada recálculo al mover un parámetro no debería repetir la lectura de venta; y la lista nunca debe deserializar 40 KB por fila.
+
+**Descartado.** Recalcular en el navegador (habría que enviar la venta y llevar el modelo en el bundle); leer `resultado` en la lista.
+
+## 2026-10-15 · M6: el alcance de la `0.9.7` se recorta
+
+**Decisión.** Javier, para recortar alcance: el botón en bloque "Comparar las obsoletas con el sistema", la temporada editable en línea en la lista y la edición en pantalla de los umbrales avanzados pasan a una **segunda entrega**; el esquema, la foto y el modelo ya los aceptan. "Comparar con el sistema" queda por fila.
+
+**Por qué.** Eran comodidades, no requisitos del flujo por agrupación, y retrasaban el momento en que Javier puede aprobar curvas.
+
+**Descartado.** Entregarlo todo en una versión.
+
+## 2026-10-15 · M6: la lectura atómica del agregado y la corrida de referencia quedan sustituidas por el flujo por agrupación
+
+**Decisión.** La `0.9.7` sustituye dos decisiones del 2026-10-14: "M6: lectura atómica del agregado y corrida de referencia (construidas en `0.9.6`)", y con ella la lectura con candado `409 calculo_en_curso` y la marca `referencia`. Sin corrida global no hay nada que refrescar ni que marcar: la lectura es una función filtrada y la foto es la de cada aprobación. Se retiran `POST /api/curvas/calcular`, `GET /api/curvas/corridas`, `GET` y `PATCH /api/curvas/corridas/[id]` y los componentes de la tarjeta Calcular y del selector de corridas; nada se borra de la base (la vista materializada, sus funciones de refresco y `referencia` quedan sin uso). Numeración: `0017` para esta entrega; M7 queda prevista para la `0018` y pasaría a la `0019` si M6 usara la `0018` para una variante de la función sobre la vista materializada (solo si la medición lo exigiera).
+
+**Por qué.** El candado y la referencia resolvían problemas de la corrida global; al desaparecer esta, mantenerlos sería código sin dueño.
+
+**Descartado.** Conservar las dos piezas "por si acaso" (el mismo criterio con el que se descartaron `tallas` y `equivalencia_marca`).
+
+## 2026-10-15 · M7: se rediseña como proyección de unidades anuales del año en curso y del siguiente, por GML × agrupación de marca (en revisión, sin construir)
+
+**Decisión.** Javier el 2026-10-14 y 15: el objetivo es el **año en curso y el año siguiente completos, en unidades anuales, sin horizonte móvil de meses**, y el volumen se decide por **GML × agrupación de marca** (en un nodo abierto a GMLE, por equivalencia × agrupación de marca). Marcas relevantes, "otras" y marcas al barrer son desglose dentro de la fila, no el nivel de decisión; la fila incluye toda la venta de su GML y agrupación de marca, de modo que cuadra con la venta real. Nada se aprueba en bloque y la proyección cerrada (una sola por año) es el único insumo de volumen de M8. Especificada en `docs/modulos/07-proyeccion-anual.md`; **en revisión por el `arquitecto-revisor`, sin construir y pendiente de aprobación**: migración prevista `0018` y versión `0.10.0 · M7`, después de `0.9.7 · M6`. Seis decisiones quedan por confirmar con Javier (sección 14 de la ficha), con valor recomendado.
+
+**Por qué.** Es como planifica Javier: por línea, en unidades, con el cierre del año en curso y el año siguiente. Una ventana de meses móvil mezcla dos años en una cifra que nadie decide. El desglose por marca importa, pero decidir marca por marca multiplicaría las decisiones sin cambiar el volumen que se compra por agrupación.
+
+**Descartado.** Escenarios con ventana base móvil, crecimiento por unidad y factor de tiendas (borrador del 2026-10-13); horizonte de dieciocho meses; filas por `claveFlujo` × talla como nivel de decisión.
+
+## 2026-10-15 · M7: "mismas tiendas" se define por año proyectado, con aperturas y cierres en bloques aparte
+
+**Decisión.** Para proyectar el año `Y`, las **mismas tiendas** son las abiertas los doce meses de `Y−1`, con la lógica de red comparable de M6 por fechas de apertura y cierre. Una tienda abierta en noviembre de `Y−1` va aparte como tienda nueva en `Y` y **ya entra** en mismas tiendas en `Y+1`, porque estuvo abierta todo `Y`; una que abre a mitad de `Y` se ve separada en `Y+1` y entra recién en `Y+2`. Las **tiendas nuevas** y los **cierres** son bloques aparte, distintos para `Y` y para `Y+1`; el CD, las desactivadas y las sin apertura quedan fuera. El conjunto cambia con el año y la matriz muestra su composición con un desplegable de las tiendas de cada bloque. Una tienda abierta en el año en curso tiene venta real parcial más la proyección del resto. Cierre como bloque aparte (y no una fracción restada dentro de las mismas tiendas) es la recomendación a confirmar por Javier.
+
+**Por qué.** Es la definición del propio Javier y es la misma lógica de comparabilidad de M6, así que una tienda nueva no infla el crecimiento de un año que no vivió completo. Separar los bloques hace legible qué parte del total viene de la red madura y cuál de aperturas.
+
+**Descartado.** Una base única para los dos años; un factor de red por unidad (borrador del 2026-10-13).
+
+## 2026-10-15 · M7: el cierre del año en curso es vendido ÷ avance de la curva, y el año siguiente es la base normalizada por el crecimiento del planner
+
+**Decisión.** **Cierre por avance de curva.** Javier: para proyectar el resto del año hay que calcular el avance de las ventas entre el avance de la estacionalidad de la línea. Total propuesto = unidades vendidas del año en curso (mismas tiendas) ÷ acumulado de la curva de la agrupación hasta el último mes cerrado; el resto se reparte por los meses con la curva. Con el año Niño normalizado por el factor de volumen de la temporada (de M6, editable): en invierno, con el año completo atípico, el factor se cancela; en verano afecta de septiembre a diciembre. Con avance de curva menor de 0,30 se calcula igual con aviso. **Año siguiente.** La base es el cierre vigente del año en curso de las mismas tiendas del año siguiente, normalizado por el factor del Niño, por el **crecimiento de unidades que escribe el planner**, repartido con la curva (la recomendación a confirmar es el cierre vigente y no los últimos doce meses reales, para que una decisión del año en curso arrastre al siguiente y no haya dos bases).
+
+**Por qué.** Es el método que Javier describió. El avance de la curva traslada a unidades lo que ya se vendió y respeta la estacionalidad de la línea; la normalización evita que un año Niño sobreestime o subestime el total.
+
+**Descartado.** Últimos doce meses como base; tendencia aplicada sola; crecimiento automático sin intervención del planner.
+
+## 2026-10-15 · M7: las tiendas nuevas se proyectan por venta esperada y por la composición de una tienda de referencia
+
+**Decisión.** Javier: el volumen de una tienda nueva se define por su venta esperada (`tiendas.venta_esperada_promedio`, de M4) y **cada tienda puede tener una tienda de referencia**, aquella a cuya composición de venta (mezcla por GML, agrupación de marca y género) debe parecerse; una tienda nueva no debe heredar la composición promedio de la red cuando hay una que se le parece más (por ejemplo, una tienda muy cargada hacia un género). Sin referente, la composición de las mismas tiendas. Columna nueva `tiendas.tienda_referencia_id` en M4 (`on delete set null`, distinta de la propia tienda, sin cadenas: la composición sale siempre de los hechos propios del referente), con `Select` en la edición de la tienda y columna `TIENDA_REFERENCIA` opcional en el importador. Con una rampa de maduración editable (por defecto 70, 85 y 100 %, a confirmar) y la curva de M6.
+
+**Por qué.** La composición de una tienda nueva cambia qué línea y qué agrupación de marca le toca vender; el promedio de la red esconde esa diferencia. La columna es un atributo de la tienda con un solo valor.
+
+**Descartado.** Composición promedio de la red por defecto cuando hay referente; una tabla aparte de referentes.
+
+## 2026-10-15 · M7: tres partes (por línea, matriz, mensual de solo lectura), decisión fila a fila y Excel en el navegador
+
+**Decisión.** La pantalla tiene tres partes. **Parte 1, análisis por línea**: filtro de género, mundo y línea; gráfico y tabla del histórico de unidades por año; propuesta con su explicación; decisión del planner por fila y año (Aceptar o cifra manual con nota, que sobrevive a cualquier recálculo). **Parte 2, matriz**: una fila por género · mundo · línea con venta a la fecha, mismas tiendas, tiendas nuevas y año siguiente, totales por mundo, género y compañía y composición de cada bloque de tiendas; con filtros y **exportación a Excel** que respeta los filtros, generada en el navegador con SheetJS cargado bajo demanda (patrón de M11), solo para admin y planner. **Parte 3, vista mensual**, solo lectura: meses reales y proyectados distinguidos, los mismos filtros y exportación a Excel, sin edición; es **el contrato de datos de M8**, por género · mundo · línea · agrupación de marca · mes, con bloque de tiendas y origen del dato. Nada se aprueba en bloque; la cola larga (propuestas menores de 24 unidades al año, umbral editable) se cierra con la propuesta, a confirmar por Javier. Toda la API de M7, lecturas incluidas, es `requirePlanner`.
+
+**Por qué.** El planner trabaja una línea a la vez y luego mira la matriz para ver el total; la mensual existe para que M8 no tenga que repartir nada. Excel en el navegador porque el navegador ya tiene la lista y los filtros.
+
+**Descartado.** Rutas de descarga en el servidor; que M8 reparta el total anual; aceptar propuestas en bloque; edición en la vista mensual.
+
+## 2026-10-15 · M7: los patrones mensuales son siempre las curvas de M6, versionadas, y el factor del Niño vive fuera de la proyección
+
+**Decisión.** M7 nunca calcula ni guarda una curva propia: aplica la vigente de M6, o la mezcla `curvaUnidad` de un GML (pesos por unidades de cada equivalencia), también en tiendas nuevas (multiplicada por la rampa) y cierres (por la fracción abierta). Cada registro guarda la versión con que se repartió; si después se aprueba otra, M7 avisa "la curva cambió" y ofrece recalcular el reparto con su impacto, **sin cambiar un total ya decidido**. El factor del Niño por temporada lo calcula M6 a demanda y M7 lo guarda en `factores_volumen_atipico` (calculado y editable, único por año y temporada), fuera de la proyección: es un hecho sobre el histórico, no un supuesto de un escenario; cada proyección guarda los factores que aplicó. Cierra la pregunta 14 de la ficha de M6. La venta se lee con una función `jsonb` (`venta_proyeccion`) en tandas de nodos, sin vista materializada, porque M6 abandonó la suya por el refresco y el candado.
+
+**Por qué.** Dos fuentes de curva darían dos respuestas sobre la misma estacionalidad. Separar el total (decisión de Javier) del reparto (curva) permite que una curva nueva mueva los meses sin deshacer lo decidido.
+
+**Descartado.** Curvas propias de M7; una vista materializada de flujo; leer cientos de miles de filas con `leerTodo`.
