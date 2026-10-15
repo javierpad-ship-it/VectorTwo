@@ -608,7 +608,7 @@ Constantes (`tipos.ts`): `UMBRAL_AVANCE = 0.30`, `UMBRAL_COBERTURA = 0.25`, `UMB
 
 **Automático** · `npm run lint`, `npx tsc --noEmit`, `npx vitest run` (todas más `tests/proyeccion.*`), `npm run build`, `scripts/validar-migraciones-local.sh`; `0018` aplicada en `vector-two`; tipos regenerados; `APP_VERSION = 0.10.0 · M7`.
 
-**Prerrequisitos de Javier** · Histórico de M5 hasta el último mes cerrado sin huecos; curvas vigentes de M6 (06b) en las 15 agrupaciones; periodos del Niño 2023 y 2026 cargados; fechas de apertura y cierre en las 10 tiendas (y la fecha real de la tienda nueva del año anterior); venta esperada (sin IGV, tienda madura) y tienda de referencia en las tiendas que abran en 2026–2027; nodos GMLE y conjuntos de 02b cargados; respuestas a la sección 15 (o aceptación de las recomendaciones).
+**Prerrequisitos de Javier** · Histórico de M5 hasta el último mes cerrado sin huecos; curvas vigentes de M6 (06b) en las 15 agrupaciones; periodos del Niño 2023 y 2026 cargados; fechas de apertura y cierre en las 10 tiendas (y la fecha real de la tienda nueva del año anterior); venta esperada (**soles del año de apertura, sin IGV**; `0.10.1`) y tienda de referencia en las tiendas que abran en 2026–2027; nodos GMLE y conjuntos de 02b cargados; respuestas a la sección 15 (o aceptación de las recomendaciones).
 
 **Hito en navegador (sección F del `cowork-checklist.md`, usuario planner; [ESCRIBE] = pide confirmación a Javier antes; no cerrar ninguna proyección)**
 1. Con el comprador: no aparece "Proyección de unidades" en el menú; `/planificacion/proyeccion` redirige; `GET /api/proyeccion` responde `403`; `GET /api/tiendas` no trae `tienda_referencia`.
