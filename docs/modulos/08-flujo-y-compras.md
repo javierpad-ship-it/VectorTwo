@@ -78,71 +78,92 @@ Javier: una compra al barrer puede cubrir marcas o GML de varios compradores. La
 
 | Pieza de la referencia | Qué es allí | En Vector2 |
 |---|---|---|
-| **Tarjeta de necesidad** (`NeedCard`): género · mundo, línea, agrupación, sello de estado, medidor "comprado / OTB", línea perforada, tres cifras | OTB por viaje fijo | **Tarjeta de hueco**: género · mundo · línea (· equivalencia) · agrupación; sello **Falta / Al día / Exceso / Quiebre / Sin curva**; medidor de **cobertura** con las marcas 4 y 8; cifras: saldo por comprar de los próximos `N` meses, stock CD + tiendas, en camino |
-| **Declaración de compra** (`PurchaseForm`) | una línea = una compra | **Nueva línea**: hueco prellenado, proveedor (autocompletado + "crear"), tipo de línea (específica / lote de una marca / lote de varias marcas), marca o agrupación, tallas, unidades, costo, llegada, destino, nota; se agrega a una **compra** en borrador; **Confirmar** al terminar. Sin "producto" ni "modelo" (segunda entrega como texto libre si Javier lo quiere) |
-| **Tablero** (`NeedsBoard`), mobile first | | **Huecos** (`/compras`) con chips Lo mío / Todos y Falta / Exceso / Todos |
-| **Pendientes** (`PendientesList`) | | **Pendientes** (segunda entrega `0.14.1`) |
-| **Proveedores** (`SupplierForm` + contactos, país/estado, RUC, banco) | | **Proveedores** con los mismos campos salvo banco y cuenta (segunda entrega, solo planner) más `es_intercompany` |
-| **Historial y tabla de compras** | | **Compras**: lista con filtros y detalle de líneas |
-| **Dashboard** y **reporte por directorio** | avance contra OTB | **Avance**: árbol género → mundo → línea con saldo, en camino y cobertura (dentro de Flujo) |
-| **Exportaciones XLS** | | Excel en el navegador: `FLUJO`, `SALDO`, `COMPRAS`, `POR_PROVEEDOR`, `COSTO`, `PARAMETROS` |
+| **Tarjeta de necesidad** (`NeedCard`): género · mundo, línea, agrupación, sello de estado, medidor "comprado / OTB", línea perforada, tres cifras | OTB por viaje fijo | **Tarjeta de hueco**: género · mundo · línea (· equivalencia) · agrupación; sello **Falta / Al día / Exceso / Quiebre / Sin curva**; medidor de **IMI** con las marcas 4 y 8; cifras: saldo por comprar de los próximos `N` meses, stock cadena (CD + tiendas como detalle), en camino |
+| **Declaración de compra** (`PurchaseForm`) | una línea = una compra | **Nueva línea**: hueco prellenado, proveedor (autocompletado + "crear"), tipo de línea (específica / lote de una marca / lote de varias marcas desde M9a), marca o agrupación, tallas, unidades, costo, **cronograma de entregas** (una o varias; "Distribuir por estacionalidad"), destino, nota; se agrega a una **compra** en borrador; **Confirmar** al terminar (con justificación si excede el tope). Sin "producto" ni "modelo" (segunda entrega como texto libre si Javier lo quiere) |
+| **Tablero** (`NeedsBoard`), mobile first | | **Huecos** (`/compras`) con chips Mis líneas / Todas y Falta / Exceso / Todos |
+| **Pendientes** (`PendientesList`) | | **Pendientes** (segunda entrega `0.13.1`) |
+| **Proveedores** (`SupplierForm` + contactos, país/estado, RUC, banco) | | **Proveedores** con los mismos campos salvo banco y cuenta (segunda entrega, solo planner) más `es_intercompany`; en M8 solo nombre y `es_intercompany` desde el autocompletado; contactos y pantalla en M9a |
+| **Historial y tabla de compras** | | **Compras**: lista con filtros, detalle de líneas con entregas y recepciones, e **historial de cambios** (auditoría) |
+| **Dashboard** y **reporte por directorio** | avance contra OTB | **Avance**: árbol género → mundo → línea con saldo, en camino e IMI (dentro de Flujo) |
+| **Exportaciones XLS** | | Excel en el navegador: `FLUJO`, `SALDO`, `CONCILIACION`, `COMPRAS`, `ENTREGAS`, `POR_PROVEEDOR`, `COSTO`, `PARAMETROS` |
 | Estilo (tipografías, colores, tarjeta con perforación y sello) | | Reproducido **con el kit y el tema de Vector2**; no se importa su CSS. No se adopta: campañas, OTB por viaje, FOB objetivo, asignación de comprador, rol viewer |
 
 ### 4.1 Rutas y navegación
 
-Sección nueva **Compras** en `nav.ts` (roles `TODOS`): en M9a, `/compras/registro` "Compras" y `/compras/proveedores` "Proveedores"; en M8 se suman `/compras` "Huecos" (`exact`, pasa a ser la entrada de la sección) y `/compras/flujo` "Flujo mensual"; en `0.14.1`, `/compras/pendientes`. Admin y planner ven además los parámetros y la casilla "carga inicial" del importador. El comprador abre en **Huecos** (M8) o en **Compras** (M9a) con "Lo mío" activo si tiene combinaciones (sección 16, pregunta 2). Filtros en la URL. Hook `use-flujo.ts`; `useColeccion` para proveedores y compras. Formato `es-PE`.
+Sección nueva **Compras** en `nav.ts`. **En M8 (`0.13.0`)**: `/compras` "Huecos" (`exact`, entrada de la sección; roles `TODOS`, lectura), `/compras/flujo` "Flujo mensual" (`TODOS`, lectura; incluye la conciliación de meses cerrados) y `/compras/registro` "Compras" (**`PLANIFICACION`** en M8: es la captura mínima del planner y el importador de carga inicial; el comprador ve la lista en solo lectura con el historial, no los botones). **En M9a (`0.14.0`)**: `/compras/registro` pasa a `TODOS` con escritura, `/compras/proveedores` "Proveedores" (`TODOS`), lotes de varias marcas, importador abierto a compradores. **En `0.13.1`**: `/compras/pendientes`. Admin y planner ven además los parámetros y la casilla "carga inicial" del importador. El comprador abre en **Huecos** con **"Mis líneas"** activo si tiene combinaciones y "Todas" si no (decisión 28; antes pregunta 2); el chip cambia en un toque y el filtro **nunca** oculta acciones. Filtros en la URL. Hook `use-flujo.ts`; `useColeccion` para proveedores y compras. Formato `es-PE`.
 
 ### 4.2 Huecos (`/compras`, mobile first; todos los roles; M8)
 
 ```
-Huecos · datos hasta set-2026 · próximos [6 ▾] meses · (Lo mío) (Todos) · (Falta) (Exceso) (Todos)   [Género ▾] [Mundo ▾] [Línea ▾] [Agrup. ▾]
+Huecos · datos hasta set-2026 · próximos [6 ▾] meses · (Mis líneas) (Todas) · (Falta) (Exceso) (Todos)   [Género ▾] [Mundo ▾] [Línea ▾] [Agrup. ▾]
 ┌──────────────────────────────────────────────┐ ┌──────────────────────────────────────────────┐
 │ HOMBRE · URBANO                      ⌈FALTA⌉ │ │ HOMBRE · FORMAL                     ⌈EXCESO⌉ │
 │ DENIM                                        │ │ CAMISA › MANGA LARGA                         │
 │ RECONOCIDO                                   │ │ PREMIUM                                      │
-│ cobertura a set: 4,6 m  ▮▮▮▮▮▯▯▯  (4 · 8)    │ │ cobertura a set: 9,8 m  ▮▮▮▮▮▮▮▮▮▮ (4 · 8)   │
+│ IMI a set: 4,4 m  ▮▮▮▮▯▯▯▯  (4 · 8)          │ │ IMI a set: 9,8 m  ▮▮▮▮▮▮▮▮▮▮ (4 · 8)         │
 │ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │ │ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
-│ Saldo oct–mar   Stock CD+T   En camino        │ │ Saldo oct–mar   Stock CD+T   En camino        │
-│   370 u           700 u        500 u (nov)    │ │     0 u         1 240 u      2 000 u (nov)    │
-│ falta en oct (70) y desde feb   [Comprar]     │ │ exceso desde nov: 1 130 u     [Ver flujo]     │
+│ Saldo oct–mar   Stock cadena   En camino      │ │ Saldo oct–mar   Stock cadena   En camino      │
+│   378 u         700 u (CD 300)  500 u (nov)   │ │     0 u       1 240 u (CD 900) 2 000 u (nov)  │
+│ falta en oct (83) y desde feb   [Comprar]     │ │ exceso desde nov: 1 127 u     [Ver flujo]     │
 └──────────────────────────────────────────────┘ └──────────────────────────────────────────────┘
 ```
 
-Estado = la peor señal de los próximos `N` meses; medidor = cobertura al fin de `k'`; "Saldo oct–mar" = `Σ C_m` de los próximos `N` meses (**370** en el ejemplo: 70 + 0 + 0 + 0 + 140 + 160); "En camino" = `Σ I_m` del horizonte con el primer mes. **Comprar** abre la declaración con la fila prellenada. Tocar la tarjeta abre el flujo de la fila. Una fila con subflujo intercompany muestra un segundo medidor pequeño por marca ("JH 1,9 m · esperada 2–4"). *Decide*: qué hueco atacar.
+Estado = la peor señal de los próximos `N` meses; medidor = **IMI** al fin de `k'` (`700 ÷ 159,4 = 4,39`); "Saldo oct–mar" = `Σ C_m` de los próximos `N` meses (**378** en el ejemplo: 83 + 0 + 0 + 0 + 135 + 160); "Stock cadena" con el CD como detalle entre paréntesis; "En camino" = `Σ I_m` del horizonte con el primer mes. **Comprar** abre la declaración con la fila prellenada (en M8, solo admin y planner; el comprador ve "Ver flujo"). Tocar la tarjeta abre el flujo de la fila. Una fila con subflujo intercompany muestra un segundo medidor pequeño por marca ("JH 1,7 m · rango 4–8"). *Decide*: qué hueco atacar.
 
 ### 4.3 Flujo mensual (`/compras/flujo`, PC; todos los roles; M8)
 
 ```
-Flujo mensual · cerrada "Proyección 2026–2027" (datos hasta set-2026; stock a set-2026) · parámetros: mín 4 · tope 8    Filtros: HOMBRE · URBANO · DENIM · RECONOCIDO   [Excel] [Parámetros]
-HOMBRE · URBANO · DENIM × RECONOCIDO · stock a set-2026: CD 300 · tiendas 400 · total 700 · intercompany: —
+Flujo mensual · cerrada "Proyección 2026–2027" (datos hasta set-2026; stock a set-2026) · IMI objetivo 4–8    Filtros: HOMBRE · URBANO · DENIM · RECONOCIDO   [Excel] [Parámetros]
+HOMBRE · URBANO · DENIM × RECONOCIDO · stock a set-2026: cadena 700 (CD 300 · tiendas 400) · intercompany: —
                       jul-26 ago-26 set-26 │ oct-26  nov-26  dic-26  ene-27  feb-27  mar-27  abr-27 … dic-27
 Venta real / demanda   1 600  1 580  1 410 │   150     150     150     160     160     160     160 …   183
   de la cual al barrer (BETA 12 %)         │    18      18      18      19      19      19      19 …    22
-Ingresos (compras confirmadas)             │     0     500       0       0       0       0       0 …     0
-Stock fin de mes (CD + tiendas)      700   │   550     900     750     590     430     270     110 …  −210
-Cobertura sin compras sugeridas      4,6   │   3,6     5,7     4,7     3,7     2,7     1,7     0,7 …   0,0
-Saldo por comprar (debe llegar)            │    70       0       0       0     140     160     160 …   183
+Ingresos (inventario, meses cerrados)  310   280   120 │                                              ← Ing = S_m − S_{m−1} + V_m
+  recepciones registradas              300   300     0 │                                              ← R_m; ago: 20 u sin registrar · set: 0
+Entregas programadas (compras confirmadas) │     0     500       0       0       0       0       0 …     0
+Stock fin de mes (cadena)            700   │   550     900     750     590     430     270     110 …  −210
+Venta promedio mensual (12 m siguientes)   │ 158,3   159,2   161,9   161,9   161,9   161,9   161,9 … 161,9
+IMI sin compras sugeridas            4,4   │   3,5     5,7     4,6     3,6     2,7     1,7     0,7 …   0,0
+Saldo por comprar (debe llegar)            │    83       0       0       0     135     160     160 …   183
 Exceso (sobre 8 meses)                     │     0       0       0       0       0       0       0 …     0
-Señal                                      │ falta    —       —       —     falta   falta   falta … quiebre
-Compras que llegan: nov-26 · C-000012 · Proveedor Norte · ALFA · centrales · 500 u · S/ 38,00 · confirmada        [Ver compra]
+Señal (IMI fuera de 4–8)                   │ falta    —       —       —     falta   falta   falta … quiebre
+Entregas que llegan: nov-26 · C-000012 · Proveedor Norte · ALFA · centrales · 500 u (entrega 1 de 1) · S/ 38,00 · confirmada        [Ver compra]
 ```
 
-Cuadre: `S_oct = 700 − 150 = 550`; `obj_oct = 150 + 150 + 160 + 160 = 620` → `C_oct = 70`, `S*_oct = 620`; nov: `S = 550 + 500 − 150 = 900`, `S* = 620 + 500 − 150 = 970`, `obj_nov = 630` → `C = 0`; ene: `S*_ene = 970 − 150 − 160 = 660 ≥ obj_ene = 640` → `C = 0` y señal "—" aunque la cobertura sin sugerencias sea 3,7 (la sugerencia de octubre ya la cubre); feb: `C = 640 − (660 − 160) = 140`. El fixture fija cada celda. Filas desplegables: por **marca** (relevantes, otras, al barrer) y, cuando hay regla de M13, el **subflujo intercompany**:
+Cuadre (`VPM` = promedio de la demanda de los doce meses siguientes; `obj = 4 × VPM`, `tope = 8 × VPM`): set: `imi = 700 ÷ 159,4 = 4,39`; oct: `S = 700 − 150 = 550`, `VPM_oct = 158,3` (nov-26 … oct-27), `obj_oct = 633` → `C_oct = 633 − 550 = 83`, `S*_oct = 633`, `imi_oct = 550 ÷ 158,3 = 3,47` → `falta`; nov: `S = 550 + 500 − 150 = 900`, `S* = 633 + 500 − 150 = 983 ≥ obj_nov = 637` → `C = 0`, `imi = 5,65`; dic: `S = 750`, `S* = 833 ≥ 648` → `C = 0`; ene: `S = 590`, `imi = 3,64` (**bajo 4 sin sugerencias: alerta en el medidor**) pero `S*_ene = 673 ≥ 648` → `C = 0` y señal "—" (la sugerencia de octubre ya lo cubre); feb: `S* = 673 − 160 = 513` → `C = 648 − 513 = 135`; mar: `C = 160`. Tope: `tope_nov = 8 × 159,2 = 1 273`; con 2 000 u en nov, `S_nov = 2 400` → `X_nov = 1 127`. Cifras redondeadas; el fixture fija cada celda con decimales. Los meses cerrados (jul–set) muestran los **ingresos inferidos del inventario** y, debajo, las recepciones registradas; la diferencia es la conciliación (4.3b). Filas desplegables: por **marca** (relevantes, otras, al barrer) y, cuando hay regla de M13, el **subflujo intercompany**:
 
 ```
-  de la cual JH · intercompany · cobertura esperada 2–4 m · 80 % directo
+  de la cual JH · intercompany · rango IMI 4–8 (por defecto, editable en M13) · 80 % directo
     demanda JH (40 %)                      │   480     480     480     …
     reposición directa esperada (80 %)     │   384     384     384     …
-    ingresos de JH                         │     0     300       0     …
+    entregas de JH (compras)               │     0     300       0     …
     stock JH                         900   │   804   1 008     912     …
-    cobertura JH                     1,9   │   1,7     2,1     1,9     …
-    saldo JH (debe llegar)                 │   156       0      48     …   señal: falta · — · falta
+    IMI JH (VPM 480)                 1,9   │   1,7     2,1     1,9     …
+    saldo JH (debe llegar)                 │ 1 116       0       0     …   señal: falta · — · —
+    ingresos inferidos de JH (jul–set)  260  250  240 · directo observado ≈ 52 % de la venta (M13 lo muestra como referencia del % directo)
   resto de la fila (4–8)                   │ … (demanda 720, stock y saldo del resto)
 ```
 
-Conmutador **Vista por marca al barrer** y Avance por árbol: segunda entrega (`0.14.1`). Totales por línea, mundo, género y compañía. **Excel** (SheetJS en el navegador): `FLUJO`, `SALDO`, `COMPRAS`, `POR_PROVEEDOR`, `COSTO`, `PARAMETROS`. **Parámetros** (admin y planner): mínimo, tope, meses de la tarjeta, "extender el horizonte". *Decide*: nada aquí; mira y exporta.
+Conmutador **Vista por marca al barrer** y Avance por árbol: segunda entrega (`0.13.1`). Totales por línea, mundo, género y compañía. **Excel** (SheetJS en el navegador): `FLUJO`, `SALDO`, `CONCILIACION`, `COMPRAS`, `ENTREGAS`, `POR_PROVEEDOR`, `COSTO`, `PARAMETROS`. **Parámetros** (admin y planner): IMI mínimo y máximo, meses de la tarjeta, "extender el horizonte", **temporadas** (verano oct–mar, invierno abr–sep, editables), umbrales de la conciliación. *Decide*: nada aquí; mira y exporta.
 
-### 4.4 Compras (`/compras/registro`; todos los roles registran; M9a)
+### 4.3b Conciliación de ingresos (meses cerrados; dentro de Flujo mensual, pestaña "Conciliación"; todos los roles; M8)
+
+Para cada mes cerrado `m ≤ k'` con `m−1` publicado y cada fila (y sus marcas), el sistema calcula el **ingreso inferido** del inventario (`Ing = S_m − S_{m−1} + V_m`, a nivel cadena) y lo compara con las **recepciones registradas** y las **entregas programadas** de ese mes. Es lo que resuelve la decisión 27 y evita contar dos veces: el stock publicado ya contiene todo lo que llegó.
+
+```
+Conciliación · set-2026 (stock de ago y set publicados) · cadena = CD + tiendas    Filtros: HOMBRE · URBANO   Solo: (sin registrar) (sin respaldo) (entregas vencidas)
+Fila                              Venta  Stock ago  Stock set  Ingreso inferido  Recepciones reg.  Entregas prog.  Diferencia         Aviso / sugerencia
+DENIM × RECONOCIDO                1 410     1 990        700          120               0             0             +120 sin registrar   —  (sin compra pendiente: ingreso sin compra registrada: carga inicial o directo)
+POLO × PREMIUM (BETA al barrer)     820       960        940          800             300           800 (C-000009)  +500 sin registrar   C-000009 entrega set vencida 500 u: [Marcar recibida en set]  ← propone, no ejecuta
+CAMISA › M. LARGA × RECONOCIDO    1 200     2 300      1 950          850             950             0             −100 sin respaldo    recepción R-… fechada set: ¿llegó en oct? [Ver compra]
+  de la cual JH (intercompany)      480       900        804          384               0             0             +384 sin registrar   directo observado 80 % (regla: 80 %) ✓
+Totales HOMBRE · URBANO           …                                  2 140           1 250          …
+Avisos del mes: 2 filas sin stock del mes anterior (sin_mes_anterior) · 1 fila con salida neta −40 (ajuste o devolución a proveedor)
+```
+
+Reglas de la pantalla: `sin_registrar = max(0, Ing − R_m)` y `sin_respaldo = max(0, R_m − Ing)`; el aviso `ingreso_sin_registrar` aparece si `sin_registrar ≥ max(UMBRAL_CONCILIACION_U = 10, 20 % de Ing)`, y trae la **sugerencia** "marcar recibida" solo si la fila tiene entregas vencidas (`entrega_vencida`) de líneas confirmadas; **el usuario decide** (abre la compra y registra la recepción con fecha, quien sea; queda en la auditoría). `recepcion_sin_respaldo` si `sin_respaldo ≥` el mismo umbral. Una **salida neta** (`Ing < 0`) se muestra con signo y el aviso `salida_neta`, sin sugerencia. En una fila con subflujo, la conciliación por marca da el **% directo observado** = `(Ing^B − R^B_m) ÷ V^B_m` (lo que llegó sin compra registrada sobre la venta de la marca); M13 lo muestra al lado del `pct_directo` como referencia, sin cambiarlo. Casos borde: `m−1` no publicado → `sin_mes_anterior` (sin conciliación de ese mes); reemplazo de un mes en M5 → la huella cambia y se recalcula; reclasificaciones (equivalencia movida de nodo, marca que entra a un conjunto) producen ingreso en una fila y salida en otra: los totales por línea y compañía lo absorben y la fila lleva `reclasificacion_probable` si `Ing_f > 0`, `Ing_{f'} < 0` en la misma línea con magnitudes parecidas (± 20 %); devoluciones de clientes suben `Ing` si la venta de M5 no es neta de devoluciones (hoy lo es: `venta_soles` neta); stock negativo por tienda se suma y se trunca por fila (`stock_negativo`); filas sin proyección también se concilian. Lo que **no** hace: nunca crea ni modifica recepciones, compras ni stock; nunca cambia el flujo futuro (que solo usa pendientes); el detalle por tienda no se concilia (mezcla transferencias con compras: hallazgo de datos). *Decide*: registrar o no la recepción sugerida; revisar la recepción sin respaldo.
+
+### 4.4 Compras (`/compras/registro`; en M8 registra el planner o admin (captura mínima) y el comprador ve en solo lectura; en M9a registran todos los roles)
 
 **Lista**: número, fecha, proveedor, origen, líneas, unidades, costo por moneda, llegadas, estado, quién, avisos; filtros por estado, proveedor, origen, mes de llegada, género/mundo/línea, marca, "Lo mío", texto; Excel. **Nueva compra** y **Abrir**.
 
@@ -156,9 +177,10 @@ Compra C-000012 · Proveedor Norte · 2026-10-14 · ref. PO-2211 · PEN         
 │            cobertura hoy 4,6 m · saldo oct–mar 370 u · en camino 500 u (nov)        ← se lee del flujo (M8)      │
 │ Qué        (Marca) (Agrupación)   [ALFA ▾]  → agrupación RECONOCIDO                                              │
 │ Tallas     (Centrales) (Extremas) (Ambas)                                                                        │
-│ Unidades   [  500 ]   Costo unitario [ 38,00 ] PEN     Llegada [nov-2026 ▾]    Destino [CD ▾]                    │
+│ Unidades   [  500 ]   Costo unitario [ 38,00 ] PEN     Destino [CD ▾]                                           │
+│ Entregas   nov-2026 · 500   [+ otra entrega]  [Distribuir por estacionalidad: de nov-26 ▾ a feb-27 ▾]  Σ = 500 ✓   │
 │ Nota       [________________________]                                                                            │
-│ Impacto: nov-26 pasa de cobertura 2,6 a 5,7 m · el saldo de nov–ene baja de 160 a 0 y el de feb a 140 (M8)       │
+│ Impacto: nov-26 pasa de IMI 2,5 a 5,7 m · el saldo de nov–ene baja a 0 y el de feb a 135 · ningún mes sobre 8 (M8)│
 │                                                                                     [Agregar línea]              │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 Lote de una marca:   Marca [BETA ▾] · Alcance (opcional): (HOMBRE) (MUJER) · (URBANO) (CASUAL) · líneas [...]
@@ -167,71 +189,76 @@ Lote de una marca:   Marca [BETA ▾] · Alcance (opcional): (HOMBRE) (MUJER) ·
 Lote de varias marcas:  Unidades [ 1 000 ]  Tabla: Marca ▾ | GML ▾ | %      BETA · DENIM · 40,0 | BETA · POLO · 20,0 | GAMMA · CAMISA › M. LARGA · 25,0 | DELTA · SANDALIA · 15,0   Suma 100,0 % ✓
 Líneas (3)
 # Tipo        GML / unidad                 Marca / agrup.     Tallas   Unid.  Costo u.  Llegada  Destino  Reparto / avisos
-1 Específica  HOMBRE · URBANO · DENIM      ALFA (RECONOCIDO)  centr.    500   38,00     nov-26   CD       —
-2 Una marca   (al barrer · alcance HOMBRE) BETA (PREMIUM)     ambas   1 000   22,50     dic-26   CD       v2 verano: DENIM 668 · POLO 332 · error 8 pp
-3 Varias      (mezcla, 4 filas)            —                  ambas   1 000   19,00     dic-26   CD       porcentajes del comprador
+1 Específica  HOMBRE · URBANO · DENIM      ALFA (RECONOCIDO)  centr.    500   38,00     nov-26 (1 entrega)        CD   —
+2 Una marca   (al barrer · alcance HOMBRE) BETA (PREMIUM)     ambas   1 000   22,50     dic-26 400 · ene-27 350 · feb-27 250   CD   v2 por mes de recepción: dic/ene/feb = verano · DENIM 668 · POLO 332 · error 8 pp
+3 Varias      (mezcla, 4 filas)            —                  ambas   1 000   19,00     dic-26 (1 entrega)        CD   porcentajes del comprador (M9a)
 Total 2 500 u · S/ 60 500,00                                                     [Guardar borrador] [Confirmar compra]
+Historial: creada por C1 el 2026-10-14 10:02 · línea 2 editada por P el 2026-10-14 11:40 (entregas: 1 → 3) · …
 ```
 
-Reglas de la pantalla: en **Lote de una marca** la marca debe ser `barrido` o `mixta` (una mixta con GML es específica); el alcance renormaliza el reparto vigente sobre el subconjunto y lo muestra antes de agregar; sin reparto vigente, la línea se guarda con `sin_reparto` y no cuenta hasta que M12 lo apruebe; la **temporada de llegada** elige el vector. En **Lote de varias marcas** la tabla admite marcas con o sin tratamiento especial y GML o GMLE, exige suma 100,0 ± 0,05 y al menos una fila; cada fila lleva aviso si la marca es relevante en ese GML (informativo). **Impacto** se calcula en el navegador con el flujo cargado (M8; en M9a no se muestra). **Confirmar** pide `confirm` con el resumen y, si alguna línea genera exceso (M8), lo repite. **Recepción**: en una compra confirmada, por línea "Registrar recepción" (mes, unidades, fecha); varias recepciones por línea. **Cancelar** (planner, o quien la creó mientras no esté recibida). **Compras del CD intercompany**: proveedor `es_intercompany` (origen `intercompany_cd`), líneas específicas de JH / Donatelli / VH con destino CD. Una línea de esas marcas con destino `intercompany_directo` lleva `directo_con_regla` (hay regla: se suma a la reposición esperada) o `directo_sin_regla` (no hay regla en M13 para esa marca y GML). *Decide*: qué, cuánto, a qué costo, cuándo llega.
+Reglas de la pantalla: **Entregas**: una o varias `(mes, unidades)` con suma igual a las unidades de la línea (bloquea si no cuadra); "Distribuir por estacionalidad" reparte las unidades entre `desde` y `hasta` con la curva de la unidad del GML (`repartirEntero`; en un lote, con la curva ponderada de su reparto) y el usuario retoca; en una línea confirmada el cronograma sigue editable (queda en el historial) mientras no contradiga las recepciones (`409 entregas_menores_que_recibidas`). En **Lote de una marca** la marca debe ser `barrido` o `mixta` (una mixta con GML es específica); el alcance renormaliza el reparto vigente sobre el subconjunto y lo muestra antes de agregar; sin reparto vigente, la línea se guarda con `sin_reparto` y no cuenta hasta que M12 lo apruebe; **la temporada de cada entrega (por su mes de recepción, con las fechas editables de temporada) elige el vector**: un lote con entregas en dos temporadas se reparte entrega a entrega. En **Lote de varias marcas** la tabla admite marcas con o sin tratamiento especial y GML o GMLE, exige suma 100,0 ± 0,05 y al menos una fila; cada fila lleva aviso si la marca es relevante en ese GML (informativo). **Impacto** se calcula en el navegador con el flujo cargado (M8). **Confirmar** pide `confirm` con el resumen y, si alguna entrega deja el IMI proyectado **por encima del máximo** en algún mes, muestra la **advertencia visible** (mes, IMI resultante, exceso en unidades) y **exige una justificación** (1–300 caracteres) que se guarda en la compra y en la auditoría (decisión 26: la oportunidad manda, pero queda registrado quién y por qué). **Recepción**: en una compra confirmada, por línea "Registrar recepción" (mes, unidades, fecha); varias recepciones por línea; se asignan FIFO a las entregas. **Editar y Cancelar**: **cualquier usuario** (comprador, planner o admin) sobre **cualquier** compra (decisión 28): un borrador se edita entero; una confirmada admite cronograma, destino, costo, nota y unidades (≥ recibidas); `recibida` y `cancelada` son inmutables; cancelar pide motivo. Todo queda en el **historial** (quién, cuándo, antes y después). En M8 estas acciones son `requirePlanner` (el comprador aún no escribe); en M9a pasan a `requireUser`. **Compras del CD intercompany**: proveedor `es_intercompany` (origen `intercompany_cd`), líneas específicas de JH / Donatelli / VH con destino CD. Una línea de esas marcas con destino `intercompany_directo` lleva `directo_con_regla` (hay regla: se suma a la reposición esperada) o `directo_sin_regla` (no hay regla en M13 para esa marca y GML). *Decide*: qué, cuánto, a qué costo, cuándo llega.
 
-### 4.5 Pendientes (`/compras/pendientes`; segunda entrega `0.14.1`)
+### 4.5 Pendientes (`/compras/pendientes`; segunda entrega `0.13.1`)
 
-Filas del flujo con `falta` o `quiebre` en los próximos `N` meses con responsable, primer mes con falta, saldo acumulado, cobertura hoy, en camino; "Lo mío"; Excel; **Comprar**.
+Filas del flujo con `falta` o `quiebre` en los próximos `N` meses con responsable, primer mes con falta, saldo acumulado, IMI hoy, en camino; "Mis líneas"; Excel; **Comprar**.
 
 ### 4.6 Proveedores (`/compras/proveedores`; M9a)
 
 Lista con buscador; alta y edición en `Modal` (nombre, código, país, ciudad, identificación, `es_intercompany`, nota) y **contactos** (nombre, cargo, teléfono, correo); desactivar (planner); el autocompletado crea un proveedor con solo el nombre. Banco y cuenta: segunda entrega, editables solo por el planner y con `updated_by` (I6).
 
-### 4.7 Importar compras (`/compras/registro` → Importar; M9a)
+### 4.7 Importar compras (`/compras/registro` → Importar; **M8** para la carga inicial del planner; M9a lo abre a los compradores y a `VARIAS_MARCAS`)
 
-Plantilla Excel nuestra con una fila de ejemplo: `PROVEEDOR`, `FECHA_COMPRA` (`aaaa-mm-dd`; **obligatoria** con la casilla de carga inicial, opcional sin ella), `REFERENCIA` (opcional; agrupa líneas en una compra), `TIPO` (`ESPECIFICA` / `UNA_MARCA` / `VARIAS_MARCAS`; vacío = específica), `GENERO`, `MUNDO`, `LINEA`, `EQUIVALENCIA` (opcional; exige nodo GMLE), `MARCA` **o** `AGRUPACION_MARCA`, `TALLAS`, `UNIDADES`, `COSTO_UNITARIO`, `MONEDA` (`PEN` / `USD`), `LLEGADA` (`aaaa-mm`), `DESTINO` (`CD`, código de tienda o `DIRECTO`), `ALCANCE` (opcional, `UNA_MARCA`: `HOMBRE;URBANO,CASUAL`), `NOTA`. Un lote de varias marcas va en **una segunda hoja `MEZCLA`** (`REFERENCIA`, `LINEA_ORDINAL`, `MARCA`, `GENERO`, `MUNDO`, `LINEA`, `EQUIVALENCIA`, `PCT`) que se valida por línea (suma 100). Mismo flujo de cuatro pasos (`use-importador`), `resolverGml` de 02b; crea **proveedores** nuevos, nunca marcas ni árbol. Omisiones: las de `resolverGml`, `marca_desconocida`, `marca_y_agrupacion`, `sin_marca_ni_agrupacion`, `agrupacion_desconocida`, `equivalencia_requiere_gmle`, `tallas_invalida`, `unidades_invalida`, `costo_invalido`, `llegada_invalida`, `destino_desconocido`, `gml_requerido`, `mezcla_sin_filas`, `mezcla_no_suma_100`, `fecha_requerida`, `duplicada_en_archivo`, `fila_total`. Avisos: `sin_reparto`, `llegada_pasada`, `directo_sin_regla`, `exceso` (solo con M8). Casilla **"Carga inicial de compras ya hechas"** (solo admin y planner): origen `carga_inicial`, estado `confirmada` al aplicar; sin la casilla, `borrador` a nombre de quien importa. **Idempotente por huella de fila = hash(contenido normalizado de la fila + ordinal en el archivo)** guardada en `compra_lineas.huella_importacion`; sin fecha por defecto (`current_date` haría que el mismo archivo creara compras nuevas otro día: hallazgo menor del revisor).
+Plantilla Excel nuestra con una fila de ejemplo: `PROVEEDOR`, `FECHA_COMPRA` (`aaaa-mm-dd`; **obligatoria** con la casilla de carga inicial, opcional sin ella), `REFERENCIA` (opcional; agrupa líneas en una compra), `TIPO` (`ESPECIFICA` / `UNA_MARCA` / `VARIAS_MARCAS`; vacío = específica), `GENERO`, `MUNDO`, `LINEA`, `EQUIVALENCIA` (opcional; exige nodo GMLE), `MARCA` **o** `AGRUPACION_MARCA`, `TALLAS`, `UNIDADES`, `COSTO_UNITARIO`, `MONEDA` (`PEN` / `USD`), `LLEGADA` (`aaaa-mm`; una sola entrega) **o** `ENTREGAS` (cronograma: `2026-11:300;2026-12:200`, suma = `UNIDADES`; manda sobre `LLEGADA`), `RECIBIDAS` (opcional; unidades ya recibidas de la línea, para que la carga inicial de compras en curso no proyecte lo que ya está en el stock: crea una recepción en el mes de la última entrega `≤ k'` o en `k'`), `DESTINO` (`CD`, código de tienda o `DIRECTO`), `ALCANCE` (opcional, `UNA_MARCA`: `HOMBRE;URBANO,CASUAL`), `NOTA`. En M8 `TIPO` admite `ESPECIFICA` y `UNA_MARCA`; `VARIAS_MARCAS` y la hoja `MEZCLA` se activan en M9a. Un lote de varias marcas va en **una segunda hoja `MEZCLA`** (`REFERENCIA`, `LINEA_ORDINAL`, `MARCA`, `GENERO`, `MUNDO`, `LINEA`, `EQUIVALENCIA`, `PCT`) que se valida por línea (suma 100). Mismo flujo de cuatro pasos (`use-importador`), `resolverGml` de 02b; crea **proveedores** nuevos, nunca marcas ni árbol. Omisiones: las de `resolverGml`, `marca_desconocida`, `marca_y_agrupacion`, `sin_marca_ni_agrupacion`, `agrupacion_desconocida`, `equivalencia_requiere_gmle`, `tallas_invalida`, `unidades_invalida`, `costo_invalido`, `llegada_invalida`, `entregas_invalidas` (formato o suma ≠ unidades), `recibidas_invalida` (> unidades), `destino_desconocido`, `gml_requerido`, `tipo_no_disponible` (`VARIAS_MARCAS` en M8), `mezcla_sin_filas`, `mezcla_no_suma_100`, `fecha_requerida`, `duplicada_en_archivo`, `fila_total`. Avisos: `sin_reparto`, `entrega_pasada` (una entrega `≤ k'` sin `RECIBIDAS` que la cubra: quedará vencida y la conciliación la mostrará), `directo_sin_regla`, `exceso` (con el IMI proyectado; la carga inicial no pide justificación porque son compras ya hechas: aviso `exceso` informativo). Casilla **"Carga inicial de compras ya hechas"** (solo admin y planner): origen `carga_inicial`, estado `confirmada` al aplicar; sin la casilla, `borrador` a nombre de quien importa. **Idempotente por huella de fila = hash(contenido normalizado de la fila + ordinal en el archivo)** guardada en `compra_lineas.huella_importacion`; sin fecha por defecto (`current_date` haría que el mismo archivo creara compras nuevas otro día: hallazgo menor del revisor).
 
 ### Qué decide quién
 
 | Decisión | Quién |
 |---|---|
 | Cuál cerrada de M7 alimenta el flujo y cuál es `k'` | sistema |
-| Mínimo 4, tope 8, meses de la tarjeta | planner (parámetros globales) |
-| Cobertura esperada y % directo de una marca intercompany | planner (M13) |
+| IMI mínimo 4 y máximo 8, meses de la tarjeta, fechas de las temporadas, umbrales de conciliación | planner (parámetros globales) |
+| Rango IMI (4–8 por defecto) y % directo de una marca intercompany | planner (M13) |
+| Cronograma de entregas de una línea (a mano o distribuido por estacionalidad) | quien registra o edita la compra; el sistema solo propone el reparto |
+| Ingreso real de un mes cerrado | sistema (inventario de M5); la recepción que lo explica la registra una persona (sugerencia, no acción) |
+| Confirmar con el IMI por encima del máximo | quien confirma, con justificación registrada |
 | Cómo se reparte un lote de una marca | sistema con el reparto vigente de M12 (temporada de llegada, alcance del comprador); el planner aplica una versión nueva |
 | Cómo se reparte un lote de varias marcas | el comprador, con su tabla de porcentajes |
-| Qué comprar, cuánto, a quién, cuándo llega, destino | **cualquier usuario** |
-| Editar o confirmar un borrador | quien lo registró, o planner/admin |
-| Recibir | cualquier usuario |
-| Cancelar | quien registró o el planner |
+| Qué comprar, cuánto, a quién, cuándo llega, destino | **cualquier usuario** (en M8, planner o admin; en M9a, también el comprador) |
+| Editar, confirmar, recibir o cancelar **cualquier** compra | **cualquier usuario** (decisión 28), con historial de quién y cuándo |
 | Proveedores | cualquiera crea y edita; el planner desactiva |
 
 ## 5. Método (lógica pura en `src/lib/flujo/` y `src/lib/compras/`, sin I/O)
 
-Notación de la sección 3; `MIN = 4`, `MAX = 8`; meses del horizonte `m = k'+1 … H`.
+Notación de la sección 3; `MIN = 4`, `MAX = 8` (IMI); meses del horizonte `m = k'+1 … H`; meses cerrados conciliables `m = k'−11 … k'` (los que tengan `m−1` publicado).
 
 1. **Filas**: `filasFlujo(cerrada, stockK, ingresos)`: una fila por `(g, a)` de la cerrada sumando bloques y tiendas; `D_m` para `m > k'` (si `k' > k`, los meses `k+1 … k'` pasan a historia con la venta real); más una fila `fila_sin_proyeccion` por cada `(g, a)` con stock o ingreso y sin fila (`D = 0`); `participaciones` de la fila base.
 2. **Demanda**: completa. **2b · Subflujos intercompany**: para cada regla vigente y aplicable en `g` (M13 regla 4), `subflujoIntercompany(D, part_B, S^B_{k'}, I^B, regla, meses)` (M13 regla 5); el resto de la fila se evalúa con el 4–8 general; `C = C^resto + Σ_B C^B`; señal = peor.
-3. **Stock**: `stockPorFila(stockK', configFlujo)`: cada fila de `stock_flujo(k')` pasa por `claveFlujo` → `(g, a)`; el stock por unidad de marca se conserva para los subflujos; `S_{k'} = Σ` (CD + tiendas); negativos a 0 por fila con aviso `stock_negativo`.
-4. **Ingresos**: `ingresosPorFila(lineas, repartos, recepciones, k')`: por línea confirmada: `pendiente = unidades − recibidas`; específica → `(g, a)` en `max(llegada, k'+1)`; `barrer_marca` → sus filas de reparto escaladas a lo pendiente (`repartirEntero(pendiente, pesos del reparto guardado)`); `barrer_mezcla` → sus filas de reparto escaladas igual, cada una en `(g, a_marca)`; recepciones con `recibida_periodo > k'` → ingreso en ese periodo en la misma fila (o filas de reparto, proporcional); `≤ k'` → 0. Cualquier destino cuenta.
-5. **Proyección**: `S_m = S_{m−1} + I_m − D_m`; `cob_m`; `obj_m`, `tope_m`; `C_m` y `S*_m` secuenciales; `X_m`; señales (regla 3: `falta` ⇔ `C_m > 0`). `mesesCobertura(700, [150,150,150,160,160,…]) = 4,5625`.
-6. **Impacto de una línea** `impacto(flujoFila(s), lineaNueva)`: el flujo con la línea añadida y la diferencia por mes de `cob`, `C` y `X`; por cada `g` del reparto si es un lote.
-7. **Reparto de un lote de una marca** `repartirLinea(linea, repartoVigente)`: elige el vector de la **temporada de llegada** (`MESES_TEMPORADA` de M12; en modo `anual`, el único), aplica el **alcance** de la línea (filtra `g` y renormaliza; alcance que deja 0 `g` → `409 alcance_vacio`), `repartirEntero` de M7 con `participacion_vigente`; guarda `reparto_id`, `version`, `temporada`, `alcance`, `error_reparto_pp`.
+3. **Stock**: `stockPorFila(stockPorMes, configFlujo)`: cada fila de `stock_flujo(desde, hasta)` pasa por `claveFlujo` → `(g, a)`; el stock por unidad de marca se conserva para los subflujos y la conciliación; `S_m = Σ` (CD + tiendas) por mes publicado; negativos a 0 por fila con aviso `stock_negativo`. Stock disponible para venta = todo el stock cargado (hallazgo de datos); cuando M5 traiga bloqueado, se resta aquí.
+4. **Entregas y pendientes**: `pendientesPorEntrega(linea, entregas, recepciones)`: ordena las entregas por periodo, asigna las recepciones FIFO (`asignadas_e`), `pend_e = max(0, unidades_e − asignadas_e)`; invariante `Σ_e pend_e = unidades − recibidas`; una entrega con `periodo ≤ k'` y `pend_e > 0` → `entrega_vencida`. `distribuirPorEstacionalidad(unidades, desde, hasta, curva)` = `repartirEntero` sobre los meses del rango con la curva de la unidad (lote: curva ponderada por el reparto); meses sin curva → reparto plano con aviso `sin_curva`.
+4b. **Ingresos**: `ingresosPorFila(lineas, entregas, repartos, recepciones, k')`: por línea confirmada y por entrega: `pend_e` en `max(periodo_e, k'+1)`; específica → `(g, a)`; `barrer_marca` → sus filas de reparto escaladas a `pend_e` **con el vector de la temporada del mes de recepción de esa entrega** (`repartirEntero(pend_e, pesos)`); `barrer_mezcla` (M9a) → sus filas de reparto escaladas igual, cada una en `(g, a_marca)`; recepciones con `recibida_periodo > k'` → ingreso en ese periodo en la misma fila (o filas de reparto, proporcional); `≤ k'` → 0. Cualquier destino cuenta.
+4c. **Conciliación** `conciliarMes(fila, stockPorMes, ventaPorMes, recepciones, entregas, m, umbrales)`: `Ing = S_m − S_{m−1} + V_m` (cadena); `ingreso_inferido`, `salida_inferida`; `R_m` = recepciones con `recibida_periodo = m` (específicas en su fila; lotes por sus repartos); `E_m` = entregas con `periodo = m` de líneas confirmadas; `sin_registrar`, `sin_respaldo`; avisos `ingreso_sin_registrar` (con `sugerencia: { linea_id, entrega_id, unidades }` si hay entregas vencidas en la fila, hasta cubrir `sin_registrar`), `recepcion_sin_respaldo`, `salida_neta`, `sin_mes_anterior`, `reclasificacion_probable`; por marca: `pct_directo_observado = max(0, Ing^B − R^B) ÷ V^B` (`null` si `V^B = 0`). Nunca escribe.
+5. **Proyección**: `S_m = S_{m−1} + I_m − D_m`; `VPM_m = Σ_{j=m+1}^{m+12} D_j ÷ 12` (extendido); `imi_m = S_m ÷ VPM_m`; `obj_m = MIN × VPM_m`, `tope_m = MAX × VPM_m`; `C_m` y `S*_m` secuenciales; `X_m`; señales (regla 3: `falta` ⇔ `C_m > 0`; `exceso` ⇔ `X_m > 0`; alerta `fuera_de_rango` ⇔ `imi_m ∉ [MIN, MAX]` sin sugerencias). `imi(700, VPM 159,4) = 4,39`.
+6. **Impacto de una línea** `impacto(flujoFila(s), lineaNueva)`: el flujo con las entregas de la línea añadidas y la diferencia por mes de `imi`, `C` y `X`; por cada `g` del reparto si es un lote; `excede_tope: { periodo, imi, exceso }[]` para la advertencia de confirmar.
+7. **Reparto de un lote de una marca** `repartirLinea(linea, entregas, repartoVigente, temporadas)`: por entrega, elige el vector de la **temporada del mes de recepción** (`temporadaDe(mes, flujo_parametros.temporadas)`; en modo `anual`, el único), aplica el **alcance** de la línea (filtra `g` y renormaliza; alcance que deja 0 `g` → `409 alcance_vacio`), `repartirEntero` de M7 con `participacion_vigente`; guarda por entrega `reparto_id`, `version`, `temporada`, `alcance`, `error_reparto_pp`; las filas de reparto de la línea son la suma de sus entregas.
 8. **Reparto de un lote de varias marcas** `repartirMezcla(unidades, filasPct)`: valida suma 100,0 ± 0,05 y `pct > 0`; `repartirEntero(unidades, pct)`; una fila por `(marca, g)`.
-9. **"Lo mío"** `esMia(fila | linea, combinaciones)`.
-10. **Estados y permisos** `transicion(compra, accion, usuario)` y **`puede(compra, usuario)`** (en el servidor, I6): `editar` y `confirmar` ⇔ `borrador` y (creador o planner/admin); `recibir` ⇔ `confirmada` (cualquier usuario); `cancelar` ⇔ no `recibida` y (creador o planner/admin); `aplicar_reparto` ⇔ planner/admin; `recibida` y `cancelada` inmutables.
+9. **"Mis líneas"** `esMia(fila | linea, combinaciones)`: filtro, nunca permiso.
+10. **Estados y permisos** `transicion(compra, accion, usuario)` y **`puede(compra, usuario)`** (en el servidor, I6; **decisión 28**): `editar_todo` ⇔ `borrador`; `editar_limitado` (cronograma, destino, costo, nota, unidades ≥ recibidas) ⇔ `confirmada`; `confirmar` ⇔ `borrador` con ≥ 1 línea (con `justificacion_exceso` obligatoria si `impacto.excede_tope` no está vacío → si falta, `409 exceso_sin_justificar`); `recibir` ⇔ `confirmada`; `cancelar` ⇔ no `recibida` (con motivo); todas **para cualquier usuario autenticado** (en M8 el guard de la ruta es `requirePlanner`; en M9a, `requireUser`); `aplicar_reparto`, parámetros y carga inicial ⇔ planner/admin; `recibida` y `cancelada` inmutables. No existe `no_es_tuya`.
+11. **Auditoría** `evento(compra, linea | null, accion, antes, despues, motivo, usuario, ahora)`: una fila por mutación; `antes` y `despues` son el objeto afectado (cabecera, línea con entregas, recepción) serializado; `historial(compra)` lo ordena por fecha; cada `CompraApi` lleva `creada_por`, `modificada_por` (último evento) y `cancelada_por`.
 
-Todo determinista, sin reloj (`k'`, `k` y `hoy` entran como parámetros).
+Todo determinista, sin reloj (`k'`, `k`, `hoy` y `ahora` entran como parámetros).
 
-## 6. Modelo de datos (`0021_compras.sql` en M9a y `0022_flujo.sql` en M8)
+## 6. Modelo de datos (`0022_flujo_y_compras.sql` en M8 y `0023_compras_comprador.sql` en M9a)
 
-Convenciones de `0019`: idempotente, sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`, sin `do $$`, sin backfill; `id uuid`, `activo`, `created_at`, `updated_at`; RLS sin políticas; `revoke`/`grant` por objeto; funciones `security invoker`, `stable`, `search_path` vacío. **Criterio I9**: la base solo lleva invariantes estructurales (no negativos, primer día de mes, `recibidas ≤ unidades`, porcentajes 0–100); los catálogos (`origen`, `estado`, `moneda`, `tallas`, `destino`, `tipo`) los valida zod, sin `check`, para poder ampliarlos sin `DROP`. `create sequence if not exists public.compras_numero_seq`.
+**Reparto por entrega (decisión 32, sin duplicar diseño):** cada tabla lleva la migración en la que nace. **`0022` (M8)** trae todo lo que el flujo necesita para tener compras comprometidas sin el módulo del comprador: `proveedores` (sin contactos), `compras`, `compra_lineas` (tipos `especifica` y `barrer_marca`; las columnas son las mismas de siempre), `compra_linea_entregas`, `compra_linea_repartos`, `compra_linea_recepciones`, `compra_eventos`, `flujo_parametros`, `stock_flujo`. **`0023` (M9a)** añade `proveedor_contactos` y `compra_linea_mezcla` (tipo `barrer_mezcla`); no toca nada de `0022`. Convenciones de `0020` (M12): idempotente, sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`, sin `do $$`, sin backfill; `id uuid`, `activo`, `created_at`, `updated_at`; RLS sin políticas; `revoke`/`grant` por objeto; funciones `security invoker`, `stable`, `search_path` vacío. **Criterio I9**: la base solo lleva invariantes estructurales (no negativos, primer día de mes, `recibidas ≤ unidades`, porcentajes 0–100); los catálogos (`origen`, `estado`, `moneda`, `tallas`, `destino`, `tipo`, `accion`) los valida zod, sin `check`, para poder ampliarlos sin `DROP`. `create sequence if not exists public.compras_numero_seq`. **Trazabilidad (decisión 28)**: tabla de auditoría insert-only (`compra_eventos`) más columnas de último cambio; **ningún `UPDATE` en migraciones**: los eventos y las columnas los escribe la API.
 
-### 6.1 `proveedores` (`0021`)
+### 6.1 `proveedores` (`0022`, M8)
 
-`codigo` (opcional, único sobre `upper`), `nombre` (1–120, único sobre `upper`), `pais`, `ciudad` (≤ 80), `identificacion` (≤ 40), `es_intercompany boolean not null default false`, `nota` (≤ 300), `perfil_id → perfiles set null`, `usuario_nombre`, `activo` con uso (inactivo no se ofrece), timestamps. **Sin `banco` ni `cuenta_bancaria`** (segunda entrega, con `datos_bancarios_updated_by`).
+`codigo` (opcional, único sobre `upper`), `nombre` (1–120, único sobre `upper`), `pais`, `ciudad` (≤ 80), `identificacion` (≤ 40), `es_intercompany boolean not null default false`, `nota` (≤ 300), `perfil_id → perfiles set null`, `usuario_nombre`, `activo` con uso (inactivo no se ofrece), timestamps. **Sin `banco` ni `cuenta_bancaria`** (segunda entrega, con `datos_bancarios_updated_by`). En M8 solo se crea desde el autocompletado (nombre) y el importador; la pantalla completa es de M9a.
 
-### 6.2 `proveedor_contactos` (`0021`)
+### 6.2 `proveedor_contactos` (`0023`, M9a)
 
 `proveedor_id → proveedores on delete cascade` (índice), `nombre` (1–120), `cargo`, `telefono`, `correo` (≤ 120, opcionales), `activo` por convención, timestamps.
 
-### 6.3 `compras` (`0021`)
+### 6.3 `compras` (`0022`, M8)
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -244,11 +271,13 @@ Convenciones de `0019`: idempotente, sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE
 | `referencia` | `text null` | ≤ 80 |
 | `moneda` | `text not null default 'PEN'` | `PEN`, `USD` (zod) |
 | `nota` | `text null` | ≤ 500 |
-| `confirmada_at`, `confirmada_por_id`, `confirmada_por_nombre`, `cancelada_at`, `cancelada_por_nombre`, `motivo_cancelacion ≤ 200` | | |
-| `perfil_id → perfiles set null`, `usuario_nombre` | | quién la registró (no "asignada a") |
+| `confirmada_at`, `confirmada_por_id`, `confirmada_por_nombre`, `cancelada_at`, `cancelada_por_id`, `cancelada_por_nombre`, `motivo_cancelacion ≤ 200` | | |
+| `justificacion_exceso` | `text null` | ≤ 300; obligatoria (API) al confirmar con `excede_tope` no vacío (decisión 26); `excede_tope_al_confirmar jsonb not null default '[]'` guarda la foto `[{ periodo, imi, exceso }]` |
+| `perfil_id → perfiles set null`, `usuario_nombre` | | quién la **creó** (no "asignada a") |
+| `updated_by_id → perfiles set null`, `updated_by_nombre` | | quién la **modificó por última vez** (la API los escribe en cada mutación; el detalle completo está en `compra_eventos`) |
 | `activo`, `created_at`, `updated_at` | | se cancela, no se borra (borrar solo `borrador` sin líneas) |
 
-### 6.4 `compra_lineas` (`0021`)
+### 6.4 `compra_lineas` (`0022`, M8; todas las columnas desde el inicio, aunque `barrer_mezcla` solo se use desde M9a)
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -262,7 +291,7 @@ Convenciones de `0019`: idempotente, sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE
 | `unidades` | `integer not null` | `check (unidades > 0)` |
 | `unidades_recibidas` | `integer not null default 0` | `check (unidades_recibidas between 0 and unidades)`; suma de las recepciones (la API la mantiene) |
 | `costo_unitario` | `numeric(12,4) null` | `check (costo_unitario >= 0)` |
-| `llegada_periodo` | `date not null` | `check` primer día de mes; índice |
+| `llegada_periodo` | `date not null` | `check` primer día de mes; índice; **= la primera entrega** de `compra_linea_entregas` (la API lo mantiene; sirve a filtros e índices) |
 | `destino` | `text not null default 'cd'` | `cd`, `tienda`, `intercompany_directo` (zod) |
 | `tienda_id` | `uuid null → tiendas restrict` | la API exige: `destino = 'tienda'` ⇔ `tienda_id` no nulo |
 | `alcance` | `jsonb not null default '{}'` | solo `barrer_marca`: `{ generos?, mundos?, lineas? }` |
@@ -273,25 +302,33 @@ Convenciones de `0019`: idempotente, sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE
 
 Índices: `(genero_mundo_linea_id, llegada_periodo)`, `(marca_id)`, `(compra_id)`.
 
-### 6.5 `compra_linea_mezcla` (`0021`; los porcentajes del comprador en un lote de varias marcas)
+### 6.4b `compra_linea_entregas` (`0022`, M8; el cronograma de entregas parciales, decisión 31)
+
+`linea_id → compra_lineas on delete cascade` (índice), `periodo date not null` (`check` primer día de mes), `unidades integer not null check (unidades > 0)`, `origen text not null default 'manual'` (`manual` / `estacionalidad` / `importada`; zod), `activo` por convención (quitar borra), timestamps; único `(linea_id, periodo)` (dos entregas del mismo mes se funden). Invariantes que verifica la API: `Σ unidades = compra_lineas.unidades` (`409 entregas_no_cuadran`), ≥ 1 entrega por línea (la API crea la primera desde `llegada_periodo`), y en una línea confirmada `Σ_{e ≤ periodo} unidades_e ≥ recibidas` asignadas (`409 entregas_menores_que_recibidas`). Las recepciones **no** apuntan a una entrega: se asignan FIFO al leer (regla 4), así una recepción adelantada o atrasada no exige mover el cronograma.
+
+### 6.5 `compra_linea_mezcla` (`0023`, M9a; los porcentajes del comprador en un lote de varias marcas)
 
 `linea_id → compra_lineas on delete cascade` (índice), `marca_id → marcas restrict` (unidad), `genero_mundo_linea_id → genero_mundo_linea restrict`, `equivalencia_id null`, `pct numeric(5,2) not null check (pct > 0 and pct <= 100)`, `activo`, timestamps; único `(linea_id, marca_id, genero_mundo_linea_id, coalesce(equivalencia_id, uuid cero))`. La suma por línea = 100 ± 0,05 la verifica la API.
 
-### 6.6 `compra_linea_repartos` (`0021`; el reparto guardado de un lote, de una o de varias marcas)
+### 6.6 `compra_linea_repartos` (`0022`, M8; el reparto guardado de un lote, de una o de varias marcas)
 
-`linea_id → compra_lineas on delete cascade` (índice), **`marca_id → marcas restrict`** (la unidad de marca de cada fila: la de la línea en `barrer_marca`, la de la fila de mezcla en `barrer_mezcla`), `genero_mundo_linea_id → genero_mundo_linea restrict`, `equivalencia_id null`, `unidades integer check (unidades >= 0)`, `reparto_id → repartos_marca_barrido restrict null` (nulo en mezcla), `reparto_version integer null`, `temporada text null`, `error_reparto_pp numeric(6,2) null`, `activo`, timestamps; único `(linea_id, marca_id, genero_mundo_linea_id, coalesce(equivalencia_id, uuid cero))`. La suma por línea = `unidades` de la línea (lo verifica la API). `reparto_cambio` = `reparto_id` ≠ vigente de la marca.
+`linea_id → compra_lineas on delete cascade` (índice), **`entrega_id → compra_linea_entregas on delete cascade`** (el reparto es **por entrega**, porque la temporada la decide el mes de recepción), **`marca_id → marcas restrict`** (la unidad de marca de cada fila: la de la línea en `barrer_marca`, la de la fila de mezcla en `barrer_mezcla`), `genero_mundo_linea_id → genero_mundo_linea restrict`, `equivalencia_id null`, `unidades integer check (unidades >= 0)`, `reparto_id → repartos_marca_barrido restrict null` (nulo en mezcla), `reparto_version integer null`, `temporada text null`, `error_reparto_pp numeric(6,2) null`, `activo`, timestamps; único `(entrega_id, marca_id, genero_mundo_linea_id, coalesce(equivalencia_id, uuid cero))`. La suma por entrega = `unidades` de la entrega (lo verifica la API). `reparto_cambio` = `reparto_id` ≠ vigente de la marca. Cambiar el cronograma de una línea de lote rehace sus repartos (evento `editar_linea`).
 
-### 6.7 `compra_linea_recepciones` (`0021`; B3)
+### 6.7 `compra_linea_recepciones` (`0022`, M8; B3)
 
 `linea_id → compra_lineas on delete cascade` (índice), `recibida_periodo date not null` (`check` primer día de mes), `unidades integer not null check (unidades > 0)`, `fecha_recepcion date not null`, `perfil_id → perfiles set null`, `usuario_nombre`, `nota ≤ 200`, `activo` por convención (quitar borra y la API resta de `unidades_recibidas`), timestamps.
 
-### 6.8 `flujo_parametros` (`0022`)
+### 6.7b `compra_eventos` (`0022`, M8; auditoría, decisión 28)
 
-Una fila por convención (`clave text not null default 'global'` único): `cobertura_min_meses numeric(4,1) not null default 4` (`check >= 0`), `cobertura_max_meses numeric(4,1) not null default 8` (`check >= 0`; `max ≥ min` en zod), `meses_tarjeta integer not null default 6` (`check > 0`), `extender_horizonte boolean not null default true`, `perfil_id`, `usuario_nombre`, `activo`, timestamps. Sin seed por `insert`: la API lee `coalesce(fila, defaults)`.
+`compra_id → compras on delete cascade` (índice), `linea_id → compra_lineas on delete set null`, `accion text not null` (`crear`, `editar_cabecera`, `agregar_linea`, `editar_linea`, `quitar_linea`, `confirmar`, `recibir`, `quitar_recepcion`, `cancelar`, `aplicar_reparto`, `importar`; zod), `antes jsonb null`, `despues jsonb null`, `motivo text null` (≤ 300: motivo de cancelación, justificación de exceso), `perfil_id → perfiles set null`, `usuario_nombre text`, `created_at`; **sin `updated_at` ni `activo`**: es un registro inmutable (`revoke update, delete` a todos los roles salvo `service_role`, y la API nunca lo actualiza). Índice `(compra_id, created_at)`. Tamaño: decenas de eventos por compra.
 
-### 6.9 Función `stock_flujo(p_periodo date) returns jsonb` (`0022`)
+### 6.8 `flujo_parametros` (`0022`, M8)
 
-El stock de fin de mes `p_periodo` desde `venta_stock_vigente`, agregado por `equivalencia_id`, `unidad_marca_id` (vía `marcas_unidad`), `agrupacion_talla_id` y `tipo` (`cd` / `tienda`), solo tiendas activas: `{ "periodo", "carga_id", "publicada_at", "filas": [...] }`. ~15 mil filas; `claveFlujo` se aplica en TS. Sin escritura.
+Una fila por convención (`clave text not null default 'global'` único): `imi_min numeric(4,1) not null default 4` (`check >= 0`), `imi_max numeric(4,1) not null default 8` (`check >= 0`; `max ≥ min` en zod), `meses_tarjeta integer not null default 6` (`check > 0`), `extender_horizonte boolean not null default true`, **`temporadas jsonb not null default '{"verano":{"desde_mes":10,"hasta_mes":3},"invierno":{"desde_mes":4,"hasta_mes":9}}'`** (decisión 31; zod exige que cubran los doce meses sin solaparse; M12 lee el mismo valor), `umbral_conciliacion_u integer not null default 10`, `umbral_conciliacion_pct numeric(5,2) not null default 20`, `perfil_id`, `usuario_nombre`, `activo`, timestamps. Sin seed por `insert`: la API lee `coalesce(fila, defaults)`.
+
+### 6.9 Función `stock_flujo(p_desde date, p_hasta date) returns jsonb` (`0022`, M8)
+
+Stock de fin de mes **y venta en unidades** de cada mes publicado entre `p_desde` y `p_hasta` desde `venta_stock_vigente`, agregado por `periodo`, `equivalencia_id`, `unidad_marca_id` (vía `marcas_unidad`), `agrupacion_talla_id` y `tipo` (`cd` / `tienda`), solo tiendas activas: `{ "meses": [{ "periodo", "carga_id", "publicada_at" }], "filas": [{ periodo, equivalencia_id, unidad_marca_id, agrupacion_talla_id, tipo, stock_unidades, unidades }] }`. El flujo pide `[k'−12, k']` (trece meses: el `k'` para el stock inicial y los doce anteriores para la conciliación y `VPM_real`); ~15 mil filas por mes; `claveFlujo` se aplica en TS. Sin escritura.
 
 ### Diagrama
 
@@ -299,13 +336,16 @@ El stock de fin de mes `p_periodo` desde `venta_stock_vigente`, agregado por `eq
 proyección cerrada (M7: D_m por GML-AM, participaciones por claveFlujo) ──────────────────────────────────────────────┐
 intercompany_reglas (M13: cob. esperada + pct directo por marca × GML × mes) ─► subflujo por marca (D^B, S^B, I^B, R^B) ┤
 stock_flujo(k') (M5 + marcas_unidad; CD y tiendas; por unidad de marca) ─► claveFlujo ─► S_{k'} por GML-AM ───────────┤
-compras (borrador → confirmada → recibida | cancelada) ─► compra_lineas (especifica | barrer_marca | barrer_mezcla) ──┤
-   ├─ barrer_marca ─► repartos_marca_barrido (M12: temporada de llegada, alcance) ─► compra_linea_repartos (marca, g, u) ┤
-   ├─ barrer_mezcla ─► compra_linea_mezcla (pct del comprador) ─► compra_linea_repartos ─────────────────────────────────┤
-   └─ compra_linea_recepciones (recibida_periodo > k' cuenta; ≤ k' ya está en el stock) ─► I_m por GML-AM ─────────────┤
-flujo_parametros (mín 4, tope 8, meses tarjeta) ──────────────────────────────────────────────────────────────────────┴─► calcularFlujo (TS puro, a demanda, cache por huella)
-                                                                                      │ S_m, cob_m, C_m, X_m, señales, subflujos, impacto de una línea
-                                            Huecos (tarjetas) · Flujo mensual · Compras · Proveedores · Excel (documento para compradores) · Pendientes (0.14.1)
+compras (borrador → confirmada → recibida | cancelada; justificación de exceso) ─► compra_lineas (especifica | barrer_marca | barrer_mezcla [M9a]) ┤
+   ├─ compra_linea_entregas (cronograma: periodo × unidades; distribución por estacionalidad) ◄─ recepciones asignadas FIFO ─► pend_e ────────────┤
+   ├─ barrer_marca ─► repartos_marca_barrido (M12: temporada del mes de recepción de cada entrega, alcance) ─► compra_linea_repartos (entrega, marca, g, u) ┤
+   ├─ barrer_mezcla [M9a] ─► compra_linea_mezcla (pct del comprador) ─► compra_linea_repartos ────────────────────────────────────────────────────┤
+   ├─ compra_linea_recepciones (recibida_periodo > k' cuenta; ≤ k' ya está en el stock y se concilia) ─► I_m por GML-AM ─────────────────────────┤
+   └─ compra_eventos (auditoría insert-only: quién creó, modificó, confirmó, recibió, canceló; cuándo; antes/después) ─────────────────────────────┤
+stock_flujo(k'−12, k') (M5: stock y venta por mes) ─► conciliación de meses cerrados: Ing = S_m − S_{m−1} + V_m vs recepciones y entregas ──────┤
+flujo_parametros (IMI 4–8, meses tarjeta, temporadas editables, umbrales de conciliación) ────────────────────────────────────────────────────────┴─► calcularFlujo (TS puro, a demanda, cache por huella)
+                                                                                      │ S_m, VPM_m, imi_m, C_m, X_m, señales, subflujos, conciliación, impacto de una línea
+                                            Huecos (tarjetas) · Flujo mensual + Conciliación · Compras (captura del planner en M8; del comprador en M9a) · Proveedores (M9a) · Excel · Pendientes (0.13.1)
 ```
 
 ## 7. Contratos de API y de lógica pura
