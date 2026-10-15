@@ -222,6 +222,7 @@ export type Database = {
       corridas_estacionalidad: {
         Row: {
           activo: boolean;
+          agrupacion_estacionalidad_id: string | null;
           created_at: string;
           efecto_atipico: Json;
           hasta_periodo: string;
@@ -237,6 +238,7 @@ export type Database = {
         };
         Insert: {
           activo?: boolean;
+          agrupacion_estacionalidad_id?: string | null;
           created_at?: string;
           efecto_atipico?: Json;
           hasta_periodo: string;
@@ -252,6 +254,7 @@ export type Database = {
         };
         Update: {
           activo?: boolean;
+          agrupacion_estacionalidad_id?: string | null;
           created_at?: string;
           efecto_atipico?: Json;
           hasta_periodo?: string;
@@ -266,6 +269,13 @@ export type Database = {
           usuario_nombre?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "corridas_estacionalidad_agrupacion_fkey";
+            columns: ["agrupacion_estacionalidad_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_estacionalidad";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "corridas_estacionalidad_perfil_id_fkey";
             columns: ["perfil_id"];
@@ -1268,6 +1278,12 @@ export type Database = {
           unidades: number;
           venta_soles: number;
         }[];
+      };
+      venta_estacionalidad_agrupacion: {
+        Args: {
+          p_agrupacion_id?: string;
+        };
+        Returns: Json;
       };
     };
     Enums: Record<string, never>;
