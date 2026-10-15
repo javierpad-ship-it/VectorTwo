@@ -57,6 +57,29 @@ Estado: **en definición con Javier; tres rondas de respuestas (2026-10-15).** E
 - El stock cargado en M5 es **mensual** (`venta_stock_vigente.stock_unidades` por periodo × tienda × equivalencia × marca × talla): **no hay días con stock disponible ni un campo de inventario bloqueado**. La regla de la respuesta 21 debe usar un **proxy mensual** (meses con stock > 0 en la tienda y línea, venta promedio de esos meses) y avisar que la disponibilidad diaria requeriría una carga nueva; el stock "disponible para venta" (25) hoy equivale a todo el stock cargado.
 - La respuesta 27 es viable a nivel de cadena con stock mensual: ingresos del mes = stock fin − stock inicio + ventas (en unidades, sumando tiendas y CD, donde las transferencias CD→tienda se cancelan); el detalle por tienda mezcla transferencias con compras.
 
+## Respuestas de Javier (2026-10-15, ronda 5: autorizaciones y preguntas abiertas; prevalecen sobre todo lo anterior)
+
+### Autorizaciones permanentes para este ciclo de trabajo
+34. **Base de datos Vector2:** aplicar migraciones idempotentes sin pedir permiso; usar `DROP CONSTRAINT` puntual cuando una migración lo exija y no haya vía aditiva (informarlo después; nunca DROP de tablas, columnas ni datos); cargar configuración ya definida; consultas de solo lectura.
+35. **Código y despliegue:** commit y push de cada versión cuando pasen lint, tipos, tests, build, QA y seguridad (sin pull request); subir versión sin esperar su OK cuando QA diga APTO y no haya hallazgos importantes abiertos; reemplazar `xlsx` por la versión oficial de SheetJS (bloqueado hoy por la política de red, ver abajo); instalar dependencias nuevas.
+36. **Agentes:** lanzar varios en paralelo sin preguntar; saltar el revisor independiente en cambios chicos de UX. **No** se autorizó "usar la recomendación por defecto" en preguntas abiertas: se preguntan.
+37. **Alcance autorizado de construcción, de corrido y en el orden recomendado:** M6 06c completo, M7 cambios de la ronda 4 (0.10.1 de la ficha 07), M12 y M13, M8 (flujo e IMI). M9a queda después de que Javier valide M8.
+
+### 06c (M6)
+38. Se puede aprobar la curva propia aunque el sistema no tenga ninguna candidata calculable, con nota obligatoria (queda "sin prueba contra años").
+39. Un GML "se aparta" cuando su curva se aleja más que `max(umbral, ruido de la agrupación)` y pesa al menos 5 % de la agrupación.
+40. Origen `usuario` por la vía **sin DROP** (columna nueva `origen_curva`); no se toca la regla `origen`.
+41. **Todo en una entrega:** composición de GML + curva del usuario + modelo F juntos (no se divide en 0.9.8 y 0.9.9).
+
+### M7/M8
+42. **IMI** con la venta promedio de los **12 meses siguientes proyectados** (el real de los últimos 12 al lado en el mes actual).
+43. **Quiebre de stock:** proxy mensual (tienda-meses con stock al cierre, umbral 0,75 editable) hasta tener carga diaria o inventario bloqueado.
+44. **Cola larga "para revisión":** la propuesta del sistema es la **demanda corregida por disponibilidad**; el avance normal V ÷ C_k se muestra como referencia (invierte lo que decía la ficha 07).
+45. **Conciliación de ingresos:** las sugerencias de recepción se aceptan con un clic ("Aceptar sugerencia" registra la recepción a nombre del usuario, con trazabilidad); nunca se ejecutan solas.
+46. **Compra confirmada:** **todo se puede editar** después de confirmar, con historial completo de quién y cuándo (reemplaza la restricción propuesta de proveedor/GML/marca/tipo).
+47. **Lotes al barrer de una sola marca en la carga inicial:** entran ya en M8 (reparto de M12 por entrega); los lotes de varias marcas esperan a M9a.
+48. **Numeración de migraciones real:** 0019 (M12) y 0020 (M13) ya aplicadas; siguiente libre 0021 (M7 0.10.1), luego 06c, M8, etc. Las fichas que citen otro número se renumeran al construir.
+
 ## Interpretación adoptada por las fichas (12, 13 y 08)
 
 - Una compra de una marca **al barrer** se registra a nivel de marca (no de GML). Si el lote es de **una sola marca**, el sistema reparte sus unidades entre los GML con el **reparto aprobado** de M12 (por temporada de llegada, con alcance opcional y con su error histórico visible); si el lote **mezcla marcas**, el comprador escribe la tabla de porcentajes marca × GML y el sistema solo la valida y la aplica. Ese reparto es lo que M8 suma a los ingresos futuros de cada GML.
