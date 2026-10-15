@@ -31,6 +31,32 @@ Estado: **en definición con Javier; tres rondas de respuestas (2026-10-15).** E
 16. **Marcas del módulo de intercompany:** JOHN HOLDEN, JOHN, DONATELLI y VAN HEUSEN. **JH = JOHN HOLDEN + JOHN** (un conjunto de 02b con cabeza JOHN HOLDEN); **no** incluye UNDERWEAR, WOMAN ni DONNA (son marcas aparte y quedan fuera). VAN HEUSEN hoy no tiene tratamiento especial: hay que marcarla antes de cerrar la proyección que lea M8, o resolverlo como propone el revisor (eje `por_marca` en las participaciones de M7). La ficha 13 pide marcarla.
 17. **Ámbito del intercompany:** hombre **formal, casual y RI**.
 
+## Respuestas de Javier (2026-10-15, ronda 4; prevalecen sobre todo lo anterior)
+
+### M7 (proyección) — cambios sobre la ficha 07 ya construida en 0.10.0
+18. **Rampa de apertura:** sin rampa por defecto, editable (ya así).
+19. **Tiendas nuevas:** dos subcolumnas diferenciadas, "nuevas del año anterior" y "aperturas del año" (ya así).
+20. **Canibalización:** no hay. Pocas tiendas y bien distribuidas geográficamente. **No incluir cálculos ni alertas automáticas de canibalización** (quitar el aviso de la ficha 07 si existe).
+21. **Cola larga (umbral 100 unidades, editable):** antes de cerrar una línea menor al umbral con la propuesta hay que validar que la venta baja no sea falta de stock: días con stock disponible frente a días totales del periodo, venta promedio en los días con disponibilidad, demanda anualizada ajustada por disponibilidad y estacionalidad, y disponibilidad en tiendas y CD. Si la venta anual corregida por disponibilidad sigue bajo el umbral → se cierra automáticamente con la propuesta; si hubo quiebres relevantes → la línea queda **marcada para revisión**.
+22. **Venta esperada de una tienda:** es la venta esperada **en soles durante el año de apertura** de la tienda, **sin IGV**; **no** es la venta de una tienda madura ni soles por mes (cambia la fórmula de la ficha 07 §5 y la ayuda del campo en M4).
+23. **Inicio de año:** se propone con referencia a la última proyección anual cerrada (ya así).
+24. **Participaciones históricas para M8:** se guardan por marca y por talla dentro de la proyección cerrada, **con su periodo de referencia**.
+
+### M8 y M9 (flujo y compras)
+25. **Cobertura (IMI, Índice de Meses de Inventario):** se calcula sobre el **stock total de la cadena (tiendas + CD) ÷ venta promedio mensual total**; el detalle tiendas/CD es información complementaria. Se considera el **stock disponible para venta**, excluyendo inventario bloqueado o no utilizable.
+26. **IMI entre 4 y 8 meses.** Puede llegar a 8 cuando entra mercadería nueva y debe bajar conforme se vende. El sistema **proyecta el IMI mes a mes** con inventario actual, ventas proyectadas, compras comprometidas, fechas estimadas de ingreso y recepciones parciales, y **alerta cuando el IMI proyectado esté fuera de 4–8**. Se puede confirmar una compra que excede el máximo, con **advertencia visible y justificación registrada**.
+27. **Ingresos reales de meses cerrados** (incluida la compra directa del intercompany): se calculan a partir de la **diferencia de inventarios entre meses cerrados**, conciliando la variación del inventario con las ventas y otros movimientos de stock; la lógica debe **evitar duplicaciones** entre compras registradas, mercadería recibida y variaciones de inventario.
+28. **Vista y permisos de compradores:** todos los compradores **ven y editan todas las líneas**; cada uno tiene un **filtro "mis líneas"** sin restringir el acceso a las demás. **Cada comprador, el planner o el administrador pueden editar o cancelar cualquier compra** (reemplaza la regla de "solo quien la registró o un planner"). **Trazabilidad completa:** quién creó, modificó o canceló cada registro, con fecha y hora.
+29. **IMI por marca:** el rango general es 4–8; JH, Donatelli y Van Heusen usan por ahora ese rango, con parámetros **editables por marca** (reemplaza los rangos propios fijos de la ficha 13 por defecto = 4–8).
+30. **Van Heusen:** tratamiento especial **desde ahora**, con reglas parametrizables, antes de la próxima proyección cerrada.
+31. **Temporadas y llegadas:** verano octubre–marzo e invierno abril–septiembre, **fechas editables**; la mercadería llega **de forma continua**: una misma compra puede tener **múltiples entregas parciales en distintos meses**; el sistema debe permitir **distribuir las cantidades compradas entre meses de recepción** (según fechas estimadas y estacionalidad del producto); **cada ingreso actualiza el inventario y la proyección de cobertura del mes**. No se asume que toda la compra ingresa junta.
+32. **Orden: M9a (compras del comprador) va DESPUÉS de terminar M8.** Primero cerrar y validar el flujo de inventarios y cobertura. (Cambia el orden previsto: M12 → M13 → M8 → M9a → PWA.)
+33. **Criterio general:** ninguna recomendación automática reemplaza la decisión del comprador, planner o administrador: el sistema propone, advierte desviaciones y **registra quién tomó la decisión final**. La proyección de inventarios refleja el movimiento real: ingresos continuos, ventas proyectadas y recepciones parciales.
+
+### Hallazgos de datos que condicionan estas respuestas (verificados en la base real, solo lectura)
+- El stock cargado en M5 es **mensual** (`venta_stock_vigente.stock_unidades` por periodo × tienda × equivalencia × marca × talla): **no hay días con stock disponible ni un campo de inventario bloqueado**. La regla de la respuesta 21 debe usar un **proxy mensual** (meses con stock > 0 en la tienda y línea, venta promedio de esos meses) y avisar que la disponibilidad diaria requeriría una carga nueva; el stock "disponible para venta" (25) hoy equivale a todo el stock cargado.
+- La respuesta 27 es viable a nivel de cadena con stock mensual: ingresos del mes = stock fin − stock inicio + ventas (en unidades, sumando tiendas y CD, donde las transferencias CD→tienda se cancelan); el detalle por tienda mezcla transferencias con compras.
+
 ## Interpretación adoptada por las fichas (12, 13 y 08)
 
 - Una compra de una marca **al barrer** se registra a nivel de marca (no de GML). Si el lote es de **una sola marca**, el sistema reparte sus unidades entre los GML con el **reparto aprobado** de M12 (por temporada de llegada, con alcance opcional y con su error histórico visible); si el lote **mezcla marcas**, el comprador escribe la tabla de porcentajes marca × GML y el sistema solo la valida y la aplica. Ese reparto es lo que M8 suma a los ingresos futuros de cada GML.
