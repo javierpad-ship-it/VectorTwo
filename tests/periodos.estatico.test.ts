@@ -69,7 +69,13 @@ describe("M6 paso 1: acceso a datos", () => {
     const permitidos = new Set(["src/lib/curvas/consultas.ts", "src/lib/supabase/database.types.ts", "src/lib/api/errores-db.ts"]);
     for (const f of src) {
       if (permitidos.has(f.ruta)) continue;
-      expect(sinComentarios(f.texto).replace(/["'`][^"'`\n]*["'`]/g, ""), f.ruta).not.toMatch(/\bperiodos_atipicos\b/);
+      // `periodos_atipicos` también es una clave del JSON de `GET /api/curvas` (contrato en tipos-api.ts): `estado.periodos_atipicos`
+      // y la declaración del campo no son acceso a la tabla; lo que se prohíbe es nombrarla de otro modo.
+      const limpio = sinComentarios(f.texto)
+        .replace(/["'`][^"'`\n]*["'`]/g, "")
+        .replace(/\.periodos_atipicos\b/g, "")
+        .replace(/\bperiodos_atipicos\s*:/g, "");
+      expect(limpio, f.ruta).not.toMatch(/\bperiodos_atipicos\b/);
     }
   });
 

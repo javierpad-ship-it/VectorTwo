@@ -229,6 +229,7 @@ export type Database = {
           parametros: Json;
           perfil_id: string | null;
           red_comparable: Json;
+          referencia: boolean;
           resultado: Json;
           resumen: Json;
           updated_at: string;
@@ -243,6 +244,7 @@ export type Database = {
           parametros: Json;
           perfil_id?: string | null;
           red_comparable?: Json;
+          referencia?: boolean;
           resultado: Json;
           resumen: Json;
           updated_at?: string;
@@ -257,6 +259,7 @@ export type Database = {
           parametros?: Json;
           perfil_id?: string | null;
           red_comparable?: Json;
+          referencia?: boolean;
           resultado?: Json;
           resumen?: Json;
           updated_at?: string;
@@ -1250,6 +1253,10 @@ export type Database = {
         }[];
       };
       refrescar_venta_mensual_estacionalidad: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
+      refrescar_y_leer_agregado_estacionalidad: {
         Args: Record<PropertyKey, never>;
         Returns: Json;
       };

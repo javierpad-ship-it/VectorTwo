@@ -54,7 +54,7 @@ describe("regla 6b · claseDeAnio (contrato para M7)", () => {
       anio: 2023,
       clase: "atipico",
       meses_atipicos: ["2023-03", "2023-04", "2023-05"],
-      periodos: [{ id: "nino-2023", motivo: "Niño costero 2023", alcance: "invierno" }],
+      periodos: [{ id: "nino-2023", motivo: "Niño costero 2023", alcance: "invierno", temporadas: ["invierno"] }],
       completo: true,
     });
   });
@@ -108,7 +108,9 @@ describe("regla 6b · claseDeAnio (contrato para M7)", () => {
     expect(Array.isArray(r.meses_atipicos)).toBe(true);
     expect(r.meses_atipicos.every((m) => /^\d{4}-\d{2}$/.test(m))).toBe(true);
     expect(typeof r.completo).toBe("boolean");
-    expect(Object.keys(r.periodos[0]).sort()).toEqual(["alcance", "id", "motivo"]);
+    // Paso 2: cada periodo suma `temporadas` (lo que M7 debe leer); `alcance` queda como espejo heredado.
+    expect(Object.keys(r.periodos[0]).sort()).toEqual(["alcance", "id", "motivo", "temporadas"]);
+    expect(Array.isArray(r.periodos[0].temporadas)).toBe(true);
   });
 });
 
@@ -182,9 +184,10 @@ describe("GET /api/periodos-atipicos/anios · años evaluados y respuesta", () =
       resumen: { anios_atipicos: [], anios_normales_completos: [] },
     });
   });
-  it("CONTRATO: cada año trae las claves de claseDeAnio más ratio_volumen", () => {
+  it("CONTRATO: cada año trae las claves de claseDeAnio más ratio_volumen y volumen (null sin corrida de referencia)", () => {
     const { anios } = aniosAtipicidad({ agrupacion: ABRIGO, periodos: [NINO_2023], mesesPublicados: PUBLICADOS_2023_2026_09 });
-    expect(Object.keys(anios[0]).sort()).toEqual(["anio", "clase", "completo", "meses_atipicos", "periodos", "ratio_volumen"]);
+    expect(Object.keys(anios[0]).sort()).toEqual(["anio", "clase", "completo", "meses_atipicos", "periodos", "ratio_volumen", "volumen"]);
+    expect(anios.every((a) => a.ratio_volumen === null && a.volumen === null)).toBe(true);
   });
 });
 

@@ -1,11 +1,10 @@
 /**
  * Tipos y constantes de M6 del lado del servidor (docs/modulos/06-curvas-estacionalidad.md,
- * "Contratos de API" → Constantes). En el paso 1 solo hay lo que usan los
- * periodos atípicos y la temporada; las constantes del modelo (`MAX_MESES_HUECO`,
- * `UMBRAL_FORMA`, `MODELOS`…) llegan con el paso 2.
+ * "Contratos de API" → Constantes y "El modelo" → Entrada del modelo).
  *
- * Las formas JSON viven en `tipos-api.ts` (autocontenido, lo usa el frontend);
- * se re-exportan aquí para que el servidor importe de un solo sitio.
+ * Las formas JSON y las constantes viven en `tipos-api.ts` (autocontenido, lo
+ * usa el frontend); se re-exportan aquí para que el servidor importe de un solo
+ * sitio. Aquí van los tipos INTERNOS del modelo (filas del agregado, series).
  */
 import {
   ALCANCES_PERIODO,
@@ -28,3 +27,50 @@ export function esAlcancePeriodo(valor: unknown): valor is AlcancePeriodo {
 export function temporadaDeFila(valor: unknown): TemporadaAgrupacion {
   return esTemporadaAgrupacion(valor) ? valor : "todo_el_ano";
 }
+
+// ─── Tipos internos del modelo ───
+
+/** Una fila del agregado: agrupación × tienda × mes (agrupación nula = unidades sin agrupación). */
+export type FilaAgregado = {
+  agrupacion_id: string | null;
+  tienda_id: string;
+  /** `aaaa-mm`. */
+  periodo: string;
+  unidades: number;
+  venta_soles: number;
+  costo_vendido: number;
+};
+
+/** Lo que el modelo necesita de una tienda de M4. */
+export type TiendaMaestro = {
+  id: string;
+  codigo: string;
+  nombre: string;
+  /** `Tienda` o `Centro de Distribución`. */
+  tipo: string;
+  activo: boolean;
+  /** `aaaa-mm-dd` o `null`. */
+  fecha_apertura: string | null;
+  fecha_cierre: string | null;
+};
+
+/** Venta total de una tienda en un mes (todas las agrupaciones). */
+export type VentaTiendaMes = { tienda_id: string; periodo: string; unidades: number };
+
+/** Doce meses de un año calendario. `publicados[m]` dice si el mes está publicado en M5 (sin publicar vale 0). */
+export type SerieAnual = {
+  anio: number;
+  meses: number[];
+  publicados: boolean[];
+  /** Los doce meses están publicados. */
+  completo: boolean;
+};
+
+export type CampoMedida = "unidades" | "venta_soles" | "costo_vendido";
+
+/** Huellas con las que se calculó (o se calcula) una curva, para detectar obsolescencia. */
+export type HuellasEstado = {
+  composicion: string;
+  red_huella: string;
+  cargas_huella: string;
+};

@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Punto } from "@/components/ui/punto";
 import { useMapaColores } from "@/components/estacionalidad/badge-agrupacion";
 import { LeyendaAgrupaciones } from "@/components/estacionalidad/leyenda-agrupaciones";
+import { BadgeTemporada } from "@/components/estacionalidad/temporada";
 
 /** A partir de cuántas equivalencias la tarjeta ofrece un buscador en su lista. */
 const UMBRAL_BUSCADOR = 30;
@@ -118,6 +119,7 @@ export function MapaTab({
             porGenero={t.porGenero}
             lineas={t.lineas}
             generos={t.agrupacion.generos ?? []}
+            temporada={t.agrupacion.temporada}
             accion={
               (t.agrupacion.generos?.length ?? 0) > 0
                 ? { texto: "Asignar", onClick: () => onAsignar(t.agrupacion.id) }
@@ -200,6 +202,7 @@ function Tarjeta({
   porGenero,
   lineas,
   generos,
+  temporada,
   accion,
 }: {
   titulo: string;
@@ -213,6 +216,8 @@ function Tarjeta({
   lineas: LineaMapa[];
   /** Géneros de la agrupación (solo las tarjetas de agrupación; vacío = "Sin género"). */
   generos?: readonly { id: string; nombre: string }[];
+  /** Temporada de la agrupación (M6): chip junto al nombre; solo las tarjetas de agrupación la llevan. */
+  temporada?: string;
   accion?: { texto: string; onClick: () => void; /** Motivo por el que no se puede usar (queda deshabilitada). */ deshabilitada?: string; extra?: { texto: string; onClick: () => void } };
 }) {
   const [abierta, setAbierta] = useState(false);
@@ -261,6 +266,7 @@ function Tarjeta({
             <h3 className={`truncate text-base font-semibold ${esSinAgrupacion ? estilos.numero : "text-tinta"}`} title={titulo}>
               {titulo}
             </h3>
+            {temporada && <BadgeTemporada temporada={temporada} />}
             {inactiva && <Badge tono="alerta">Inactiva</Badge>}
           </div>
           {codigo && <code className="font-mono text-xs text-tinta-suave">{codigo}</code>}

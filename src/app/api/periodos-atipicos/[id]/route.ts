@@ -1,12 +1,11 @@
 import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import type { TablesUpdate } from "@/lib/supabase/database.types";
 import { requirePlanner } from "@/lib/auth/guard";
 import { error, idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
-import { periodoADb, recortarPeriodo } from "@/lib/ventas/periodo";
+import { recortarPeriodo } from "@/lib/ventas/periodo";
 import { rangoValido } from "@/lib/curvas/atipicos";
-import { actualizarPeriodo, aPeriodoApi, borrarPeriodo, leerPeriodoPorId } from "@/lib/curvas/consultas";
+import { actualizarPeriodo, aPeriodoApi, borrarPeriodo, cambioDePeriodo, leerPeriodoPorId } from "@/lib/curvas/consultas";
 import { editarPeriodoAtipicoSchema, MENSAJE_RANGO_INVERTIDO } from "@/lib/curvas/esquemas";
 import type { EliminarPeriodoAtipicoRespuesta } from "@/lib/curvas/tipos-api";
 
@@ -15,7 +14,7 @@ type Params = { params: Promise<{ id: string }> };
 const PERIODO_NO_ENCONTRADO = "Periodo atípico no encontrado.";
 
 /**
- * Edita desde, hasta, motivo, descripción, alcance y/o activo
+ * Edita desde, hasta, motivo, descripción, temporadas (o el alcance heredado) y/o activo
  * (`requirePlanner`). `404` si no existe; `400` si el rango resultante (contra
  * la fila actual cuando solo viene un extremo) queda invertido o el cuerpo no
  * trae nada que cambiar. Cambiar un periodo no recalcula nada.
@@ -38,13 +37,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const hasta = datos.hasta ?? recortarPeriodo(actual.hasta);
   if (!rangoValido(desde, hasta)) return error(MENSAJE_RANGO_INVERTIDO, 400);
 
-  const cambio: TablesUpdate<"periodos_atipicos"> = {};
-  if (datos.desde !== undefined) cambio.desde = periodoADb(datos.desde);
-  if (datos.hasta !== undefined) cambio.hasta = periodoADb(datos.hasta);
-  if (datos.motivo !== undefined) cambio.motivo = datos.motivo;
-  if (datos.descripcion !== undefined) cambio.descripcion = datos.descripcion;
-  if (datos.alcance !== undefined) cambio.alcance = datos.alcance;
-  if (datos.activo !== undefined) cambio.activo = datos.activo;
+  const cambio = cambioDePeriodo(datos);
 
   const { data, error: err } = await actualizarPeriodo(db, id, cambio);
   if (err) return traducirErrorDb(err, "editar periodo atípico");

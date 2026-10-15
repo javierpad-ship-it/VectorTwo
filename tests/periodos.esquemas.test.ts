@@ -27,7 +27,7 @@ describe("mes (aaaa-mm)", () => {
 describe("crearPeriodoAtipicoSchema", () => {
   const base = { desde: "2023-03", hasta: "2023-05", motivo: "Niño costero 2023" };
   it("aplica los valores por defecto: alcance invierno y sin descripción", () => {
-    expect(crearPeriodoAtipicoSchema.parse(base)).toEqual({ ...base, alcance: "invierno" });
+    expect(crearPeriodoAtipicoSchema.parse(base)).toEqual({ ...base, temporadas: ["invierno"], alcance: "invierno" });
   });
   it("motivo y descripción se recortan sin pasar a mayúsculas; descripción vacía → null", () => {
     const r = crearPeriodoAtipicoSchema.parse({ ...base, motivo: "  Niño costero 2023  ", descripcion: "   " });

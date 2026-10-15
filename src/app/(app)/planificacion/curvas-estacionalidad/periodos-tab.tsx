@@ -12,8 +12,9 @@ import { DataTable, type Columna } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Modal } from "@/components/ui/modal";
 import { AniosAtipicosCard } from "./anios-atipicos-card";
-import { pendientesDeInvierno } from "./curvas-tab";
-import { ETIQUETA_ALCANCE } from "@/lib/curvas/tipos-api";
+import { ALTAS_PRELLENADAS, altasFaltantes, type AltaPrellenada } from "./atajos";
+import { TEMPORADAS_AGRUPACION } from "@/lib/curvas/tipos-api";
+import { BadgeTemporada } from "@/components/estacionalidad/temporada";
 import {
   CamposPeriodo,
   PERIODO_VACIO,
@@ -21,24 +22,9 @@ import {
   type ValoresPeriodo,
 } from "./formulario-periodo";
 import { contarMeses, mesCorto, textoRango } from "./meses";
-import type { AgrupacionConTemporada, AniosAtipicosRespuesta, CrearPeriodoAtipicoCuerpo, PeriodoAtipicoLista } from "./tipos";
+import type { AgrupacionConTemporada, CrearPeriodoAtipicoCuerpo, PeriodoAtipicoLista } from "./tipos";
 import { useRecurso } from "./use-recurso";
-
-/** Los dos altas que se esperan, para prellenar el formulario (nada se guarda hasta pulsar Crear). */
-const PRELLENADO_2023: ValoresPeriodo = {
-  desde: "2023-03",
-  hasta: "2023-05",
-  motivo: "Niño costero 2023",
-  descripcion: "Propuesta: marzo a mayo; confirmar con planeamiento.",
-  alcance: "invierno",
-};
-const PRELLENADO_2026: ValoresPeriodo = {
-  desde: "",
-  hasta: "",
-  motivo: "Niño costero 2026",
-  descripcion: "Meses por definir.",
-  alcance: "invierno",
-};
+import { useAniosAtipicosPorTemporada } from "./use-anios-atipicos";
 
 const ID_FORM_NUEVO = "form-periodo-nuevo";
 const ID_MOTIVO_NUEVO = "periodo-motivo-nuevo";
@@ -55,26 +41,31 @@ function cuerpoDe(v: ValoresPeriodo): CrearPeriodoAtipicoCuerpo {
     hasta: v.hasta,
     motivo: v.motivo.trim(),
     descripcion: v.descripcion.trim() === "" ? null : v.descripcion.trim(),
-    alcance: v.alcance,
+    temporadas: v.temporadas,
   };
 }
 
+function valoresDeAlta(a: AltaPrellenada): ValoresPeriodo {
+  return { desde: a.desde, hasta: a.hasta, motivo: a.motivo, descripcion: a.descripcion, temporadas: [...a.temporadas] };
+}
+
 /**
- * Pestaña Periodos atípicos (paso 1 de M6): el mantenimiento de los rangos de
- * meses distorsionados (El Niño costero 2023 y 2026). Funciona sin corridas ni
- * agregado: alta, edición en diálogo, activar/desactivar y eliminar. Cambiar un
- * periodo no recalcula nada.
+ * Pestaña Periodos atípicos (M6): el mantenimiento de los rangos de meses
+ * distorsionados (El Niño costero 2023 y 2026), cada uno con el conjunto de
+ * temporadas de agrupación a las que aplica. Funciona sin corridas ni agregado:
+ * alta, edición en diálogo, activar/desactivar y eliminar. Cambiar un periodo no
+ * recalcula nada: las curvas afectadas se marcan obsoletas (`periodo_cambiado`).
  */
 export function PeriodosTab({
   agrupaciones,
   onIrACurvas,
 }: {
   agrupaciones: AgrupacionConTemporada[];
-  /** Lleva a la pestaña Curvas con las agrupaciones cuya temporada falta decidir. */
+  /** Lleva a la pestaña Curvas filtrada por «Toda temporada» (las que el planner aún no revisó). */
   onIrACurvas: () => void;
 }) {
   const periodosApi = useRecurso<PeriodoAtipicoLista[] | { periodos: PeriodoAtipicoLista[] }>("/api/periodos-atipicos?incluir_inactivos=1");
-  const aniosApi = useRecurso<AniosAtipicosRespuesta>("/api/periodos-atipicos/anios?temporada=invierno");
+  const anios = useAniosAtipicosPorTemporada();
   const cargasApi = useRecurso<CargasRespuesta>("/api/ventas/cargas");
   const periodos = useMemo(() => listaDePeriodos(periodosApi.datos), [periodosApi.datos]);
   const ultimoCargado = cargasApi.datos?.meta.ultimo_cargado ? mesCorto(cargasApi.datos.meta.ultimo_cargado) : null;
@@ -84,10 +75,11 @@ export function PeriodosTab({
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [edicion, setEdicion] = useState<{ id: string; valores: ValoresPeriodo } | null>(null);
-  const pendientes = useMemo(() => pendientesDeInvierno(agrupaciones), [agrupaciones]);
+  const sinRevisar = useMemo(() => agrupaciones.filter((a) => a.activo && a.temporada === "todo_el_ano").length, [agrupaciones]);
+  const faltantes = useMemo(() => altasFaltantes(periodos), [periodos]);
 
   const recargarPeriodos = periodosApi.recargar;
-  const recargarAnios = aniosApi.recargar;
+  const recargarAnios = anios.recargar;
   const setErrorPeriodos = periodosApi.setError;
 
   async function ejecutar(accion: () => Promise<unknown>): Promise<boolean> {
@@ -105,8 +97,8 @@ export function PeriodosTab({
     }
   }
 
-  function prellenar(v: ValoresPeriodo) {
-    setForm(v);
+  function prellenar(a: AltaPrellenada) {
+    setForm(valoresDeAlta(a));
     setAviso(null);
     // Evento de usuario, no efecto: se lleva la vista y el foco al formulario.
     document.getElementById(ID_FORM_NUEVO)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -146,7 +138,13 @@ export function PeriodosTab({
     periodosApi.setError(null);
     setEdicion({
       id: p.id,
-      valores: { desde: mesCorto(p.desde), hasta: mesCorto(p.hasta), motivo: p.motivo, descripcion: p.descripcion ?? "", alcance: p.alcance },
+      valores: {
+        desde: mesCorto(p.desde),
+        hasta: mesCorto(p.hasta),
+        motivo: p.motivo,
+        descripcion: p.descripcion ?? "",
+        temporadas: TEMPORADAS_AGRUPACION.filter((t) => p.temporadas.includes(t)),
+      },
     });
   }
 
@@ -188,9 +186,17 @@ export function PeriodosTab({
       ),
     },
     {
-      clave: "alcance",
-      titulo: "Alcance",
-      render: (p) => <Badge tono={p.alcance === "invierno" ? "marca" : "alerta"}>{ETIQUETA_ALCANCE[p.alcance]}</Badge>,
+      clave: "temporadas",
+      titulo: "Temporadas",
+      render: (p) => (
+        <ul className="flex flex-wrap gap-1" aria-label={`Temporadas de ${p.motivo}`}>
+          {TEMPORADAS_AGRUPACION.filter((t) => p.temporadas.includes(t)).map((t) => (
+            <li key={t}>
+              <BadgeTemporada temporada={t} />
+            </li>
+          ))}
+        </ul>
+      ),
     },
     {
       clave: "afectadas",
@@ -240,14 +246,14 @@ export function PeriodosTab({
         </Alert>
       )}
 
-      <AniosAtipicosCard datos={aniosApi.datos} cargando={aniosApi.cargando} error={aniosApi.error} onCerrarError={() => aniosApi.setError(null)} />
+      <AniosAtipicosCard porTemporada={anios.filas} />
 
-      {pendientes.length > 0 && (
+      {sinRevisar > 0 && (
         <Alert tono="info">
-          {plural(pendientes.length, "agrupación sigue", "agrupaciones siguen")} como «Toda temporada» aunque sus líneas sugieren Invierno: un periodo de
-          alcance «invierno» no las alcanzaría.{" "}
+          {plural(sinRevisar, "agrupación activa sigue", "agrupaciones activas siguen")} en «Toda temporada»: las líneas no informan la temporada, así que
+          hay que revisarlas una por una. Una agrupación de toda temporada solo recibe un periodo si marcas esa casilla.{" "}
           <button type="button" onClick={onIrACurvas} className="font-medium underline underline-offset-2">
-            Marcar la temporada de las agrupaciones
+            Revisar las agrupaciones en Toda temporada
           </button>
         </Alert>
       )}
@@ -255,16 +261,27 @@ export function PeriodosTab({
       {sinPeriodos && (
         <EmptyState
           titulo="Todavía no hay periodos atípicos"
-          detalle="Crea los dos que se esperan: «Niño costero 2023» (propuesta: marzo a mayo, confirmar con planeamiento) y «Niño costero 2026» (meses por definir). Los botones solo rellenan el formulario; nada se guarda hasta pulsar Crear."
+          detalle="Crea los cuatro que Javier confirmó para El Niño costero: invierno, año completo (2023 y 2026); verano, setiembre a diciembre (2023 y 2026). Los botones solo rellenan el formulario; nada se guarda hasta pulsar Crear."
         >
-          <Button onClick={() => prellenar(PRELLENADO_2023)}>Prellenar Niño costero 2023</Button>
-          <Button variante="secundario" onClick={() => prellenar(PRELLENADO_2026)}>
-            Prellenar Niño costero 2026
-          </Button>
+          {ALTAS_PRELLENADAS.map((a) => (
+            <Button key={a.clave} variante="secundario" onClick={() => prellenar(a)}>
+              {a.boton}
+            </Button>
+          ))}
         </EmptyState>
       )}
 
       <Card titulo="Nuevo periodo atípico" descripcion="Un rango de meses cuya venta está distorsionada (se solapan: cuenta la unión).">
+        {!sinPeriodos && faltantes.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Altas confirmadas que faltan">
+            <span className="text-sm text-tinta-suave">Faltan de los confirmados:</span>
+            {faltantes.map((a) => (
+              <Button key={a.clave} variante="secundario" tamano="sm" onClick={() => prellenar(a)}>
+                {a.boton}
+              </Button>
+            ))}
+          </div>
+        )}
         <form id={ID_FORM_NUEVO} onSubmit={crear} className="grid gap-4 md:grid-cols-4">
           <CamposPeriodo
             valores={form}
@@ -295,8 +312,8 @@ export function PeriodosTab({
           claseFila={(p) => (p.activo ? undefined : "bg-neutro-suave/60 text-tinta-suave")}
         />
         <p className="mt-3 text-xs text-tinta-suave">
-          Cambiar un periodo no recalcula nada: el cálculo de curvas llega en el paso 2 y usará los periodos activos. Desactivar un periodo lo saca
-          del cálculo sin perder el registro.
+          Cambiar un periodo no recalcula nada: las curvas afectadas se marcan obsoletas (periodo cambiado) y el planner recalcula y vuelve a aprobar.
+          Desactivar un periodo lo saca del cálculo sin perder el registro.
         </p>
       </Card>
 

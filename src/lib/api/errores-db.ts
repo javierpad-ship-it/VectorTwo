@@ -19,6 +19,9 @@ import { error } from "./respuestas";
 export const CODIGO_UNICO = "23505";
 export const CODIGO_FK = "23503";
 export const CODIGO_CHECK = "23514";
+/** `lock_not_available`: el lock de aviso del cálculo de M6 (`calculo_en_curso`). */
+export const CODIGO_BLOQUEO = "55P03";
+export const MENSAJE_CALCULO_EN_CURSO = "Hay otro cálculo de curvas en curso. Espera a que termine y vuelve a intentarlo.";
 
 export type DescripcionErrorDb = { status: number; mensaje: string };
 
@@ -64,6 +67,10 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["ubicaciones_ignoradas_nombre", "Esa ubicación ya está en la lista."],
   // M2b. La API lo anticipa con el par que choca; esto es la red de seguridad (carrera entre dos usuarios).
   ["marca_gml_especial_par", "Esa marca ya es relevante en ese GML."],
+  // M6 paso 2. La API lo anticipa con el reemplazo en dos pasos; esto es la red de seguridad (carrera entre dos planners).
+  ["curvas_estacionalidad_vigente_uniq", "Esa agrupación ya tiene una curva vigente; vuelve a cargar."],
+  ["curvas_estacionalidad_agrupacion_version_key", "Esa agrupación ya tiene una curva con esa versión; vuelve a cargar."],
+  ["corridas_estacionalidad_referencia_uniq", "Ya hay otra corrida de referencia; vuelve a cargar."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -102,6 +109,12 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["periodos_atipicos_motivo_len", "El motivo debe tener entre 1 y 120 caracteres."],
   ["periodos_atipicos_descripcion_len", "La descripción no puede superar 500 caracteres."],
   ["periodos_atipicos_alcance", "El alcance debe ser invierno o todas."],
+  ["periodos_atipicos_temporadas", "Elige de una a tres temporadas entre invierno, verano y toda temporada."],
+  // M6 paso 2.
+  ["curvas_estacionalidad_suma", "Las doce participaciones de la curva deben sumar 1."],
+  ["curvas_estacionalidad_nota_len", "La nota no puede superar 300 caracteres."],
+  ["curvas_estacionalidad_", "La curva no cumple las reglas de la base (participaciones entre 0 y 1, estado, origen o medida)."],
+  ["corridas_estacionalidad_resultado_size", "El resultado de la corrida es demasiado grande para guardarse."],
   // Genéricos: cubren `*_codigo_len_check` y `*_nombre_len_check` de todas las tablas, incluidas tiendas.
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
@@ -239,6 +252,21 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
       asignar: { status: 404, mensaje: "Marca cabeza no encontrada." },
     },
   ],
+  // M6 paso 2. Las curvas y las corridas nunca se eliminan (cambian de estado): la agrupación con curvas no se borra.
+  [
+    "curvas_estacionalidad_agrupacion_fkey",
+    {
+      eliminar: "No se puede eliminar la agrupación de estacionalidad: tiene curvas. Desactívala.",
+      asignar: { status: 404, mensaje: "Agrupación de estacionalidad no encontrada." },
+    },
+  ],
+  [
+    "curvas_estacionalidad_corrida_id_fkey",
+    {
+      eliminar: "No se puede eliminar la corrida: hay curvas aprobadas a partir de ella.",
+      asignar: { status: 404, mensaje: "Corrida no encontrada." },
+    },
+  ],
   // Las cargas nunca se eliminan (cambian de estado); la FK es la red de seguridad.
   [
     "venta_stock_mensual_carga_id_fkey",
@@ -270,6 +298,10 @@ export function describirErrorDb(
   details?: string | null
 ): DescripcionErrorDb {
   const texto = `${nombreConstraint(message) ?? ""} ${message} ${details ?? ""}`;
+
+  if (code === CODIGO_BLOQUEO || /calculo_en_curso/.test(message)) {
+    return { status: 409, mensaje: MENSAJE_CALCULO_EN_CURSO };
+  }
 
   if (code === CODIGO_UNICO) {
     return { status: 409, mensaje: buscar(MENSAJES_UNICO, texto) ?? "Ya existe un registro con esos datos." };

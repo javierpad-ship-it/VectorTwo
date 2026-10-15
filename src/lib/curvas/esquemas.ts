@@ -1,11 +1,20 @@
 import { z } from "zod";
-import { ALCANCES_PERIODO, TEMPORADAS_AGRUPACION, type TemporadaAgrupacion } from "./tipos-api";
+import { resolverTemporadas } from "./atipicos";
+import {
+  ALCANCES_PERIODO,
+  MODELOS_CURVA,
+  PARAMETROS_POR_DEFECTO,
+  TEMPORADAS_AGRUPACION,
+  TRATAMIENTOS_ATIPICOS,
+  type ParametrosCurvas,
+  type TemporadaAgrupacion,
+} from "./tipos-api";
 
 /**
- * Esquemas zod de M6, paso 1 (docs/modulos/06-curvas-estacionalidad.md,
- * "Contratos de API" y regla 29): periodos atípicos y temporada de la
- * agrupación. Los del cálculo (`calcularSchema`, `elegirCurvaSchema`,
- * `aprobarSchema`) llegan con el paso 2.
+ * Esquemas zod de M6 (docs/modulos/06-curvas-estacionalidad.md, "Contratos de
+ * API" y regla 29): periodos atípicos con `temporadas`, temporada de la
+ * agrupación, `calcularSchema`, `elegirCurvaSchema` y `marcarReferenciaSchema`.
+ * No existe esquema de aprobación en bloque: cada curva se elige una por una.
  */
 
 export const MAX_MOTIVO = 120;
@@ -45,24 +54,78 @@ const descripcion = z
 
 const alcance = z.enum(ALCANCES_PERIODO, "El alcance debe ser invierno o todas.");
 
+const temporadasPeriodo = z
+  .array(z.enum(TEMPORADAS_AGRUPACION, "Cada temporada debe ser invierno, verano o todo_el_ano."), "temporadas debe ser una lista.")
+  .min(1, "Elige al menos una temporada.")
+  .max(3, "Hay solo tres temporadas.")
+  .refine((v) => new Set(v).size === v.length, { message: "Las temporadas no pueden repetirse." });
+
+export const MENSAJE_TEMPORADAS_CONTRADICTORIAS =
+  "temporadas y alcance se contradicen: alcance es un dato heredado, usa solo temporadas.";
+
+/**
+ * Conjunto de temporadas y espejo `alcance` de un cuerpo (alta o edición): manda
+ * `temporadas`; solo con `alcance` (cliente del paso 1) se traduce; con los dos
+ * contradictorios, 400. Nadie fuera de `atipicos.ts` decide con `alcance`.
+ */
+const conTemporadas = <T extends { temporadas?: TemporadaAgrupacion[]; alcance?: (typeof ALCANCES_PERIODO)[number] }>(
+  v: T,
+  ctx: z.RefinementCtx
+) => {
+  if (resolverTemporadas(v)?.contradiccion) {
+    ctx.addIssue({ code: "custom", message: MENSAJE_TEMPORADAS_CONTRADICTORIAS, path: ["alcance"] });
+  }
+};
+
 export const crearPeriodoAtipicoSchema = z
   .object({
     desde: mes,
     hasta: mes,
     motivo,
     descripcion,
-    alcance: alcance.default("invierno"),
+    temporadas: temporadasPeriodo.optional(),
+    alcance: alcance.optional(),
   })
-  .refine((v) => v.hasta >= v.desde, { message: MENSAJE_RANGO_INVERTIDO, path: ["hasta"] });
+  .refine((v) => v.hasta >= v.desde, { message: MENSAJE_RANGO_INVERTIDO, path: ["hasta"] })
+  .superRefine(conTemporadas)
+  .transform((v) => {
+    const { temporadas: _t, alcance: _a, ...resto } = v;
+    void _t;
+    void _a;
+    // Sin `temporadas` ni `alcance`, por defecto invierno (como en el paso 1).
+    const r = resolverTemporadas(v) ?? resolverTemporadas({ temporadas: ["invierno"] });
+    return { ...resto, temporadas: r?.temporadas ?? (["invierno"] as TemporadaAgrupacion[]), alcance: r?.alcance ?? ("invierno" as const) };
+  });
 
 export const editarPeriodoAtipicoSchema = z
-  .object({ desde: mes, hasta: mes, motivo, descripcion, alcance, activo: z.boolean("activo debe ser verdadero o falso.") })
+  .object({
+    desde: mes,
+    hasta: mes,
+    motivo,
+    descripcion,
+    temporadas: temporadasPeriodo,
+    alcance,
+    activo: z.boolean("activo debe ser verdadero o falso."),
+  })
   .partial()
   .refine(tieneAlgo, noVacio)
   // Si vienen los dos extremos se comprueba aquí; si viene uno solo, el handler lo compara con la fila actual (`rangoValido`).
   .refine((v) => v.desde === undefined || v.hasta === undefined || v.hasta >= v.desde, {
     message: MENSAJE_RANGO_INVERTIDO,
     path: ["hasta"],
+  })
+  .superRefine(conTemporadas)
+  .transform((v) => {
+    const { temporadas: _t, alcance: _a, ...resto } = v;
+    void _t;
+    void _a;
+    // Con `temporadas` o `alcance` se escriben SIEMPRE los dos (conjunto y espejo).
+    const r = resolverTemporadas(v);
+    return {
+      ...resto,
+      temporadas: r?.temporadas as TemporadaAgrupacion[] | undefined,
+      alcance: r?.alcance as (typeof ALCANCES_PERIODO)[number] | undefined,
+    };
   });
 
 /** Temporada de una agrupación (POST y PATCH de `/api/agrupaciones-estacionalidad`). */
@@ -148,3 +211,208 @@ export function leerConsultaAnios(
     rechazo: null,
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Paso 2
+// ═══════════════════════════════════════════════════════════════════════════
+
+const uuidValido = z.uuid("El identificador no es válido.");
+
+/**
+ * `POST /api/curvas/calcular`. Todo es opcional (valen los valores por defecto de
+ * la ficha). Las claves desconocidas se ignoran: NO se aceptan `medida`,
+ * `referencia_volumen` ni `umbral_sustitucion` (recortados), y por eso nunca
+ * llegan a los parámetros guardados.
+ */
+export const calcularSchema = z.object({
+  hasta_periodo: mes.optional(),
+  solo_tiendas_completas: z.boolean("solo_tiendas_completas debe ser verdadero o falso.").default(PARAMETROS_POR_DEFECTO.solo_tiendas_completas),
+  exigir_venta_todo_el_ano: z.boolean("exigir_venta_todo_el_ano debe ser verdadero o falso.").default(PARAMETROS_POR_DEFECTO.exigir_venta_todo_el_ano),
+  meses_tienda_nueva: z
+    .number("Los meses de tienda nueva deben ser un número.")
+    .int("Los meses de tienda nueva deben ser un número entero.")
+    .min(0, "Los meses de tienda nueva van de 0 a 36.")
+    .max(36, "Los meses de tienda nueva van de 0 a 36.")
+    .default(PARAMETROS_POR_DEFECTO.meses_tienda_nueva),
+  umbral_tienda_dominante: z
+    .number("El umbral de tienda dominante debe ser un número.")
+    .min(0.1, "El umbral de tienda dominante va de 0,1 a 0,9.")
+    .max(0.9, "El umbral de tienda dominante va de 0,1 a 0,9.")
+    .default(PARAMETROS_POR_DEFECTO.umbral_tienda_dominante),
+  tratamiento_atipicos: z
+    .enum(TRATAMIENTOS_ATIPICOS, "El tratamiento debe ser auto, incluir, imputar o descartar.")
+    .default(PARAMETROS_POR_DEFECTO.tratamiento_atipicos),
+  umbral_forma: z
+    .number("El piso del umbral de forma debe ser un número.")
+    .min(0.5, "El piso del umbral de forma va de 0,5 a 50 puntos.")
+    .max(50, "El piso del umbral de forma va de 0,5 a 50 puntos.")
+    .default(PARAMETROS_POR_DEFECTO.umbral_forma),
+  max_meses_hueco: z
+    .number("El máximo de meses con hueco debe ser un número.")
+    .int("El máximo de meses con hueco debe ser un número entero.")
+    .min(1, "El máximo de meses con hueco va de 1 a 6.")
+    .max(6, "El máximo de meses con hueco va de 1 a 6.")
+    .default(PARAMETROS_POR_DEFECTO.max_meses_hueco),
+  min_unidades_ano: z
+    .number("El mínimo de unidades por año debe ser un número.")
+    .int("El mínimo de unidades por año debe ser un número entero.")
+    .min(0, "El mínimo de unidades por año no puede ser negativo.")
+    .default(PARAMETROS_POR_DEFECTO.min_unidades_ano),
+  umbral_cambio_volumen: z
+    .number("El umbral de cambio de volumen debe ser un número.")
+    .min(1.5, "El umbral de cambio de volumen va de 1,5 a 10.")
+    .max(10, "El umbral de cambio de volumen va de 1,5 a 10.")
+    .default(PARAMETROS_POR_DEFECTO.umbral_cambio_volumen),
+  margen_ruido: z
+    .number("El margen sobre el ruido debe ser un número.")
+    .min(0, "El margen sobre el ruido va de 0 a 1.")
+    .max(1, "El margen sobre el ruido va de 0 a 1.")
+    .default(PARAMETROS_POR_DEFECTO.margen_ruido),
+  peso_minimo_diagnostico: z
+    .number("El peso mínimo del diagnóstico debe ser un número.")
+    .min(0, "El peso mínimo del diagnóstico va de 0 a 0,5.")
+    .max(0.5, "El peso mínimo del diagnóstico va de 0 a 0,5.")
+    .default(PARAMETROS_POR_DEFECTO.peso_minimo_diagnostico),
+  umbral_liquidacion: z
+    .number("El umbral de liquidación debe ser un número.")
+    .min(0.05, "El umbral de liquidación va de 0,05 a 0,5.")
+    .max(0.5, "El umbral de liquidación va de 0,05 a 0,5.")
+    .default(PARAMETROS_POR_DEFECTO.umbral_liquidacion),
+  marcar_referencia: z.boolean("marcar_referencia debe ser verdadero o falso.").default(false),
+});
+
+export type CalcularCuerpoValidado = z.infer<typeof calcularSchema>;
+
+/** Los parámetros del modelo (sin `hasta_periodo` ni `marcar_referencia`): lo que se guarda en `corridas.parametros`. */
+export function parametrosDeCuerpo(cuerpo: CalcularCuerpoValidado): ParametrosCurvas {
+  return {
+    solo_tiendas_completas: cuerpo.solo_tiendas_completas,
+    exigir_venta_todo_el_ano: cuerpo.exigir_venta_todo_el_ano,
+    meses_tienda_nueva: cuerpo.meses_tienda_nueva,
+    umbral_tienda_dominante: cuerpo.umbral_tienda_dominante,
+    tratamiento_atipicos: cuerpo.tratamiento_atipicos,
+    umbral_forma: cuerpo.umbral_forma,
+    max_meses_hueco: cuerpo.max_meses_hueco,
+    min_unidades_ano: cuerpo.min_unidades_ano,
+    umbral_cambio_volumen: cuerpo.umbral_cambio_volumen,
+    margen_ruido: cuerpo.margen_ruido,
+    peso_minimo_diagnostico: cuerpo.peso_minimo_diagnostico,
+    umbral_liquidacion: cuerpo.umbral_liquidacion,
+  };
+}
+
+/** ¿Es un UUID? (segmentos de ruta que `idDeRuta` no cubre, como `[agrupacionId]`). */
+export function esUuid(valor: string): boolean {
+  return uuidValido.safeParse(valor).success;
+}
+
+/** `?modelo=` del detalle: ausente → `null`; `A`…`E`/`T` → el modelo; otro valor → `null` con `invalido`. */
+export function leerModeloConsulta(params: Pick<URLSearchParams, "get">): { modelo: (typeof MODELOS_CURVA)[number] | null; invalido: boolean } {
+  const crudo = params.get("modelo");
+  if (crudo === null || crudo.trim() === "") return { modelo: null, invalido: false };
+  const r = z.enum(MODELOS_CURVA).safeParse(crudo.trim());
+  return r.success ? { modelo: r.data, invalido: false } : { modelo: null, invalido: true };
+}
+
+/** `PUT /api/curvas/agrupaciones/[id]`. Rechaza `F`, `G`, `H` y cualquier modelo fuera de `A`…`E`, `T`. */
+export const elegirCurvaSchema = z.object({
+  corrida_id: uuidValido,
+  modelo: z.enum(MODELOS_CURVA, "El modelo debe ser A, B, C, D, E o T."),
+  nota: z
+    .string("La nota debe ser texto.")
+    .trim()
+    .max(300, "La nota no puede superar 300 caracteres.")
+    .optional(),
+});
+
+/** `PATCH /api/curvas/corridas/[id]`: solo `{ referencia: true }`. */
+export const marcarReferenciaSchema = z.object({
+  referencia: z.literal(true, "referencia solo puede ser true: marcar una corrida quita la anterior."),
+});
+
+// ─── Lectura de query strings ───
+
+export type RechazoConsulta = { status: 400 | 404; mensaje: string };
+
+export const CORRIDA_NO_ENCONTRADA = "Corrida no encontrada.";
+
+/** `?corrida_id=`: ausente o vacío → `null` (la de referencia); un valor que no es UUID → `404`. */
+export function leerCorridaId(
+  params: Pick<URLSearchParams, "get">
+): { corridaId: string | null; rechazo: null } | { corridaId: null; rechazo: RechazoConsulta } {
+  const crudo = params.get("corrida_id");
+  if (crudo === null || crudo.trim() === "") return { corridaId: null, rechazo: null };
+  if (!uuid.safeParse(crudo.trim()).success) return { corridaId: null, rechazo: { status: 404, mensaje: CORRIDA_NO_ENCONTRADA } };
+  return { corridaId: crudo.trim(), rechazo: null };
+}
+
+const booleano = (nombre: string) =>
+  z
+    .enum(["true", "false", "1", "0"], `${nombre} debe ser true o false.`)
+    .transform((v) => v === "true" || v === "1");
+
+const numeroDeQuery = (nombre: string, min: number, max: number, entero: boolean) => {
+  const base = z.coerce.number(`${nombre} debe ser un número.`);
+  return (entero ? base.int(`${nombre} debe ser un número entero.`) : base).min(min, `${nombre} va de ${min} a ${max}.`).max(max, `${nombre} va de ${min} a ${max}.`);
+};
+
+const esquemaConsultaRed = z.object({
+  hasta_periodo: mes.optional(),
+  solo_tiendas_completas: booleano("solo_tiendas_completas").optional(),
+  exigir_venta_todo_el_ano: booleano("exigir_venta_todo_el_ano").optional(),
+  meses_tienda_nueva: numeroDeQuery("meses_tienda_nueva", 0, 36, true).optional(),
+  umbral_tienda_dominante: numeroDeQuery("umbral_tienda_dominante", 0.1, 0.9, false).optional(),
+  umbral_forma: numeroDeQuery("umbral_forma", 0.5, 50, false).optional(),
+  peso_minimo_diagnostico: numeroDeQuery("peso_minimo_diagnostico", 0, 0.5, false).optional(),
+});
+
+export type ParametrosRedConsulta = Pick<
+  ParametrosCurvas,
+  | "solo_tiendas_completas"
+  | "exigir_venta_todo_el_ano"
+  | "meses_tienda_nueva"
+  | "umbral_tienda_dominante"
+  | "umbral_forma"
+  | "peso_minimo_diagnostico"
+>;
+
+/**
+ * `GET /api/curvas/red-comparable`: lee de la query los parámetros de red de
+ * `calcularSchema` (los que faltan toman su valor por defecto) y `hasta_periodo`.
+ * `400` con el primer problema en castellano.
+ */
+export function leerConsultaRed(
+  params: Pick<URLSearchParams, "get">
+):
+  | { consulta: { parametros: ParametrosRedConsulta; hasta_periodo: string | null }; rechazo: null }
+  | { consulta: null; rechazo: RechazoConsulta } {
+  const crudo: Record<string, string> = {};
+  for (const clave of Object.keys(esquemaConsultaRed.shape)) {
+    const v = params.get(clave);
+    if (v !== null && v.trim() !== "") crudo[clave] = v.trim();
+  }
+  const r = esquemaConsultaRed.safeParse(crudo);
+  if (!r.success) {
+    const primero = r.error.issues[0];
+    const campo = primero?.path.length ? `${primero.path.join(".")}: ` : "";
+    return { consulta: null, rechazo: { status: 400, mensaje: `${campo}${primero?.message ?? "Parámetros inválidos."}` } };
+  }
+  const d = PARAMETROS_POR_DEFECTO;
+  return {
+    consulta: {
+      hasta_periodo: r.data.hasta_periodo ?? null,
+      parametros: {
+        solo_tiendas_completas: r.data.solo_tiendas_completas ?? d.solo_tiendas_completas,
+        exigir_venta_todo_el_ano: r.data.exigir_venta_todo_el_ano ?? d.exigir_venta_todo_el_ano,
+        meses_tienda_nueva: r.data.meses_tienda_nueva ?? d.meses_tienda_nueva,
+        umbral_tienda_dominante: r.data.umbral_tienda_dominante ?? d.umbral_tienda_dominante,
+        umbral_forma: r.data.umbral_forma ?? d.umbral_forma,
+        peso_minimo_diagnostico: r.data.peso_minimo_diagnostico ?? d.peso_minimo_diagnostico,
+      },
+    },
+    rechazo: null,
+  };
+}
+
+export type ElegirCurva = z.infer<typeof elegirCurvaSchema>;
+export type CalcularCuerpoEntrada = z.input<typeof calcularSchema>;
