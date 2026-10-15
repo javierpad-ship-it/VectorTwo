@@ -31,7 +31,8 @@
 --     "agrupacion": [ { tienda_id, periodo, unidades, venta_soles, costo_vendido } ]
 --                   | null,          -- null cuando p_agrupacion_id es nulo
 --     "temporadas": [ { temporada, tienda_id, periodo, unidades } ],
---     "meses_publicados": [ "2023-01-01", ... ]
+--     "meses_publicados": [ "2023-01-01", ... ],
+--     "cargas": { "2023-01": "<carga_id uuid>", ... }
 --   }
 --
 -- * `agrupacion`: suma por tienda y mes de las equivalencias cuyo
@@ -50,6 +51,15 @@
 --   ninguna fila de venta se pierde del total.
 --
 -- * `meses_publicados`: periodos de las cargas en estado `publicada`.
+--
+-- * `cargas`: objeto `{ "<periodo aaaa-mm>": "<carga_id>" }` de esas mismas cargas
+--   publicadas. Sale del MISMO CTE `meses` que `meses_publicados`, dentro de la
+--   misma sentencia: la huella de cargas que calcula el backend y la venta leída
+--   corresponden al mismo estado de los datos (no se desfasan si una carga se
+--   publica o se retira entre dos lecturas). Hay a lo sumo una carga publicada por
+--   periodo (índice único parcial `cargas_periodo_publicada_uniq`), así que la
+--   clave nunca se pisa. Orden estable: `jsonb_object_agg` ordenado por periodo
+--   (jsonb además ordena las claves al guardarlas).
 --
 -- POR QUÉ `jsonb` Y NO `setof`: `temporadas` supera el corte de 1 000 filas de
 -- PostgREST y paginar un `rpc` reejecutaría el agregado en cada página. Un `jsonb`
@@ -105,7 +115,7 @@ as $$
     group by coalesce(a.temporada, 'sin_agrupacion'), v.tienda_id, v.periodo
   ),
   meses as (
-    select distinct c.periodo
+    select c.periodo, c.id as carga_id
     from public.cargas_venta_stock c
     where c.estado = 'publicada'
   )
@@ -143,7 +153,12 @@ as $$
     'meses_publicados',
       coalesce(
         (select jsonb_agg(m.periodo order by m.periodo) from meses m),
-        '[]'::jsonb)
+        '[]'::jsonb),
+    'cargas',
+      coalesce(
+        (select jsonb_object_agg(to_char(m.periodo, 'YYYY-MM'), m.carga_id order by m.periodo)
+           from meses m),
+        '{}'::jsonb)
   );
 $$;
 
@@ -151,7 +166,7 @@ revoke execute on function public.venta_estacionalidad_agrupacion(uuid) from pub
 grant execute on function public.venta_estacionalidad_agrupacion(uuid) to service_role;
 
 comment on function public.venta_estacionalidad_agrupacion(uuid) is
-  'M6 0.9.7: venta publicada en un jsonb { agrupacion (tienda x mes de la agrupacion; null con id nulo), temporadas (temporada x tienda x mes; sin_agrupacion incluida), meses_publicados }. Solo lectura, sin vista materializada ni candado. Solo service_role.';
+  'M6 0.9.7: venta publicada en un jsonb { agrupacion (tienda x mes de la agrupacion; null con id nulo), temporadas (temporada x tienda x mes; sin_agrupacion incluida), meses_publicados, cargas (periodo aaaa-mm -> carga_id publicada, mismo estado de datos) }. Solo lectura, sin vista materializada ni candado. Solo service_role.';
 
 -- ---------------------------------------------------------------------------
 -- 2. `corridas_estacionalidad.agrupacion_estacionalidad_id`
