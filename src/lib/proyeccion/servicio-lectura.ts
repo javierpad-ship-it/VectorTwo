@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { eatM6DeLinea } from "./calculo";
 import { cargarCatalogo } from "./contexto";
 import { leerFilaCompleta, leerFilasConAnios, leerTiendasProyeccion } from "./consultas";
 import { filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
@@ -120,15 +121,27 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
   // Prueba con el año anterior (dentro de muestra), agregada por línea.
   let propuestoPrueba = 0;
   let realPrueba = 0;
-  const eats: number[] = [];
+  const pruebas: { real: number; eat_m6: number | null; eat_m6_cobertura?: number | null }[] = [];
   for (const m of modelos) {
     const pr = (m.historico as HistoricoFila | null)?.prueba_anterior;
     if (!pr) continue;
     propuestoPrueba += pr.propuesto;
     realPrueba += pr.real;
-    if (pr.eat_m6 !== null) eats.push(pr.eat_m6);
+    pruebas.push({ real: pr.real, eat_m6: pr.eat_m6, eat_m6_cobertura: pr.eat_m6_cobertura });
   }
-  const prueba = realPrueba > 0 ? { propuesto: propuestoPrueba, real: realPrueba, desvio_pct: (propuestoPrueba / realPrueba - 1) * 100, eat_m6: eats.length > 0 ? eats.reduce((a, c) => a + c, 0) / eats.length : null } : null;
+  const eatLinea = eatM6DeLinea(pruebas);
+  const prueba =
+    realPrueba > 0
+      ? {
+          propuesto: propuestoPrueba,
+          real: realPrueba,
+          desvio_pct: (propuestoPrueba / realPrueba - 1) * 100,
+          // 06c: con cobertura menor que 1 el EAT queda null ("sin backtesting de M6 (cubre x %)"), como en la fila.
+          eat_m6: eatLinea.eat_m6,
+          // Peso (0 a 1, por real del año anterior) de la línea cuyas agrupaciones traen backtesting de M6.
+          eat_m6_cobertura: eatLinea.cobertura,
+        }
+      : null;
 
   // Tiendas nuevas y cierres que tocan la línea.
   const nombres = new Map<string, string>();

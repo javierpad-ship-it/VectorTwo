@@ -1,18 +1,28 @@
 import type { Json, Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { formatearDecimal } from "@/lib/formato";
 import { curvaAcumulada, hastaPorDefecto, normalizarCurva } from "./anios";
+import { TOLERANCIA_IGUAL } from "./candidatas";
+import { curvaDeUsuario, curvaManualDe, type EvaluacionCurvaUsuario } from "./curva-usuario";
+import { redondearJson } from "./modelo";
 import { difiereDeVigente, eatEntreCurvas } from "./obsolescencia";
 import {
   MODELOS_CURVA,
+  ORIGENES_CURVA,
   PARAMETROS_POR_DEFECTO,
+  esModeloAprobable,
+  origenCurvaDe,
   type AgrupacionResultado,
   type CodigoErrorCurvas,
   type ComparadorApi,
   type CurvaAprobadaApi,
+  type CurvaManualApi,
   type CurvaVigenteApi,
   type HuellasCurva,
+  type ModeloAprobable,
   type ModeloCurva,
+  type OrigenCurva,
   type ParametrosCurvas,
+  type PartidaCurvaUsuario,
   type PrerrequisitosApi,
   type TemporadaResultado,
   type VersionAgrupacionApi,
@@ -30,8 +40,41 @@ export const MENSAJE_CORRIDA_NO_ENCONTRADA = "Corrida no encontrada.";
 
 export type RechazoAprobar = { status: 404 | 409; mensaje: string; codigo: CodigoErrorCurvas | "agrupacion_no_encontrada" };
 
+/** `A`…`F` y `T` (las candidatas que `calcular` devuelve); `U` no es una candidata. Para `U` también existe `esModeloAprobable` (en `tipos-api`). */
 export function esModeloCurva(valor: unknown): valor is ModeloCurva {
   return typeof valor === "string" && (MODELOS_CURVA as readonly string[]).includes(valor);
+}
+
+export { esModeloAprobable };
+
+/** El `origen_curva` de una fila de la base; ante un valor desconocido, el que corresponde al modelo. */
+function origenCurvaDeFila(fila: Pick<Tables<"curvas_estacionalidad">, "origen_curva" | "modelo">): OrigenCurva {
+  const guardado = (ORIGENES_CURVA as readonly string[]).includes(fila.origen_curva) ? (fila.origen_curva as OrigenCurva) : null;
+  return guardado ?? origenCurvaDe(esModeloAprobable(fila.modelo) ? fila.modelo : "A");
+}
+
+/** `curva_manual` guardada → `CurvaManualApi`; `null` si no es un objeto con la forma esperada. */
+export function curvaManualDeJson(json: Json | null | undefined): CurvaManualApi | null {
+  const o = comoObjeto(json);
+  if (!o) return null;
+  const valores = o.valores_ingresados;
+  if (!Array.isArray(valores) || valores.length !== 12 || !valores.every((v) => typeof v === "number")) return null;
+  const numero = (v: unknown) => (typeof v === "number" ? v : null);
+  const partida = comoObjeto(o.partida);
+  const porAnio = Array.isArray(o.eat_en_muestra_por_anio) ? o.eat_en_muestra_por_anio : [];
+  return {
+    valores_ingresados: valores as number[],
+    partida: (partida && typeof partida.tipo === "string" ? partida : { tipo: "en_blanco", referencia: null }) as unknown as PartidaCurvaUsuario,
+    en_muestra: true,
+    eat_en_muestra: numero(o.eat_en_muestra),
+    error_max_en_muestra: numero(o.error_max_en_muestra),
+    eat_en_muestra_por_anio: porAnio.flatMap((x) => {
+      const f = comoObjeto(x);
+      return f && typeof f.anio === "number" && typeof f.eat === "number" && typeof f.error_max === "number" ? [{ anio: f.anio, eat: f.eat, error_max: f.error_max }] : [];
+    }),
+    eat_parcial_en_muestra: numero(o.eat_parcial_en_muestra),
+    igual_a: esModeloCurva(o.igual_a) ? o.igual_a : null,
+  };
 }
 
 /** `p01 … p12` de una fila de `curvas_estacionalidad`, en orden. */
@@ -82,12 +125,16 @@ export function parametrosIniciales(
   };
 }
 
-/** Por qué falta la nota (`null` si no se exige): apartarse de la recomendada, excluir años o tiendas, o un tratamiento del Niño distinto de `auto`. */
+/**
+ * Por qué falta la nota (`null` si no se exige): la curva del usuario (SIEMPRE), apartarse de la recomendada,
+ * excluir años o tiendas, o un tratamiento del Niño distinto de `auto`.
+ */
 export function notaRequeridaPor(
-  modelo: ModeloCurva,
+  modelo: ModeloAprobable,
   recomendada: ModeloCurva | null,
   parametros: Pick<ParametrosCurvas, "anios_excluidos" | "tiendas_excluidas" | "tratamiento_atipicos">
 ): string | null {
+  if (modelo === "U") return "aprobaste tu propia curva (U)";
   if (recomendada !== null && modelo !== recomendada) return `elegiste ${modelo} y el sistema recomienda ${recomendada}`;
   if (parametros.anios_excluidos.length > 0) return `excluiste ${parametros.anios_excluidos.length === 1 ? "un año" : "años"} del ajuste (${[...parametros.anios_excluidos].sort((a, b) => a - b).join(", ")})`;
   if (parametros.tiendas_excluidas.length > 0) {
@@ -107,11 +154,13 @@ export type EntradaRechazoAprobar = {
   /** Lo calculado para la agrupación (con los parámetros que mandó el planner). */
   resultado: AgrupacionResultado | null;
   temporada: Pick<TemporadaResultado, "curva_T"> | null;
-  modelo: ModeloCurva;
+  modelo: ModeloAprobable;
   huella_enviada: string;
   huella_actual: string;
-  /** La vigente de hoy; `huella_calculo` es `null` en curvas de la 0.9.6. */
-  vigente: { version: number; modelo: string; huella_calculo: string | null } | null;
+  /** La vigente de hoy; `huella_calculo` es `null` en curvas de la 0.9.6. `curva` solo hace falta para el `sin_cambio` de una `U`. */
+  vigente: { version: number; modelo: string; huella_calculo: string | null; curva?: readonly number[] } | null;
+  /** 06c. Con `modelo = "U"`: los doce porcentajes que se quieren aprobar (para `sin_cambio`). */
+  curva_usuario?: readonly number[] | null;
   version_vigente: number | null;
   parametros: Pick<ParametrosCurvas, "anios_excluidos" | "tiendas_excluidas" | "tratamiento_atipicos">;
   nota: string | undefined;
@@ -125,6 +174,10 @@ export type EntradaRechazoAprobar = {
  * distinta de la recalculada `datos_cambiados`; `version_vigente` distinta de la
  * vigente de hoy `vigente_cambiada`; misma candidata y misma huella que la vigente
  * `sin_cambio`; nota vacía en alguno de los tres casos `nota_requerida`. Todos `409`.
+ *
+ * 06c, con `modelo = "U"`: sin `sin_curva_posible` ni `candidata_no_disponible` (se aprueba aunque el sistema no
+ * tenga candidata, pero `sin_venta` ya bloqueó en `prerrequisitos`); `sin_cambio` exige además los mismos doce
+ * valores normalizados que la vigente `U`; la nota es SIEMPRE obligatoria.
  */
 export function motivoRechazoAprobar(e: EntradaRechazoAprobar): RechazoAprobar | null {
   if (!e.agrupacion) return { status: 404, mensaje: MENSAJE_AGRUPACION_NO_ENCONTRADA, codigo: "agrupacion_no_encontrada" };
@@ -138,22 +191,26 @@ export function motivoRechazoAprobar(e: EntradaRechazoAprobar): RechazoAprobar |
       codigo: "prerrequisitos",
     };
   }
-  if (!e.resultado || e.resultado.origen === null) {
-    return {
+  // La curva del usuario se aprueba aunque el sistema no tenga ninguna candidata calculable (nunca con cero
+  // venta: `sin_venta` bloquea arriba): no le aplican `sin_curva_posible` ni `candidata_no_disponible`.
+  if (e.modelo !== "U") {
+    if (!e.resultado || e.resultado.origen === null) {
+      return {
+        status: 409,
+        mensaje: "Esta agrupación no tiene curva posible: ni años de ajuste propios ni una curva de su temporada de la que prestar.",
+        codigo: "sin_curva_posible",
+      };
+    }
+    const noDisponible: RechazoAprobar = {
       status: 409,
-      mensaje: "Esta agrupación no tiene curva posible: ni años de ajuste propios ni una curva de su temporada de la que prestar.",
-      codigo: "sin_curva_posible",
+      mensaje: "Esa candidata no está disponible para esta agrupación con estos parámetros.",
+      codigo: "candidata_no_disponible",
     };
-  }
-  const noDisponible: RechazoAprobar = {
-    status: 409,
-    mensaje: "Esa candidata no está disponible para esta agrupación con estos parámetros.",
-    codigo: "candidata_no_disponible",
-  };
-  if (e.modelo === "T") {
-    if (!e.temporada?.curva_T) return noDisponible;
-  } else if (!e.resultado.candidatas.find((c) => c.modelo === e.modelo)?.curva) {
-    return noDisponible;
+    if (e.modelo === "T") {
+      if (!e.temporada?.curva_T) return noDisponible;
+    } else if (!e.resultado.candidatas.find((c) => c.modelo === e.modelo)?.curva) {
+      return noDisponible;
+    }
   }
   if (e.huella_enviada !== e.huella_actual) {
     return {
@@ -170,13 +227,27 @@ export function motivoRechazoAprobar(e: EntradaRechazoAprobar): RechazoAprobar |
     };
   }
   if (e.vigente && e.vigente.modelo === e.modelo && e.vigente.huella_calculo === e.huella_actual) {
-    return { status: 409, mensaje: "Esa curva ya es la vigente de la agrupación y los datos no cambiaron.", codigo: "sin_cambio" };
+    // Una `U` es lo que escribió el planner: igual a la vigente solo si los doce valores normalizados también coinciden.
+    const mismaCurva =
+      e.modelo !== "U" ||
+      (e.curva_usuario != null && e.vigente.curva !== undefined && sonMismaCurva(curvaDeUsuario(e.curva_usuario), e.vigente.curva));
+    if (mismaCurva) {
+      return { status: 409, mensaje: "Esa curva ya es la vigente de la agrupación y los datos no cambiaron.", codigo: "sin_cambio" };
+    }
   }
-  const porQue = notaRequeridaPor(e.modelo, e.resultado.recomendada, e.parametros);
+  const porQue = notaRequeridaPor(e.modelo, e.resultado?.recomendada ?? null, e.parametros);
   if (porQue !== null && (e.nota ?? "").trim() === "") {
     return { status: 409, mensaje: `Escribe una nota que explique el motivo: ${porQue}.`, codigo: "nota_requerida" };
   }
   return null;
+}
+
+/** `max |Δ| < TOLERANCIA_IGUAL` entre dos curvas de doce meses. */
+function sonMismaCurva(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  let max = 0;
+  for (let m = 0; m < a.length; m++) max = Math.max(max, Math.abs(a[m] - b[m]));
+  return max < TOLERANCIA_IGUAL;
 }
 
 // ─── Regla 27/42: fila de la curva aprobada ───
@@ -196,7 +267,9 @@ export type DatosFotoCurva = {
 export type EntradaFilaCurva = {
   agrupacion: AgrupacionResultado;
   temporada: TemporadaResultado | null;
-  modelo: ModeloCurva;
+  modelo: ModeloAprobable;
+  /** 06c. Obligatoria con `modelo = "U"`: lo escrito, de dónde partió y lo medido en muestra (`evaluarCurvaUsuario`). */
+  curva_usuario?: EvaluacionCurvaUsuario;
   corrida_id: string;
   red_huella: string;
   cargas_huella: string;
@@ -213,18 +286,29 @@ const a2 = (n: number) => Math.round(n * 100) / 100;
 /**
  * Regla 27 y 42. Fila de `curvas_estacionalidad` para la candidata elegida: copia la
  * curva (la `T` de la temporada), `recomendada = (modelo === recomendada)`,
- * `origen = prestada` si es `T`, `medida = 'unidades'`, `eat` y `error_max`
- * (nulos para `T`), `anios_utilizados` con los años, las tres huellas y lo que
- * necesitan la lista y el comparador (`huella_calculo`, `huella_temporada`,
+ * `origen = prestada` si es `T`, `medida = 'unidades'`, `eat` y `error_max` (fuera de muestra, del
+ * backtesting de la candidata; nulos si no los tiene), `anios_utilizados` con los años,
+ * las tres huellas y lo que necesitan la lista y el comparador (`huella_calculo`, `huella_temporada`,
  * `version_modelo`, `hasta_periodo`, `hasta_fue_por_defecto`, `recomendada_entonces`,
  * `anios_ajuste`, parámetros) y `version = anterior + 1`. Devuelve `null` si la curva no existe.
+ *
+ * 06c: `origen_curva = origenCurvaDe(modelo)` (`U` → usuario, `F` → avanzada, el resto sistema; los mismos
+ * checks de la base) y `curva_manual` solo con `U`. Con `U`: `modelo U`, `origen propia`, `recomendada false`,
+ * `eat = null` y `error_max = null` (la medida en muestra va solo en `curva_manual`), `p01..p12` la curva
+ * normalizada (`normalizarCurva(valores ÷ 100)`).
  */
 export function filaCurva(e: EntradaFilaCurva): TablesInsert<"curvas_estacionalidad"> | null {
   let curva: number[] | null;
   let eat: number | null = null;
   let errorMax: number | null = null;
-  if (e.modelo === "T") {
+  if (e.modelo === "U") {
+    if (!e.curva_usuario) return null;
+    curva = e.curva_usuario.curva;
+  } else if (e.modelo === "T") {
     curva = e.temporada?.curva_T ?? null;
+    const candidata = e.agrupacion.candidatas.find((c) => c.modelo === "T");
+    eat = candidata?.eat ?? null;
+    errorMax = candidata?.error_max ?? null;
   } else {
     const candidata = e.agrupacion.candidatas.find((c) => c.modelo === e.modelo);
     curva = candidata?.curva ?? null;
@@ -262,7 +346,9 @@ export function filaCurva(e: EntradaFilaCurva): TablesInsert<"curvas_estacionali
     corrida_id: e.corrida_id,
     modelo: e.modelo,
     origen: e.modelo === "T" ? "prestada" : "propia",
-    recomendada: e.modelo === e.agrupacion.recomendada,
+    origen_curva: origenCurvaDe(e.modelo),
+    curva_manual: e.modelo === "U" && e.curva_usuario ? (redondearJson(curvaManualDe(e.curva_usuario)) as unknown as Json) : null,
+    recomendada: e.modelo !== "U" && e.modelo === e.agrupacion.recomendada,
     eat: eat === null ? null : a2(eat),
     error_max: errorMax === null ? null : a2(errorMax),
     anios_utilizados: aniosUtilizados,
@@ -320,8 +406,10 @@ export function aVigenteResumen(fila: Tables<"curvas_estacionalidad">): VigenteR
   return {
     id: fila.id,
     version: fila.version,
-    modelo: esModeloCurva(fila.modelo) ? fila.modelo : "A",
+    modelo: esModeloAprobable(fila.modelo) ? fila.modelo : "A",
     origen: fila.origen === "prestada" ? "prestada" : "propia",
+    origen_curva: origenCurvaDeFila(fila),
+    curva_manual: fila.modelo === "U" ? curvaManualDeJson(fila.curva_manual) : null,
     recomendada: fila.recomendada,
     recomendada_entonces: x.recomendada_entonces,
     eat: fila.eat === null ? null : Number(fila.eat),
@@ -347,8 +435,10 @@ export function aCurvaAprobada(fila: Tables<"curvas_estacionalidad">): CurvaApro
     version: fila.version,
     estado: fila.estado === "reemplazada" ? "reemplazada" : fila.estado === "retirada" ? "retirada" : "vigente",
     corrida_id: fila.corrida_id,
-    modelo: esModeloCurva(fila.modelo) ? fila.modelo : "A",
+    modelo: esModeloAprobable(fila.modelo) ? fila.modelo : "A",
     origen: fila.origen === "prestada" ? "prestada" : "propia",
+    origen_curva: origenCurvaDeFila(fila),
+    curva_manual: fila.modelo === "U" ? curvaManualDeJson(fila.curva_manual) : null,
     recomendada: fila.recomendada,
     eat: fila.eat === null ? null : Number(fila.eat),
     error_max: fila.error_max === null ? null : Number(fila.error_max),
@@ -385,8 +475,9 @@ export function aCurvaVigente(
     nombre: agrupacion.nombre,
     curva_id: fila.id,
     version: fila.version,
-    modelo: esModeloCurva(fila.modelo) ? fila.modelo : "A",
+    modelo: esModeloAprobable(fila.modelo) ? fila.modelo : "A",
     origen: fila.origen === "prestada" ? "prestada" : "propia",
+    origen_curva: origenCurvaDeFila(fila),
     medida: "unidades",
     curva,
     acumulada: curvaAcumulada(curva),
@@ -410,6 +501,7 @@ const ETIQUETA_PARAMETRO: Partial<Record<keyof ParametrosCurvas, string>> = {
   margen_ruido: "margen sobre el ruido",
   peso_minimo_diagnostico: "peso mínimo del diagnóstico",
   umbral_liquidacion: "umbral de liquidación",
+  recencia_f: "recencia F",
 };
 
 /** Los parámetros distintos del valor por defecto, en castellano ("años excluidos: 2023"); vacío si todo es por defecto. */
@@ -437,8 +529,10 @@ export function versionesDeAgrupacion(filas: readonly Tables<"curvas_estacionali
         id: f.id,
         version: f.version,
         estado: f.estado === "reemplazada" ? "reemplazada" : f.estado === "retirada" ? "retirada" : "vigente",
-        modelo: esModeloCurva(f.modelo) ? f.modelo : "A",
+        modelo: esModeloAprobable(f.modelo) ? f.modelo : "A",
         origen: f.origen === "prestada" ? "prestada" : "propia",
+        origen_curva: origenCurvaDeFila(f),
+        curva_manual: f.modelo === "U" ? curvaManualDeJson(f.curva_manual) : null,
         recomendada: f.recomendada,
         recomendada_entonces: x.recomendada_entonces,
         eat: f.eat === null ? null : Number(f.eat),
@@ -465,7 +559,7 @@ export function mismosAniosDeAjuste(propuesta: readonly number[], vigente: reado
 
 /** Comparador vigente / propuesta: EAT entre ambas, diferencia mes a mes en puntos y el mes que más cambia. */
 export function armarComparador(
-  modelo: ModeloCurva,
+  modelo: ModeloAprobable,
   propuesta: { curva: readonly number[]; eat: number | null },
   vigente: { modelo: string; curva: readonly number[]; eat: number | null },
   comparable: boolean | null = null

@@ -343,6 +343,7 @@ describe("lista de agrupaciones v2", () => {
       con_curva_vigente: 3,
       al_dia: 1,
       al_dia_distintas: 1,
+      curvas_usuario: 0,
       obsoletas: 1,
       sin_curva: 2,
       bloqueadas: 1,
@@ -441,8 +442,8 @@ describe("vista de trabajo, versiones y apoyo", () => {
 
   const versiones: VersionesAgrupacionApi = {
     versiones: [
-      { id: "c3", version: 3, estado: "vigente", modelo: "A", origen: "propia", recomendada: true, recomendada_entonces: "A", eat: 29.1, ruido_normal: 33, curva: PLANA, nota: null, aprobada_at: "2026-10-15T15:00:00Z", usuario_nombre: "Javier", foto_id: "f3", parametros_resumen: [] },
-      { id: "c2", version: 2, estado: "reemplazada", modelo: "B", origen: "propia", recomendada: false, recomendada_entonces: "A", eat: 27.4, ruido_normal: null, curva: PLANA, nota: "2025 tuvo un mes raro", aprobada_at: "2026-10-14T15:00:00Z", usuario_nombre: "Javier", foto_id: "f2", parametros_resumen: ["años excluidos: 2023"] },
+      { id: "c3", version: 3, estado: "vigente", modelo: "A", origen: "propia", origen_curva: "sistema", curva_manual: null, recomendada: true, recomendada_entonces: "A", eat: 29.1, ruido_normal: 33, curva: PLANA, nota: null, aprobada_at: "2026-10-15T15:00:00Z", usuario_nombre: "Javier", foto_id: "f3", parametros_resumen: [] },
+      { id: "c2", version: 2, estado: "reemplazada", modelo: "B", origen: "propia", origen_curva: "sistema", curva_manual: null, recomendada: false, recomendada_entonces: "A", eat: 27.4, ruido_normal: null, curva: PLANA, nota: "2025 tuvo un mes raro", aprobada_at: "2026-10-14T15:00:00Z", usuario_nombre: "Javier", foto_id: "f2", parametros_resumen: ["años excluidos: 2023"] },
     ],
   };
 

@@ -19,6 +19,7 @@ import type {
   ParametrosCurvas,
   PrerrequisitosApi,
   RedAnioApi,
+  ResumenCurvaUsuario,
   ResumenFoto,
   TemporadaAgrupacion,
   TemporadaResultado,
@@ -290,7 +291,8 @@ export function comparadorContra(
 ): ComparadorApi | null {
   const modelo = modeloPedido ?? resultado.recomendada;
   if (!aprobada || !modelo) return null;
-  const candidata = modelo === "T" ? null : resultado.candidatas.find((c) => c.modelo === modelo);
+  // `T` también tiene candidata (con EAT desde la 06c); su curva es la de la temporada.
+  const candidata = resultado.candidatas.find((c) => c.modelo === modelo);
   const curva = modelo === "T" ? curvaDeRecomendada({ ...resultado, recomendada: "T" }, temporada) : (candidata?.curva ?? null);
   if (!curva) return null;
   const aniosAjuste = resultado.anios.filter((a) => a.en_ajuste).map((a) => a.anio);
@@ -333,8 +335,18 @@ export type FotoAprobacion = Omit<TablesInsert<"corridas_estacionalidad">, "perf
  * control de toda temporada, `red_comparable`, `efecto_atipico` de su temporada y el
  * control, y un `resumen` que basta para la obsolescencia sin releer `resultado`.
  * `null` si el modelo no corrió.
+ *
+ * 06c: con `curvaUsuario` (aprobar una `U`) el `resultado` queda TAL COMO SALIÓ del cálculo (sin candidata
+ * sintética `U`: una curva fija entre las candidatas confunde a "Ver foto" y a M7) y la curva del usuario va
+ * en `resumen.curva_usuario`.
  */
-export function armarFoto(t: ResultadoTrabajo, agrupacion: AgrupacionTrabajo, periodos: readonly PeriodoParaClase[], duracionMs: number): FotoAprobacion | null {
+export function armarFoto(
+  t: ResultadoTrabajo,
+  agrupacion: AgrupacionTrabajo,
+  periodos: readonly PeriodoParaClase[],
+  duracionMs: number,
+  curvaUsuario?: ResumenCurvaUsuario
+): FotoAprobacion | null {
   const piezas = piezasDeSalida(t.salida, agrupacion.id);
   if (!piezas || !t.salida || !t.entrada || t.hasta_periodo === null) return null;
   const hasta = t.hasta_periodo;
@@ -360,6 +372,7 @@ export function armarFoto(t: ResultadoTrabajo, agrupacion: AgrupacionTrabajo, pe
     sin_periodos_confirmado: t.parametros.sin_periodos_confirmado,
     meses_publicados: { desde: usados[0] ?? hasta, hasta, faltantes: mesesFaltantes(usados, hasta) },
     duracion_ms: duracionMs,
+    ...(curvaUsuario ? { curva_usuario: curvaUsuario } : {}),
   };
   return {
     agrupacion_estacionalidad_id: agrupacion.id,

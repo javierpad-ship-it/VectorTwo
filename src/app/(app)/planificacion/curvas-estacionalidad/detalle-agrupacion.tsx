@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, codigoDeError } from "@/lib/api-client";
 import { formatearNumero, mensajeError } from "@/lib/formato";
-import type { AprobarCurvaRespuesta, ModeloCurva, TemporadaAgrupacion, VersionAgrupacionApi, VersionesAgrupacionApi } from "@/lib/curvas/tipos-api";
+import { evaluarCurvaUsuario } from "@/lib/curvas/curva-usuario";
+import type { AprobarCurvaRespuesta, ModeloAprobable, ModeloCurva, TemporadaAgrupacion, VersionAgrupacionApi, VersionesAgrupacionApi } from "@/lib/curvas/tipos-api";
 import type { MapaColores } from "@/lib/estacionalidad/colores";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,16 +14,31 @@ import { Select } from "@/components/ui/form";
 import { BadgeAgrupacion } from "@/components/estacionalidad/badge-agrupacion";
 import { BadgeTemporada, OPCIONES_TEMPORADA, esTemporada } from "@/components/estacionalidad/temporada";
 import { GraficoCurvas } from "@/components/curvas/grafico-curvas";
+import { CLAVE_USUARIO, COLOR_USUARIO, COLORES_GML, claveGml, type SerieExtra } from "@/components/curvas/series";
 import { AlertaAccion } from "./alerta-accion";
 import { AntesDeCalcular } from "./antes-de-calcular";
 import { AprobarPanel, ID_NOTA_APROBACION } from "./aprobar-panel";
 import { CandidatasTabla } from "./candidatas-tabla";
+import { ComposicionCard } from "./composicion-card";
+import { nombreGml } from "./composicion-vista";
+import { CurvaUsuarioEditor } from "./curva-usuario-editor";
+import {
+  PARTIDA_EN_BLANCO,
+  borrarBorrador,
+  guardarBorrador,
+  leerBorrador,
+  textosEnBlanco,
+  valoresValidos,
+  type BorradorCurva,
+} from "./curva-usuario-vista";
 import { EfectoNinoDetalle, hayEfectoNino } from "./efecto-nino-detalle";
 import { NavegarAgrupaciones } from "./navegar-agrupaciones";
 import { ParametrosAgrupacion } from "./parametros-agrupacion";
 import { RedComparable } from "./red-comparable";
+import { useComposicion } from "./use-composicion";
 import { TablaAnioMes } from "./tabla-anio-mes";
 import {
+  cuerpoCalcular,
   errorDeAprobar,
   cuerpoAprobar,
   hayCambiosSinAprobar,
@@ -97,7 +113,13 @@ export function DetalleAgrupacion({
 }) {
   const t = useTrabajoAgrupacion(agrupacionId);
   const versiones = useRecurso<VersionesAgrupacionApi>(`/api/curvas/agrupaciones/${agrupacionId}/versiones`);
-  const [elegida, setElegida] = useState<ModeloCurva | null>(modeloInicial);
+  const [elegida, setElegida] = useState<ModeloAprobable | null>(modeloInicial);
+  // Mi curva (06c): las doce celdas y de dónde se partió viven aquí para que el gráfico, la tabla y Aprobar las compartan;
+  // el borrador sobrevive a recargar la página (sessionStorage, por agrupación).
+  const [borrador, setBorrador] = useState<BorradorCurva>(() => leerBorrador(agrupacionId) ?? { textos: textosEnBlanco(), partida: PARTIDA_EN_BLANCO });
+  const [usuarioAbierto, setUsuarioAbierto] = useState(() => borrador.textos.some((x) => x.trim() !== ""));
+  const [composicionAbierta, setComposicionAbierta] = useState(false);
+  const [verGml, setVerGml] = useState<string[]>([]);
   const [nota, setNota] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [errorAccion, setErrorAccion] = useState<ErrorAprobar | null>(null);
@@ -110,19 +132,32 @@ export function DetalleAgrupacion({
   const resultado = calculo?.resultado ?? null;
   const vigente = datos?.vigente ?? null;
 
-  const modelo: ModeloCurva | null = useMemo(() => {
+  // La candidata dibujada como «propuesta»: la elegida si sirve (`U` no es una candidata) o la recomendada.
+  const modeloCandidata: ModeloCurva | null = useMemo(() => {
     if (!resultado) return null;
-    const sirve = (m: ModeloCurva | null) => m !== null && resultado.candidatas.some((c) => c.modelo === m && c.curva !== null);
+    const sirve = (m: ModeloAprobable | null): m is ModeloCurva => m !== null && m !== "U" && resultado.candidatas.some((c) => c.modelo === m && c.curva !== null);
     return sirve(elegida) ? elegida : resultado.recomendada;
   }, [resultado, elegida]);
-  const candidata = useMemo(() => resultado?.candidatas.find((c) => c.modelo === modelo && c.curva !== null) ?? null, [resultado, modelo]);
+  const candidata = useMemo(() => resultado?.candidatas.find((c) => c.modelo === modeloCandidata && c.curva !== null) ?? null, [resultado, modeloCandidata]);
 
-  const propuesta = useMemo(() => (candidata?.curva && modelo ? { etiqueta: etiquetaPropuesta(modelo), curva: candidata.curva } : null), [candidata, modelo]);
+  // La curva del usuario, medida EN MUESTRA con los años de este cálculo (solo si es válida).
+  const valoresUsuario = useMemo(() => valoresValidos(borrador.textos), [borrador.textos]);
+  const evaluacion = useMemo(
+    () => (valoresUsuario && resultado ? evaluarCurvaUsuario(valoresUsuario, resultado, calculo?.temporada_curva ?? null, borrador.partida) : null),
+    [valoresUsuario, resultado, calculo?.temporada_curva, borrador.partida]
+  );
+  /** Lo que se va a aprobar: `U` solo si la eligió y su curva es válida; si no, la candidata dibujada. */
+  const modelo: ModeloAprobable | null = elegida === "U" && evaluacion ? "U" : modeloCandidata;
+
+  const propuesta = useMemo(() => (candidata?.curva && modeloCandidata ? { etiqueta: etiquetaPropuesta(modeloCandidata), curva: candidata.curva } : null), [candidata, modeloCandidata]);
+  const usuarioSerie = useMemo(() => (evaluacion ? { etiqueta: "Mi curva", curva: evaluacion.curva } : null), [evaluacion]);
+  /** La curva que se compara con la aprobada y se aprobaría: Mi curva con `U`, la propuesta con las demás. */
+  const aAprobar = modelo === "U" ? usuarioSerie : propuesta;
   const aprobada = useMemo(() => (vigente ? { etiqueta: etiquetaAprobada(vigente.version, vigente.modelo), curva: vigente.curva } : null), [vigente]);
-  const comparacion = useMemo(() => (propuesta && vigente ? compararCurvas(vigente.curva, propuesta.curva, vigente.modelo === modelo) : null), [propuesta, vigente, modelo]);
+  const comparacion = useMemo(() => (aAprobar && vigente ? compararCurvas(vigente.curva, aAprobar.curva, vigente.modelo === modelo) : null), [aAprobar, vigente, modelo]);
   const avisoNoComparable = useMemo(
-    () => (resultado ? textoNoComparable(datos?.comparador?.comparable_con_vigente, vigente?.anios_ajuste ?? null, aniosDeAjuste(resultado.anios)) : null),
-    [datos?.comparador?.comparable_con_vigente, vigente?.anios_ajuste, resultado]
+    () => (resultado && modelo !== "U" ? textoNoComparable(datos?.comparador?.comparable_con_vigente, vigente?.anios_ajuste ?? null, aniosDeAjuste(resultado.anios)) : null),
+    [datos?.comparador?.comparable_con_vigente, vigente?.anios_ajuste, resultado, modelo]
   );
   const motivosAnios = useMemo(() => {
     const m = new Map<number, string>();
@@ -139,12 +174,37 @@ export function DetalleAgrupacion({
     [calculo, parametros]
   );
 
-  const motivosNota = parametros ? motivosNotaRequerida(parametros, modelo, resultado?.recomendada ?? null) : [];
-  const motivoNoPuede = motivoNoSePuedeAprobar({ datos, recalculando: t.recalculando, desactualizado: t.desactualizado, fallo: t.error !== null, tieneCandidata: candidata !== null });
+  // Composición (carga diferida): al desplegar la tarjeta y de nuevo si cambia la huella del cálculo.
+  const cuerpoComposicion = useMemo(() => (datos && datos.datos.hasta_periodo ? cuerpoCalcular(datos.parametros, datos.datos.hasta_periodo) : null), [datos]);
+  const composicion = useComposicion({ agrupacionId, abierta: composicionAbierta, cuerpo: cuerpoComposicion, huella: datos?.huella_calculo ?? null });
+  const gmlDatos = composicion.datos?.gml;
+  const extras = useMemo<SerieExtra[]>(() => {
+    const e: SerieExtra[] = [];
+    if (evaluacion) e.push({ clave: CLAVE_USUARIO, etiqueta: "Mi curva", valores: evaluacion.curva, color: COLOR_USUARIO, trazo: "discontinuo", grosor: 3.5 });
+    verGml.forEach((id, i) => {
+      const g = gmlDatos?.find((x) => x.gml_id === id);
+      if (g?.curva) e.push({ clave: claveGml(id), etiqueta: nombreGml(g), valores: g.curva, color: COLORES_GML[i % COLORES_GML.length], grosor: 1.5 });
+    });
+    return e;
+  }, [evaluacion, verGml, gmlDatos]);
 
-  function elegirCandidata(m: ModeloCurva) {
+  const motivosNota = parametros ? motivosNotaRequerida(parametros, modelo, resultado?.recomendada ?? null) : [];
+  const motivoNoPuede = motivoNoSePuedeAprobar({ datos, recalculando: t.recalculando, desactualizado: t.desactualizado, fallo: t.error !== null, tieneCandidata: modelo === "U" ? evaluacion !== null : candidata !== null, esUsuario: modelo === "U" });
+
+  function elegirCandidata(m: ModeloAprobable) {
     setElegida(m);
-    onModelo(m);
+    if (m !== "U") onModelo(m);
+  }
+
+  /** Cambia las celdas de Mi curva (y, si cambió, el punto de partida) y guarda el borrador de la pestaña. */
+  function cambiarBorrador(textos: string[], partida?: BorradorCurva["partida"]) {
+    const sig: BorradorCurva = { textos, partida: partida ?? borrador.partida };
+    setBorrador(sig);
+    guardarBorrador(agrupacionId, sig);
+  }
+
+  function marcarGml(id: string, ver: boolean) {
+    setVerGml((prev) => (ver ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)));
   }
 
   /** Recarga lo que depende de la base: el cálculo (con lo que hay en pantalla), las versiones y la lista. */
@@ -160,7 +220,8 @@ export function DetalleAgrupacion({
   }
 
   async function aprobar() {
-    if (!datos || !resultado || !modelo || !candidata) return;
+    if (!datos || !resultado || !modelo) return;
+    if (modelo === "U" ? !evaluacion || !valoresUsuario : !candidata) return;
     setErrorAccion(null);
     setAviso(null);
     const motivos = motivosNotaRequerida(datos.parametros, modelo, resultado.recomendada);
@@ -169,7 +230,7 @@ export function DetalleAgrupacion({
       document.getElementById(ID_NOTA_APROBACION)?.focus();
       return;
     }
-    const cuerpo = cuerpoAprobar(datos, modelo, nota);
+    const cuerpo = cuerpoAprobar(datos, modelo, nota, modelo === "U" && valoresUsuario ? { valores: valoresUsuario, partida: borrador.partida } : null);
     if (!cuerpo) return;
     const nombresTiendas = new Map((calculo?.tiendas ?? []).map((x) => [x.id, x.codigo]));
     const texto = textoConfirmarAprobacion({
@@ -178,7 +239,7 @@ export function DetalleAgrupacion({
       modelo,
       recomendada: resultado.recomendada,
       anios: resultado.anios,
-      eat: candidata.eat,
+      eat: candidata?.eat ?? null,
       ruidoNormal: resultado.ruido_normal,
       versionVigente: vigente?.version ?? null,
       comparacion,
@@ -190,13 +251,23 @@ export function DetalleAgrupacion({
       hasta: cuerpo.parametros.hasta_periodo,
       avisos: [...datos.prerrequisitos.avisa, ...resultado.avisos],
       nota,
+      usuario:
+        modelo === "U" && evaluacion && valoresUsuario
+          ? { valores: valoresUsuario, eatEnMuestra: evaluacion.eat_en_muestra, parcialEnMuestra: evaluacion.eat_parcial_en_muestra, partida: borrador.partida, igualA: evaluacion.igual_a }
+          : undefined,
     });
     if (!confirm(texto)) return;
     setOcupado(true);
     try {
       const r = await api.put<AprobarCurvaRespuesta>(`/api/curvas/agrupaciones/${agrupacionId}`, cuerpo);
       setNota("");
-      setAviso(`Curva ${r.curva.modelo} aprobada como versión ${r.curva.version} de ${datos.agrupacion.nombre}.`);
+      if (modelo === "U") {
+        // La curva ya quedó guardada: el borrador de la pestaña se vacía.
+        setBorrador({ textos: textosEnBlanco(), partida: PARTIDA_EN_BLANCO });
+        borrarBorrador(agrupacionId);
+        setElegida(null);
+      }
+      setAviso(`${modelo === "U" ? "Tu curva (U)" : `Curva ${r.curva.modelo}`} aprobada como versión ${r.curva.version} de ${datos.agrupacion.nombre}.`);
       await recargarTodo();
     } catch (e) {
       const codigo = codigoDeError(e);
@@ -306,6 +377,24 @@ export function DetalleAgrupacion({
   const { agrupacion } = datos;
   const hastaVigente = vigente?.hasta_periodo ?? null;
   const redPorAnio = textoRedPorAnio(calculo?.red ?? []);
+  const tarjetaComposicion = (
+    <div id="composicion">
+      <ComposicionCard
+        abierta={composicionAbierta}
+        onAbrir={setComposicionAbierta}
+        datos={composicion.datos}
+        cargando={composicion.cargando}
+        actual={composicion.actual}
+        error={composicion.error}
+        onReintentar={composicion.reintentar}
+        curvaAgrupacion={propuesta?.curva ?? aprobada?.curva ?? null}
+        equivalenciasActivas={agrupacion.equivalencias_activas}
+        seleccionados={verGml}
+        onVer={marcarGml}
+        nombreArchivo={`composicion-${agrupacion.codigo.toLowerCase()}.csv`}
+      />
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -349,7 +438,18 @@ export function DetalleAgrupacion({
           )}
         </div>
         <p className="text-xs text-tinta-suave" aria-live="polite">
-          {formatearNumero(agrupacion.equivalencias_activas)} equivalencias activas{redPorAnio ? ` · ${redPorAnio}` : ""}
+          {formatearNumero(agrupacion.equivalencias_activas)} equivalencias activas{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setComposicionAbierta(true);
+              requestAnimationFrame(() => document.getElementById("composicion")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+            }}
+            className="font-medium text-marca-oscura underline underline-offset-2"
+          >
+            Ver composición
+          </button>
+          {redPorAnio ? ` · ${redPorAnio}` : ""}
           {" · "}
           {t.recalculando ? (
             <span className="font-medium text-marca-oscura">Recalculando…</span>
@@ -371,13 +471,15 @@ export function DetalleAgrupacion({
         deshabilitado={ocupado}
       />
 
+      {!resultado && tarjetaComposicion}
+
       {resultado && calculo && (
         <>
           <Card
             titulo="Curvas de la agrupación"
             descripcion="La aprobada vigente, la curva de cada año sobre las mismas tiendas dentro de cada año y la propuesta del sistema, en el mismo gráfico."
           >
-            <GraficoCurvas resultado={resultado} propuesta={propuesta} vigente={aprobada} temporada={calculo.temporada_curva} idTabla={ID_TABLA} />
+            <GraficoCurvas resultado={resultado} propuesta={propuesta} vigente={aprobada} temporada={calculo.temporada_curva} extras={extras} idTabla={ID_TABLA} />
           </Card>
 
           <Card titulo="Tabla año × mes" descripcion="Las cifras exactas del gráfico, la diferencia entre propuesta y aprobada, y el promedio, índice y años considerados de cada mes.">
@@ -386,11 +488,14 @@ export function DetalleAgrupacion({
               anios={resultado.anios}
               propuesta={propuesta}
               vigente={aprobada}
+              usuario={usuarioSerie}
               umbralDominante={parametros.umbral_tienda_dominante}
               nombreArchivo={`curva-${agrupacion.codigo.toLowerCase()}-anio-mes.csv`}
               motivos={motivosAnios}
             />
           </Card>
+
+          {tarjetaComposicion}
 
           <div className={`grid items-start gap-6 ${hayEfectoNino(resultado) ? "xl:grid-cols-5" : ""}`}>
             <div id="candidatas" className={hayEfectoNino(resultado) ? "xl:col-span-3" : ""}>
@@ -398,7 +503,7 @@ export function DetalleAgrupacion({
                 titulo="Lo que propone el sistema"
                 descripcion="El modelo propone y compara con backtesting (se deja un año fuera y se compara con lo que ocurrió); tú eliges con el botón de la izquierda."
               >
-                <CandidatasTabla resultado={resultado} seleccionada={modelo} onSeleccionar={elegirCandidata} avisoNoComparable={avisoNoComparable} />
+                <CandidatasTabla resultado={resultado} seleccionada={modelo} onSeleccionar={elegirCandidata} avisoNoComparable={avisoNoComparable} usuario={evaluacion} />
               </Card>
             </div>
             {hayEfectoNino(resultado) && (
@@ -407,6 +512,22 @@ export function DetalleAgrupacion({
               </div>
             )}
           </div>
+
+          <CurvaUsuarioEditor
+            abierta={usuarioAbierto}
+            onAbrir={setUsuarioAbierto}
+            textos={borrador.textos}
+            partida={borrador.partida}
+            onCambio={cambiarBorrador}
+            resultado={resultado}
+            vigente={vigente}
+            evaluacion={evaluacion}
+            referencia={propuesta && modeloCandidata ? { modelo: modeloCandidata, curva: propuesta.curva } : null}
+            candidataReferencia={candidata}
+            seleccionadaU={modelo === "U"}
+            onElegirU={() => elegirCandidata("U")}
+            deshabilitado={ocupado}
+          />
         </>
       )}
 
@@ -425,7 +546,7 @@ export function DetalleAgrupacion({
           <AprobarPanel
             datos={datos}
             modelo={modelo}
-            propuesta={propuesta}
+            propuesta={aAprobar}
             vigente={aprobada}
             comparacion={comparacion}
             avisoNoComparable={avisoNoComparable}

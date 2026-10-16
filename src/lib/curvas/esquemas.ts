@@ -2,9 +2,11 @@ import { z } from "zod";
 import { resolverTemporadas } from "./atipicos";
 import {
   ALCANCES_PERIODO,
+  MODELOS_APROBABLES,
   MODELOS_CURVA,
   PARAMETROS_POR_DEFECTO,
   TEMPORADAS_AGRUPACION,
+  TOLERANCIA_SUMA_USUARIO,
   TRATAMIENTOS_ATIPICOS,
   type ParametrosCurvas,
   type TemporadaAgrupacion,
@@ -295,6 +297,11 @@ const camposParametros = {
     .max(100, "Se pueden excluir hasta 100 tiendas.")
     .default([]),
   sin_periodos_confirmado: z.boolean("sin_periodos_confirmado debe ser verdadero o falso.").default(false),
+  recencia_f: z
+    .number("La recencia de F debe ser un número.")
+    .min(0.5, "La recencia de F va de 0.5 a 1.")
+    .max(1, "La recencia de F va de 0.5 a 1.")
+    .default(PARAMETROS_POR_DEFECTO.recencia_f),
 };
 
 /**
@@ -316,28 +323,83 @@ export type CalcularCuerpoValidado = z.infer<typeof calcularAgrupacionSchema>;
 /** Caracteres de control (`Cc`) y de dirección de texto (bidi): no tienen sitio en una nota de una línea y sirven para disfrazar texto. */
 const CARACTERES_PROHIBIDOS_NOTA = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
 
+const porcentajeUsuario = z
+  .number("Cada mes debe ser un número.")
+  .min(0, "Un mes no puede ser negativo.")
+  .max(100, "Un mes no puede pasar de 100 %.");
+
+/**
+ * 06c. La curva del usuario: doce porcentajes (de 0 a 100, hasta cuatro decimales admitidos por la pantalla)
+ * que suman 100 ± `TOLERANCIA_SUMA_USUARIO` y no son todos cero. El servidor la normaliza (`normalizarCurva`)
+ * antes de guardarla.
+ */
+export const curvaUsuarioSchema = z
+  .array(porcentajeUsuario, "La curva debe ser una lista de doce porcentajes.")
+  .length(12, "La curva debe tener doce meses.")
+  .refine((v) => Math.abs(v.reduce((s, x) => s + x, 0) - 100) <= TOLERANCIA_SUMA_USUARIO, "Los doce meses deben sumar 100 % (± 0.05).")
+  .refine((v) => v.some((x) => x > 0), "La curva no puede ser toda ceros.");
+
+const referenciaLimpia = z
+  .string("La referencia de la partida debe ser texto.")
+  .trim()
+  .max(40, "La referencia de la partida no puede superar 40 caracteres.")
+  .refine((v) => !CARACTERES_PROHIBIDOS_NOTA.test(v), "La referencia de la partida no puede llevar caracteres de control ni de dirección de texto.");
+
+/**
+ * 06c. De dónde partió el planner: `candidata` (`A`…`F`, `T`), `anio` (`aaaa`), `vigente` (`vN`), `pegado` o
+ * `en_blanco` (estos dos con `referencia: null`). Estricto: una clave desconocida o una referencia que no
+ * corresponde al tipo es `400`.
+ */
+export const partidaSchema = z.discriminatedUnion("tipo", [
+  z.object({ tipo: z.literal("candidata"), referencia: z.enum(MODELOS_CURVA, "La candidata de partida debe ser A, B, C, D, E, F o T.") }).strict(),
+  z.object({ tipo: z.literal("anio"), referencia: referenciaLimpia.regex(/^\d{4}$/, "El año de partida debe tener cuatro cifras.") }).strict(),
+  z.object({ tipo: z.literal("vigente"), referencia: referenciaLimpia.regex(/^v\d+$/, "La versión de partida debe tener la forma v2.") }).strict(),
+  z.object({ tipo: z.literal("pegado"), referencia: z.null("Una curva pegada no lleva referencia.") }).strict(),
+  z.object({ tipo: z.literal("en_blanco"), referencia: z.null("Una curva en blanco no lleva referencia.") }).strict(),
+]);
+
 /**
  * `PUT /api/curvas/agrupaciones/[id]`. `parametros` son los que vio el planner, con
  * `hasta_periodo` OBLIGATORIO (el que devolvió `calcular` en `datos.hasta_periodo`);
  * `huella_calculo` la que devolvió `calcular`; `version_vigente` la versión vigente que
- * vio (`null` si no había). Es ESTRICTO (raíz y `parametros`): una clave desconocida es `400`. Rechaza `F`, `G`, `H` y cualquier modelo fuera de `A`…`E`, `T`.
+ * vio (`null` si no había). Es ESTRICTO (raíz y `parametros`): una clave desconocida es `400`.
+ * Acepta `A`…`F`, `T` y `U` (la curva del usuario, 06c); rechaza `G`, `H` y cualquier otro modelo. Con `U`
+ * `curva_usuario` es obligatoria; con cualquier otro modelo `curva_usuario` y `partida` están prohibidas.
  */
-export const aprobarCurvaSchema = z.object({
-  modelo: z.enum(MODELOS_CURVA, "El modelo debe ser A, B, C, D, E o T."),
-  parametros: z.object({ hasta_periodo: mes, ...camposParametros }).strict(),
-  huella_calculo: z.string("La huella del cálculo debe ser texto.").regex(/^[0-9a-f]{32}$/, "La huella del cálculo no es válida: vuelve a cargar la agrupación."),
-  version_vigente: z
-    .number("version_vigente debe ser un número (o null si no había curva vigente).")
-    .int("version_vigente debe ser un número entero.")
-    .min(1, "version_vigente debe ser 1 o más (o null si no había curva vigente).")
-    .nullable(),
-  nota: z
-    .string("La nota debe ser texto.")
-    .trim()
-    .max(300, "La nota no puede superar 300 caracteres.")
-    .refine((v) => !CARACTERES_PROHIBIDOS_NOTA.test(v), "La nota no puede llevar saltos de línea ni caracteres de control o de dirección de texto.")
-    .optional(),
-}).strict();
+export const aprobarCurvaSchema = z
+  .object({
+    modelo: z.enum(MODELOS_APROBABLES, "El modelo debe ser A, B, C, D, E, F, T o U."),
+    curva_usuario: curvaUsuarioSchema.optional(),
+    partida: partidaSchema.optional(),
+    parametros: z.object({ hasta_periodo: mes, ...camposParametros }).strict(),
+    huella_calculo: z.string("La huella del cálculo debe ser texto.").regex(/^[0-9a-f]{32}$/, "La huella del cálculo no es válida: vuelve a cargar la agrupación."),
+    version_vigente: z
+      .number("version_vigente debe ser un número (o null si no había curva vigente).")
+      .int("version_vigente debe ser un número entero.")
+      .min(1, "version_vigente debe ser 1 o más (o null si no había curva vigente).")
+      .nullable(),
+    nota: z
+      .string("La nota debe ser texto.")
+      .trim()
+      .max(300, "La nota no puede superar 300 caracteres.")
+      .refine((v) => !CARACTERES_PROHIBIDOS_NOTA.test(v), "La nota no puede llevar saltos de línea ni caracteres de control o de dirección de texto.")
+      .optional(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.modelo === "U") {
+      if (v.curva_usuario === undefined) {
+        ctx.addIssue({ code: "custom", message: "Con el modelo U hay que enviar los doce valores de la curva (curva_usuario).", path: ["curva_usuario"] });
+      }
+      return;
+    }
+    if (v.curva_usuario !== undefined) {
+      ctx.addIssue({ code: "custom", message: "curva_usuario solo se envía con el modelo U.", path: ["curva_usuario"] });
+    }
+    if (v.partida !== undefined) {
+      ctx.addIssue({ code: "custom", message: "partida solo se envía con el modelo U.", path: ["partida"] });
+    }
+  });
 
 export type AprobarCurvaCuerpoValidado = z.infer<typeof aprobarCurvaSchema>;
 
@@ -359,6 +421,7 @@ export function parametrosDeCuerpo(cuerpo: Omit<CalcularCuerpoValidado, "hasta_p
     anios_excluidos: [...new Set(cuerpo.anios_excluidos)].sort((a, b) => a - b),
     tiendas_excluidas: [...new Set(cuerpo.tiendas_excluidas)].sort(),
     sin_periodos_confirmado: cuerpo.sin_periodos_confirmado,
+    recencia_f: cuerpo.recencia_f,
   };
 }
 
@@ -367,7 +430,7 @@ export function esUuid(valor: string): boolean {
   return uuidValido.safeParse(valor).success;
 }
 
-/** `?modelo=` del detalle: ausente → `null`; `A`…`E`/`T` → el modelo; otro valor → `null` con `invalido`. */
+/** `?modelo=` del detalle y de `calcular`: ausente → `null`; `A`…`F`/`T` → el modelo (la `U` no es una candidata); otro valor → `null` con `invalido`. */
 export function leerModeloConsulta(params: Pick<URLSearchParams, "get">): { modelo: (typeof MODELOS_CURVA)[number] | null; invalido: boolean } {
   const crudo = params.get("modelo");
   if (crudo === null || crudo.trim() === "") return { modelo: null, invalido: false };

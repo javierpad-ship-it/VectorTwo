@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { DetalleFotoApi, ModeloCurva, VersionAgrupacionApi, VersionesAgrupacionApi } from "@/lib/curvas/tipos-api";
+import { formatearDecimal } from "@/lib/formato";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,16 +13,19 @@ import { MiniCurva } from "@/components/curvas/mini-curva";
 import { CandidatasTabla } from "./candidatas-tabla";
 import { ComparadorCurvas } from "./comparador-curvas";
 import { TablaAnioMes } from "./tabla-anio-mes";
+import { lineasMedidaEnMuestra } from "./curva-usuario-vista";
 import { parametrosDistintos } from "./trabajo-vista";
 import { useRecurso } from "./use-recurso";
 import {
   compararCurvas,
+  esModeloCurva,
   etiquetaAprobada,
   etiquetaPropuesta,
   formatearFechaHora,
   modeloConNombre,
   motivoAnioSinDatos,
   textoEatConRuido,
+  textoPartida,
   textoAnio,
 } from "./vista";
 
@@ -87,11 +91,14 @@ export function VersionesPanel({
                   <Badge tono={ESTADO_VERSION[v.estado].tono}>{ESTADO_VERSION[v.estado].texto}</Badge>
                   <span>{modeloConNombre(v.modelo)}</span>
                   {v.origen === "prestada" && <Badge tono="marca">Prestada</Badge>}
+                  {v.origen_curva === "usuario" && <Badge tono="marca">Mi curva</Badge>}
+                  {v.origen_curva === "avanzada" && <Badge tono="neutro">Avanzada</Badge>}
                   {!v.recomendada && v.recomendada_entonces && <Badge tono="alerta">El sistema proponía {v.recomendada_entonces}</Badge>}
                 </p>
                 <p className="text-xs text-tinta-suave">
                   {formatearFechaHora(v.aprobada_at)} · {v.usuario_nombre ?? "—"}
                   {v.eat !== null && ` · ${textoEatConRuido(v.eat, v.ruido_normal)}`}
+                  {v.origen_curva === "usuario" && v.curva_manual && v.curva_manual.eat_en_muestra !== null && ` · ${textoEatConRuido(v.curva_manual.eat_en_muestra, v.ruido_normal)} (en muestra)`}
                 </p>
                 {v.nota && <p className="text-xs text-tinta">Nota: «{v.nota}»</p>}
                 {v.parametros_resumen.length > 0 && <p className="text-xs text-tinta-suave">Parámetros: {v.parametros_resumen.join(" · ")}</p>}
@@ -130,7 +137,9 @@ export function FotoModal({
   const [elegida, setElegida] = useState<ModeloCurva | null>(null);
 
   const resultado = datos?.resultado ?? null;
-  const modelo: ModeloCurva | null = elegida ?? datos?.curva_de_la_foto?.modelo ?? resultado?.recomendada ?? null;
+  // La versión del usuario (`U`) no es una candidata de la foto: se dibuja desde `curva_de_la_foto`, no desde `candidatas`.
+  const modeloDeLaFoto = datos?.curva_de_la_foto?.modelo;
+  const modelo: ModeloCurva | null = elegida ?? (modeloDeLaFoto && esModeloCurva(modeloDeLaFoto) ? modeloDeLaFoto : null) ?? resultado?.recomendada ?? null;
   const candidata = useMemo(() => resultado?.candidatas.find((c) => c.modelo === modelo && c.curva !== null) ?? null, [resultado, modelo]);
   const curvaPropuesta = modelo === "T" ? (datos?.temporada_curva?.curva_T ?? null) : (candidata?.curva ?? null);
   const propuesta = useMemo(() => (curvaPropuesta && modelo ? { etiqueta: etiquetaPropuesta(modelo), curva: curvaPropuesta } : null), [curvaPropuesta, modelo]);
@@ -149,6 +158,8 @@ export function FotoModal({
   }, [datos]);
 
   const f = datos?.foto ?? null;
+  // Una versión `U` no trae candidata `U`: su curva sale de `curva_de_la_foto` y lo medido de `foto.resumen.curva_usuario`.
+  const usuario = f?.resumen.curva_usuario ?? null;
   const modeloAnterior = f?.resumen.version_modelo !== undefined && f.resumen.version_modelo < versionModeloActual;
   const distintos = f ? parametrosDistintos(f.parametros) : [];
 
@@ -202,7 +213,20 @@ export function FotoModal({
             nombreArchivo={`foto-${datos.agrupacion.codigo.toLowerCase()}-v${version.version}-anio-mes.csv`}
             motivos={motivos}
           />
-          <CandidatasTabla resultado={resultado} seleccionada={modelo} onSeleccionar={setElegida} />
+          {usuario && (
+            <div className="space-y-1 rounded-md border border-borde bg-fondo px-3 py-2 text-sm" aria-label="Curva del usuario de esta versión">
+              <p className="font-medium text-tinta">Curva del usuario (U) · se escribió, no la calculó el sistema</p>
+              <p className="text-xs text-tinta-suave">
+                Valores ingresados (%): {usuario.valores_ingresados.map((v) => formatearDecimal(v, 1)).join(" · ")}. Partió de {textoPartida(usuario.partida)}.
+              </p>
+              {lineasMedidaEnMuestra({ ...usuario, ruido_normal: f.resumen.ruido_normal ?? null }).map((l, i) => (
+                <p key={i} className="text-xs text-tinta">
+                  {l}
+                </p>
+              ))}
+            </div>
+          )}
+          <CandidatasTabla resultado={resultado} seleccionada={modelo} onSeleccionar={(m) => m !== "U" && setElegida(m)} />
           {propuesta && (
             <div className="space-y-1">
               <h3 className="text-sm font-semibold text-tinta">Candidata frente a la curva de esta foto</h3>

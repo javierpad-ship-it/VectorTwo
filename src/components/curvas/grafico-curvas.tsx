@@ -5,7 +5,7 @@ import { calcularGeometriaCurvas, lecturaMes, type EstiloTrazo } from "@/lib/cur
 import type { AgrupacionResultado, TemporadaResultado } from "@/lib/curvas/tipos-api";
 import { Chips, type ChipItem } from "@/components/ui/chips";
 import { Select } from "@/components/ui/form";
-import { COLOR_LIQUIDACION, aniosConAtipicos, bandaParaGrafico, construirSeries, puntosLiquidacion, type ModoGrafico } from "./series";
+import { COLOR_LIQUIDACION, aniosConAtipicos, bandaParaGrafico, construirSeries, puntosLiquidacion, type ModoGrafico, type SerieExtra } from "./series";
 
 /** Trazos: discontinuo = año en curso; punteado (guion y punto) = año del Niño; continuo = el resto. */
 function dasharray(trazo: EstiloTrazo | undefined, donde: "leyenda" | "linea"): string | undefined {
@@ -31,6 +31,7 @@ export function GraficoCurvas({
   propuesta,
   vigente,
   temporada,
+  extras,
   idTabla,
 }: {
   resultado: Pick<AgrupacionResultado, "anios" | "banda">;
@@ -38,6 +39,8 @@ export function GraficoCurvas({
   propuesta: { etiqueta: string; curva: number[] } | null;
   vigente: { etiqueta: string; curva: number[] } | null;
   temporada: Pick<TemporadaResultado, "curva_T"> | null;
+  /** 06c: Mi curva y los GML marcados «ver en el gráfico» (participación; encendidos al abrir). */
+  extras?: readonly SerieExtra[];
   /** Id de la tabla año × mes que repite estas cifras. */
   idTabla: string;
 }) {
@@ -46,7 +49,7 @@ export function GraficoCurvas({
   const [mes, setMes] = useState<number | null>(null);
   const [sombreado, setSombreado] = useState<string | null>(null);
 
-  const series = useMemo(() => construirSeries(resultado.anios, { modo, propuesta, vigente, temporada }), [resultado.anios, modo, propuesta, vigente, temporada]);
+  const series = useMemo(() => construirSeries(resultado.anios, { modo, propuesta, vigente, temporada, extras }), [resultado.anios, modo, propuesta, vigente, temporada, extras]);
   const visible = (clave: string, porDefecto: boolean) => cambios[clave] ?? porDefecto;
   const activas = useMemo(() => series.filter((s) => cambios[s.clave] ?? s.porDefecto), [series, cambios]);
 

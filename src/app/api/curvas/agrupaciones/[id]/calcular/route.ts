@@ -29,10 +29,13 @@ type Params = { params: Promise<{ id: string }> };
  *           `hasta_periodo` (`aaaa-mm`) por defecto es el último mes publicado y cerrado y
  *           NUNCA se hereda de la vigente; `partir_de_vigente: true` usa los parámetros de la
  *           última aprobación (y los demás parámetros del cuerpo se ignoran).
- *   query   `?modelo=A..E|T` elige la candidata del `comparador` (por defecto la recomendada).
+ *   query   `?modelo=A..F|T` elige la candidata del `comparador` (por defecto la recomendada).
  *   200     `TrabajoAgrupacionApi`: `prerrequisitos` (con `bloquea` no vacío, `calculo: null`
  *           y nada que aprobar), `huella_calculo` (la que `PUT` devuelve), `calculo`,
- *           `vigente` / `obsoleta` / `avisos_vigente` / `comparador` y `versiones`.
+ *           `vigente` / `obsoleta` / `avisos_vigente` / `comparador` y `versiones`. Desde la 06c
+ *           `calculo.resultado.candidatas` trae `F` (con `explicacion_f` y `detalle_f`) y `T` con EAT
+ *           (`eat`, `pruebas`, `eat_parcial`, `igual_a`), y cada candidata con curva su `eat_en_muestra`;
+ *           el cuerpo acepta `recencia_f` (0.5 a 1, defecto 0.75).
  *   404     agrupación inexistente (o id no UUID) · 400 zod · 409 `hasta_periodo_sin_cargar`
  *           (el `hasta_periodo` pedido no está publicado) · 500 venta incompleta.
  */
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { datos, respuesta } = await leerCuerpo(request, calcularAgrupacionSchema);
   if (respuesta) return respuesta;
   const consulta = leerModeloConsulta(request.nextUrl.searchParams);
-  if (consulta.invalido) return error("El modelo debe ser A, B, C, D, E o T.", 400);
+  if (consulta.invalido) return error("El modelo debe ser A, B, C, D, E, F o T.", 400);
 
   const inicio = Date.now();
   const db = supabaseAdmin();

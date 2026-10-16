@@ -210,7 +210,8 @@ describe("reglas 37 y 38 · exclusiones", () => {
   it("las candidatas con anios_excluidos = [2023] coinciden con tratamiento_atipicos = descartar", () => {
     const x = resultadoDe(trabajo(ABRIGO_ID, { anios_excluidos: [2023] }), ABRIGO_ID);
     const y = resultadoDe(trabajo(ABRIGO_ID, { tratamiento_atipicos: "descartar" }), ABRIGO_ID);
-    const propias = (r: typeof x) => r.candidatas.filter((c) => c.modelo !== "T").map((c) => c.curva);
+    // `F` queda fuera: contrae hacia `T`, que no aplica `anios_excluidos` (la curva de la temporada sigue con 2023).
+    const propias = (r: typeof x) => r.candidatas.filter((c) => c.modelo !== "T" && c.modelo !== "F").map((c) => c.curva);
     expect(propias(x)).toEqual(propias(y));
   });
   it("excluir un año atípico sigue midiendo su volumen", () => {
@@ -333,7 +334,11 @@ describe("regla 56 · pruebas y comparabilidad", () => {
     const a = resultadoDe(t, ABRIGO_ID);
     expect(a.candidatas.find((c) => c.modelo === "A")!.pruebas).toBe(3);
     const sin2023 = resultadoDe(trabajo(ABRIGO_ID, { anios_excluidos: [2023] }), ABRIGO_ID);
-    for (const c of sin2023.candidatas.filter((x) => x.curva && x.modelo !== "T")) expect(c.pruebas).toBe(2);
+    for (const c of sin2023.candidatas.filter((x) => x.curva && x.modelo !== "T" && x.modelo !== "F")) expect(c.pruebas).toBe(2);
+    // Con dos años de ajuste `F` se muestra pero no compite (un solo año de entrenamiento por prueba): sin pruebas ni EAT.
+    const f = sin2023.candidatas.find((x) => x.modelo === "F")!;
+    expect(f.curva).not.toBeNull();
+    expect([f.pruebas, f.eat, f.motivo]).toEqual([0, null, "sin_backtesting_honesto"]);
     const uno = resultadoDe(trabajo(ABRIGO_ID, { anios_excluidos: [2023, 2024] }), ABRIGO_ID);
     for (const c of uno.candidatas) expect(c.pruebas).toBe(0);
   });

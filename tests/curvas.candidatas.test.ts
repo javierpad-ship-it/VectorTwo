@@ -76,14 +76,14 @@ describe("regla 11 · candidatas", () => {
 });
 
 describe("regla 12 · catálogo MODELOS", () => {
-  it("A, B, C, D, E en ese orden y T marcada prestada; nombres y descripciones no vacíos", () => {
-    expect(MODELOS.map((m) => m.codigo)).toEqual(["A", "B", "C", "D", "E", "T"]);
+  it("A, B, C, D, E, F en ese orden y T marcada prestada; nombres y descripciones no vacíos", () => {
+    expect(MODELOS.map((m) => m.codigo)).toEqual(["A", "B", "C", "D", "E", "F", "T"]);
     expect(MODELOS.filter((m) => m.prestada).map((m) => m.codigo)).toEqual(["T"]);
     for (const m of MODELOS) {
       expect(m.nombre.trim()).not.toBe("");
       expect(m.descripcion.trim()).not.toBe("");
     }
-    expect(MODELOS_PROPIOS).toEqual(["A", "B", "C", "D", "E"]);
+    expect(MODELOS_PROPIOS).toEqual(["A", "B", "C", "D", "E", "F"]);
   });
 });
 

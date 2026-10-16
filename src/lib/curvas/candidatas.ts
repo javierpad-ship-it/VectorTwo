@@ -1,9 +1,10 @@
-import { MODELOS_PROPIOS, type ModeloPropio } from "./tipos-api";
+import { MODELOS_PROPIOS, RECENCIA_F, type DetalleF, type ModeloCurva, type ModeloPropio } from "./tipos-api";
 import { MESES_ANIO, normalizarCurva, participacion, sumar } from "./anios";
+import { curvaF, rhoDe } from "./avanzada";
 
 /**
- * Candidatas propias `A` a `E` (docs/modulos/06-curvas-estacionalidad.md,
- * "Paso 2" y reglas 11 y 12b). Funciones puras. Cada una devuelve una curva de
+ * Candidatas propias `A` a `F` (docs/modulos/06-curvas-estacionalidad.md,
+ * "Paso 2" y reglas 11 y 12b; `F`, el modelo avanzado, en `avanzada.ts` y la 06c). Funciones puras. Cada una devuelve una curva de
  * doce participaciones que suma exactamente 1 (`normalizarCurva`) o `null` con
  * su motivo. SOLO reciben los años de ajuste (un año `escaso` no mueve `A`: lo
  * garantiza quien llama, y un test lo comprueba de punta a punta).
@@ -21,9 +22,20 @@ export type AnioAjuste = {
   unidades_total: number;
   /** Unidades mensuales de cada tienda de la red en ESTA agrupación (12 por tienda); solo lo usa `E`. */
   tiendas: ReadonlyArray<readonly number[]>;
+  /**
+   * 06c. El año es `normal` (sin meses atípicos): solo lo usa `rhoDe` para el ruido de `F`. Sin dato se
+   * toma como normal.
+   */
+  normal?: boolean;
 };
 
-export type CandidataCruda = { modelo: ModeloPropio; curva: number[] | null; motivo: string | null };
+export type CandidataCruda = {
+  modelo: ModeloPropio;
+  curva: number[] | null;
+  motivo: string | null;
+  /** Solo `F` con curva. */
+  detalle_f?: DetalleF;
+};
 
 function ordenarPorAnio(anios: readonly AnioAjuste[]): AnioAjuste[] {
   return [...anios].sort((a, b) => a.anio - b.anio);
@@ -116,19 +128,33 @@ export function curvaE(anios: readonly AnioAjuste[], minUnidadesAno: number): nu
   return final && normalizarCurva(final);
 }
 
-/** Las cinco candidatas propias, en el orden de desempate `A, B, C, D, E`. */
-export function calcularCandidatas(anios: readonly AnioAjuste[], minUnidadesAno: number): CandidataCruda[] {
+/**
+ * Lo que `F` necesita además de los años: el peso de la recencia, la curva de la temporada a la que
+ * contrae (`null` = sin serie: no contrae) y el ruido `ρ` entre años normales. En el backtesting los dos
+ * últimos se calculan SOLO con los años de entrenamiento de cada pliegue (sin fuga).
+ */
+export type OpcionesAvanzada = { recencia: number; t: readonly number[] | null; rho: number | null };
+
+/**
+ * Las seis candidatas propias, en el orden de desempate `A, B, C, D, E, F`. Sin `avanzada`, `F` se
+ * calcula sin `T` (`λ = 0`: la base por recencia) y con el ruido de los propios años.
+ */
+export function calcularCandidatas(anios: readonly AnioAjuste[], minUnidadesAno: number, avanzada?: OpcionesAvanzada): CandidataCruda[] {
+  const opciones = avanzada ?? { recencia: RECENCIA_F, t: null, rho: rhoDe(anios) };
+  const f = curvaF(anios, opciones.rho, opciones.t, opciones.recencia);
   const curvas: Record<ModeloPropio, number[] | null> = {
     A: curvaA(anios),
     B: curvaB(anios),
     C: curvaC(anios),
     D: curvaD(anios),
     E: curvaE(anios, minUnidadesAno),
+    F: f?.curva ?? null,
   };
   return MODELOS_PROPIOS.map((modelo) => ({
     modelo,
     curva: curvas[modelo],
     motivo: curvas[modelo] === null ? (modelo === "E" ? MOTIVO_SIN_TIENDAS_VALIDAS : "sin_anos_ajuste") : null,
+    ...(modelo === "F" && f ? { detalle_f: f.detalle } : {}),
   }));
 }
 
@@ -144,11 +170,12 @@ export const TOLERANCIA_IGUAL = 5e-6;
  * Regla 12b. Una candidata cuya curva es idéntica a la de otra ANTERIOR en el
  * orden de desempate recibe `igual_a` (la primera que la repite); la pantalla la
  * muestra como "Igual a A". Las candidatas sin curva y la primera nunca la llevan.
+ * Desde la 06c acepta también `T` (siempre la última: su igual es siempre una propia).
  */
 export function marcarIguales(
-  candidatas: ReadonlyArray<{ modelo: ModeloPropio; curva: readonly number[] | null }>
-): Map<ModeloPropio, ModeloPropio> {
-  const iguales = new Map<ModeloPropio, ModeloPropio>();
+  candidatas: ReadonlyArray<{ modelo: ModeloCurva; curva: readonly number[] | null }>
+): Map<ModeloCurva, ModeloPropio> {
+  const iguales = new Map<ModeloCurva, ModeloPropio>();
   candidatas.forEach((c, i) => {
     if (!c.curva) return;
     for (let j = 0; j < i; j++) {
@@ -157,7 +184,7 @@ export function marcarIguales(
       let max = 0;
       for (let m = 0; m < MESES_ANIO; m++) max = Math.max(max, Math.abs(c.curva[m] - otra.curva[m]));
       if (max < TOLERANCIA_IGUAL) {
-        iguales.set(c.modelo, otra.modelo);
+        iguales.set(c.modelo, otra.modelo as ModeloPropio);
         return;
       }
     }

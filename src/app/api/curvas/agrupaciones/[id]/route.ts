@@ -7,10 +7,11 @@ import { nombreDeUsuario } from "@/lib/ventas/http";
 import { errorConCodigo, leerContextoTrabajo } from "@/lib/curvas/lectura";
 import { cambiarEstadoCurva, insertarCorrida, insertarCurva, leerCurvaVigente } from "@/lib/curvas/consultas";
 import { aprobarCurvaSchema, parametrosDeCuerpo } from "@/lib/curvas/esquemas";
-import { aCurvaAprobada, extrasDeCurva, filaCurva, MENSAJE_AGRUPACION_NO_ENCONTRADA, motivoRechazoAprobar } from "@/lib/curvas/reglas";
+import { curvaManualDe, evaluarCurvaUsuario, type EvaluacionCurvaUsuario } from "@/lib/curvas/curva-usuario";
+import { aCurvaAprobada, curvaDeFila, extrasDeCurva, filaCurva, MENSAJE_AGRUPACION_NO_ENCONTRADA, motivoRechazoAprobar } from "@/lib/curvas/reglas";
 import { VERSION_MODELO } from "@/lib/curvas/modelo";
 import { armarFoto, piezasDeSalida, prepararTrabajo } from "@/lib/curvas/trabajo";
-import type { AprobarCurvaRespuesta, RetirarCurvaRespuesta } from "@/lib/curvas/tipos-api";
+import type { AprobarCurvaRespuesta, PartidaCurvaUsuario, RetirarCurvaRespuesta } from "@/lib/curvas/tipos-api";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -18,10 +19,11 @@ type Params = { params: Promise<{ id: string }> };
  * APRUEBA UNA curva para la agrupación (`requirePlanner`; no hay aprobación en
  * bloque). Contrato para el frontend (docs/modulos/06b…):
  *
- *   cuerpo  `AprobarCurvaCuerpo`: `modelo`, `parametros` (los que vio el planner, con
+ *   cuerpo  `AprobarCurvaCuerpo`: `modelo` (`A`…`F`, `T` o `U`), `parametros` (los que vio el planner, con
  *           `hasta_periodo` OBLIGATORIO: el de `datos.hasta_periodo` de `calcular`),
  *           `huella_calculo` (la de `calcular`), `version_vigente` (la versión vigente que vio, o
- *           `null`) y `nota`.
+ *           `null`) y `nota`. Con `U` (la curva del usuario, 06c) además `curva_usuario` (doce porcentajes
+ *           que suman 100 ± 0.05) y, opcional, `partida`; con cualquier otro modelo ninguno de los dos.
  *   201     `{ curva, foto_id }` (`AprobarCurvaRespuesta`). El servidor recalcula con esos
  *           parámetros, guarda la FOTO en `corridas_estacionalidad`, pasa la vigente a
  *           `reemplazada` y crea la versión siguiente como `vigente`.
@@ -32,6 +34,11 @@ type Params = { params: Promise<{ id: string }> };
  *           `vigente_cambiada` · `sin_cambio` · `nota_requerida` (modelo distinto de la recomendada,
  *           años o tiendas excluidos, o tratamiento del Niño distinto de `auto`, sin nota). Al guardar,
  *           `vigente_cambiada` también si otro usuario movió la vigente entre la lectura y el cambio.
+ *           Con `U`, en este orden: `hasta_periodo_sin_cargar` · `agrupacion_inactiva` · `prerrequisitos` (incluido
+ *           `sin_venta`: con cero venta no se aprueba) · `datos_cambiados` · `vigente_cambiada` · `sin_cambio`
+ *           (misma huella y mismos doce valores normalizados que la vigente `U`) · `nota_requerida` (siempre).
+ *           NO aplican `sin_curva_posible` ni `candidata_no_disponible`. La fila queda con `origen_curva "usuario"`,
+ *           `eat` y `error_max` nulos y lo medido en muestra en `curva_manual`; la foto lleva `resumen.curva_usuario`.
  *
  * Sin transacción: si el alta falla tras reemplazar, se intenta devolver la anterior a
  * vigente; una foto sin curva es basura inofensiva (nadie la referencia).
@@ -51,15 +58,21 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (contexto.respuesta) return contexto.respuesta;
   if (!contexto.data) return error(MENSAJE_AGRUPACION_NO_ENCONTRADA, 404);
   const { insumos, vigente, ultima_version } = contexto.data;
-  if (!insumos.agrupacion.activo) {
-    return errorConCodigo("La agrupación está inactiva: actívala antes de aprobarle una curva.", 409, "agrupacion_inactiva");
-  }
-
   const parametros = parametrosDeCuerpo(datos.parametros);
+  const esUsuario = datos.modelo === "U";
+  const inactiva = () => errorConCodigo("La agrupación está inactiva: actívala antes de aprobarle una curva.", 409, "agrupacion_inactiva");
+  // Con A…F y T, `agrupacion_inactiva` va antes que `hasta_periodo_sin_cargar` (06b); con `U` el orden de la 06c es el inverso.
+  if (!esUsuario && !insumos.agrupacion.activo) return inactiva();
   const preparado = prepararTrabajo(insumos, parametros, datos.parametros.hasta_periodo);
   if (preparado.rechazo) return errorConCodigo(preparado.rechazo.mensaje, preparado.rechazo.status, preparado.rechazo.codigo);
+  if (esUsuario && !insumos.agrupacion.activo) return inactiva();
   const trabajo = preparado.trabajo;
   const piezas = piezasDeSalida(trabajo.salida, id);
+
+  // La curva del usuario se mide aquí, en el servidor, con la misma vara que las candidatas (en muestra).
+  const partida: PartidaCurvaUsuario = datos.partida ?? { tipo: "en_blanco", referencia: null };
+  const evaluacion: EvaluacionCurvaUsuario | undefined =
+    esUsuario && datos.curva_usuario && piezas ? evaluarCurvaUsuario(datos.curva_usuario, piezas.resultado, piezas.temporada, partida) : undefined;
 
   const rechazo = motivoRechazoAprobar({
     agrupacion: { id: insumos.agrupacion.id, activo: insumos.agrupacion.activo },
@@ -69,7 +82,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
     modelo: datos.modelo,
     huella_enviada: datos.huella_calculo,
     huella_actual: trabajo.huella_calculo,
-    vigente: vigente ? { version: vigente.version, modelo: vigente.modelo, huella_calculo: extrasDeCurva(vigente.anios_utilizados).huella_calculo } : null,
+    vigente: vigente
+      ? { version: vigente.version, modelo: vigente.modelo, huella_calculo: extrasDeCurva(vigente.anios_utilizados).huella_calculo, curva: curvaDeFila(vigente) }
+      : null,
+    curva_usuario: datos.curva_usuario ?? null,
     version_vigente: datos.version_vigente,
     parametros,
     nota: datos.nota,
@@ -77,7 +93,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (rechazo) return rechazo.status === 404 ? error(rechazo.mensaje, 404) : errorConCodigo(rechazo.mensaje, 409, rechazo.codigo);
   if (!piezas || trabajo.hasta_periodo === null) return errorConCodigo("Esta agrupación no tiene curva posible.", 409, "sin_curva_posible");
 
-  const foto = armarFoto(trabajo, insumos.agrupacion, insumos.periodos, Date.now() - inicio);
+  const foto = armarFoto(trabajo, insumos.agrupacion, insumos.periodos, Date.now() - inicio, evaluacion ? { ...curvaManualDe(evaluacion), curva: evaluacion.curva } : undefined);
   if (!foto) return errorConCodigo("Esta agrupación no tiene curva posible.", 409, "sin_curva_posible");
   const usuario = { id: perfil.id, nombre: nombreDeUsuario(perfil) };
 
@@ -87,6 +103,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     agrupacion: piezas.resultado,
     temporada: piezas.temporada,
     modelo: datos.modelo,
+    curva_usuario: evaluacion,
     corrida_id: "",
     red_huella: trabajo.red_huella,
     cargas_huella: trabajo.cargas_huella,

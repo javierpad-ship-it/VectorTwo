@@ -33,7 +33,18 @@ function ListaMotivos({ motivos, tono }: { motivos: readonly Motivo[]; tono: "al
  * ninguna tienda en las mismas tiendas; avisa lo demás (aperturas dudosas, agrupaciones sin curva, curvas obsoletas,
  * tiendas nuevas sin venta esperada o sin referente…). Se abre sola si algo bloquea.
  */
-export function AntesDeProyectar({ datos, prerrequisitos, abierta }: { datos: DatosProyeccionApi; prerrequisitos: PrerrequisitosProyeccionApi; abierta?: boolean }) {
+export function AntesDeProyectar({
+  datos,
+  prerrequisitos,
+  abierta,
+  curvasUsuario = 0,
+}: {
+  datos: DatosProyeccionApi;
+  prerrequisitos: PrerrequisitosProyeccionApi;
+  abierta?: boolean;
+  /** 06c: agrupaciones cuya curva vigente es del usuario (`origen_curva = "usuario"`); nunca cuentan como obsoletas. */
+  curvasUsuario?: number;
+}) {
   const { bloquea, avisa } = prerrequisitos;
   const abrir = abierta ?? bloquea.length > 0;
   return (
@@ -65,6 +76,11 @@ export function AntesDeProyectar({ datos, prerrequisitos, abierta }: { datos: Da
               {formatearNumero(datos.curvas_vigentes)}
               {datos.curvas_obsoletas > 0 && <span className="text-alerta"> · {datos.curvas_obsoletas} obsoletas</span>}
             </dd>
+            {curvasUsuario > 0 && (
+              <dd className="mt-0.5 text-xs text-tinta-suave">
+                {plural(curvasUsuario, "agrupación con curva del usuario", "agrupaciones con curva del usuario")} (no se marcan obsoletas; vigilarlas desde Curvas de estacionalidad)
+              </dd>
+            )}
           </div>
           <div>
             <dt className="text-xs text-tinta-suave">Agrupaciones con venta sin curva</dt>

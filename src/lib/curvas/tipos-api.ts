@@ -237,6 +237,10 @@ export const MIN_MESES_VALIDACION_PARCIAL = 6;
 export const UMBRAL_LIQUIDACION = 0.15;
 export const MESES_TIENDA_NUEVA = 0;
 export const UMBRAL_TIENDA_DOMINANTE = 0.35;
+/** 06c: peso de la recencia de `F` ("cada año pesa un 25 % menos que el siguiente"); rango 0,5 a 1. */
+export const RECENCIA_F = 0.75;
+/** 06c: la suma de los doce porcentajes de la curva del usuario puede apartarse de 100 en este valor (puntos). */
+export const TOLERANCIA_SUMA_USUARIO = 0.05;
 
 export const CLASES_ANIO = ["normal", "con_huecos", "atipico_completo", "incompleto", "en_curso"] as const;
 /** Clase de un año para el modelo (distinta de `ClaseAnio`, que es el contrato de M7: normal/atipico). */
@@ -307,12 +311,36 @@ export const MOTIVOS_OBSOLETA = [
 ] as const;
 export type MotivoObsoleta = (typeof MOTIVOS_OBSOLETA)[number];
 
-export const MODELOS_PROPIOS = ["A", "B", "C", "D", "E"] as const;
+/**
+ * Candidatas propias en el orden de desempate (`F`, el modelo avanzado de la 06c, va al
+ * final). `T` (prestada) también compite desde la 06c, con backtesting honesto.
+ */
+export const MODELOS_PROPIOS = ["A", "B", "C", "D", "E", "F"] as const;
 export type ModeloPropio = (typeof MODELOS_PROPIOS)[number];
-export const MODELOS_CURVA = ["A", "B", "C", "D", "E", "T"] as const;
+/** Lo que `calcular` devuelve en `candidatas` y lo que `?modelo=` admite. */
+export const MODELOS_CURVA = [...MODELOS_PROPIOS, "T"] as const;
 export type ModeloCurva = (typeof MODELOS_CURVA)[number];
+/** 06c: la curva que escribe el planner. NO es una candidata del sistema (nunca está en `candidatas` ni en `?modelo=`). */
+export const MODELO_USUARIO = "U" as const;
+/** Lo que se puede aprobar (`PUT`) y lo que lleva una curva guardada: `A`…`F`, `T` y `U`. */
+export const MODELOS_APROBABLES = [...MODELOS_CURVA, MODELO_USUARIO] as const;
+export type ModeloAprobable = (typeof MODELOS_APROBABLES)[number];
 
-/** Catálogo de candidatas, en orden de desempate (`T` nunca compite). */
+/** `true` para `A`…`F`, `T` y `U` (servidor y pantalla). */
+export function esModeloAprobable(valor: unknown): valor is ModeloAprobable {
+  return typeof valor === "string" && (MODELOS_APROBABLES as readonly string[]).includes(valor);
+}
+
+/** 06c: quién produjo la curva (columna `curvas_estacionalidad.origen_curva`, con checks de coherencia con `modelo`). */
+export const ORIGENES_CURVA = ["sistema", "avanzada", "usuario"] as const;
+export type OrigenCurva = (typeof ORIGENES_CURVA)[number];
+
+/** `U` → `usuario`, `F` → `avanzada`, el resto → `sistema` (la misma regla que los checks de la base). */
+export function origenCurvaDe(modelo: ModeloAprobable): OrigenCurva {
+  return modelo === "U" ? "usuario" : modelo === "F" ? "avanzada" : "sistema";
+}
+
+/** Catálogo de candidatas, en orden de desempate (`T` al final; `U` no es una candidata). */
 export type DescripcionModelo = { codigo: ModeloCurva; nombre: string; descripcion: string; prestada: boolean };
 export const MODELOS: readonly DescripcionModelo[] = [
   { codigo: "A", nombre: "Promedio simple", descripcion: "Media de la participación de cada año de ajuste.", prestada: false },
@@ -320,8 +348,21 @@ export const MODELOS: readonly DescripcionModelo[] = [
   { codigo: "C", nombre: "Ponderado por recencia", descripcion: "Los años recientes pesan más (1, 2, 3…).", prestada: false },
   { codigo: "D", nombre: "Suavizada", descripcion: "Promedio simple con media móvil de tres meses, para quitar picos de un solo mes.", prestada: false },
   { codigo: "E", nombre: "Promedio de tiendas", descripcion: "Media simple de las curvas de cada tienda de la red: contraste frente a la tienda dominante.", prestada: false },
-  { codigo: "T", nombre: "Curva de la temporada", descripcion: "Curva agregada de todas las agrupaciones de su temporada (prestada, para agrupaciones con pocos años).", prestada: true },
+  {
+    codigo: "F",
+    nombre: "Modelo avanzado",
+    descripcion: "Los años recientes pesan más y la curva se acerca a la de su temporada tanto más cuanto menos datos o más ruido tenga la agrupación.",
+    prestada: false,
+  },
+  { codigo: "T", nombre: "Curva de la temporada", descripcion: "Curva agregada de todas las agrupaciones de su temporada (prestada; compite con backtesting honesto).", prestada: true },
 ];
+
+/** La curva del usuario, para quien la muestre junto al catálogo (no está en `MODELOS`). */
+export const DESCRIPCION_MODELO_USUARIO = {
+  codigo: MODELO_USUARIO,
+  nombre: "Mi curva",
+  descripcion: "Doce participaciones escritas por el planner; se mide contra los años en muestra y no se vuelve obsoleta sola.",
+} as const;
 
 export const MOTIVOS_RECOMENDACION = ["sin_evidencia", "menor_error", "prestada"] as const;
 export type MotivoRecomendacion = (typeof MOTIVOS_RECOMENDACION)[number];
@@ -387,6 +428,8 @@ export type ParametrosCurvas = {
   tiendas_excluidas: string[];
   /** "Confirmo que esta temporada no tiene años atípicos": levanta `periodos_temporada_faltantes`. */
   sin_periodos_confirmado: boolean;
+  /** 06c: `0,5` a `1` (defecto `0,75`). Peso de la recencia de `F`: cada año pesa `recencia_f` veces el siguiente. Entra en la huella y en la foto. */
+  recencia_f: number;
 };
 
 export const PARAMETROS_POR_DEFECTO: Readonly<ParametrosCurvas> = {
@@ -405,6 +448,7 @@ export const PARAMETROS_POR_DEFECTO: Readonly<ParametrosCurvas> = {
   anios_excluidos: [],
   tiendas_excluidas: [],
   sin_periodos_confirmado: false,
+  recencia_f: RECENCIA_F,
 };
 
 /**
@@ -586,7 +630,10 @@ export type CandidataApi = {
   modelo: ModeloCurva;
   /** `null` si no está disponible (ver `motivo`). */
   curva: number[] | null;
-  /** `sin_tiendas_validas` (E), `sin_anos_ajuste`, `sin_anos_utilizables` (T). */
+  /**
+   * `sin_tiendas_validas` (E), `sin_anos_ajuste`, `sin_anos_utilizables` (T) y, con curva pero sin EAT,
+   * `sin_backtesting_honesto` (F con dos años de ajuste: un solo año de entrenamiento por prueba).
+   */
   motivo: string | null;
   eat: number | null;
   error_max: number | null;
@@ -599,11 +646,54 @@ export type CandidataApi = {
   igual_a: ModeloPropio | null;
   /** `T` (curva de la temporada) siempre. */
   prestada: boolean;
+  /**
+   * 06c. EAT EN MUESTRA: la curva completa contra la participación usada de cada año de ajuste
+   * (promedio). Para comparar peras con peras junto a la de la curva del usuario (`U`); `null` sin
+   * curva o sin años de ajuste. La `eat` de arriba sigue siendo FUERA de muestra (backtesting).
+   */
+  eat_en_muestra?: number | null;
+  /** 06c. Solo `F` con curva: cómo se armó, en lenguaje del planner. */
+  explicacion_f?: ExplicacionF | null;
+  /** 06c. Solo `F` con curva: con esto y los años se reproduce paso a paso. */
+  detalle_f?: DetalleF | null;
+};
+
+/** Un año de `F` con el peso que recibe (suman 1, año ascendente). */
+export type PesoAnioF = { anio: number; peso: number };
+
+/** Lo que `F` hizo en un pliegue del backtesting: solo con los años de entrenamiento (sin fuga). */
+export type PliegueF = { anio_prueba: number; rho: number; lambda: number; eat: number };
+
+/**
+ * 06c. Reproducción paso a paso de `F`: pesos por recencia, `rho` (ruido entre años normales),
+ * `delta` (EAT de la base frente a `T`), `lambda` (contracción hacia `T`), la `T` usada, la
+ * curva base (antes de contraer) y la contraída (= la curva de `F`).
+ */
+export type DetalleF = {
+  pesos_anios: PesoAnioF[];
+  rho: number;
+  /** `null` sin `T`. */
+  delta: number | null;
+  lambda: number;
+  t_usada: number[] | null;
+  base: number[];
+  contraida: number[];
+  por_pliegue: PliegueF[];
+};
+
+/** 06c. `detalle_f` en palabras del planner: `frase` es lo que se muestra debajo de la fila `F`. */
+export type ExplicacionF = {
+  anios: PesoAnioF[];
+  rho: number;
+  delta: number | null;
+  lambda: number;
+  frase: string;
+  por_pliegue: PliegueF[];
 };
 
 export type ComparacionRecomendacion = {
-  /** La mejor por EAT entre las propias con backtesting. */
-  mejor: ModeloPropio;
+  /** La mejor por EAT entre las propias con backtesting y `T` (que compite desde la 06c). */
+  mejor: ModeloPropio | "T";
   eat_mejor: number;
   eat_a: number | null;
   margen: number;
@@ -726,10 +816,17 @@ export type EfectoAtipicoCorrida = {
 //        `vigente_cambiada`, `sin_curva_posible`, `candidata_no_disponible`,
 //        `sin_cambio`, `nota_requerida`, `sin_datos`, `hasta_periodo_sin_cargar`.
 //
-// Orden de los 409 de `PUT /api/curvas/agrupaciones/[id]` (el primero que aplica gana):
+// Orden de los 409 de `PUT /api/curvas/agrupaciones/[id]` con `A`…`F` y `T` (el primero que aplica gana):
 //   `agrupacion_inactiva` · `hasta_periodo_sin_cargar` · `prerrequisitos` · `sin_curva_posible` ·
 //   `candidata_no_disponible` · `datos_cambiados` · `vigente_cambiada` · `sin_cambio` · `nota_requerida`;
 //   y, al guardar, `vigente_cambiada` otra vez si alguien movió la vigente entre la lectura y el cambio de estado.
+//
+// Orden de los 409 con `modelo = "U"` (06c; NO aplican `sin_curva_posible` ni `candidata_no_disponible`: la
+// curva del usuario se aprueba aunque el sistema no tenga ninguna candidata calculable, pero nunca con cero venta):
+//   `hasta_periodo_sin_cargar` · `agrupacion_inactiva` · `prerrequisitos` (incluido `sin_venta`) ·
+//   `datos_cambiados` · `vigente_cambiada` · `sin_cambio` (vigente `U` con la misma huella y los mismos doce
+//   valores normalizados) · `nota_requerida` (SIEMPRE: "aprobaste tu propia curva (U)").
+//   (Con `A`…`F` y `T` la inactiva va antes que `hasta_periodo_sin_cargar`; solo se nota si ambas ocurren a la vez.)
 
 export const CODIGOS_ERROR_CURVAS = [
   "agrupacion_inactiva",
@@ -779,7 +876,15 @@ export type ResumenFoto = {
   sin_periodos_confirmado?: boolean;
   meses_publicados?: { desde: string; hasta: string; faltantes: string[] };
   duracion_ms?: number;
+  /**
+   * 06c. Solo en la foto de una curva del usuario (`U`): los doce valores, de dónde partió, lo medido EN MUESTRA
+   * y `igual_a`. El `resultado` de la foto queda tal como salió del cálculo (sin candidata `U`).
+   */
+  curva_usuario?: ResumenCurvaUsuario;
 };
+
+/** 06c. Para quienes reproducen la foto de una `U`: `curva_manual` más la curva normalizada que se guardó (suma 1). */
+export type ResumenCurvaUsuario = CurvaManualApi & { curva: number[] };
 
 export type FotoResumenApi = {
   id: string;
@@ -797,10 +902,16 @@ export type FotoResumenApi = {
 export type VigenteResumenApi = {
   id: string;
   version: number;
-  modelo: ModeloCurva;
+  /** `A`…`F`, `T` o `U` (06c). */
+  modelo: ModeloAprobable;
   origen: "propia" | "prestada";
+  /** 06c. `sistema` (A…E, T), `avanzada` (F) o `usuario` (U). */
+  origen_curva: OrigenCurva;
+  /** 06c. Solo con `modelo = "U"`: lo escrito y lo medido en muestra; `null` en el resto. */
+  curva_manual: CurvaManualApi | null;
+  /** `false` siempre en una `U` (nunca entra en la recomendación). */
   recomendada: boolean;
-  /** La candidata que el sistema recomendaba al aprobar; `null` en curvas de la 0.9.6. */
+  /** La candidata que el sistema recomendaba al aprobar; `null` en curvas de la 0.9.6 o si no había recomendación. */
   recomendada_entonces: ModeloCurva | null;
   eat: number | null;
   /** Ruido entre años normales al aprobar (el de `resumen.ruido_normal` de la foto), siempre junto al EAT; `null` = no medible o curva de la 0.9.6. */
@@ -826,7 +937,7 @@ export type VigenteResumenApi = {
 export type MotivoObsoletaApi = { codigo: MotivoObsoleta; detalle: string };
 export type ObsoletaApi = { motivos: MotivoObsoletaApi[] };
 
-export const CODIGOS_AVISO_VIGENTE = ["datos_posteriores", "modelo_anterior", "temporada_recompuesta"] as const;
+export const CODIGOS_AVISO_VIGENTE = ["datos_posteriores", "modelo_anterior", "temporada_recompuesta", "cambio_desde_aprobacion"] as const;
 /**
  * Avisos de una curva vigente que NO la vuelven obsoleta: `datos_posteriores`
  * ("hay 1 mes publicado después de 2026-08; la curva sigue al día hasta ese mes"),
@@ -835,14 +946,24 @@ export const CODIGOS_AVISO_VIGENTE = ["datos_posteriores", "modelo_anterior", "t
  * agrupación de su temporada; solo avisa si la curva es propia, si es prestada `T`
  * es un motivo de obsolescencia).
  */
-export type AvisoVigenteApi = { codigo: (typeof CODIGOS_AVISO_VIGENTE)[number]; detalle: string };
+export type AvisoVigenteApi = {
+  codigo: (typeof CODIGOS_AVISO_VIGENTE)[number];
+  detalle: string;
+  /**
+   * 06c. Con `cambio_desde_aprobacion` (curva del usuario): el motivo que en una curva del sistema habría
+   * sido obsolescencia, y que aquí solo informa. `detalle` es el mismo texto del motivo
+   * ("mes publicado después y ya cerrado: 2026-09"); la pantalla puede anteponer "desde que la aprobaste: ".
+   */
+  motivo?: MotivoObsoleta;
+};
 
-export const ESTADOS_AGRUPACION = ["sin_curva", "al_dia", "al_dia_distinta", "obsoleta", "inactiva_con_curva"] as const;
+export const ESTADOS_AGRUPACION = ["sin_curva", "al_dia", "al_dia_distinta", "obsoleta", "curva_usuario", "inactiva_con_curva"] as const;
 /**
  * Estado de una agrupación en la lista (sin corrida): `sin_curva`; `al_dia` (vigente,
  * sin motivos y se aprobó la recomendada); `al_dia_distinta` (vigente, sin motivos,
  * pero se aprobó una candidata distinta de la recomendada); `obsoleta` (con motivo);
- * `inactiva_con_curva` (gana a los demás).
+ * `curva_usuario` (06c: la vigente es una `U`; NUNCA es `obsoleta`: los cambios de datos van como aviso
+ * `cambio_desde_aprobacion`); `inactiva_con_curva` (gana a los demás).
  */
 export type EstadoAgrupacion = (typeof ESTADOS_AGRUPACION)[number];
 
@@ -913,11 +1034,14 @@ export type ResumenEstadoCurvas = {
   por_temporada: Record<TemporadaAgrupacion, number>;
   /** Agrupaciones activas que siguen en `todo_el_ano` (hay que revisarlas). */
   sin_revisar_toda_temporada: number;
-  /** `al_dia + al_dia_distintas + obsoletas` (solo activas). */
+  /** `al_dia + al_dia_distintas + obsoletas + curvas_usuario` (solo activas). */
   con_curva_vigente: number;
   al_dia: number;
   al_dia_distintas: number;
+  /** Nunca incluye las curvas del usuario. */
   obsoletas: number;
+  /** 06c. Activas cuya vigente es una curva del usuario (`U`); se cuentan aparte de `al_dia` y `obsoletas`. */
+  curvas_usuario: number;
   /** Activas sin curva vigente: `sin_curva = bloqueadas_sin_curva + calculables_sin_curva`. */
   sin_curva: number;
   /** Activas (con o sin curva) con algún prerrequisito bloqueante evaluable sin calcular. */
@@ -960,8 +1084,11 @@ export type AgrupacionTrabajoApi = {
 };
 
 export type ComparadorApi = {
-  /** Modelo de la propuesta comparada (por defecto la recomendada; `?modelo=` elige otro). */
-  modelo: ModeloCurva;
+  /**
+   * Modelo de la propuesta comparada (por defecto la recomendada; `?modelo=` elige otro). `U` solo en
+   * "Ver foto" de una versión del usuario, que se compara consigo misma (`eat_vs_vigente = 0`).
+   */
+  modelo: ModeloAprobable;
   propuesta: number[];
   vigente: number[];
   /** EAT entre ambas, en puntos. */
@@ -1040,9 +1167,14 @@ export type CurvaAprobadaApi = {
   estado: "vigente" | "reemplazada" | "retirada";
   /** La foto de la aprobación (`corridas_estacionalidad.id`). */
   corrida_id: string;
-  modelo: ModeloCurva;
+  modelo: ModeloAprobable;
   origen: "propia" | "prestada";
+  /** 06c. */
+  origen_curva: OrigenCurva;
+  /** 06c. Solo con `modelo = "U"`. */
+  curva_manual: CurvaManualApi | null;
   recomendada: boolean;
+  /** Fuera de muestra; `null` en una `U` y en una `F` sin backtesting honesto. */
   eat: number | null;
   error_max: number | null;
   medida: MedidaCurva;
@@ -1054,7 +1186,15 @@ export type CurvaAprobadaApi = {
 
 /** Cuerpo de `PUT /api/curvas/agrupaciones/[id]`. */
 export type AprobarCurvaCuerpo = {
-  modelo: ModeloCurva;
+  /** `A`…`F`, `T` o `U` (06c). */
+  modelo: ModeloAprobable;
+  /**
+   * 06c. Con `modelo = "U"` es OBLIGATORIA (doce porcentajes de 0 a 100 que suman 100 ± 0,05, no todos cero);
+   * con cualquier otro modelo está PROHIBIDA (`400` en los dos sentidos).
+   */
+  curva_usuario?: number[];
+  /** 06c. Solo con `U` (sin ella, `{ tipo: "en_blanco", referencia: null }`); `400` con otro modelo. */
+  partida?: PartidaCurvaUsuario;
   /** Los que vio el planner; `hasta_periodo` es OBLIGATORIO (el que devolvió `calcular`: nunca se hereda ni se infiere). */
   parametros: ParametrosCurvas & { hasta_periodo: string };
   /** La `huella_calculo` que devolvió `calcular` con esos parámetros. */
@@ -1063,7 +1203,7 @@ export type AprobarCurvaCuerpo = {
   version_vigente: number | null;
   /**
    * Obligatoria (`409 nota_requerida`) si `modelo` no es la recomendada, o hay
-   * `anios_excluidos` / `tiendas_excluidas`, o `tratamiento_atipicos` no es `auto`.
+   * `anios_excluidos` / `tiendas_excluidas`, o `tratamiento_atipicos` no es `auto`; con `U`, SIEMPRE.
    */
   nota?: string;
 };
@@ -1079,8 +1219,12 @@ export type VersionAgrupacionApi = {
   id: string;
   version: number;
   estado: "vigente" | "reemplazada" | "retirada";
-  modelo: ModeloCurva;
+  modelo: ModeloAprobable;
   origen: "propia" | "prestada";
+  /** 06c. */
+  origen_curva: OrigenCurva;
+  /** 06c. Solo con `modelo = "U"`. */
+  curva_manual: CurvaManualApi | null;
   recomendada: boolean;
   recomendada_entonces: ModeloCurva | null;
   eat: number | null;
@@ -1150,8 +1294,10 @@ export type CurvaVigenteApi = {
   nombre: string;
   curva_id: string;
   version: number;
-  modelo: ModeloCurva;
+  modelo: ModeloAprobable;
   origen: "propia" | "prestada";
+  /** 06c (aditivo). */
+  origen_curva: OrigenCurva;
   medida: MedidaCurva;
   /** Doce participaciones (suman 1). */
   curva: number[];
@@ -1161,4 +1307,131 @@ export type CurvaVigenteApi = {
   /** La foto de la aprobación. */
   corrida_id: string;
   aprobada_at: string;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 06c · Composición de la agrupación, curva del usuario `U` y modelo avanzado `F`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Rutas nuevas y ampliadas (docs/modulos/06c-curvas-composicion-y-curva-usuario.md):
+//   POST /api/curvas/agrupaciones/[id]/composicion   `requirePlanner`, lectura con cuerpo (NUNCA escribe).
+//        cuerpo `CalcularAgrupacionCuerpo` (el mismo de `calcular`) · 200 `ComposicionAgrupacionApi`
+//        · 404 agrupación · 400 zod · 409 `hasta_periodo_sin_cargar` · 409 `sin_datos` (ningún mes publicado y
+//        cerrado) · 409 `datos_cambiados` (se publicó una carga mientras se leía) · 500.
+//        Carga diferida (no entra en `calcular`), caché y semáforo propios.
+//   POST /api/curvas/agrupaciones/[id]/calcular      acepta `recencia_f`; `resultado.candidatas` trae `F`
+//        (con `explicacion_f` y `detalle_f`) y `T` con EAT; `?modelo=F` y `?modelo=T` valen para el comparador.
+//   PUT  /api/curvas/agrupaciones/[id]               aprueba `A`…`F`, `T` o `U` (ver `AprobarCurvaCuerpo` y el orden de los 409).
+//   GET  /api/curvas · …/versiones · /api/curvas/corridas/[id]/agrupaciones/[agrupacionId] · /api/curvas/vigentes:
+//        `modelo` puede ser `U`/`F`; suman `origen_curva` y `curva_manual`; estado `curva_usuario`; aviso
+//        `cambio_desde_aprobacion`; `resumen.curvas_usuario`.
+
+/** De dónde partió el planner para escribir su curva (`curva_manual.partida` y `PUT.partida`). */
+export type PartidaCurvaUsuario =
+  | { tipo: "candidata"; referencia: ModeloCurva }
+  | { tipo: "anio"; referencia: string }
+  | { tipo: "vigente"; referencia: string }
+  | { tipo: "pegado"; referencia: null }
+  | { tipo: "en_blanco"; referencia: null };
+
+/**
+ * Contenido de `curvas_estacionalidad.curva_manual` (solo en la curva del usuario). Todo lo medido es EN
+ * MUESTRA: la curva se escribió viendo esos mismos años (las candidatas se miden fuera de muestra). `eat` y
+ * `error_max` de la fila quedan `null` por eso.
+ */
+export type CurvaManualApi = {
+  /** Porcentajes tal como se enviaron (hasta cuatro decimales), ANTES de normalizar. */
+  valores_ingresados: number[];
+  partida: PartidaCurvaUsuario;
+  en_muestra: true;
+  eat_en_muestra: number | null;
+  error_max_en_muestra: number | null;
+  eat_en_muestra_por_anio: { anio: number; eat: number; error_max: number }[];
+  /** La curva contra el año en curso (los meses cargados); también en muestra. */
+  eat_parcial_en_muestra: number | null;
+  /** La candidata del sistema (o `T`) cuya curva coincide con la del usuario (`TOLERANCIA_IGUAL`); `null` si ninguna. */
+  igual_a: ModeloCurva | null;
+};
+
+// ─── Composición: `POST /api/curvas/agrupaciones/[id]/composicion` ───
+
+export const AVISOS_GML = ["se_aparta", "sin_calculo", "sin_venta", "unidades_negativas", "pocas_unidades", "nodo_no_vigente", "en_otras_agrupaciones"] as const;
+export type AvisoGml = (typeof AVISOS_GML)[number];
+
+export type EquivalenciaComposicionApi = {
+  id: string;
+  nombre: string;
+  codigo: string;
+  es_generica: boolean;
+  activo: boolean;
+  /** Un elemento por año de la corrida; `peso` sobre la venta de la agrupación en la red comparable del año (con signo). */
+  por_anio: { anio: number; unidades: number; peso: number }[];
+};
+
+export type GmlAnioComposicionApi = {
+  anio: number;
+  clase: ClaseAnioCurva;
+  en_ajuste: boolean;
+  /** `en_ajuste` y `unidades ≥ min_unidades_ano`. */
+  valido: boolean;
+  unidades: number;
+  /** Con signo: una devolución puede dejarlo negativo. */
+  peso: number;
+  /** Participación mensual del GML en el año (12; parcial en el año en curso); `null` si `unidades ≤ 0`. Los meses negativos se truncan a 0. */
+  participacion: number[] | null;
+  /** EAT (puntos) de su participación frente a la del RESTO de la agrupación; `null` sin cálculo, sin participación o sin resto. */
+  eat_vs_resto: number | null;
+  /** `eat_vs_resto > umbral` solo en años válidos con cálculo; `null` en el resto. */
+  distinta: boolean | null;
+};
+
+export type GmlComposicionApi = {
+  gml_id: string;
+  genero: string;
+  mundo: string;
+  linea: string;
+  nivel: "GML" | "GMLE";
+  /** Nodo, género, mundo y línea activos (`nodoVigente` de M1). */
+  vigente: boolean;
+  /** Entre los que cubren el 85 % (o los 12 primeros) de las unidades del último año de ajuste. */
+  principal: boolean;
+  /** Las equivalencias de la agrupación en ese GML: las activas (también sin venta) y las inactivas con venta. */
+  equivalencias: EquivalenciaComposicionApi[];
+  por_anio: GmlAnioComposicionApi[];
+  /** `curvaA` sobre los años válidos del GML; `null` sin ninguno. Es una lectura: no se backtestea ni se recomienda. */
+  curva: number[] | null;
+  anios_curva: number[];
+  /** EAT promedio entre pares de sus años normales válidos; `null` con menos de dos. */
+  ruido_propio: number | null;
+  /** `max(umbral_forma, ruido_normal de la agrupación, ruido_propio)`; `null` sin cálculo. */
+  umbral: number | null;
+  /** `distinta` en TODOS sus años válidos (y hay al menos uno); `false` sin años válidos; `null` sin cálculo. */
+  se_aparta: boolean | null;
+  /** Último año de ajuste; vacío si no vende fuera. `pct_de_su_venta = fuera ÷ (dentro + fuera)`. */
+  otras_agrupaciones: { agrupacion_id: string; nombre: string; unidades: number; pct_de_su_venta: number }[];
+  avisos: AvisoGml[];
+};
+
+export type ComposicionAgrupacionApi = {
+  /** La misma que devuelve `calcular` con el mismo cuerpo. */
+  huella_calculo: string;
+  hasta_periodo: string;
+  /** `false` si algún prerrequisito bloquea el cálculo (periodos del Niño faltantes…): hay unidades y pesos, `se_aparta` es `null` y los GML llevan el aviso `sin_calculo`. */
+  con_calculo: boolean;
+  ruido_normal: number | null;
+  umbral_forma: number;
+  min_unidades: number;
+  /** Totales de la agrupación (= `resultado.anios[].unidades` con cálculo). */
+  anios: { anio: number; clase: ClaseAnioCurva; en_ajuste: boolean; unidades: number }[];
+  /** TODOS los GML (principales y otros), por género, mundo y línea. */
+  gml: GmlComposicionApi[];
+  principales: number;
+  otros: number;
+  /** Fracción (0 a 1) de las unidades del último año de ajuste que cubren los principales. */
+  pct_principales: number;
+  equivalencias_activas: number;
+  equivalencias_inactivas_con_venta: number;
+  /** Ids de las equivalencias activas sin venta en el periodo (sus nombres están en `gml[].equivalencias`). */
+  equivalencias_sin_venta: string[];
+  duracion_ms: number;
 };

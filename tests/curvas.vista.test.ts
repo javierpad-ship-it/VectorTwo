@@ -219,7 +219,7 @@ describe("lista de agrupaciones (v2): estados, filtros y resumen", () => {
   });
   it("los conteos solo cuentan agrupaciones activas", () => {
     const c = contarEstados(todas);
-    expect(c).toEqual({ todas: 5, sin_curva: 2, obsoletas: 1, distintas: 1, al_dia: 1, bloqueadas: 1 });
+    expect(c).toEqual({ todas: 5, sin_curva: 2, obsoletas: 1, distintas: 1, al_dia: 1, usuario: 0, bloqueadas: 1 });
   });
   it("sin chips: alfabético y las inactivas al final; con chip, solo activas", () => {
     expect(f()).toEqual(["1", "6", "2", "3", "4", "5"]);
@@ -238,7 +238,7 @@ describe("lista de agrupaciones (v2): estados, filtros y resumen", () => {
     expect(textoObsoleta({ motivos: [] })).toBeNull();
   });
   it("resumen de la cabecera con bloqueadas y calculables", () => {
-    const r = { agrupaciones_activas: 15, por_temporada: { invierno: 4, verano: 1, todo_el_ano: 10 }, sin_revisar_toda_temporada: 10, con_curva_vigente: 6, al_dia: 3, al_dia_distintas: 1, obsoletas: 2, sin_curva: 9, bloqueadas: 5, bloqueadas_sin_curva: 5, calculables_sin_curva: 4, vigentes_prestadas: 0, inactivas_con_curva: 0, equivalencias_sin_agrupacion: 0 };
+    const r = { agrupaciones_activas: 15, por_temporada: { invierno: 4, verano: 1, todo_el_ano: 10 }, sin_revisar_toda_temporada: 10, con_curva_vigente: 6, al_dia: 3, al_dia_distintas: 1, obsoletas: 2, curvas_usuario: 0, sin_curva: 9, bloqueadas: 5, bloqueadas_sin_curva: 5, calculables_sin_curva: 4, vigentes_prestadas: 0, inactivas_con_curva: 0, equivalencias_sin_agrupacion: 0 };
     expect(textoResumen(r)).toBe(
       "15 agrupaciones activas · 3 con curva al día · 1 aprobada distinta de la recomendada · 2 obsoletas · 9 sin curva (5 bloqueadas, 4 calculables) · 10 siguen en Toda temporada (revísalas)"
     );
@@ -342,7 +342,9 @@ describe("lo que propone el sistema", () => {
     expect(esIdAgrupacion("abc")).toBe(false);
     expect(esIdAgrupacion(null)).toBe(false);
     expect(esModeloCurva("T")).toBe(true);
-    expect(esModeloCurva("F")).toBe(false);
+    expect(esModeloCurva("F")).toBe(true);
+    expect(esModeloCurva("G")).toBe(false);
+    expect(esModeloCurva("U")).toBe(false);
     expect(esModeloCurva(null)).toBe(false);
   });
 });

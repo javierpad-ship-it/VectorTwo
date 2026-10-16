@@ -13,6 +13,7 @@ import {
 import { MESES_ANIO, clasificarAnio, mesDe, participacion, redondear, sumar } from "./anios";
 import { backtest, eat as calcularEat, promediarPliegues, validacionParcial } from "./backtesting";
 import { calcularCandidatas, marcarIguales, curvaA, type AnioAjuste } from "./candidatas";
+import { armarExplicacionF, curvaF, explicarF, rhoDe } from "./avanzada";
 import { efectoAtipicoCorrida, medirVolumen, referenciaVolumen, resumirFormaPorTemporada, type GrupoParaEfecto, type SerieParaVolumen } from "./efecto";
 import { cvMensual, mesesEnLiquidacion } from "./liquidacion";
 import { diagnosticarTiendas, tiendasComunes, tiendasQueEntran } from "./red";
@@ -64,8 +65,10 @@ import type { SerieAnual, TiendaMaestro } from "./tipos";
  * defecto que altera el resultado con la misma entrada. Entra en la huella del
  * cálculo y se guarda en la foto (`version_modelo`): una foto con una versión menor
  * recibe el aviso `modelo_anterior`.
+ *
+ * `2` (06c): una candidata nueva (`F`) y `T` compitiendo con EAT cambian el resultado con la misma entrada.
  */
-export const VERSION_MODELO = 1;
+export const VERSION_MODELO = 2;
 
 export type EntradaAgrupacion = {
   agrupacion_id: string;
@@ -208,17 +211,18 @@ export type Recomendacion = {
   motivo: MotivoRecomendacion | null;
   /** Puntos que otra candidata debe ganar a `A` para desbancarla; `null` sin propias. */
   margen: number | null;
-  /** La mejor por EAT entre las propias con backtesting. */
-  mejor: ModeloPropio | null;
+  /** La mejor por EAT entre las propias con backtesting y `T` (06c: `T` compite). */
+  mejor: ModeloPropio | "T" | null;
 };
 
 /**
- * Regla 17. `mejor = argmin EAT` entre las propias con backtesting (empate: la
- * primera en el orden `A, B, C, D, E`) y `margen = max(EMPATE_EAT, margenRuido × (ruido ?? 0))`.
- * Si `mejor` es `A`, se recomienda `A` (`menor_error`). Si no, y
- * `EAT_mejor > EAT_A − margen`, `A` con `sin_evidencia` ("sin evidencia para
- * apartarse del promedio"); si no, `mejor` con `menor_error`. Sin propias, `T`
- * (`prestada`); sin nada, `null`.
+ * Regla 17 (con `F` y `T` de la 06c). `mejor = argmin EAT` entre las propias con backtesting y `T` con
+ * backtesting (empate: la primera en el orden `A, B, C, D, E, F, T`) y
+ * `margen = max(EMPATE_EAT, margenRuido × (ruido ?? 0))`. Si `mejor` es `A`, se recomienda `A`
+ * (`menor_error`). Si no, y `EAT_mejor > EAT_A − margen`, `A` con `sin_evidencia` ("sin evidencia para
+ * apartarse del promedio"); si no, `mejor` con `menor_error` (con `T`, origen `prestada`). Sin propias con
+ * EAT, `T` si tiene curva (`prestada`, como antes); sin nada, `null`. `F` con dos años de ajuste no tiene EAT
+ * y no compite.
  */
 export function recomendar(
   candidatas: readonly CandidataParaRecomendar[],
@@ -226,18 +230,22 @@ export function recomendar(
   margenRuido: number
 ): Recomendacion {
   const margen = Math.max(EMPATE_EAT, margenRuido * (ruido ?? 0));
-  const propias = MODELOS_PROPIOS.map((m) => candidatas.find((c) => c.modelo === m)).filter(
-    (c): c is CandidataParaRecomendar & { eat: number } => !!c && c.curva !== null && c.eat !== null
-  );
+  const conEat = (m: ModeloCurva) => {
+    const c = candidatas.find((x) => x.modelo === m);
+    return c && c.curva !== null && c.eat !== null ? (c as CandidataParaRecomendar & { eat: number }) : null;
+  };
+  const propias = MODELOS_PROPIOS.map(conEat).filter((c): c is CandidataParaRecomendar & { eat: number } => c !== null);
   if (propias.length === 0) {
     const t = candidatas.find((c) => c.modelo === "T" && c.curva !== null);
     return t
       ? { recomendada: "T", motivo: "prestada", margen: null, mejor: null }
       : { recomendada: null, motivo: null, margen: null, mejor: null };
   }
-  let mejor = propias[0];
-  for (const c of propias) if (c.eat < mejor.eat) mejor = c;
-  const mejorModelo = mejor.modelo as ModeloPropio;
+  const t = conEat("T");
+  const competidoras = t ? [...propias, t] : propias;
+  let mejor = competidoras[0];
+  for (const c of competidoras) if (c.eat < mejor.eat) mejor = c;
+  const mejorModelo = mejor.modelo as ModeloPropio | "T";
   const a = propias.find((c) => c.modelo === "A");
   if (!a || mejor.modelo === "A") {
     return { recomendada: mejorModelo, motivo: "menor_error", margen, mejor: mejorModelo };
@@ -451,89 +459,52 @@ function aniosAjusteDe(
       participacion: a.p as number[],
       unidades_total: a.total,
       tiendas: tiendasDeAnio(a.anio),
+      normal: a.clase === "normal",
     }));
 }
 
-function proponer(
-  ajuste: readonly AnioAjuste[],
-  prep: Preparacion,
-  curvaT: number[] | null,
-  enCurso: AnioPreparado | undefined,
-  atipicos: ReadonlySet<string>,
-  ctx: Contexto
-): CandidatasCalculadas {
-  const p = ctx.parametros;
-  const nums = ajuste.map((a) => a.anio);
-  const candidatas: CandidataApi[] = [];
+/**
+ * 06c. `T` del pliegue: `A` sobre los años de ajuste de la temporada SIN el año de prueba (`excluir`). Sin
+ * `excluir`, la `T` completa. `null` si no queda ningún año. Con ella `T` compite con backtesting honesto y
+ * `F` contrae hacia una `T` que no ha visto el año que se va a medir.
+ */
+export function curvaTDe(aniosTemporada: readonly AnioAjuste[], excluir?: number): number[] | null {
+  const base = excluir === undefined ? aniosTemporada : aniosTemporada.filter((a) => a.anio !== excluir);
+  return base.length > 0 ? curvaA(base) : null;
+}
 
-  if (ajuste.length >= 2) {
-    const crudas = calcularCandidatas(ajuste, p.min_unidades_ano);
-    const iguales = marcarIguales(crudas);
-    const realDe = (anio: number) => ajuste.find((a) => a.anio === anio)?.participacion.slice() ?? null;
-    for (const c of crudas) {
-      if (!c.curva) {
-        candidatas.push({
-          modelo: c.modelo,
-          curva: null,
-          motivo: c.motivo,
-          eat: null,
-          error_max: null,
-          pruebas: 0,
-          pliegues: 0,
-          eat_por_pliegue: [],
-          eat_parcial: null,
-          igual_a: null,
-          prestada: false,
-        });
-        continue;
-      }
-      const porPliegue = backtest(
-        nums,
-        (entrenamiento) =>
-          calcularCandidatas(
-            ajuste.filter((a) => entrenamiento.includes(a.anio)),
-            p.min_unidades_ano
-          ).find((x) => x.modelo === c.modelo)?.curva ?? null,
-        realDe
-      );
-      const promedio = promediarPliegues(porPliegue);
-      candidatas.push({
-        modelo: c.modelo,
-        curva: c.curva,
-        motivo: null,
-        eat: promedio?.eat ?? null,
-        error_max: promedio?.error_max ?? null,
-        pruebas: porPliegue.length,
-        pliegues: porPliegue.length,
-        eat_por_pliegue: porPliegue,
-        eat_parcial: enCurso
-          ? validacionParcial(c.curva, { anio: enCurso.anio, meses: enCurso.serie.meses, publicados: enCurso.serie.publicados }, atipicos)
-          : null,
-        igual_a: iguales.get(c.modelo) ?? null,
-        prestada: false,
-      });
-    }
-  } else {
-    for (const modelo of MODELOS_PROPIOS) {
-      candidatas.push({
-        modelo,
-        curva: null,
-        motivo: "sin_anos_ajuste",
-        eat: null,
-        error_max: null,
-        pruebas: 0,
-        pliegues: 0,
-        eat_por_pliegue: [],
-        eat_parcial: null,
-        igual_a: null,
-        prestada: false,
-      });
-    }
-  }
-  candidatas.push({
-    modelo: "T",
-    curva: curvaT,
-    motivo: curvaT === null ? "sin_anos_utilizables" : null,
+/**
+ * `F` de UN pliegue del backtesting, SOLO con lo que el entrenamiento permite (sin fuga): `ρ` es el ruido entre
+ * los años normales de entrenamiento (`rhoDe`) y la `T` es la de la temporada sin el año de prueba
+ * (`curvaTDe`). Con menos de dos años de entrenamiento no hay backtesting honesto: `null` (el pliegue se omite).
+ * Es la única definición: la usan `proponer` y el backtest offline de las fotos.
+ */
+export function ajustarFPliegue(p: {
+  ajuste: readonly AnioAjuste[];
+  /** Años de ajuste de la temporada (`GrupoTemporada.anios_ajuste`). */
+  aniosTemporada: readonly AnioAjuste[];
+  /** Años de entrenamiento del pliegue. */
+  entrenamiento: readonly number[];
+  /** Año de prueba (el que queda fuera). */
+  prueba: number;
+  recencia: number;
+}): ReturnType<typeof curvaF> {
+  const entrenados = p.ajuste.filter((a) => p.entrenamiento.includes(a.anio));
+  if (entrenados.length < 2) return null;
+  return curvaF(entrenados, rhoDe(entrenados), curvaTDe(p.aniosTemporada, p.prueba), p.recencia);
+}
+
+/** EAT EN MUESTRA: la curva completa contra la participación usada de cada año de ajuste (promedio); `null` sin años. */
+export function eatEnMuestra(curva: readonly number[], ajuste: readonly Pick<AnioAjuste, "participacion">[]): number | null {
+  if (ajuste.length === 0) return null;
+  return sumar(ajuste.map((a) => calcularEat(curva, a.participacion))) / ajuste.length;
+}
+
+function candidataVacia(modelo: ModeloCurva, motivo: string, prestada = false): CandidataApi {
+  return {
+    modelo,
+    curva: null,
+    motivo,
     eat: null,
     error_max: null,
     pruebas: 0,
@@ -541,11 +512,130 @@ function proponer(
     eat_por_pliegue: [],
     eat_parcial: null,
     igual_a: null,
-    prestada: true,
-  });
+    prestada,
+    eat_en_muestra: null,
+  };
+}
 
-  // Nota: `eat` puede quedar nulo con curva (menos de dos pliegues): `recomendar` solo mira las que tienen EAT.
+function proponer(
+  ajuste: readonly AnioAjuste[],
+  prep: Preparacion,
+  curvaT: number[] | null,
+  aniosTemporada: readonly AnioAjuste[],
+  temporada: TemporadaAgrupacion,
+  enCurso: AnioPreparado | undefined,
+  atipicos: ReadonlySet<string>,
+  ctx: Contexto
+): CandidatasCalculadas {
+  const p = ctx.parametros;
+  const nums = ajuste.map((a) => a.anio);
+  const candidatas: CandidataApi[] = [];
+  const realDe = (anio: number) => ajuste.find((a) => a.anio === anio)?.participacion.slice() ?? null;
+  const parcialDe = (curva: readonly number[]) =>
+    enCurso ? validacionParcial(curva, { anio: enCurso.anio, meses: enCurso.serie.meses, publicados: enCurso.serie.publicados }, atipicos) : null;
+  const pruebaDe = (entrenamiento: readonly number[]) => nums.find((n) => !entrenamiento.includes(n));
+
+  // `F` de un pliegue: SOLO con los años de entrenamiento (ρ y T del pliegue, sin el año de prueba). Con un solo
+  // año de entrenamiento no hay backtesting honesto: no se ajusta (el pliegue se omite).
+  const ajustarF = (entrenamiento: readonly number[]) => {
+    const prueba = pruebaDe(entrenamiento);
+    return prueba === undefined ? null : ajustarFPliegue({ ajuste, aniosTemporada, entrenamiento, prueba, recencia: p.recencia_f });
+  };
+
+  if (ajuste.length >= 2) {
+    const crudas = calcularCandidatas(ajuste, p.min_unidades_ano, { recencia: p.recencia_f, t: curvaT, rho: rhoDe(ajuste) });
+    const iguales = marcarIguales([...crudas.map((c) => ({ modelo: c.modelo as ModeloCurva, curva: c.curva })), { modelo: "T", curva: curvaT }]);
+    for (const c of crudas) {
+      if (!c.curva) {
+        candidatas.push(candidataVacia(c.modelo, c.motivo ?? "sin_anos_ajuste"));
+        continue;
+      }
+      const porPliegue = backtest(
+        nums,
+        (entrenamiento) =>
+          c.modelo === "F"
+            ? (ajustarF(entrenamiento)?.curva ?? null)
+            : (calcularCandidatas(
+                ajuste.filter((a) => entrenamiento.includes(a.anio)),
+                p.min_unidades_ano
+              ).find((x) => x.modelo === c.modelo)?.curva ?? null),
+        realDe
+      );
+      const promedio = promediarPliegues(porPliegue);
+      const candidata: CandidataApi = {
+        modelo: c.modelo,
+        curva: c.curva,
+        motivo: c.modelo === "F" && porPliegue.length === 0 ? "sin_backtesting_honesto" : null,
+        eat: promedio?.eat ?? null,
+        error_max: promedio?.error_max ?? null,
+        pruebas: porPliegue.length,
+        pliegues: porPliegue.length,
+        eat_por_pliegue: porPliegue,
+        eat_parcial: parcialDe(c.curva),
+        igual_a: iguales.get(c.modelo) ?? null,
+        prestada: false,
+        eat_en_muestra: eatEnMuestra(c.curva, ajuste),
+      };
+      if (c.modelo === "F" && c.detalle_f) {
+        // Por pliegue: el ρ y el λ de ESE pliegue (solo con su entrenamiento) y el EAT medido en él.
+        const por_pliegue = porPliegue.flatMap((pl) => {
+          const r = ajustarF(nums.filter((n) => n !== pl.anio));
+          return r ? [{ anio_prueba: pl.anio, rho: r.detalle.rho, lambda: r.detalle.lambda, eat: pl.eat }] : [];
+        });
+        candidata.detalle_f = { ...c.detalle_f, por_pliegue };
+      }
+      candidatas.push(candidata);
+    }
+  } else {
+    for (const modelo of MODELOS_PROPIOS) candidatas.push(candidataVacia(modelo, "sin_anos_ajuste"));
+  }
+
+  // `T` compite con la misma mecánica: en cada pliegue, la `T` de la temporada SIN el año de prueba contra ese año.
+  if (curvaT === null) {
+    candidatas.push(candidataVacia("T", "sin_anos_utilizables", true));
+  } else {
+    const iguales = marcarIguales([...candidatas.map((c) => ({ modelo: c.modelo, curva: c.curva })).filter((c) => c.modelo !== "T"), { modelo: "T", curva: curvaT }]);
+    const porPliegue = backtest(
+      nums,
+      (entrenamiento) => {
+        const prueba = pruebaDe(entrenamiento);
+        return prueba === undefined ? null : curvaTDe(aniosTemporada, prueba);
+      },
+      realDe
+    );
+    const promedio = promediarPliegues(porPliegue);
+    candidatas.push({
+      modelo: "T",
+      curva: curvaT,
+      motivo: null,
+      eat: promedio?.eat ?? null,
+      error_max: promedio?.error_max ?? null,
+      pruebas: porPliegue.length,
+      pliegues: porPliegue.length,
+      eat_por_pliegue: porPliegue,
+      eat_parcial: parcialDe(curvaT),
+      igual_a: iguales.get("T") ?? null,
+      prestada: true,
+      eat_en_muestra: eatEnMuestra(curvaT, ajuste),
+    });
+  }
+
+  // Nota: `eat` puede quedar nulo con curva (menos de dos pliegues, o `F` con dos años): `recomendar` solo mira las que tienen EAT.
   const recomendacion = recomendar(candidatas, prep.ruido, p.margen_ruido);
+
+  // La explicación de `F` se cierra con lo que el backtesting dijo y lo que el sistema recomienda.
+  const f = candidatas.find((c) => c.modelo === "F");
+  if (f?.detalle_f) {
+    const a = candidatas.find((c) => c.modelo === "A");
+    const frase = explicarF(f.detalle_f, temporada, nums.length, {
+      eat: f.eat,
+      pruebas: f.pruebas,
+      eat_a: a?.eat ?? null,
+      margen: recomendacion.margen,
+      recomendada: recomendacion.recomendada,
+    });
+    f.explicacion_f = armarExplicacionF(f.detalle_f, frase);
+  }
   return { candidatas, recomendacion, aniosAjuste: nums };
 }
 
@@ -869,7 +959,7 @@ function analizarAgrupacion(entrada: EntradaAgrupacion, grupoT: GrupoTemporada |
 
   // Candidatas.
   const ajuste = aniosAjusteDe(prep, (anio) => [...(porTienda.get(anio)?.values() ?? [])]);
-  const propuesta = proponer(ajuste, prep, grupoT?.curva_T ?? null, enCurso, entrada.atipicos, ctx);
+  const propuesta = proponer(ajuste, prep, grupoT?.curva_T ?? null, grupoT?.anios_ajuste ?? [], entrada.temporada, enCurso, entrada.atipicos, ctx);
   const { candidatas, recomendacion } = propuesta;
   const estab = estabilidad(ajuste.map((a) => a.participacion));
   const bandaMes = banda(ajuste.map((a) => a.participacion));
@@ -938,7 +1028,14 @@ function analizarAgrupacion(entrada: EntradaAgrupacion, grupoT: GrupoTemporada |
   }
   const sinRed = prep.anios.filter((a) => a.sinRed);
   if (sinRed.length > 0) avisar("sin_red_comparable", `Sin red comparable en ${sinRed.map((a) => a.anio).join(", ")}.`);
-  if (origen === "prestada") avisar("prestada", "Sin años suficientes: se propone la curva de su temporada.");
+  if (origen === "prestada") {
+    avisar(
+      "prestada",
+      recomendacion.motivo === "prestada"
+        ? "Sin años suficientes: se propone la curva de su temporada."
+        : "La curva de su temporada se equivoca menos que las propias en el backtesting: se propone la curva de su temporada."
+    );
+  }
 
   const resultado: AgrupacionResultado = {
     agrupacion_id: entrada.agrupacion_id,

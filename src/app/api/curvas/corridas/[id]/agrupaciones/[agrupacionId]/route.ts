@@ -5,7 +5,7 @@ import { error, idDeRuta, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { aFotoResumen, comoRed, comoResultado, leerAgrupacionConDatos, leerCorridaPorId, leerCurvaDeFoto, leerTiendas } from "@/lib/curvas/consultas";
 import { CORRIDA_NO_ENCONTRADA, esUuid, leerModeloConsulta } from "@/lib/curvas/esquemas";
-import { aVigenteResumen, MENSAJE_AGRUPACION_NO_ENCONTRADA } from "@/lib/curvas/reglas";
+import { armarComparador, aVigenteResumen, MENSAJE_AGRUPACION_NO_ENCONTRADA } from "@/lib/curvas/reglas";
 import { agrupacionTrabajoApi, comparadorContra, redConIdentidad } from "@/lib/curvas/trabajo";
 import type { DetalleFotoApi } from "@/lib/curvas/tipos-api";
 
@@ -13,12 +13,15 @@ type Params = { params: Promise<{ id: string; agrupacionId: string }> };
 
 /**
  * "Ver foto" (`requirePlanner`): el detalle CONGELADO de la foto de una aprobación,
- * tal como la vio el planner (`DetalleFotoApi`). `?modelo=A..E|T` elige la candidata
+ * tal como la vio el planner (`DetalleFotoApi`). `?modelo=A..F|T` elige la candidata
  * dibujada (por defecto la recomendada de entonces). Lee la foto con `leerCorridaPorId`
  * (no hay corrida "actual"), compara con LA CURVA aprobada con esa foto (no con la
  * vigente de hoy) y no evalúa obsolescencia: es historia. `404` si la foto o la
  * agrupación no existen, o si la foto no es de esa agrupación (las fotos de la
  * 0.9.6, de una corrida global, valen para las agrupaciones que contienen).
+ *
+ * 06c: la foto de una curva del usuario (`U`) deja `resultado` tal como salió del cálculo (SIN candidata `U`):
+ * la curva dibujada sale de `curva_de_la_foto.curva` y lo medido en muestra de `foto.resumen.curva_usuario`.
  */
 export async function GET(request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();
@@ -29,7 +32,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { agrupacionId } = await params;
   if (!esUuid(agrupacionId)) return error(MENSAJE_AGRUPACION_NO_ENCONTRADA, 404);
   const consulta = leerModeloConsulta(request.nextUrl.searchParams);
-  if (consulta.invalido) return error("El modelo debe ser A, B, C, D, E o T.", 400);
+  if (consulta.invalido) return error("El modelo debe ser A, B, C, D, E, F o T.", 400);
 
   const db = supabaseAdmin();
   const foto = await leerCorridaPorId(db, id);
@@ -61,7 +64,11 @@ export async function GET(request: NextRequest, { params }: Params) {
     red,
     tiendas: identidades,
     curva_de_la_foto: curvaDeLaFoto,
-    comparador: comparadorContra(delResultado, temporada, curvaDeLaFoto, consulta.modelo),
+    // Una versión del usuario (`U`) no es una candidata de la foto: sin `?modelo=`, se compara consigo misma (`eat_vs_vigente = 0`).
+    comparador:
+      curvaDeLaFoto?.modelo === "U" && consulta.modelo === null
+        ? armarComparador("U", { curva: curvaDeLaFoto.curva, eat: null }, curvaDeLaFoto, true)
+        : comparadorContra(delResultado, temporada, curvaDeLaFoto, consulta.modelo),
   };
   return ok(cuerpo);
 }

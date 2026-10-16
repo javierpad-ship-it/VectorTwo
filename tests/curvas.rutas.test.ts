@@ -290,7 +290,10 @@ describe("POST /api/curvas/agrupaciones/[id]/calcular (lectura con cuerpo: nunca
     for (const mal of [{ meses_tienda_nueva: 40 }, { umbral_forma: 0 }, { marcar_referencia: true }, { anios_excluidos: [1900] }, { tiendas_excluidas: ["x"] }]) {
       expect((await calcular(json(mal), ctx(A[ABRIGO_ID]))).status, JSON.stringify(mal)).toBe(400);
     }
-    expect((await calcular(json({}, "POST", "?modelo=F"), ctx(A[ABRIGO_ID]))).status).toBe(400);
+    expect((await calcular(json({}, "POST", "?modelo=G"), ctx(A[ABRIGO_ID]))).status).toBe(400);
+    expect((await calcular(json({}, "POST", "?modelo=U"), ctx(A[ABRIGO_ID]))).status).toBe(400);
+    expect((await calcular(json({}, "POST", "?modelo=F"), ctx(A[ABRIGO_ID]))).status).toBe(200);
+    expect((await calcular(json({ recencia_f: 0.4 }), ctx(A[ABRIGO_ID]))).status).toBe(400);
     expect((await calcular(json({}), ctx(INEXISTENTE))).status).toBe(404);
     expect((await calcular(json({}), ctx("no-uuid"))).status).toBe(404);
     expect((await calcular(new NextRequest(URL, { method: "POST", body: "no es json" }), ctx(A[ABRIGO_ID]))).status).toBe(400);
@@ -481,9 +484,9 @@ describe("PUT /api/curvas/agrupaciones/[id] (aprobar una por una)", () => {
     expect(r.status).toBe(409);
     expect((await leer(r)).codigo).toBe("candidata_no_disponible");
   });
-  it("400 con modelo F/G/H, huella mal formada o versión inválida; 404 agrupación inexistente o mal formada", async () => {
+  it("400 con modelo G/H/vacío/AB, huella mal formada o versión inválida; 404 agrupación inexistente o mal formada", async () => {
     const t = await abrir(A[ABRIGO_ID]);
-    for (const m of ["F", "G", "H"]) expect((await aprobar(json(cuerpoAprobar(t, m), "PUT"), ctx(A[ABRIGO_ID]))).status).toBe(400);
+    for (const m of ["G", "H", "", "AB"]) expect((await aprobar(json(cuerpoAprobar(t, m), "PUT"), ctx(A[ABRIGO_ID]))).status).toBe(400);
     expect((await aprobar(json({ ...cuerpoAprobar(t, "A"), huella_calculo: "x" }, "PUT"), ctx(A[ABRIGO_ID]))).status).toBe(400);
     expect((await aprobar(json({ ...cuerpoAprobar(t, "A"), version_vigente: 0 }, "PUT"), ctx(A[ABRIGO_ID]))).status).toBe(400);
     expect((await aprobar(json(cuerpoAprobar(t, "A"), "PUT"), ctx(INEXISTENTE))).status).toBe(404);
@@ -695,7 +698,8 @@ describe("GET /api/curvas/agrupaciones/[id]/versiones y la foto (caso 18)", () =
     expect((await detalleFoto(get(), ctx2("x", A[ABRIGO_ID]))).status).toBe(404);
     expect((await detalleFoto(get(), ctx2(v1.foto_id, "x"))).status).toBe(404);
     expect((await detalleFoto(get(), ctx2(v1.foto_id, INEXISTENTE))).status).toBe(404);
-    expect((await detalleFoto(get("", "?modelo=F"), ctx2(v1.foto_id, A[ABRIGO_ID]))).status).toBe(400);
+    expect((await detalleFoto(get("", "?modelo=G"), ctx2(v1.foto_id, A[ABRIGO_ID]))).status).toBe(400);
+    expect((await detalleFoto(get("", "?modelo=F"), ctx2(v1.foto_id, A[ABRIGO_ID]))).status).toBe(200);
   });
   it("una foto de la corrida global de la 0.9.6 se puede ver para las agrupaciones que contiene", async () => {
     const t = await abrir(A[ABRIGO_ID]);

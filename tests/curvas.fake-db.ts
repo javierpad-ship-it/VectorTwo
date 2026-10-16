@@ -4,8 +4,8 @@ import { NextResponse } from "next/server";
  * Base falsa en memoria para probar los handlers de M6 sin red ni datos reales.
  * Implementa solo lo que usan las consultas: `select` (con proyección de columnas
  * y `count` con `head`), filtros (`eq`, `neq`, `in`, `is`, `not … is null`), `order`,
- * `limit`, `range`, `maybeSingle`, `single`, `insert`, `update`, `delete` y los dos
- * `rpc` de M6 (`venta_estacionalidad_agrupacion` y `venta_mensual_tienda`). Hace
+ * `limit`, `range`, `maybeSingle`, `single`, `insert`, `update`, `delete` y los tres
+ * `rpc` de M6 (`venta_estacionalidad_agrupacion`, `venta_composicion_agrupacion` (06c) y `venta_mensual_tienda`). Hace
  * cumplir el parcial de M6 (una curva vigente por agrupación y su versión única)
  * con el mismo código y mensaje que Postgres, y anota qué columnas se pidieron de
  * cada tabla (para probar que la lista no lee `resultado`).
@@ -13,12 +13,19 @@ import { NextResponse } from "next/server";
 
 export type Fila = Record<string, unknown>;
 
+/** Argumentos de `venta_composicion_agrupacion` tal como llegan a la base. */
+export type ArgsComposicion = { p_agrupacion_id: string; p_red: Record<string, string[]>; p_hasta: string };
+
 export type EstadoFalso = {
   tablas: Record<string, Fila[]>;
   rol: "planner" | "comprador" | "sin_sesion";
   siguienteId: number;
   /** Respuesta de `venta_estacionalidad_agrupacion(id)` por id (`"null"` sin agrupación), o un error que se devuelve en cualquier llamada. */
   venta: { porId: Record<string, unknown>; error: { code: string; message: string } | null };
+  /** 06c. Respuesta de `venta_composicion_agrupacion` (la función recibe los argumentos) o un error que se devuelve en cualquier llamada. */
+  composicion: { respuesta: (args: ArgsComposicion) => unknown; error: { code: string; message: string } | null };
+  /** 06c. Los argumentos de cada llamada a `venta_composicion_agrupacion`. */
+  llamadasComposicion: ArgsComposicion[];
   /** Filas de `venta_mensual_tienda()`. */
   ventaTienda: Fila[];
   /** Una anotación por llamada a `venta_estacionalidad_agrupacion` (el id pedido, o null). */
@@ -38,6 +45,8 @@ export const estadoFalso: EstadoFalso = {
   rol: "planner",
   siguienteId: 1,
   venta: { porId: {}, error: null },
+  composicion: { respuesta: () => null, error: null },
+  llamadasComposicion: [],
   ventaTienda: [],
   llamadasVenta: [],
   llamadasVentaTienda: 0,
@@ -222,7 +231,14 @@ class Consulta implements PromiseLike<Resultado> {
 export function clienteFalso() {
   return {
     from: (t: string) => new Consulta(t),
-    rpc: (nombre: string, args?: { p_agrupacion_id?: string }) => {
+    rpc: (nombre: string, args?: { p_agrupacion_id?: string; p_red?: Record<string, string[]>; p_hasta?: string }) => {
+      if (nombre === "venta_composicion_agrupacion") {
+        const llamada = { p_agrupacion_id: String(args?.p_agrupacion_id), p_red: args?.p_red ?? {}, p_hasta: String(args?.p_hasta) };
+        estadoFalso.llamadasComposicion.push(llamada);
+        const { respuesta, error } = estadoFalso.composicion;
+        if (error) return Promise.resolve({ data: null, error: { ...error, details: null, hint: null } });
+        return Promise.resolve({ data: respuesta(llamada), error: null });
+      }
       if (nombre === "venta_estacionalidad_agrupacion") {
         const id = args?.p_agrupacion_id ?? null;
         estadoFalso.llamadasVenta.push(id);

@@ -106,9 +106,9 @@ describe("regla 41 · motivoRechazoAprobar (en este orden)", () => {
     expect(notaRequeridaPor("A", "A", { ...PARAMETROS_POR_DEFECTO, tratamiento_atipicos: "incluir" })).toContain("incluir");
     expect(notaRequeridaPor("A", "A", PARAMETROS_POR_DEFECTO)).toBeNull();
   });
-  it("esModeloCurva rechaza F, G, H", () => {
-    for (const m of ["A", "B", "C", "D", "E", "T"]) expect(esModeloCurva(m)).toBe(true);
-    for (const m of ["F", "G", "H", "", 3]) expect(esModeloCurva(m)).toBe(false);
+  it("esModeloCurva acepta A a F y T; rechaza G, H, vacío, 3, «a», «AB» y la U (que no es una candidata)", () => {
+    for (const m of ["A", "B", "C", "D", "E", "F", "T"]) expect(esModeloCurva(m)).toBe(true);
+    for (const m of ["G", "H", "", 3, "a", "AB", "U"]) expect(esModeloCurva(m)).toBe(false);
   });
 });
 
@@ -168,9 +168,11 @@ describe("reglas 27 y 42 · filaCurva", () => {
     expect(filaCurva({ ...base, modelo: "A", version_anterior: 2, nota: "  prefiero A  " })).toMatchObject({ version: 3, nota: "prefiero A" });
     expect(filaCurva({ ...base, modelo: "A", nota: "   " })?.nota).toBeNull();
   });
-  it("T copia la curva de la temporada: origen prestada, eat y error_max nulos", () => {
+  it("T copia la curva de la temporada: origen prestada y, desde la 06c, el EAT de su backtesting", () => {
     const f = filaCurva({ ...base, modelo: "T" })!;
-    expect(f).toMatchObject({ modelo: "T", origen: "prestada", eat: null, error_max: null, recomendada: false });
+    const t = base.agrupacion.candidatas.find((c) => c.modelo === "T")!;
+    expect(f).toMatchObject({ modelo: "T", origen: "prestada", origen_curva: "sistema", curva_manual: null, recomendada: false });
+    expect(f.eat).toBeCloseTo(t.eat as number, 2);
     expect(f.p01).toBeCloseTo(base.temporada!.curva_T![0], 6);
   });
   it("anios_utilizados lleva los años, la composición y las tres huellas", () => {

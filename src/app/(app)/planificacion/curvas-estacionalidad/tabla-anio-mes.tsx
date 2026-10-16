@@ -36,6 +36,7 @@ export function TablaAnioMes({
   anios,
   propuesta,
   vigente,
+  usuario = null,
   umbralDominante,
   nombreArchivo,
   motivos,
@@ -46,6 +47,8 @@ export function TablaAnioMes({
   propuesta: { etiqueta: string; curva: number[] } | null;
   /** La curva aprobada vigente (etiqueta `Aprobada v2 (A)`). */
   vigente: { etiqueta: string; curva: number[] } | null;
+  /** 06c: la curva del usuario si es válida («Mi curva»), con su diferencia frente a la aprobada. */
+  usuario?: { etiqueta: string; curva: number[] } | null;
   umbralDominante: number;
   nombreArchivo: string;
   /** Por qué un año no se pudo dibujar (año → motivo). */
@@ -54,9 +57,10 @@ export function TablaAnioMes({
   const ordenados = useMemo(() => [...anios].sort((a, b) => a.anio - b.anio), [anios]);
   const resumen = useMemo(() => resumenMensual(ordenados), [ordenados]);
   const comparacion = useMemo(() => (propuesta && vigente ? compararCurvas(vigente.curva, propuesta.curva, true) : null), [propuesta, vigente]);
+  const comparacionUsuario = useMemo(() => (usuario && vigente ? compararCurvas(vigente.curva, usuario.curva, true) : null), [usuario, vigente]);
 
   function descargar() {
-    const { campos, datos } = filasCsvAnioMes(ordenados, propuesta?.curva ?? null, vigente?.curva ?? null);
+    const { campos, datos } = filasCsvAnioMes(ordenados, propuesta?.curva ?? null, vigente?.curva ?? null, usuario?.curva ?? null);
     descargarCsv(campos, datos, nombreArchivo);
   }
 
@@ -213,6 +217,36 @@ export function TablaAnioMes({
               </td>
             </tr>
           </tbody>
+
+          {usuario && (
+            <tbody className="divide-y divide-borde border-t-2 border-borde">
+              <tr>
+                <th scope="row" className="sticky left-0 z-10 bg-superficie px-3 py-1.5 text-left font-semibold" style={{ color: "#0f766e" }}>
+                  {usuario.etiqueta}
+                </th>
+                {MESES_CORTOS.map((_, mes) => celdaCurva(usuario.curva, mes, "font-medium"))}
+                <td className="px-3 py-1.5 text-right tabular-nums text-tinta-suave">100.0 %</td>
+                <td />
+              </tr>
+              <tr className="bg-neutro-suave/50">
+                <th scope="row" className="sticky left-0 z-10 bg-neutro-suave px-3 py-1.5 text-left font-semibold">
+                  Diferencia (pp)
+                  <span className="block text-xs font-normal text-tinta-suave">mi curva − aprobada</span>
+                </th>
+                {MESES_CORTOS.map((_, mes) => {
+                  const dif = comparacionUsuario ? comparacionUsuario.diferencias[mes] : null;
+                  return (
+                    <td key={mes} className={`px-2 py-1.5 text-right font-medium tabular-nums ${claseDiferencia(dif)}`}>
+                      {dif === null ? "—" : formatearDiferenciaPp(dif)}
+                    </td>
+                  );
+                })}
+                <td className="px-3 py-1.5 text-right text-xs tabular-nums text-tinta-suave" colSpan={2}>
+                  {comparacionUsuario ? `EAT ${formatearPp(comparacionUsuario.eat)}` : "sin aprobada"}
+                </td>
+              </tr>
+            </tbody>
+          )}
 
           <tbody className="divide-y divide-borde border-t-2 border-borde text-xs">
             <tr>

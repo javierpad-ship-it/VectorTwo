@@ -60,8 +60,15 @@ describe("M6b regla 46: solo consultas.ts nombra la función de venta y las tabl
   });
   it("ningún archivo de la API ni de lib/curvas lee o escribe `referencia` de las corridas", () => {
     const delasCorridas = ["consultas", "reglas", "estado", "lectura", "trabajo", "esquemas", "tipos-api", "cache-venta", "prerrequisitos", "huellas"].map((n) => `src/lib/curvas/${n}.ts`);
-    const usan = BACKEND.filter((f) => (delasCorridas.includes(f.ruta) || f.ruta.startsWith("src/app/api/curvas/")) && /\breferencia\b/.test(sinComentarios(f.texto))).map((f) => f.ruta);
+    // 06c: `partida.referencia` (de dónde partió la curva del usuario) es otra cosa; solo estos archivos la nombran.
+    const conPartida = new Set(["src/lib/curvas/esquemas.ts", "src/lib/curvas/reglas.ts", "src/lib/curvas/tipos-api.ts", "src/app/api/curvas/agrupaciones/[id]/route.ts"]);
+    const usan = BACKEND.filter(
+      (f) => (delasCorridas.includes(f.ruta) || f.ruta.startsWith("src/app/api/curvas/")) && !conPartida.has(f.ruta) && /\breferencia\b/.test(sinComentarios(f.texto))
+    ).map((f) => f.ruta);
     expect(usan).toEqual([]);
+    // Y en esos mismos archivos, `referencia` solo cuelga de una partida, nunca de una corrida o una foto.
+    const deCorrida = BACKEND.filter((f) => /\b(corrida|foto|fotos|corridas)\w*\??\.referencia\b/i.test(sinComentarios(f.texto))).map((f) => f.ruta);
+    expect(deCorrida).toEqual([]);
   });
   it("«Ver foto» es la única ruta de corridas que nombran los componentes", () => {
     const usan = src
@@ -107,6 +114,7 @@ describe("M6b: rutas", () => {
     const esperado: Record<string, string[]> = {
       "src/app/api/curvas/route.ts": ["GET"],
       "src/app/api/curvas/agrupaciones/[id]/calcular/route.ts": ["POST"],
+      "src/app/api/curvas/agrupaciones/[id]/composicion/route.ts": ["POST"],
       "src/app/api/curvas/agrupaciones/[id]/route.ts": ["DELETE", "PUT"],
       "src/app/api/curvas/agrupaciones/[id]/versiones/route.ts": ["GET"],
       "src/app/api/curvas/corridas/[id]/agrupaciones/[agrupacionId]/route.ts": ["GET"],
@@ -240,7 +248,46 @@ describe("M6b pantallas (frontend): nada de lo retirado, y los contratos de la v
     expect(fuente(`${DIR}page.tsx`)).toMatch(/<Suspense[\s\S]*<CurvasPanel/);
   });
 
-  it("solo hay una versión vigente (0.10.3 · M7)", () => {
-    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.3 · M7"');
+  it("solo hay una versión vigente (0.10.4 · M6)", () => {
+    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.4 · M6"');
   });
 });
+
+describe("M6c pantallas (frontend): composición, curva del usuario y M7", () => {
+  const DIR = "src/app/(app)/planificacion/curvas-estacionalidad/";
+
+  it("la composición se pide al abrir y se descarta si llega con otra huella; cancela con AbortController", () => {
+    const h = fuente(`${DIR}use-composicion.ts`);
+    expect(h).toContain("/composicion`");
+    expect(h).toContain("AbortController");
+    expect(h).toMatch(/d\.huella_calculo !== huella/);
+    expect(h).toMatch(/if \(!abierta/);
+  });
+
+  it("el editor guarda el borrador en sessionStorage (por agrupación), sin tocar el servidor", () => {
+    const v = fuente(`${DIR}curva-usuario-vista.ts`);
+    expect(v).toContain("curva-usuario:");
+    expect(v).toContain("sessionStorage");
+    expect(v).not.toMatch(/fetch\(|api\.(get|post|put)/);
+  });
+
+  it("el PUT de la curva del usuario sale de cuerpoAprobar (modelo U con curva_usuario y partida) y exige confirm", () => {
+    const t = fuente(`${DIR}trabajo-vista.ts`);
+    expect(t).toContain("cuerpo.curva_usuario");
+    expect(t).toContain("cuerpo.partida");
+    expect(fuente(`${DIR}detalle-agrupacion.tsx`)).toContain("confirm(texto)");
+  });
+
+  it("la pantalla no escribe `origen_curva` ni inventa estados: solo lo lee", () => {
+    for (const f of src.filter((x) => x.ruta.startsWith(DIR))) {
+      expect(sinComentarios(f.texto), f.ruta).not.toMatch(/origen_curva\s*[:=]\s*["'](usuario|avanzada|sistema)["']\s*[,;)]?\s*$/m);
+    }
+  });
+
+  it("M7 muestra la cobertura del backtesting y cuenta las curvas del usuario desde /api/curvas/vigentes", () => {
+    expect(fuente("src/app/(app)/planificacion/proyeccion/vista.ts")).toContain("textoEatM6");
+    expect(fuente("src/app/(app)/planificacion/proyeccion/proyeccion-panel.tsx")).toContain("/api/curvas/vigentes");
+    expect(fuente("src/app/(app)/planificacion/proyeccion/antes-de-proyectar.tsx")).toContain("curva del usuario");
+  });
+});
+

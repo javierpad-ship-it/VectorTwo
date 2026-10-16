@@ -96,9 +96,9 @@ describe("regla 44 · calcularAgrupacionSchema", () => {
 describe("regla 44 · aprobarCurvaSchema", () => {
   const completo = { ...PARAMETROS_POR_DEFECTO, hasta_periodo: "2026-09" };
   const base = { modelo: "A", parametros: completo, huella_calculo: "a".repeat(32), version_vigente: null };
-  it("acepta A a E y T; rechaza F, G, H y cualquier otro", () => {
-    for (const m of ["A", "B", "C", "D", "E", "T"]) expect(aprobarCurvaSchema.safeParse({ ...base, modelo: m }).success).toBe(true);
-    for (const m of ["F", "G", "H", "a", "", "AB"]) expect(aprobarCurvaSchema.safeParse({ ...base, modelo: m }).success, m).toBe(false);
+  it("acepta A a F y T; rechaza G, H, 3, «a», vacío, «AB»", () => {
+    for (const m of ["A", "B", "C", "D", "E", "F", "T"]) expect(aprobarCurvaSchema.safeParse({ ...base, modelo: m }).success, m).toBe(true);
+    for (const m of ["G", "H", "a", "", "AB", 3]) expect(aprobarCurvaSchema.safeParse({ ...base, modelo: m }).success, String(m)).toBe(false);
   });
   it("exige huella_calculo de 32 hex, hasta_periodo explícito y parámetros completos", () => {
     expect(aprobarCurvaSchema.safeParse({ ...base, huella_calculo: "xyz" }).success).toBe(false);

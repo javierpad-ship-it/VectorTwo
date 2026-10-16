@@ -48,6 +48,11 @@ export type EstadoGuardado = {
   hasta_fue_por_defecto?: boolean;
   /** `T` = curva prestada de la temporada (depende de las otras agrupaciones). */
   modelo?: string | null;
+  /**
+   * 06c. `usuario` = curva del usuario (`U`): NUNCA se vuelve obsoleta sola. Lo que en una curva del sistema es
+   * un motivo de obsolescencia pasa a avisos `cambio_desde_aprobacion` y `motivos` queda vacío.
+   */
+  origen_curva?: string | null;
   /** `huella_temporada` de la foto (sin dato, no se evalúa `temporada_recompuesta`). */
   huella_temporada?: string | null;
   /** Los tríos de la foto (para nombrar la agrupación que cambió). */
@@ -218,6 +223,11 @@ export function evaluarEstadoVigente(guardado: EstadoGuardado, actual: EstadoAct
   if (guardado.version_modelo !== undefined && guardado.version_modelo !== null && guardado.version_modelo < VERSION_MODELO) {
     avisos.push({ codigo: "modelo_anterior", detalle: "calculada con un modelo anterior: hoy el sistema puede proponer otra cosa" });
   }
+  if (guardado.origen_curva === "usuario" && motivos.length > 0) {
+    // 06c, decisión 17: la curva del usuario no se obsoleta sola. Cada motivo se informa como aviso, con el mismo detalle.
+    const cambios: AvisoVigenteApi[] = motivos.map((m) => ({ codigo: "cambio_desde_aprobacion", detalle: m.detalle, motivo: m.codigo }));
+    return { motivos: [], avisos: [...cambios, ...avisos] };
+  }
   return { motivos, avisos };
 }
 
@@ -258,6 +268,8 @@ export function difiereDeVigente(
 export type CurvaParaObsolescencia = {
   agrupacion_id: string;
   corrida_id: string;
+  /** 06c. `usuario` para una `U`. */
+  origen_curva?: string | null;
   /** `anios_utilizados.composicion`. */
   composicion: { equivalencias: number; huella: string } | null;
   /** `T` = curva prestada de la temporada. */
@@ -373,6 +385,7 @@ export function evaluarObsolescencia(
           hasta_periodo: hastaFoto,
           hasta_fue_por_defecto: fuePorDefecto,
           modelo: curva.modelo ?? null,
+          origen_curva: curva.origen_curva ?? null,
           huella_temporada: resumen.huella_temporada ?? null,
           agrupaciones_temporada: resumen.agrupaciones_temporada,
           version_modelo: resumen.version_modelo ?? null,

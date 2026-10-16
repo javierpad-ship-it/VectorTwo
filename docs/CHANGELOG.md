@@ -2,6 +2,20 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.4 · M6 — 2026-10-16
+
+Pantallas de la ficha 06c (`docs/modulos/06c-curvas-composicion-y-curva-usuario.md`): composición de la agrupación, curva del usuario `U` y modelo avanzado `F`. El backend (migración `0022`, `POST …/composicion`, `F` y `T` con backtesting honesto, `U` en el PUT) ya estaba; esto es la vista de trabajo, la lista, las versiones y la pantalla de M7. Sin migración.
+
+- **Composición de la agrupación** (tarjeta plegada; se lee de la base solo al desplegarla y de nuevo si cambia la huella del cálculo, descartando respuestas con otra huella): los GML principales (hasta ~85 % de las unidades del último año de ajuste o los 12 primeros) con unidades y peso por año, EAT frente al **resto** de la agrupación, marca «se aparta» con su motivo, «también está en otras N agrupaciones (x % de su venta)», minicurva solo con 120 unidades o más, casilla «ver en el gráfico», equivalencias desplegables, «Otros N GML (x %)» desplegable sin curva, buscador sobre todos, pequeños múltiplos, CSV con todos los GML y enlace a M3 (`?pestana=asignacion`). Se muestra aunque falten los periodos del Niño («se aparta» dice que no se evalúa).
+- **Candidatas:** fila `F · Modelo avanzado` con su frase de explicación, «Cómo se armó F» (pesos, ρ, δ, λ, curva base y contraída, y ρ y λ de cada pliegue) y el aviso de que con tres o cuatro años ningún algoritmo avanzado garantiza ganar; `T` con EAT, pruebas e «Igual a»; el EAT en muestra junto al EAT fuera de muestra.
+- **Mi curva (curva del usuario):** editor de doce porcentajes con suma en vivo, «Normalizar a 100 %», partir de una candidata, un año, la vigente o pegar desde Excel, «Limpiar» y borrador que sobrevive a recargar. Se dibuja en el gráfico y en la tabla año × mes con su diferencia frente a la aprobada, y se mide **en muestra** (también el año en curso) junto a la fila `U` de la tabla de candidatas. Aprobarla exige nota siempre; el `confirm` repite los doce valores, lo que proponía el sistema y de dónde partió. Orden de los 409 con `U` respetado.
+- **Lista y versiones:** estado «Curva del usuario» (nunca obsoleta; avisos `cambio_desde_aprobacion` con su motivo), badges «Mi curva» y «Avanzada», «A (vs U)» en «Sistema hoy», `curvas_usuario` en el resumen, filtro por curva del usuario; «Ver foto» de una `U` dibuja desde la curva de la foto y lee `resumen.curva_usuario`.
+- **M7:** «sin backtesting de M6 (cubre x %)» cuando una unidad mezcla agrupaciones con y sin backtesting, y la línea «N agrupaciones con curva del usuario» en «Antes de proyectar».
+- Gráfico y CSV: series extra (Mi curva y los GML marcados) y las columnas de Mi curva en el CSV de la tabla año × mes.
+- **Corrección de QA en M7:** la línea de «Por línea» ya no muestra el EAT de M6 cuando solo una parte de sus agrupaciones trae backtesting (por ejemplo una con curva del usuario); queda «sin backtesting de M6 (cubre x %)», como ya hacía el detalle de fila (función pura `eatM6DeLinea`, con pruebas).
+- **Pendientes menores de 06c** (auditoría de seguridad y QA, sin hallazgos bloqueantes): tope de espera de la cola de composición, lecturas del maestro de composición fuera de caché, borrador de «Mi curva» que sobrevive al cierre de sesión, `partida` autodeclarada, fotos sin curva en una carrera al aprobar, ruta de `--salida` del script de backtest y la instrucción de `JITI_ALIAS` (usar ruta absoluta). La tabla agregada del backtest sobre fotos reales queda pendiente de correr contra la base.
+- Total: **3 267 pruebas en 169 archivos**, lint, `tsc` y build en verde. Probado en navegador por QA sobre una pila local sintética; no probado contra la base real con la venta completa.
+
 ## 0.10.3 · M7 — 2026-10-16
 
 Endurecimiento de M7 tras la auditoría de seguridad de la 0.10.2 (sin hallazgos bloqueantes ni importantes; seis menores corregidos). Sin migración.

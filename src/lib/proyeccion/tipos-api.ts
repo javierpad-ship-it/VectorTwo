@@ -272,7 +272,10 @@ export type HistoricoFila = {
     real: number;
     desvio_pct: number;
     dentro_de_muestra: true;
+    /** `null` si alguna agrupación de la unidad no trae backtesting (curva del usuario, `F` sin backtesting honesto…): ver `eat_m6_cobertura`. */
     eat_m6: number | null;
+    /** 06c. Peso (0 a 1) de la unidad cuyas agrupaciones traen backtesting de M6: "sin backtesting (cubre 70 %)". Ausente en filas guardadas antes de la 06c. */
+    eat_m6_cobertura?: number;
   } | null;
   pesos_equivalencias: { equivalencia_id: string; peso: number }[];
   /** `0.10.1`: la validación de disponibilidad (solo si la propuesta de `Y` quedó bajo el umbral de cola larga). */
@@ -487,7 +490,7 @@ export type RespuestaLineasApi = {
     vigente: number | null;
     decidida: boolean;
   }[];
-  prueba_anterior: { propuesto: number; real: number; desvio_pct: number | null; eat_m6: number | null } | null;
+  prueba_anterior: { propuesto: number; real: number; desvio_pct: number | null; eat_m6: number | null; eat_m6_cobertura: number } | null;
   avisos_linea: "tienda_nueva_sin_decidir"[];
   indice_lineas: IndiceLineaApi[];
 };

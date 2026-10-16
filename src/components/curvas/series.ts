@@ -32,6 +32,22 @@ export const COLOR_VIGENTE = "var(--tinta)";
 export const COLOR_TEMPORADA = "#8b5cf6";
 export const COLOR_DESCARTADO = "#9aa1ab";
 export const COLOR_LIQUIDACION = "#f59e0b";
+/** 06c: la curva del usuario («Mi curva»), con trazo discontinuo grueso. */
+export const COLOR_USUARIO = "#0f766e";
+export const CLAVE_USUARIO = "usuario";
+/** 06c: colores de los GML marcados «ver en el gráfico», por posición (se repiten si hay más). */
+export const COLORES_GML = ["#7c3aed", "#db2777", "#ea580c", "#0891b2", "#65a30d", "#4f46e5", "#b45309", "#be123c"] as const;
+export const claveGml = (gmlId: string) => `gml-${gmlId}`;
+
+/** Una serie añadida al gráfico (Mi curva, un GML marcado): participación mensual (12), encendida al abrir. */
+export type SerieExtra = {
+  clave: string;
+  etiqueta: string;
+  valores: readonly number[];
+  color: string;
+  trazo?: SerieGrafico["trazo"];
+  grosor?: number;
+};
 
 /** `aaaa-mm` → mes 1-12. */
 function mesDe(periodo: string): number {
@@ -104,11 +120,13 @@ export type OpcionesSeries = {
   propuesta?: { etiqueta: string; curva: readonly number[] } | null;
   vigente?: { etiqueta: string; curva: readonly number[] } | null;
   temporada?: Pick<TemporadaResultado, "curva_T"> | null;
+  /** 06c, regla 78: Mi curva y los GML marcados; van después de la propuesta, encendidos al abrir y solo en participación. */
+  extras?: readonly SerieExtra[];
 };
 
 /**
  * Todas las series, en orden de dibujo: años de más antiguo a más reciente y,
- * encima, `T`, la vigente y la propuesta. En unidades solo se dibujan los años
+ * encima, `T`, la vigente, la propuesta y los extras (Mi curva, GML marcados). En unidades solo se dibujan los años
  * (las candidatas son participaciones).
  */
 export function construirSeries(anios: readonly AnioAgrupacion[], o: OpcionesSeries): SerieConMeta[] {
@@ -128,6 +146,10 @@ export function construirSeries(anios: readonly AnioAgrupacion[], o: OpcionesSer
       curva("propuesta", o.propuesta?.etiqueta ?? "Propuesta", COLOR_PROPUESTA, 3.5, o.propuesta?.curva, true),
     ])
       if (s) series.push(s);
+    for (const e of o.extras ?? []) {
+      if (e.valores.length !== 12) continue;
+      series.push({ clave: e.clave, etiqueta: e.etiqueta, valores: e.valores, color: e.color, trazo: e.trazo ?? "continuo", grosor: e.grosor ?? 1.5, opacidad: 1, porDefecto: true, mesesAtipicos: [], mesesLiquidacion: [] });
+    }
   }
   return series;
 }

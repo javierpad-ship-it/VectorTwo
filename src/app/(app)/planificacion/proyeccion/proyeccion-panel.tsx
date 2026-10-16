@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { useColeccion } from "@/lib/use-coleccion";
+import type { CurvaVigenteApi } from "@/lib/curvas/tipos-api";
 import type { AgrupacionEstacionalidadFila } from "@/lib/estacionalidad/tipos-api";
 import type { AgrupacionMarcaFila } from "@/lib/marcas/tipos-api";
 import type { IndiceLineaApi, NodoMatrizApi, ProyeccionApi, RespuestaLineasApi, RespuestaProyeccionApi } from "@/lib/proyeccion/tipos-api";
@@ -63,6 +64,9 @@ export function ProyeccionPanel() {
   const lineas = useLectura<RespuestaLineasApi>(idElegido ? `${rutaProyeccion(idElegido)}/lineas` : null);
   const estacionalidad = useColeccion<AgrupacionEstacionalidadFila>("/api/agrupaciones-estacionalidad");
   const marcas = useColeccion<AgrupacionMarcaFila>("/api/agrupaciones-marca");
+  // 06c: cuántas curvas vigentes de M6 son del usuario (no se marcan obsoletas: la línea informativa de «Antes de proyectar»).
+  const curvasVigentes = useColeccion<CurvaVigenteApi>("/api/curvas/vigentes");
+  const curvasUsuario = useMemo(() => curvasVigentes.datos.filter((c) => c.origen_curva === "usuario").length, [curvasVigentes.datos]);
 
   const accion = useAccion();
   const [calculandoLocal, setCalculandoLocal] = useState(false);
@@ -210,7 +214,7 @@ export function ProyeccionPanel() {
       {estado.cargando && !estado.datos && <Cargando />}
 
       {estado.datos && (
-        <AntesDeProyectar datos={estado.datos.datos} prerrequisitos={estado.datos.prerrequisitos} abierta={ordenadas.length === 0 ? true : undefined} />
+        <AntesDeProyectar datos={estado.datos.datos} prerrequisitos={estado.datos.prerrequisitos} abierta={ordenadas.length === 0 ? true : undefined} curvasUsuario={curvasUsuario} />
       )}
 
       {estado.datos && ordenadas.length > 0 && (

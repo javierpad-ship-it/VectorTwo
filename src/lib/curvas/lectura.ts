@@ -90,6 +90,7 @@ export async function leerObsolescencia(
       agrupacion_id: v.agrupacion_estacionalidad_id,
       corrida_id: v.corrida_id,
       modelo: v.modelo,
+      origen_curva: v.origen_curva,
       composicion:
         composicion && typeof composicion.equivalencias === "number" && typeof composicion.huella === "string"
           ? { equivalencias: composicion.equivalencias, huella: composicion.huella }

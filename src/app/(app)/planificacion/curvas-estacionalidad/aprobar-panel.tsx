@@ -1,6 +1,6 @@
 "use client";
 
-import type { ModeloCurva, TrabajoAgrupacionApi } from "@/lib/curvas/tipos-api";
+import type { ModeloAprobable, TrabajoAgrupacionApi } from "@/lib/curvas/tipos-api";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Field, Input } from "@/components/ui/form";
 import { AlertaAccion } from "./alerta-accion";
 import { ComparadorCurvas } from "./comparador-curvas";
 import type { AccionSugerida, ErrorAprobar } from "./trabajo-vista";
+import { formatearDecimal } from "@/lib/formato";
 import { ETIQUETA_AVISO_VIGENTE, formatearDiaMes, formatearFechaHora, modeloConNombre, textoObsoleta, type Comparacion } from "./vista";
 
 export const ID_NOTA_APROBACION = "nota-aprobacion";
@@ -39,7 +40,7 @@ export function AprobarPanel({
   onCerrarAviso,
 }: {
   datos: TrabajoAgrupacionApi;
-  modelo: ModeloCurva | null;
+  modelo: ModeloAprobable | null;
   propuesta: { etiqueta: string; curva: number[] } | null;
   vigente: { etiqueta: string; curva: number[] } | null;
   comparacion: Comparacion | null;
@@ -63,6 +64,7 @@ export function AprobarPanel({
   const motivoObsoleta = textoObsoleta(datos.obsoleta);
   const siguiente = (v?.version ?? 0) + 1;
   const notaObligatoria = motivosNota.length > 0;
+  const esUsuario = modelo === "U";
 
   function accion(a: AccionSugerida) {
     if (a.tipo === "nota") {
@@ -85,7 +87,9 @@ export function AprobarPanel({
                 {v.hasta_periodo ? ` con datos hasta ${v.hasta_periodo}` : ""}
               </span>
               {v.origen === "prestada" && <Badge tono="marca">Prestada (temporada)</Badge>}
-              {motivoObsoleta ? <Badge tono="alerta">Obsoleta</Badge> : <Badge tono="exito">Al día</Badge>}
+              {v.origen_curva === "usuario" && <Badge tono="marca">Mi curva</Badge>}
+              {v.origen_curva === "avanzada" && <Badge tono="neutro">Avanzada</Badge>}
+              {motivoObsoleta ? <Badge tono="alerta">Obsoleta</Badge> : v.origen_curva === "usuario" ? <Badge tono="neutro">No se marca obsoleta</Badge> : <Badge tono="exito">Al día</Badge>}
             </p>
             {motivoObsoleta && <p className="text-alerta">{motivoObsoleta}.</p>}
             {datos.avisos_vigente.length > 0 && (
@@ -98,15 +102,27 @@ export function AprobarPanel({
               </ul>
             )}
             {v.nota && <p className="text-xs text-tinta-suave">Nota de esa versión: «{v.nota}»</p>}
+            {v.origen_curva === "usuario" && v.curva_manual && (
+              <p className="text-xs text-tinta-suave">
+                Es una curva del usuario: se midió en muestra al aprobarla{v.curva_manual.eat_en_muestra !== null ? ` (EAT ${formatearDecimal(v.curva_manual.eat_en_muestra, 1)} pp)` : ""} y el sistema no la marca obsoleta: avisa de lo que cambió, la cambias tú.
+              </p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-tinta-suave">Esta agrupación no tiene curva aprobada: aprobar la propuesta creará la versión 1.</p>
         )}
 
         {propuesta ? (
-          <ComparadorCurvas propuesta={propuesta} vigente={vigente} comparacion={comparacion} avisoNoComparable={avisoNoComparable} />
+          <>
+            <ComparadorCurvas propuesta={propuesta} vigente={vigente} comparacion={comparacion} avisoNoComparable={avisoNoComparable} />
+            {esUsuario && (
+              <p className="text-xs text-tinta-suave">
+                Aprobar tu curva (U) no la hace «recomendada»: no se marcará obsoleta por datos nuevos (verás avisos) y la cambias tú cuando decidas.
+              </p>
+            )}
+          </>
         ) : (
-          <p className="text-sm text-tinta-suave">No hay candidata con curva para comparar o aprobar.</p>
+          <p className="text-sm text-tinta-suave">No hay candidata con curva para comparar o aprobar: puedes escribir la tuya en «Mi curva».</p>
         )}
 
         <div className="space-y-3 border-t border-borde pt-4">
@@ -115,7 +131,7 @@ export function AprobarPanel({
             hint={
               notaObligatoria
                 ? `Obligatoria ahora: ${motivosNota.join("; ")}.`
-                : "Obligatoria si eliges otra candidata que la recomendada, excluyes años o tiendas, o el tratamiento del Niño no es automático."
+                : "Obligatoria si eliges otra candidata que la recomendada, escribes tu propia curva, excluyes años o tiendas, o el tratamiento del Niño no es automático."
             }
           >
             <Input
@@ -140,7 +156,7 @@ export function AprobarPanel({
           <div className="flex flex-wrap items-center justify-end gap-3">
             {motivoNoPuede && <p className="mr-auto text-xs text-tinta-suave">{motivoNoPuede}</p>}
             <Button onClick={onAprobar} disabled={!puedeAprobar || ocupado} title={motivoNoPuede ?? undefined}>
-              {ocupado ? "Guardando…" : `Aprobar esta curva${modelo ? ` (${modelo})` : ""} como versión ${siguiente}`}
+              {ocupado ? "Guardando…" : esUsuario ? `Aprobar mi curva (U) como versión ${siguiente}` : `Aprobar esta curva${modelo ? ` (${modelo})` : ""} como versión ${siguiente}`}
             </Button>
           </div>
         </div>

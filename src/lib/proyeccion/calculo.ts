@@ -92,7 +92,55 @@ type CtxUnidad = {
   factores_mes: Record<number, number[]> | null;
   pesos_equivalencias: { equivalencia_id: string; peso: number }[];
   eat_m6: number | null;
+  /** 06c. Peso (0 a 1) de la unidad cuyas agrupaciones traen backtesting de M6; `eat_m6` es `null` si es menor que 1. */
+  eat_m6_cobertura: number;
 };
+
+/**
+ * 06c. EAT de M6 de una unidad dejando `anio` fuera: el promedio ponderado por el peso de cada agrupación, SOLO si
+ * todas traen su backtesting (`eat_por_pliegue` de ese año). Una curva del usuario (`U`), una `F` sin backtesting
+ * honesto o una curva de la 0.9.6 no lo traen: con `cobertura < 1` el EAT queda `null` ("sin backtesting (cubre 70 %)")
+ * en vez de promediar solo una parte y aparentar que cubre la unidad.
+ */
+export function eatM6ConCobertura(
+  origen: ReadonlyArray<{ agrupacion_id: string; peso: number }>,
+  vigentes: ReadonlyMap<string, { eat_por_pliegue?: { anio: number; eat: number }[] }>,
+  anio: number
+): { eat: number | null; cobertura: number } {
+  let pesoEat = 0;
+  let sumaEat = 0;
+  for (const o of origen) {
+    const pliegue = vigentes.get(o.agrupacion_id)?.eat_por_pliegue?.find((p) => p.anio === anio);
+    if (pliegue) {
+      sumaEat += pliegue.eat * o.peso;
+      pesoEat += o.peso;
+    }
+  }
+  const cobertura = Math.min(1, pesoEat);
+  return { eat: pesoEat > 0 && cobertura >= 1 - 1e-9 ? sumaEat / pesoEat : null, cobertura };
+}
+
+/**
+ * Agrega a nivel de línea el EAT de M6 de sus filas (06c, hallazgo de QA): la cobertura se pondera por el real del año
+ * anterior y, si es menor que 1 (alguna fila no tiene backtesting: p. ej. una curva del usuario), el EAT queda `null`
+ * en vez de promediar solo la parte que sí lo tiene. Las filas guardadas antes de `eat_m6_cobertura` cubren por
+ * completo si traen EAT y nada si no.
+ */
+export function eatM6DeLinea(
+  pruebas: ReadonlyArray<{ real: number; eat_m6: number | null; eat_m6_cobertura?: number | null }>
+): { eat_m6: number | null; cobertura: number } {
+  let real = 0;
+  let cubierto = 0;
+  const eats: number[] = [];
+  for (const pr of pruebas) {
+    real += pr.real;
+    cubierto += pr.real * (pr.eat_m6_cobertura ?? (pr.eat_m6 !== null ? 1 : 0));
+    if (pr.eat_m6 !== null) eats.push(pr.eat_m6);
+  }
+  const cobertura = real > 0 ? cubierto / real : 0;
+  const completa = cobertura >= 1 - 1e-9;
+  return { eat_m6: eats.length > 0 && completa ? eats.reduce((a, c) => a + c, 0) / eats.length : null, cobertura };
+}
 
 function ventanaW12(anio: number, k: number): string[] {
   const fin = indiceMes(anio, k);
@@ -178,18 +226,8 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       const total = [...pesos.values()].reduce((a, b) => a + b, 0);
       if (total > 0) for (const [id, u] of [...pesos].sort((a, b) => a[0].localeCompare(b[0]))) if (u > 0) pesosEq.push({ equivalencia_id: id, peso: u / total });
     }
-    // EAT de M6 dejando `Y−1` fuera: promedio ponderado por el peso de cada agrupación (si la vigente lo trae).
-    let eat: number | null = null;
-    let pesoEat = 0;
-    let sumaEat = 0;
-    for (const o of cf.curva_origen) {
-      const pliegue = vigentes.get(o.agrupacion_id)?.eat_por_pliegue?.find((p) => p.anio === Y - 1);
-      if (pliegue) {
-        sumaEat += pliegue.eat * o.peso;
-        pesoEat += o.peso;
-      }
-    }
-    if (pesoEat > 0) eat = sumaEat / pesoEat;
+    // EAT de M6 dejando `Y−1` fuera: promedio ponderado por el peso de cada agrupación, solo si TODAS traen backtesting (06c).
+    const { eat, cobertura: eatCobertura } = eatM6ConCobertura(cf.curva_origen, vigentes, Y - 1);
 
     const ctx: CtxUnidad = {
       nodo,
@@ -203,6 +241,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       factores_mes,
       pesos_equivalencias: pesosEq,
       eat_m6: eat,
+      eat_m6_cobertura: eatCobertura,
     };
     unidades.set(clave, ctx);
     return ctx;
@@ -746,7 +785,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     const realPrev = sPrev.u.reduce((x, y) => x + y, 0);
     const propPrev = pruebaPorAvance({ serie: sPrev.u, k, curva: u.curva, factoresMes: phiDe(u, Y - 1) });
     if (propPrev !== null && realPrev > 0) {
-      prueba = { anio: Y - 1, propuesto: propPrev, real: realPrev, desvio_pct: (propPrev / realPrev - 1) * 100, dentro_de_muestra: true, eat_m6: u.eat_m6 };
+      prueba = { anio: Y - 1, propuesto: propPrev, real: realPrev, desvio_pct: (propPrev / realPrev - 1) * 100, dentro_de_muestra: true, eat_m6: u.eat_m6, eat_m6_cobertura: u.eat_m6_cobertura };
       sumaPropuestaPrueba += propPrev;
       sumaRealPrueba += realPrev;
     }

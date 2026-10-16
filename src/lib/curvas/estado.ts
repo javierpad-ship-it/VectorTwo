@@ -48,16 +48,18 @@ export type AgrupacionLeida = {
 
 /**
  * Regla 40. Estado de una agrupación en la lista: `inactiva_con_curva` (gana a los
- * demás), `sin_curva`, `obsoleta` (con motivos), `al_dia` (se aprobó la recomendada)
- * o `al_dia_distinta` (se aprobó otra candidata).
+ * demás), `sin_curva`, `curva_usuario` (06c: la vigente es una `U`, que NUNCA se
+ * vuelve obsoleta sola: gana a `obsoleta`), `obsoleta` (con motivos), `al_dia` (se aprobó la
+ * recomendada) o `al_dia_distinta` (se aprobó otra candidata).
  */
 export function estadoDeAgrupacion(
-  vigente: Pick<VigenteResumenApi, "recomendada"> | null,
+  vigente: (Pick<VigenteResumenApi, "recomendada"> & Partial<Pick<VigenteResumenApi, "origen_curva" | "modelo">>) | null,
   obsoleta: ObsoletaApi | null,
   activo: boolean
 ): EstadoAgrupacion {
   if (!vigente) return "sin_curva";
   if (!activo) return "inactiva_con_curva";
+  if (vigente.origen_curva === "usuario" || vigente.modelo === "U") return "curva_usuario";
   if (obsoleta && obsoleta.motivos.length > 0) return "obsoleta";
   return vigente.recomendada ? "al_dia" : "al_dia_distinta";
 }
@@ -151,6 +153,7 @@ export function armarEstadoCurvas(e: EntradaEstado): EstadoCurvasApi {
     al_dia: activas.filter((a) => a.estado === "al_dia").length,
     al_dia_distintas: activas.filter((a) => a.estado === "al_dia_distinta").length,
     obsoletas: activas.filter((a) => a.estado === "obsoleta").length,
+    curvas_usuario: activas.filter((a) => a.estado === "curva_usuario").length,
     sin_curva: sinCurva.length,
     bloqueadas: activas.filter((a) => a.bloqueada_por.length > 0).length,
     bloqueadas_sin_curva: bloqueadasSinCurva,

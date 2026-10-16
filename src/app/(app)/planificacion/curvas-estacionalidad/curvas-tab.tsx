@@ -223,6 +223,8 @@ export function CurvasTab({
               {v.hasta_periodo ? ` · datos hasta ${v.hasta_periodo}` : ""}
             </p>
             {v.origen === "prestada" && <Badge tono="marca">Prestada (temporada)</Badge>}
+            {v.origen_curva === "usuario" && <Badge tono="marca">Mi curva</Badge>}
+            {v.origen_curva === "avanzada" && <Badge tono="neutro">Avanzada</Badge>}
             {v.nota && (
               <p className="max-w-56 truncate text-tinta-suave" title={v.nota}>
                 nota: «{v.nota}»
@@ -255,6 +257,14 @@ export function CurvasTab({
                 <span className="mt-0.5 block max-w-56 text-alerta">{a.obsoleta?.motivos.map((m) => m.detalle).join("; ")}</span>
               </span>
             )}
+            {a.estado === "curva_usuario" && (
+              <span title={a.vigente?.nota ? `Nota: ${a.vigente.nota}` : undefined}>
+                <Badge tono="marca">Curva del usuario</Badge>
+                <span className="mt-0.5 block text-tinta-suave">
+                  v{a.vigente?.version} · el sistema proponía {a.vigente?.recomendada_entonces ?? "—"}; no se marca obsoleta, la cambias tú
+                </span>
+              </span>
+            )}
             {a.estado === "inactiva_con_curva" && <Badge tono="neutro">Inactiva con curva</Badge>}
             {a.bloqueada_por.length > 0 && (
               <p className="max-w-56 text-alerta" title="Falta algo imprescindible para calcularla">
@@ -269,6 +279,7 @@ export function CurvasTab({
                     <Badge tono="neutro">
                       <span aria-hidden>ⓘ</span> {ETIQUETA_AVISO_VIGENTE[x.codigo]}
                     </Badge>
+                    {x.codigo === "cambio_desde_aprobacion" && <span className="mt-0.5 block max-w-56 text-tinta-suave">{x.detalle}</span>}
                   </li>
                 ))}
               </ul>
@@ -303,9 +314,19 @@ export function CurvasTab({
         const s = sistemaHoy(a);
         if (s.tipo === "igual" || s.tipo === "distinta")
           return (
-            <span className={`text-xs ${s.tipo === "distinta" ? "text-alerta" : "text-tinta"}`} title={s.tipo === "igual" ? "El modelo es determinista: con los mismos datos propondría lo mismo que al aprobar" : "Se aprobó otra candidata que la recomendada"}>
-              {s.texto}
-            </span>
+            <div className="space-y-1">
+              <span className={`text-xs ${s.tipo === "distinta" ? "text-alerta" : "text-tinta"}`} title={s.tipo === "igual" ? "El modelo es determinista: con los mismos datos propondría lo mismo que al aprobar" : "Se aprobó otra curva que la que recomendaba el sistema"}>
+                {s.texto}
+              </span>
+              {/* La curva del usuario no se marca obsoleta: «Comparar con el sistema» sigue disponible para saber si hoy el sistema propondría otra cosa. */}
+              {a.estado === "curva_usuario" && (
+                <div>
+                  <Button variante="secundario" tamano="sm" disabled={ocupadoId !== null} onClick={() => void comparar(a)} title="Calcula la propuesta de hoy sin aprobar ni guardar nada">
+                    Comparar con el sistema
+                  </Button>
+                </div>
+              )}
+            </div>
           );
         if (s.tipo === "comparar")
           return (

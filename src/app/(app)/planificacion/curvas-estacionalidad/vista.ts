@@ -2,9 +2,11 @@ import { normalizarNombre } from "@/lib/arbol/normalizar";
 import { formatearDecimal, formatearNumero, formatearPp as formatearPpCompartido } from "@/lib/formato";
 import { MESES_CORTOS, MESES_LARGOS } from "@/lib/reportes/histograma";
 import {
+  DESCRIPCION_MODELO_USUARIO,
   ETIQUETA_MOTIVO_RED,
   ETIQUETA_TEMPORADA,
   MODELOS,
+  esModeloAprobable,
   type AgrupacionCurvasApi,
   type AgrupacionResultado,
   type AnioAgrupacion,
@@ -15,9 +17,11 @@ import {
   type EfectoAtipicoCorrida,
   type EfectoTemporadaAnio,
   type EstadoAgrupacion,
+  type ModeloAprobable,
   type ModeloCurva,
   type MotivoTratamiento,
   type ObsoletaApi,
+  type PartidaCurvaUsuario,
   type RedAnioApi,
   type ResumenEstadoCurvas,
   type RedTiendaAnioApi,
@@ -163,13 +167,14 @@ export const ETIQUETA_AVISO: Record<CodigoAviso, string> = {
   prestada: "Curva prestada",
 };
 
-export function etiquetaModelo(codigo: ModeloCurva): string {
+export function etiquetaModelo(codigo: ModeloAprobable): string {
+  if (codigo === "U") return DESCRIPCION_MODELO_USUARIO.nombre;
   const m = MODELOS.find((x) => x.codigo === codigo);
   return m ? m.nombre : codigo;
 }
 
 /** `B · Ponderado por volumen`. */
-export function modeloConNombre(codigo: ModeloCurva): string {
+export function modeloConNombre(codigo: ModeloAprobable): string {
   return `${codigo} · ${etiquetaModelo(codigo)}`;
 }
 
@@ -179,7 +184,7 @@ export function etiquetaPropuesta(modelo: ModeloCurva): string {
 }
 
 /** Etiqueta de la serie y de la fila de la aprobada: `Aprobada v2 (A)`. */
-export function etiquetaAprobada(version: number, modelo: ModeloCurva): string {
+export function etiquetaAprobada(version: number, modelo: ModeloAprobable): string {
   return `Aprobada v${version} (${modelo})`;
 }
 
@@ -262,6 +267,7 @@ export const ETIQUETA_ESTADO: Record<EstadoAgrupacion, string> = {
   al_dia: "Al día",
   al_dia_distinta: "Al día · distinta de la recomendada",
   obsoleta: "Obsoleta",
+  curva_usuario: "Curva del usuario",
   inactiva_con_curva: "Inactiva con curva",
 };
 
@@ -285,10 +291,11 @@ export const ETIQUETA_AVISO_VIGENTE: Record<AvisoVigenteApi["codigo"], string> =
   datos_posteriores: "Datos posteriores",
   modelo_anterior: "Modelo anterior",
   temporada_recompuesta: "Temporada recompuesta",
+  cambio_desde_aprobacion: "Cambio desde la aprobación",
 };
 
 export type FiltroTemporada = "todas" | TemporadaAgrupacion;
-export type FiltroEstado = "todas" | "sin_curva" | "obsoletas" | "distintas" | "al_dia" | "bloqueadas";
+export type FiltroEstado = "todas" | "sin_curva" | "obsoletas" | "distintas" | "al_dia" | "usuario" | "bloqueadas";
 
 export function cumpleEstado(a: AgrupacionCurvasApi, f: FiltroEstado): boolean {
   switch (f) {
@@ -302,6 +309,8 @@ export function cumpleEstado(a: AgrupacionCurvasApi, f: FiltroEstado): boolean {
       return a.estado === "al_dia_distinta";
     case "al_dia":
       return a.estado === "al_dia";
+    case "usuario":
+      return a.estado === "curva_usuario";
     case "bloqueadas":
       return a.bloqueada_por.length > 0;
   }
@@ -313,6 +322,7 @@ export const FILTROS_ESTADO: { id: FiltroEstado; label: string }[] = [
   { id: "obsoletas", label: "Obsoletas" },
   { id: "distintas", label: "Distintas" },
   { id: "al_dia", label: "Al día" },
+  { id: "usuario", label: "Curva del usuario" },
   { id: "bloqueadas", label: "Bloqueadas" },
 ];
 
@@ -359,6 +369,8 @@ export function textoResumen(r: ResumenEstadoCurvas): string {
     `${n(r.al_dia_distintas)} ${r.al_dia_distintas === 1 ? "aprobada distinta de la recomendada" : "aprobadas distintas de la recomendada"}`,
     `${n(r.obsoletas)} ${r.obsoletas === 1 ? "obsoleta" : "obsoletas"}`,
   ];
+  // 06c: las curvas del usuario se cuentan aparte y nunca son obsoletas.
+  if (r.curvas_usuario > 0) partes.push(`${n(r.curvas_usuario)} ${r.curvas_usuario === 1 ? "con curva del usuario" : "con curva del usuario"}`);
   partes.push(
     r.sin_curva === 0
       ? "0 sin curva"
@@ -388,6 +400,9 @@ export function sistemaHoy(a: Pick<AgrupacionCurvasApi, "estado" | "vigente" | "
       return v ? { tipo: "igual", texto: `= (${v.modelo})` } : { tipo: "ninguno" };
     case "al_dia_distinta":
       return v ? { tipo: "distinta", texto: `${v.recomendada_entonces ?? "?"} (vs ${v.modelo})` } : { tipo: "ninguno" };
+    case "curva_usuario":
+      // 06c: lo que el sistema proponía al aprobarse; «Comparar con el sistema» sigue disponible (la fila lo ofrece aparte).
+      return v ? { tipo: "distinta", texto: `${v.recomendada_entonces ?? "?"} (vs U)` } : { tipo: "ninguno" };
     case "obsoleta":
     case "sin_curva":
       return a.bloqueada_por.length > 0 && a.estado === "sin_curva" ? { tipo: "ninguno" } : { tipo: "comparar" };
@@ -505,10 +520,14 @@ function listaAnios(xs: readonly number[]): string {
  * Ejemplo: «Propone A · Promedio simple de 2023, 2024 y 2025 (2023, año del Niño, entra incluido).
  * B se equivoca 27.4 pp frente a 29.1 de A en 3 pruebas; …».
  */
-export function textoPropone(r: Pick<AgrupacionResultado, "recomendada" | "anios" | "comparacion" | "origen">): string {
+export function textoPropone(r: Pick<AgrupacionResultado, "recomendada" | "anios" | "comparacion" | "origen"> & Partial<Pick<AgrupacionResultado, "motivo_recomendacion">>): string {
   if (r.recomendada === null) return "El sistema no puede proponer una curva: la agrupación no tiene años utilizables y su temporada tampoco. Revisa los avisos y los meses cargados.";
-  if (r.recomendada === "T")
+  if (r.recomendada === "T") {
+    // 06c: `T` también compite con backtesting; solo es «prestada por falta de años» cuando no hay propias con EAT.
+    if (r.motivo_recomendacion === "menor_error")
+      return `Propone T · Curva de la temporada (prestada de las demás agrupaciones de su temporada): se equivoca menos que las propias, por más del margen.${r.comparacion ? ` ${r.comparacion.frase}` : ""}`;
     return "Propone T · Curva de la temporada (prestada): la agrupación no tiene años suficientes para una curva propia y usa la de las demás agrupaciones de su temporada.";
+  }
   const usados = r.anios.filter((a) => a.en_ajuste).sort((a, b) => a.anio - b.anio);
   const nino = usados.filter((a) => a.clase !== "normal" && a.tratamiento !== null);
   const notaNino =
@@ -563,10 +582,12 @@ export function esIdAgrupacion(v: string | null | undefined): v is string {
   return typeof v === "string" && UUID.test(v);
 }
 
-/** ¿Es el código de una candidata (A a E o T)? (el de `?modelo=` de la URL). */
+/** ¿Es el código de una candidata (A a F o T)? (el de `?modelo=` de la URL). La `U` no es una candidata. */
 export function esModeloCurva(v: string | null | undefined): v is ModeloCurva {
   return MODELOS.some((m) => m.codigo === v);
 }
+
+export { esModeloAprobable };
 
 // ─── Aprobar una curva ───
 
@@ -585,7 +606,7 @@ export function textoAniosFuera(anios: readonly AnioAgrupacion[]): string {
 export type EntradaConfirmar = {
   agrupacion: string;
   temporada: TemporadaAgrupacion;
-  modelo: ModeloCurva;
+  modelo: ModeloAprobable;
   recomendada: ModeloCurva | null;
   anios: readonly AnioAgrupacion[];
   eat: number | null;
@@ -605,7 +626,31 @@ export type EntradaConfirmar = {
   hasta: string;
   avisos: readonly { detalle: string }[];
   nota: string;
+  /** 06c: con `modelo = "U"`, lo que el planner escribió y cómo se midió (EN MUESTRA). */
+  usuario?: {
+    valores: readonly number[];
+    eatEnMuestra: number | null;
+    parcialEnMuestra: number | null;
+    partida: PartidaCurvaUsuario;
+    igualA: ModeloCurva | null;
+  };
 };
+
+/** De dónde partió la curva del usuario, en texto de pantalla. */
+export function textoPartida(p: PartidaCurvaUsuario): string {
+  switch (p.tipo) {
+    case "candidata":
+      return `la candidata ${modeloConNombre(p.referencia)}`;
+    case "anio":
+      return `la curva del año ${p.referencia}`;
+    case "vigente":
+      return `la curva vigente ${p.referencia}`;
+    case "pegado":
+      return "valores pegados desde Excel";
+    case "en_blanco":
+      return "una curva en blanco";
+  }
+}
 
 function listaTexto(xs: readonly (string | number)[]): string {
   return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`;
@@ -618,6 +663,7 @@ function listaTexto(xs: readonly (string | number)[]): string {
  */
 export function textoConfirmarAprobacion(e: EntradaConfirmar): string {
   const lineas: string[] = [];
+  if (e.modelo === "U" && e.usuario) return textoConfirmarCurvaUsuario(e, e.usuario);
   const prestada = e.modelo === "T";
   lineas.push(`¿Aprobar la curva ${modeloConNombre(e.modelo)} de ${e.agrupacion}?`);
   lineas.push(`Temporada: ${ETIQUETA_TEMPORADA[e.temporada]}.`);
@@ -649,6 +695,34 @@ export function textoConfirmarAprobacion(e: EntradaConfirmar): string {
       `Reemplaza la v${e.versionVigente}: difiere ${formatearPp(e.comparacion.eat)}; el mes que más cambia es ${nombreMes(e.comparacion.mesMayorCambio)} (${formatearDiferenciaPp(e.comparacion.diferenciaMayor)}).`
     );
   else lineas.push(`Reemplaza la v${e.versionVigente}.`);
+  if (e.avisos.length > 0) lineas.push(`Avisos: ${e.avisos.map((a) => a.detalle).join(" | ")}`);
+  if (e.nota.trim() !== "") lineas.push(`Nota: ${e.nota.trim()}`);
+  return lineas.join("\n");
+}
+
+/** El `confirm` de aprobar la curva del usuario: los doce valores, el EAT EN MUESTRA frente al ruido, lo que proponía el sistema y de dónde partió. */
+function textoConfirmarCurvaUsuario(e: EntradaConfirmar, u: NonNullable<EntradaConfirmar["usuario"]>): string {
+  const lineas: string[] = [];
+  lineas.push(`¿Aprobar TU curva (${modeloConNombre("U")}) de ${e.agrupacion}?`);
+  lineas.push(`Temporada: ${ETIQUETA_TEMPORADA[e.temporada]}.`);
+  lineas.push(`Tus doce valores (%): ${u.valores.map((v) => formatearDecimal(v, 1)).join(" · ")}.`);
+  lineas.push(
+    u.eatEnMuestra === null
+      ? "EAT en muestra: no medible (no hay años de ajuste)."
+      : `EAT EN MUESTRA: ${formatearPp(u.eatEnMuestra)}, medida con los mismos años que ves (las candidatas se miden fuera de muestra); ruido entre años normales: ${e.ruidoNormal === null ? "no medible" : formatearPp(e.ruidoNormal)}.`
+  );
+  if (u.parcialEnMuestra !== null) lineas.push(`Año en curso (parcial): ${formatearPp(u.parcialEnMuestra)} (en muestra).`);
+  if (u.igualA) lineas.push(`Coincide con la candidata ${u.igualA}.`);
+  lineas.push(e.recomendada ? `El sistema proponía ${modeloConNombre(e.recomendada)}.` : "El sistema no tenía ninguna candidata que proponer.");
+  lineas.push(`Partiste de: ${textoPartida(u.partida)}.`);
+  if (e.aniosExcluidos.length > 0) lineas.push(`Años excluidos a mano: ${listaTexto(e.aniosExcluidos)}.`);
+  if (e.tiendasExcluidas.length > 0) lineas.push(`Tiendas excluidas a mano: ${listaTexto(e.tiendasExcluidas)}.`);
+  lineas.push(`Datos hasta ${e.hasta}.`);
+  if (e.versionVigente === null) lineas.push("No hay curva vigente: esta será la versión 1.");
+  else if (e.comparacion)
+    lineas.push(`Reemplaza la v${e.versionVigente}: difiere ${formatearPp(e.comparacion.eat)}; el mes que más cambia es ${nombreMes(e.comparacion.mesMayorCambio)} (${formatearDiferenciaPp(e.comparacion.diferenciaMayor)}).`);
+  else lineas.push(`Reemplaza la v${e.versionVigente}.`);
+  lineas.push("Esta curva NO se marcará obsoleta por datos nuevos: verás avisos y la cambias tú cuando decidas.");
   if (e.avisos.length > 0) lineas.push(`Avisos: ${e.avisos.map((a) => a.detalle).join(" | ")}`);
   if (e.nota.trim() !== "") lineas.push(`Nota: ${e.nota.trim()}`);
   return lineas.join("\n");
@@ -1004,7 +1078,9 @@ export function resumenMensual(anios: readonly AnioAgrupacion[]): ResumenMensual
 export function filasCsvAnioMes(
   anios: readonly AnioAgrupacion[],
   propuesta: readonly number[] | null,
-  vigente: readonly number[] | null
+  vigente: readonly number[] | null,
+  /** 06c, regla 78: la curva del usuario (fracciones) si es válida; añade «MI CURVA (%)» y su diferencia con la aprobada. */
+  usuario: readonly number[] | null = null
 ): { campos: string[]; datos: (string | number)[][] } {
   const ordenados = [...anios].sort((a, b) => a.anio - b.anio);
   const resumen = resumenMensual(ordenados);
@@ -1014,6 +1090,7 @@ export function filasCsvAnioMes(
     "PROPUESTA (%)",
     "APROBADA (%)",
     "DIFERENCIA (pp)",
+    ...(usuario ? ["MI CURVA (%)", "MI CURVA - APROBADA (pp)"] : []),
     "PROMEDIO (unidades)",
     "INDICE (1.00 = promedio)",
     "ANIOS CONSIDERADOS",
@@ -1030,6 +1107,7 @@ export function filasCsvAnioMes(
       propuesta ? r1(propuesta[mes] * 100) : "",
       vigente ? r1(vigente[mes] * 100) : "",
       propuesta && vigente ? r1((propuesta[mes] - vigente[mes]) * 100) : "",
+      ...(usuario ? [r1(usuario[mes] * 100), vigente ? r1((usuario[mes] - vigente[mes]) * 100) : ""] : []),
       resumen.promedio[mes] === null ? "" : Math.round(resumen.promedio[mes] as number),
       resumen.indice[mes] === null ? "" : r2(resumen.indice[mes] as number),
       resumen.considerados[mes]

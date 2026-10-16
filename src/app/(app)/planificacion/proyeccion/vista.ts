@@ -834,14 +834,25 @@ export function textoFactoresMes(phi: readonly number[] | undefined | null): str
   return meses.map((x) => `${nombreMes(x.i + 1)} ${formatearDecimal(x.f, 2)}`).join(", ");
 }
 
+/**
+ * La EAT de M6 de la prueba, o por qué no hay (06c): `eat_m6 = null` con cobertura parcial (0 a 1: el peso de la unidad
+ * cuyas agrupaciones traen backtesting) dice «sin backtesting de M6 (cubre 70 %: una agrupación tiene curva del usuario
+ * o F sin backtesting honesto)»; sin cobertura o sin el dato (filas anteriores a la 06c), «sin backtesting de M6».
+ */
+export function textoEatM6(eat: number | null, cobertura: number | undefined, anio: number): string {
+  if (eat !== null) return `M6 dejando ${anio} fuera: EAT ${formatearDecimal(eat, 1)} pp`;
+  if (cobertura === undefined || !(cobertura > 0)) return "sin backtesting de M6";
+  return `sin backtesting de M6 (cubre ${formatearDecimal(Math.round(cobertura * 100), 0)} %: una agrupación tiene curva del usuario o una candidata sin backtesting)`;
+}
+
 /** La prueba con el año anterior, rotulada «dentro de muestra» y con la EAT de M6 al lado. */
 export function textoPruebaAnterior(
-  pa: { anio: number; propuesto: number; real: number; desvio_pct: number | null; eat_m6: number | null },
+  pa: { anio: number; propuesto: number; real: number; desvio_pct: number | null; eat_m6: number | null; eat_m6_cobertura?: number },
   hastaPeriodo: string
 ): string {
   const mes = nombreMes(indiceMes(hastaPeriodo));
   const desvio = pa.desvio_pct === null ? "" : ` (${formatearPct(pa.desvio_pct)})`;
-  const eat = pa.eat_m6 === null ? "sin backtesting de M6" : `M6 dejando ${pa.anio} fuera: EAT ${formatearDecimal(pa.eat_m6, 1)} pp`;
+  const eat = textoEatM6(pa.eat_m6, pa.eat_m6_cobertura, pa.anio);
   return `A ${mes}-${pa.anio} el método habría dado ${unidades(pa.propuesto)}; el real fue ${unidades(pa.real)}${desvio} · dentro de muestra · ${eat}`;
 }
 

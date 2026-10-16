@@ -1,10 +1,12 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types";
 import { leerLineas, leerNodos, leerTodo } from "@/lib/arbol/consultas";
+import { nodoVigente } from "@/lib/arbol/armar-arbol";
 import { temporadasDeLineasPorAgrupacion } from "@/lib/estacionalidad/reglas";
 import { recortarPeriodo } from "@/lib/ventas/periodo";
 import { leerVentaEstacionalidad, type VentaEstacionalidad } from "./agregado";
 import { alcanceEspejo, temporadaSugerida, temporadasDePeriodo, temporadaSugeridaVisible } from "./atipicos";
+import { leerComposicion, type LecturaComposicion, type MaestroComposicion } from "./composicion";
 import { huellaComposicion } from "./huellas";
 import { parametrosDeJson } from "./reglas";
 import { temporadaDeFila, type TiendaMaestro, type VentaTiendaMes } from "./tipos";
@@ -23,7 +25,7 @@ import type { AgrupacionLeida } from "./estado";
 /**
  * Acceso a datos de M6 (solo servidor). ÚNICO archivo de `src/` que lee o
  * escribe `periodos_atipicos`, `corridas_estacionalidad` y `curvas_estacionalidad`
- * y que nombra `venta_estacionalidad_agrupacion` y `venta_mensual_tienda`
+ * y que nombra `venta_estacionalidad_agrupacion`, `venta_composicion_agrupacion` y `venta_mensual_tienda`
  * (docs/modulos/06b-curvas-trabajo-por-agrupacion.md, "Contratos de API" y regla 46).
  * La venta se lee SOLO con la función `jsonb` (un solo estado de los datos); la
  * vista materializada y la función de refresco de la 0.9.6 ya no se usan.
@@ -192,6 +194,81 @@ export async function leerVentaDeEstacionalidad(
   const { data, error } = await db.rpc("venta_estacionalidad_agrupacion", agrupacionId === null ? {} : { p_agrupacion_id: agrupacionId });
   if (error) return { data: null, error };
   return { data: leerVentaEstacionalidad(data), error: null };
+}
+
+/**
+ * 06c. UNA llamada a `venta_composicion_agrupacion(id, p_red, p_hasta)`: la venta de la agrupación por GML ×
+ * mes y por equivalencia × año sobre la red comparable de cada año (`p_red`, que arma SIEMPRE el servidor desde
+ * el cálculo: `{ "2024": [tienda_id, …] }`), la venta de esos GML en otras agrupaciones y las cargas
+ * publicadas, todo del mismo estado. `hasta` es el `hasta_periodo` (`aaaa-mm`). `data` es `null` si la
+ * respuesta no tiene la forma esperada (el handler responde 500).
+ */
+export async function leerComposicionDeAgrupacion(
+  db: Db,
+  agrupacionId: string,
+  pRed: Record<string, string[]>,
+  hasta: string
+): Promise<{ data: LecturaComposicion | null; error: PostgrestError | null }> {
+  const { data, error } = await db.rpc("venta_composicion_agrupacion", {
+    p_agrupacion_id: agrupacionId,
+    p_red: pRed,
+    p_hasta: `${recortarPeriodo(hasta)}-01`,
+  });
+  if (error) return { data: null, error };
+  return { data: leerComposicion(data), error: null };
+}
+
+/**
+ * 06c. Nombres y vigencia de lo que muestra la composición: TODAS las equivalencias de la agrupación (activas
+ * o no), los GML a los que pertenecen (género, mundo, línea, nivel de planificación y vigencia de M1) y el
+ * nombre de las agrupaciones (para "también está en otras N agrupaciones"). Lecturas pequeñas y paginadas.
+ */
+export async function leerMaestroComposicion(db: Db, agrupacionId: string): Promise<{ data: MaestroComposicion; error: PostgrestError | null }> {
+  const vacio: MaestroComposicion = { gml: [], equivalencias: [], agrupaciones: [] };
+  const [equivalencias, nodos, generos, mundos, lineas, agrupaciones] = await Promise.all([
+    leerTodo<Tables<"equivalencias">>((d, h) => db.from("equivalencias").select("*").eq("agrupacion_estacionalidad_id", agrupacionId).order("id").range(d, h)),
+    leerNodos(db),
+    leerTodo<Tables<"generos">>((d, h) => db.from("generos").select("*").order("id").range(d, h)),
+    leerTodo<Tables<"mundos">>((d, h) => db.from("mundos").select("*").order("id").range(d, h)),
+    leerLineas(db),
+    leerTodo<{ id: string; nombre: string }>((d, h) => db.from("agrupaciones_estacionalidad").select("id, nombre").order("id").range(d, h)),
+  ]);
+  const fallo = equivalencias.error ?? nodos.error ?? generos.error ?? mundos.error ?? lineas.error ?? agrupaciones.error;
+  if (fallo) return { data: vacio, error: fallo };
+
+  const generoPorId = new Map(generos.data.map((g) => [g.id, g]));
+  const mundoPorId = new Map(mundos.data.map((m) => [m.id, m]));
+  const lineaPorId = new Map(lineas.data.map((l) => [l.id, l]));
+  const idsGml = new Set(equivalencias.data.map((e) => e.genero_mundo_linea_id));
+  return {
+    data: {
+      gml: nodos.data
+        .filter((n) => idsGml.has(n.id))
+        .map((n) => {
+          const genero = generoPorId.get(n.genero_id);
+          const mundo = mundoPorId.get(n.mundo_id);
+          const linea = lineaPorId.get(n.linea_id);
+          return {
+            id: n.id,
+            genero: genero?.nombre ?? "—",
+            mundo: mundo?.nombre ?? "—",
+            linea: linea?.nombre ?? "—",
+            nivel: n.nivel_planificacion === "GMLE" ? ("GMLE" as const) : ("GML" as const),
+            vigente: nodoVigente(n, genero ?? { activo: false }, mundo ?? { activo: false }, linea ?? { activo: false }),
+          };
+        }),
+      equivalencias: equivalencias.data.map((e) => ({
+        id: e.id,
+        gml_id: e.genero_mundo_linea_id,
+        nombre: e.nombre,
+        codigo: e.codigo,
+        es_generica: e.es_generica,
+        activo: e.activo,
+      })),
+      agrupaciones: agrupaciones.data,
+    },
+    error: null,
+  };
 }
 
 // ─── Tiendas, venta por tienda y cargas ───

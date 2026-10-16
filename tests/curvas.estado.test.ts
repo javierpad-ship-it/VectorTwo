@@ -43,6 +43,8 @@ const vigenteDe = (modelo: "A" | "B", extra: Partial<VigenteResumenApi> = {}): V
   version: 1,
   modelo,
   origen: "propia",
+  origen_curva: "sistema",
+  curva_manual: null,
   recomendada: true,
   recomendada_entonces: "A",
   eat: 10,

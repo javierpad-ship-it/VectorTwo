@@ -3,7 +3,9 @@ import {
   PARAMETROS_POR_DEFECTO,
   type AprobarCurvaCuerpo,
   type CalcularAgrupacionCuerpo,
+  type ModeloAprobable,
   type ModeloCurva,
+  type PartidaCurvaUsuario,
   type ParametrosCurvas,
   type PantallaArreglo,
   type Prerrequisito,
@@ -131,9 +133,11 @@ export function alternarTiendaExcluida(p: ParametrosCurvas, tiendaId: string, ex
  * recomendada, años o tiendas excluidos a mano, o tratamiento del Niño que no es `auto`.
  * Es la misma regla que aplica el servidor (`409 nota_requerida`).
  */
-export function motivosNotaRequerida(p: ParametrosCurvas, modelo: ModeloCurva | null, recomendada: ModeloCurva | null): string[] {
+export function motivosNotaRequerida(p: ParametrosCurvas, modelo: ModeloAprobable | null, recomendada: ModeloCurva | null): string[] {
   const motivos: string[] = [];
-  if (modelo !== null && recomendada !== null && modelo !== recomendada) motivos.push(`elegiste ${modelo} y el sistema recomienda ${recomendada}`);
+  // 06c: la curva del usuario SIEMPRE lleva motivo.
+  if (modelo === "U") motivos.push("aprobaste tu propia curva (U): siempre lleva motivo");
+  else if (modelo !== null && recomendada !== null && modelo !== recomendada) motivos.push(`elegiste ${modelo} y el sistema recomienda ${recomendada}`);
   if (p.anios_excluidos.length > 0) motivos.push(`excluiste ${p.anios_excluidos.length === 1 ? "el año" : "los años"} ${p.anios_excluidos.join(", ")}`);
   if (p.tiendas_excluidas.length > 0) motivos.push(`excluiste ${p.tiendas_excluidas.length === 1 ? "una tienda" : `${p.tiendas_excluidas.length} tiendas`}`);
   if (p.tratamiento_atipicos !== "auto") motivos.push(`fijaste el tratamiento del Niño en «${ETIQUETA_TRATAMIENTO_ATIPICOS[p.tratamiento_atipicos]}»`);
@@ -151,7 +155,13 @@ export function mensajeNotaRequerida(motivos: readonly string[]): string {
  * la huella de ese cálculo y la versión vigente que vio. `null` si no hay `hasta_periodo`
  * (no hay nada que aprobar).
  */
-export function cuerpoAprobar(t: Pick<TrabajoAgrupacionApi, "parametros" | "datos" | "huella_calculo" | "vigente">, modelo: ModeloCurva, nota: string): AprobarCurvaCuerpo | null {
+export function cuerpoAprobar(
+  t: Pick<TrabajoAgrupacionApi, "parametros" | "datos" | "huella_calculo" | "vigente">,
+  modelo: ModeloAprobable,
+  nota: string,
+  /** Con `U`: los doce porcentajes tal como están escritos y de dónde partió la curva. */
+  usuario?: { valores: readonly number[]; partida: PartidaCurvaUsuario } | null
+): AprobarCurvaCuerpo | null {
   const hasta = t.datos.hasta_periodo;
   if (hasta === null) return null;
   const cuerpo: AprobarCurvaCuerpo = {
@@ -161,6 +171,11 @@ export function cuerpoAprobar(t: Pick<TrabajoAgrupacionApi, "parametros" | "dato
     version_vigente: t.vigente?.version ?? null,
   };
   if (nota.trim() !== "") cuerpo.nota = nota.trim();
+  if (modelo === "U") {
+    if (!usuario) return null;
+    cuerpo.curva_usuario = [...usuario.valores];
+    cuerpo.partida = usuario.partida;
+  }
   return cuerpo;
 }
 
@@ -306,7 +321,10 @@ export function motivoNoSePuedeAprobar(e: {
   desactualizado: boolean;
   /** El último cálculo falló (la pantalla muestra el error). */
   fallo?: boolean;
+  /** Hay curva que aprobar: la candidata elegida tiene curva, o (con `U`) la curva del usuario es válida. */
   tieneCandidata: boolean;
+  /** Lo elegido es la curva del usuario (cambia el mensaje de «no hay curva»). */
+  esUsuario?: boolean;
 }): string | null {
   if (!e.datos) return "Todavía no hay un cálculo que aprobar.";
   if (e.recalculando) return "Recalculando con los parámetros nuevos: espera a que termine.";
@@ -314,7 +332,7 @@ export function motivoNoSePuedeAprobar(e: {
   if (e.datos.prerrequisitos.bloquea.length > 0) return "Hay prerrequisitos que bloquean el cálculo (tarjeta «Antes de calcular»).";
   if (!e.datos.agrupacion.activo) return "La agrupación está inactiva: reactívala para aprobar su curva.";
   if (e.datos.datos.hasta_periodo === null) return "No hay un mes publicado y cerrado hasta el que calcular.";
-  if (!e.tieneCandidata) return "La candidata elegida no tiene curva: elige otra.";
+  if (!e.tieneCandidata) return e.esUsuario ? "Tu curva no es válida: doce valores de 0 a 100 que sumen 100 % (usa «Normalizar a 100 %»)." : "La candidata elegida no tiene curva: elige otra.";
   return null;
 }
 
