@@ -149,7 +149,7 @@ Agentes en `.claude/agents/`:
 
 | Agente | Rol |
 |---|---|
-| `arquitecto` | Especificación del módulo en `docs/modulos/NN-*.md` antes de construir. Siempre con el modelo `fable` (fijado en su archivo y pasado al lanzarlo); aplica a toda especificación nueva y a toda revisión de diseño |
+| `arquitecto` | Especificación del módulo en `docs/modulos/NN-*.md` antes de construir. Siempre con el modelo `opus` (fijado en su archivo y pasado al lanzarlo; hasta el 2026-10-16 era `fable`); aplica a toda especificación nueva y a toda revisión de diseño |
 | `arquitecto-revisor` | Segunda opinión independiente sobre las fichas del arquitecto: omisiones, contradicciones, supuestos sin verificar, casos borde y riesgos, contrastados con la base real en solo lectura. Siempre con el modelo `opus`. Solo lectura: entrega feedback y el `arquitecto` ajusta la ficha. Se usa después de cada ficha grande y antes de construir |
 | `datos` | Migraciones idempotentes, aplicación en Supabase, tipos regenerados |
 | `backend` | Route handlers con zod y guards; reglas de negocio puras con tests |
@@ -160,7 +160,7 @@ Agentes en `.claude/agents/`:
 
 En Fase 2 se suma `analista-planeamiento`, que define fórmulas y casos de prueba antes de implementarlas; M7 es el primer módulo en el que revisa fórmulas (pasos 1 a 6 del método) y los casos sintéticos antes de construir. La PWA no pasa por `datos`: no tiene migración, la hacen `backend` y `frontend` en paralelo y la recorre `qa` en Chromium.
 
-Dos agentes corren siempre con `opus`, y `arquitecto` con `fable` (las reglas de modelo viven en `CLAUDE.md` y en el encabezado de cada agente): `seguridad` y `arquitecto-revisor` son de solo lectura y nunca corrigen; el `arquitecto-revisor` revisó la ficha de M6 (tercera pasada y 06b) y revisa la de M7 antes de construirla, y `seguridad` hizo la primera auditoría el 2026-10-14. Una ficha grande pasa por `arquitecto` → `arquitecto-revisor` → ajuste del `arquitecto` → aprobación de Javier → construcción.
+`arquitecto` y `arquitecto-revisor` corren siempre con `opus` y `seguridad` con `sonnet` (las reglas de modelo viven en `CLAUDE.md` y en el encabezado de cada agente): `seguridad` y `arquitecto-revisor` son de solo lectura y nunca corrigen; el `arquitecto-revisor` revisó la ficha de M6 (tercera pasada y 06b) y revisa la de M7 antes de construirla, y `seguridad` hizo la primera auditoría el 2026-10-14. Una ficha grande pasa por `arquitecto` → `arquitecto-revisor` → ajuste del `arquitecto` → aprobación de Javier → construcción.
 
 Ciclo de cada módulo:
 

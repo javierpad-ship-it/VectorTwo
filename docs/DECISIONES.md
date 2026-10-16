@@ -989,3 +989,20 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** Dos fuentes de curva darían dos respuestas sobre la misma estacionalidad. Separar el total (decisión de Javier) del reparto (curva) permite que una curva nueva mueva los meses sin deshacer lo decidido.
 
 **Descartado.** Curvas propias de M7; una vista materializada de flujo; leer cientos de miles de filas con `leerTodo`.
+
+## 2026-10-16 · El `arquitecto` pasa de `fable` a `opus`
+
+**Decisión.** Javier cambia el modelo del agente `arquitecto`: ya no corre con `fable`, corre siempre con `opus` (fijado en `model` de `.claude/agents/arquitecto.md` y pasado además `model: "opus"` al lanzarlo con la herramienta Agent). La regla vive en `CLAUDE.md`. Las fichas ya escritas con `fable` no se reescriben.
+
+**Consecuencia a tener presente.** `arquitecto`, `arquitecto-revisor` y `seguridad` corren ahora con el mismo modelo; la independencia del revisor viene de que no escribió la ficha y de que contrasta con la base real en solo lectura, no de otro modelo.
+
+**Descartado.** Mantener `fable` solo para fichas grandes: Javier prefirió un solo modelo para el arquitecto.
+
+## 2026-10-16 · La auditoría de `seguridad` pasa de `opus` a `sonnet`
+
+**Decisión.** Javier cambia el modelo del agente `seguridad`: corre siempre con `sonnet` (fijado en `model` de `.claude/agents/seguridad.md` y pasado además `model: "sonnet"` al lanzarlo con la herramienta Agent). La regla vive en `CLAUDE.md`. Sigue siendo de solo lectura: reporta y `backend` o `datos` corrigen. Una auditoría lanzada antes de este cambio con `opus` se deja terminar.
+
+**Consecuencia a tener presente.** `arquitecto` y `arquitecto-revisor` quedan con `opus` y `seguridad` con `sonnet`; si una auditoría de un módulo grande o de auth parece superficial, se puede pedir una segunda pasada con `opus` solo para ese caso.
+
+**Descartado.** Mantener `opus` para toda auditoría.
+
