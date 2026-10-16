@@ -212,7 +212,15 @@ export const claveBaseFila = (f: Pick<FilaModelo, "clave">): string => claveBase
  * `proyeccion_tiendas` + sus filas → `TiendaProyeccionApi`. El código, el nombre y el referente salen de la foto de bloques
  * que la proyección guardó al calcular (`parametros.bloques`), no de M4 hoy.
  */
-export function aTiendaApi(row: TiendaPyDb, filas: readonly FilaConAnios[], catalogo: Catalogo, parametros: ParametrosProyeccion, p: ProyeccionDb): TiendaProyeccionApi {
+export function aTiendaApi(
+  row: TiendaPyDb,
+  filas: readonly FilaConAnios[],
+  catalogo: Catalogo,
+  parametros: ParametrosProyeccion,
+  p: ProyeccionDb,
+  /** `0.10.7`: suma del vigente de las filas de la tienda en el año y cuántas están fijadas a mano (de `resumenFilasDeTienda`). */
+  resumenFilas: { suma_filas: number | null; filas_fijadas: number } = { suma_filas: null, filas_fijadas: 0 }
+): TiendaProyeccionApi {
   const t = aTiendaModelo(row);
   const todas = new Map<string, { codigo: string; nombre: string }>();
   for (const b of Object.values(parametros.bloques)) for (const lista of [b.mismas, b.nuevas, b.cierres, b.fuera]) for (const x of lista) todas.set(x.tienda_id, { codigo: x.codigo, nombre: x.nombre });
@@ -249,6 +257,8 @@ export function aTiendaApi(row: TiendaPyDb, filas: readonly FilaConAnios[], cata
     pasa_a_mismas: t.anio === p.anio_en_curso && (parametros.bloques[p.anio_en_curso + 1]?.mismas ?? []).some((x) => x.tienda_id === row.tienda_id),
     filas: filas.map((f) => aFilaApi(f, catalogo, k, p.anio_en_curso)).filter((f): f is NonNullable<typeof f> => f !== null),
     avisos,
+    suma_filas: resumenFilas.suma_filas,
+    filas_fijadas: resumenFilas.filas_fijadas,
   };
 }
 

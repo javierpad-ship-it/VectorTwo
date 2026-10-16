@@ -1,13 +1,14 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { eatM6DeLinea } from "./calculo";
 import { cargarCatalogo } from "./contexto";
-import { leerFilaCompleta, leerFilasConAnios, leerTiendasProyeccion } from "./consultas";
+import { leerFilaCompleta, leerFilasConAnios, leerNombresMarcas, leerTiendasProyeccion } from "./consultas";
+import { claveTiendaAnio, filasTiendaDeLinea, marcasDeFilaApi, marcasQueNecesitanNombre, resumenFilasDeTienda } from "./apertura-linea";
 import { filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
 import { armarMensual } from "./mensual";
 import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, ordenMarcaDe, type Catalogo } from "./persistencia";
 import { aTiendaApi, falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
 import type { ProyeccionDb } from "./consultas";
-import type { FiltroMatrizApi, HistoricoFila, FilaDetalleApi, RespuestaLineasApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
+import type { FiltroMatrizApi, HistoricoFila, FilaDetalleApi, MarcasDeFilaApi, OrigenComposicion, RespuestaLineasApi, TiendaLineaApi, TiendaLineaBaseApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
 import { UMBRAL_COLA_LARGA } from "./tipos";
 
 /**
@@ -91,6 +92,8 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
     totales_por_anio: hayFiltro ? totalesPorAnio : [],
     historico_linea: [],
     tiendas_linea: [],
+    filas_tienda: [],
+    marcas: [],
     prueba_anterior: null,
     avisos_linea: [],
     indice_lineas: indice,
@@ -112,7 +115,8 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
       (x.equivalencia_id ?? "").localeCompare(y.equivalencia_id ?? "") ||
       ordenMarcaDe(x.agrupacion_marca_id, b.catalogo) - ordenMarcaDe(y.agrupacion_marca_id, b.catalogo)
   );
-  const filasApi = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y)).filter((x): x is NonNullable<typeof x> => x !== null);
+  const apis = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y));
+  const filasApi = apis.filter((x): x is NonNullable<typeof x> => x !== null);
   const modelos = base_.map((x) => aFilaModelo(x, b.k, Y));
 
   // Histórico de la línea: cada año con su red de mismas tiendas.
@@ -157,13 +161,16 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
   for (const bl of Object.values(parametros.bloques)) for (const lista of [bl.mismas, bl.nuevas, bl.cierres, bl.fuera]) for (const t of lista) nombres.set(t.tienda_id, t.codigo);
   const deTienda = completas.data.filter((x) => x.tienda_id !== null);
   const decididaPorTienda = new Map(tiendasRows.data.map((t) => [`${t.tienda_id}#${t.anio}`, t.decidido !== null]));
-  const acumulado = new Map<string, RespuestaLineasApi["tiendas_linea"][number]>();
-  for (const x of deTienda) {
-    const m = aFilaModelo(x, b.k, Y);
-    for (const r of m.registros) {
+  const filaTiendaDb = new Map(tiendasRows.data.filter((t) => t.activo).map((t) => [claveTiendaAnio(t.tienda_id, t.anio), t]));
+  // Solo cuentan los registros activos de cada año (los de un año que dejó de existir no suman ni en la barra ni en el pie).
+  const modelosTienda = deTienda.map((x) => aFilaModelo({ ...x, proyeccion_fila_anios: x.proyeccion_fila_anios.filter((a) => a.activo) }, b.k, Y));
+  const acumulado = new Map<string, TiendaLineaBaseApi & { tienda_id: string }>();
+  deTienda.forEach((x, i) => {
+    for (const r of modelosTienda[i].registros) {
       if (r.bloque === "mismas") continue;
       const clave = `${x.tienda_id}#${r.anio}`;
       const previo = acumulado.get(clave) ?? {
+        tienda_id: x.tienda_id as string,
         anio: r.anio,
         bloque: r.bloque === "cierres" ? ("cierres" as const) : ("nuevas" as const),
         subbloque: r.subbloque,
@@ -176,8 +183,41 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
       previo.vigente = (previo.vigente ?? 0) + (r.vigente ?? 0);
       acumulado.set(clave, previo);
     }
-  }
-  const tiendasLinea = [...acumulado.values()].sort((a, c) => a.anio - c.anio || a.tienda.localeCompare(c.tienda));
+  });
+  // `0.10.7`: cada tienda con lo que necesita la cabecera de su sección (fecha, referente, composición y total de TODA la tienda).
+  const tiendasLinea: TiendaLineaApi[] = [...acumulado.values()]
+    .sort((a, c) => a.anio - c.anio || a.tienda.localeCompare(c.tienda))
+    .map((t) => {
+      const row = filaTiendaDb.get(claveTiendaAnio(t.tienda_id, t.anio));
+      const origen: OrigenComposicion = row?.origen_composicion === "referente" || row?.origen_composicion === "propia" ? row.origen_composicion : "red";
+      return {
+        ...t,
+        fecha_apertura: row && t.bloque === "nuevas" ? row.fecha_usada : null,
+        origen_composicion: origen,
+        referente: row?.referente_id_usado ? (nombres.get(row.referente_id_usado) ?? null) : null,
+        total_tienda: { propuesto: row?.propuesto ?? null, decidido: row?.decidido ?? null },
+      };
+    });
+
+  // `0.10.7`: las filas de apertura (una por agrupación de marca de cada tienda nueva), ya leídas con la línea: no hay lectura nueva.
+  const composicionS = new Map(deTienda.map((x, i) => [x.id, modelosTienda[i].composicion?.s ?? null]));
+  const filasTienda = filasTiendaDeLinea(
+    deTienda.map((x) => aFilaApi(x, b.catalogo, b.k, Y)).filter((x): x is NonNullable<typeof x> => x !== null),
+    {
+      codigoDe: (tiendaId) => nombres.get(tiendaId) ?? tiendaId.slice(0, 8),
+      composicionSDe: (filaId) => composicionS.get(filaId) ?? null,
+      lugarGml,
+      ordenMarca: (id) => ordenMarcaDe(id, b.catalogo),
+    }
+  );
+
+  // `0.10.7`: las 3 marcas de más peso de cada fila base (de `participaciones.por_marca`, ya leído) y el resto. Solo se piden a la base los
+  // nombres de las marcas del top, en tandas de 100.
+  const paraMarcas = apis.flatMap((api, i) => (api ? [{ api, participaciones: modelos[i].participaciones }] : []));
+  const nombresMarca = await leerNombresMarcas(d, paraMarcas.flatMap((x) => marcasQueNecesitanNombre(x.participaciones)));
+  if (nombresMarca.error) return fallaDb(nombresMarca.error, "proyección: leer los nombres de marca");
+  const tiendasMismas = parametros.bloques[Y]?.mismas.length ?? 0;
+  const marcas: MarcasDeFilaApi[] = paraMarcas.map((x) => marcasDeFilaApi(x.api, x.participaciones, nombresMarca.data, tiendasMismas));
 
   // B2: una tienda nueva de `Y` que pasa a `M(Y+1)` y está sin decidir alimenta la base del año siguiente.
   const mismasSiguiente = new Set((parametros.bloques[Y + 1]?.mismas ?? []).map((t) => t.tienda_id));
@@ -192,6 +232,8 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
     filas: filasApi,
     historico_linea: historicoLinea,
     tiendas_linea: tiendasLinea,
+    filas_tienda: filasTienda,
+    marcas,
     prueba_anterior: prueba,
     avisos_linea: sinDecidir ? ["tienda_nueva_sin_decidir"] : [],
   });
@@ -292,9 +334,13 @@ export async function leerTiendasDeProyeccion(id: string, q: { anio?: number; bl
   const tiendas = await leerTiendasProyeccion(d, id);
   if (tiendas.error) return fallaDb(tiendas.error, "proyección: leer tiendas");
   const parametros = parametrosDe(b.p.parametros);
+  // `0.10.7`: suma de lo vigente de las filas de cada tienda y cuántas están fijadas a mano; columnas ligeras, sin `historico`, y las filas no viajan.
+  const filasDeTiendas = await leerFilasConAnios(d, id, { columnas: "ligeras", soloTiendas: true, soloActivas: true });
+  if (filasDeTiendas.error) return fallaDb(filasDeTiendas.error, "proyección: leer las filas de las tiendas");
+  const resumenes = resumenFilasDeTienda(filasDeTiendas.data);
   const salida = tiendas.data
     .filter((t) => t.activo && (q.anio === undefined || t.anio === q.anio) && (q.bloque === undefined || t.bloque === q.bloque))
-    .map((t) => aTiendaApi(t, [], b.catalogo, parametros, b.p))
+    .map((t) => aTiendaApi(t, [], b.catalogo, parametros, b.p, resumenes.get(claveTiendaAnio(t.tienda_id, t.anio))))
     .sort((x, y) => x.anio - y.anio || x.codigo.localeCompare(y.codigo, "es"));
   const resumen = b.p.resumen as unknown as ResumenProyeccion | null;
   return listo({ tiendas: salida, perfiles_apertura: resumen?.perfiles_apertura ?? [] });

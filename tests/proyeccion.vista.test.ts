@@ -347,7 +347,7 @@ describe("Parte 1: línea, filas y totales", () => {
 
   it("avisa de la tienda nueva sin decidir que alimenta la base del año siguiente", () => {
     expect(tiendasSinDecidirQueAlimentan(respuestaLineas(), 2026)).toEqual(["T10"]);
-    const decidida = respuestaLineas({ tiendas_linea: [{ anio: 2026, bloque: "nuevas", subbloque: "nuevas_anterior", tienda: "T10", vendido: 3420, vigente: 4797, decidida: true }] });
+    const decidida = respuestaLineas({ tiendas_linea: [{ ...respuestaLineas().tiendas_linea[0], decidida: true }] });
     expect(tiendasSinDecidirQueAlimentan(decidida, 2026)).toEqual([]);
   });
 

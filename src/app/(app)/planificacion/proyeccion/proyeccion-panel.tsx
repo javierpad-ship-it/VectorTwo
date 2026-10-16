@@ -134,6 +134,10 @@ export function ProyeccionPanel() {
     cambiarUrl({ pestana: "tiendas", fila: null });
   }
 
+  function irATienda(id: string) {
+    cambiarUrl({ pestana: "tiendas", fila: null, tienda: id });
+  }
+
   async function recalcular() {
     if (!proyeccion || calculandoLocal) return;
     setAviso(null);
@@ -279,6 +283,7 @@ export function ProyeccionPanel() {
           onFiltro={cambiarFiltro}
           onFila={(id) => cambiarUrl({ fila: id })}
           onIrATiendas={irATiendas}
+          onIrATienda={irATienda}
           onCambio={recargarTodo}
           onRecalcular={() => void recalcular()}
         />

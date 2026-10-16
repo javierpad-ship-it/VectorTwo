@@ -1006,3 +1006,19 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Descartado.** Mantener `opus` para toda auditoría.
 
+
+## 2026-10-16 · M7 (07b): la apertura se decide también desde Por línea, «solo se mueve lo modificado» y marcas con 3 + Otras
+
+**Decisión.** Javier decide cinco cosas sobre la mejora `0.10.7 · M7` (ficha `docs/modulos/07b-apertura-en-la-linea.md`):
+
+1. **La apertura es editable desde el detalle de la línea.** La tabla de Por línea muestra, después de las filas base, una sección por tienda nueva y año con una fila por agrupación de marca, con el mismo campo y ✓ que las demás. Aceptar con ✓ en una fila de tienda **la fija** (`origen = manual`), de modo que sobrevive a Recalcular.
+2. **«Solo se mueve lo modificado».** Al fijar una fila de una tienda con total decidido `D`, el total de la tienda pasa a `D' = max(D + Δ, Σ fijadas)` y las demás filas no se tocan; sin `D`, solo se fija la fila. Es el único comportamiento: no hay pregunta ni modal. Lo mismo vale al fijar una fila desde la tarjeta de Tiendas nuevas, que además muestra la suma de filas, las filas fijadas y el botón «Usar la suma de filas».
+3. **Marcas: las 3 de más peso más «Otras», con su % real.** El gráfico y el reparto de la apertura suman 100 % sin reescalar. Es solo dato: no se decide ni se guarda por marca.
+4. **Orden de las agrupaciones de marca: PREMIUM → ULTRA LOW**, el de `agrupaciones_marca.orden` del catálogo, en la tabla, las secciones de apertura y el gráfico de marcas.
+5. **El gráfico anual incluye a las tiendas nuevas** (aperturas y nuevas del año anterior): la barra, el «Total línea» del pie de la tabla y la columna de aperturas de la Matriz dan la misma cifra.
+
+**Por qué.** El planner trabaja una línea a la vez y la apertura era una frase que solo se movía entre ~400 filas de la tienda. Preguntar «mantener o subir el total» en cada edición era fricción: lo que el planner modifica es lo que cambia, y lo demás queda como estaba (el costo es que el total de la tienda deja de ser una cifra «redonda» si se edita por filas; por eso la tarjeta muestra la suma de filas y ofrece usarla). Con 3 marcas más «Otras» el reparto es lo que realmente vendió la agrupación; reescalar solo las 3 inventaría una tienda que vende únicamente esas marcas.
+
+**Descartado.** Preguntar cada vez «mantener el total / subir el total» (la ficha original del arquitecto, con `ajuste_tienda`, `Modal` y `409 excede_total_tienda`); mantener el total de la tienda y absorber el cambio en las demás filas; mostrar solo las 3 marcas reescaladas a 100 %; una migración para guardar la composición por marca de las filas de tienda (`participaciones.por_marca` de la fila base ya la trae).
+
+**Consecuencia a tener presente.** El total movido es una decisión explícita del planner (lleva quién, cuándo y «ajustado desde la línea G · M · L»), y nunca queda por debajo de lo fijado a mano. La medición de bytes y tiempo de `/lineas` frente a `0.10.6` no se hizo.

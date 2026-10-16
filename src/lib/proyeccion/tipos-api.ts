@@ -335,6 +335,9 @@ export type TiendaProyeccionApi = {
   pasa_a_mismas: boolean;
   filas: FilaApi[];
   avisos: AvisoFila[];
+  /** `0.10.7`: suma del `vigente` de las filas de la tienda en `anio` (`null` si la tienda no tiene filas) y cuántas están fijadas a mano. */
+  suma_filas: number | null;
+  filas_fijadas: number;
 };
 
 export type NodoMatrizApi = {
@@ -476,24 +479,63 @@ export type IndiceLineaApi = {
   estado: EstadoLinea;
 };
 
+/** `0.10.7` (07b): una fila de apertura de la línea (`tienda_id` no nulo). `anios` trae solo los años en que la tienda es nueva. */
+export type FilaTiendaLineaApi = FilaApi & { tienda_codigo: string; composicion_s: number | null };
+
+/** Fila de `tiendas_linea` tal como la entregaba la `0.10.6` (la base de `TiendaLineaApi`). */
+export type TiendaLineaBaseApi = {
+  anio: number;
+  bloque: "nuevas" | "cierres";
+  subbloque: Subbloque | null;
+  tienda: string;
+  vendido: number;
+  vigente: number | null;
+  decidida: boolean;
+};
+
+/** `0.10.7` (07b): `tiendas_linea` ampliada con lo que necesita la cabecera de la sección de cada tienda. */
+export type TiendaLineaApi = TiendaLineaBaseApi & {
+  tienda_id: string;
+  fecha_apertura: string | null;
+  origen_composicion: "referente" | "red" | "propia";
+  referente: string | null;
+  /** De `proyeccion_tiendas`: TODA la tienda, todas las líneas. */
+  total_tienda: { propuesto: number | null; decidido: number | null };
+};
+
+/** `0.10.7` (07b): las marcas de más peso de una fila base (GML × equivalencia × agrupación de marca) y el resto. Solo dato, no decisión. */
+export type MarcasDeFilaApi = {
+  fila_id: string;
+  equivalencia_id: string | null;
+  agrupacion_marca_id: string;
+  /** `periodo_referencia` de la fila base + cantidad de tiendas de `M(Y)`. */
+  periodo: { desde: string; hasta: string; tiendas: number } | null;
+  /** Hasta 3, de mayor a menor participación (empate: por nombre). */
+  top: { marca_id: string; marca: string; participacion: number }[];
+  /** El resto, para que `Σ top + otras = 1`; `null` si no sobra nada. */
+  otras: { marcas: number; participacion: number } | null;
+};
+
 export type RespuestaLineasApi = {
   filtro: { genero_id: string | null; mundo_id: string | null; linea_id: string | null; q: string | null };
   filas: FilaApi[];
   totales_por_anio: { anio: number; vigente: number; propuesto: number; decididas: number; filas: number }[];
   historico_linea: { anio: number; unidades: number; clase: ClaseAnioFila; tiendas: number }[];
-  tiendas_linea: {
-    anio: number;
-    bloque: "nuevas" | "cierres";
-    subbloque: Subbloque | null;
-    tienda: string;
-    vendido: number;
-    vigente: number | null;
-    decidida: boolean;
-  }[];
+  tiendas_linea: TiendaLineaApi[];
+  /** `0.10.7`: filas de apertura (bloque `nuevas`, activas), por año, código de tienda, equivalencia y orden de agrupación de marca. */
+  filas_tienda: FilaTiendaLineaApi[];
+  /** `0.10.7`: marcas de más peso por fila base de la línea (vacío sin línea elegida). */
+  marcas: MarcasDeFilaApi[];
   prueba_anterior: { propuesto: number; real: number; desvio_pct: number | null; eat_m6: number | null; eat_m6_cobertura: number } | null;
   avisos_linea: "tienda_nueva_sin_decidir"[];
   indice_lineas: IndiceLineaApi[];
 };
+
+/**
+ * `0.10.7` (07b): respuesta de `PUT …/filas/[filaId]/anios/[anio]`. Al decidir una fila de tienda, el total de la tienda pasa a `D + Δ`
+ * («solo se mueve lo modificado»); `tienda` trae ese total y la suma de sus filas de ese año (ausente en una fila base).
+ */
+export type RespuestaDecidirFilaApi = AnioFilaApi & { tienda?: { anio: number; decidido: number | null; suma_filas: number } };
 
 export type FilaDetalleApi = FilaApi & {
   historico: HistoricoFila | null;

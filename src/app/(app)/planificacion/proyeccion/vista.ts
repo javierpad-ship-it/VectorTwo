@@ -21,12 +21,17 @@ import {
   type FilaApi,
   type FilaDetalleApi,
   type FilaMensualApi,
+  type FilaTiendaLineaApi,
+  type MarcasDeFilaApi,
   type NodoMatrizApi,
   type OrigenMes,
   type ProyeccionApi,
   type RespuestaLineasApi,
+  type RespuestaDecidirFilaApi,
   type SoloMatriz,
+  type Subbloque,
   type TiendaBloqueApi,
+  type TiendaLineaApi,
   type TiendaProyeccionApi,
   type VeredictoColaLarga,
 } from "@/lib/proyeccion/tipos-api";
@@ -582,7 +587,7 @@ export type BarraAnual = {
   clase: ClaseAnioFila | null;
 };
 
-const vigenteDeRegistro = (a: AnioFilaApi | undefined): number => a?.vigente ?? a?.decidido ?? a?.propuesto ?? 0;
+export const vigenteDeRegistro = (a: AnioFilaApi | undefined): number => a?.vigente ?? a?.decidido ?? a?.propuesto ?? 0;
 
 /**
  * Una barra por año: histórico real de `M(año)`, el año en curso (vendido + resto) y el siguiente. Cada año con su
@@ -792,6 +797,314 @@ export function resumenTiendasLinea(lineas: Pick<RespuestaLineasApi, "tiendas_li
   };
   partes.push(texto(`Nuevas del año anterior ${anio}`, nuevas), texto(`Aperturas ${anio}`, aperturas), texto(`Cierres ${anio}`, cierres));
   return partes;
+}
+
+// ─── 07b: apertura en la línea y marcas de más peso ───
+
+/**
+ * Reparte `total` (entero) en enteros proporcionales a `pesos` con el método del mayor resto (empate: el primero), de modo que la suma
+ * es exactamente `total`. Con `total = 0`, sin pesos o con todos los pesos en 0, todo es 0. Pura.
+ */
+export function repartirEntero(total: number, pesos: readonly number[]): number[] {
+  const limpios = pesos.map((p) => (Number.isFinite(p) && p > 0 ? p : 0));
+  const suma = limpios.reduce((s, p) => s + p, 0);
+  const t = Number.isFinite(total) ? Math.max(0, Math.round(total)) : 0;
+  if (limpios.length === 0 || t === 0 || suma <= 0) return limpios.map(() => 0);
+  const cuotas = limpios.map((p) => (t * p) / suma);
+  const partes = cuotas.map((c) => Math.floor(c));
+  let faltan = t - partes.reduce((s, x) => s + x, 0);
+  const porResto = cuotas.map((c, i) => ({ i, resto: c - partes[i] })).sort((a, b) => b.resto - a.resto || a.i - b.i);
+  for (const { i } of porResto) {
+    if (faltan <= 0) break;
+    partes[i] += 1;
+    faltan -= 1;
+  }
+  return partes;
+}
+
+type ConClaveBase = { equivalencia_id: string | null; agrupacion_marca_id: string };
+
+/** Identifica la agrupación de marca (y la equivalencia en un nodo GMLE): la fila base y la de apertura la comparten. */
+export const claveFilaBase = (f: ConClaveBase): string => `${f.equivalencia_id ?? ""}|${f.agrupacion_marca_id}`;
+
+const nombreFilaBase = (f: Pick<FilaApi, "equivalencia" | "agrupacion_marca">): string => (f.equivalencia ? `${f.equivalencia} · ${f.agrupacion_marca}` : f.agrupacion_marca);
+
+export type FilaApertura = {
+  clave: string;
+  nombre: string;
+  /** `null` si la tienda no tiene fila de esta agrupación (el referente no la vende). */
+  fila: FilaTiendaLineaApi | null;
+  /** Registro del año de la sección (solo con `fila`). */
+  registro: AnioFilaApi | undefined;
+};
+
+export type SeccionApertura = {
+  clave: string;
+  anio: number;
+  tienda_id: string;
+  codigo: string;
+  nombre: string | null;
+  subbloque: Subbloque | null;
+  fecha_apertura: string | null;
+  referente: string | null;
+  origen_composicion: TiendaLineaApi["origen_composicion"];
+  total_tienda: TiendaLineaApi["total_tienda"];
+  /** Lo que la tienda aporta a la línea en el año (`tiendas_linea.vigente`). */
+  vigente_en_linea: number | null;
+  filas: FilaApertura[];
+};
+
+const esRegistroNuevas = (r: AnioFilaApi | undefined): r is AnioFilaApi => r !== undefined && r.bloque === "nuevas";
+
+/**
+ * Las secciones de apertura de la tabla de la línea: una por tienda nueva y año (aperturas y nuevas del año anterior), con una fila por
+ * agrupación de marca en el orden de las filas base (el del catálogo). Una agrupación con fila base y sin fila de tienda sale con
+ * `fila = null`. Los nombres de tienda (`nombres`: id → nombre) son opcionales.
+ */
+export function seccionesApertura(
+  lineas: Pick<RespuestaLineasApi, "filas" | "tiendas_linea" | "filas_tienda">,
+  anios: readonly number[],
+  nombres: ReadonlyMap<string, string> = new Map()
+): SeccionApertura[] {
+  const base = lineas.filas.filter((f) => f.tienda_id === null && f.activo);
+  const deTienda = (lineas.filas_tienda ?? []).filter((f) => f.tienda_id !== null && f.activo);
+  const secciones: SeccionApertura[] = [];
+  for (const anio of anios) {
+    const vistas = new Set<string>();
+    const tiendas = lineas.tiendas_linea
+      .filter((t) => t.anio === anio && t.bloque === "nuevas")
+      .filter((t) => {
+        if (vistas.has(t.tienda_id)) return false;
+        vistas.add(t.tienda_id);
+        return true;
+      })
+      .sort((a, b) => a.tienda.localeCompare(b.tienda, "es"));
+    for (const t of tiendas) {
+      const propias = deTienda.filter((f) => f.tienda_id === t.tienda_id && esRegistroNuevas(registroDe(f, anio)));
+      const porClave = new Map(propias.map((f) => [claveFilaBase(f), f] as const));
+      const filas: FilaApertura[] = base.map((b) => {
+        const clave = claveFilaBase(b);
+        const fila = porClave.get(clave) ?? null;
+        return { clave, nombre: nombreFilaBase(b), fila, registro: fila ? registroDe(fila, anio) : undefined };
+      });
+      const claves = new Set(filas.map((x) => x.clave));
+      for (const f of propias) {
+        const clave = claveFilaBase(f);
+        if (!claves.has(clave)) filas.push({ clave, nombre: nombreFilaBase(f), fila: f, registro: registroDe(f, anio) });
+      }
+      secciones.push({
+        clave: `${t.tienda_id}-${anio}`,
+        anio,
+        tienda_id: t.tienda_id,
+        codigo: t.tienda,
+        nombre: nombres.get(t.tienda_id) ?? null,
+        subbloque: t.subbloque,
+        fecha_apertura: t.fecha_apertura,
+        referente: t.referente,
+        origen_composicion: t.origen_composicion,
+        total_tienda: t.total_tienda,
+        vigente_en_linea: t.vigente,
+        filas,
+      });
+    }
+  }
+  return secciones;
+}
+
+/** id de tienda → nombre, de los bloques de la proyección (las tiendas nuevas de cada año). */
+export function nombresDeTiendas(bloques: BloquesApi): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const b of Object.values(bloques)) for (const t of b.nuevas) m.set(t.tienda_id, t.nombre);
+  return m;
+}
+
+/** Suma del `vigente` de las filas de apertura de la línea en un año (el «Tiendas nuevas» del pie). */
+export function sumaApertura(lineas: Pick<RespuestaLineasApi, "filas_tienda">, anio: number): number {
+  let s = 0;
+  for (const f of lineas.filas_tienda ?? []) {
+    if (f.tienda_id === null || !f.activo) continue;
+    const r = registroDe(f, anio);
+    if (esRegistroNuevas(r)) s += vigenteDeRegistro(r);
+  }
+  return s;
+}
+
+/** Total de la línea en un año: filas base + filas de apertura (la misma cifra de la barra anual y de la Matriz). */
+export function totalLinea(lineas: Pick<RespuestaLineasApi, "filas" | "totales_por_anio" | "filas_tienda">, anio: number): number {
+  return totalesDeLinea(lineas, anio).vigente + sumaApertura(lineas, anio);
+}
+
+/** Título de la sección: `Aperturas 2027 · T12 · Tienda nueva B · abre 2027-03-15 · referente T03`. */
+export function tituloSeccionApertura(s: Pick<SeccionApertura, "anio" | "subbloque" | "codigo" | "nombre" | "fecha_apertura" | "origen_composicion" | "referente">): string {
+  const rotulo = s.subbloque === "nuevas_anterior" ? `Nueva del año anterior ${s.anio}` : `Aperturas ${s.anio}`;
+  const composicion = s.origen_composicion === "referente" && s.referente ? `referente ${s.referente}` : s.origen_composicion === "propia" ? "composición propia" : "composición de la red";
+  return [rotulo, s.codigo, s.nombre, s.fecha_apertura ? `abre ${s.fecha_apertura}` : null, composicion].filter((x): x is string => x !== null && x !== "").join(" · ");
+}
+
+/** El total de la tienda (toda la tienda, todas las líneas): decidido, o «sin decidir: propuesta N». */
+export function textoTotalTienda(t: TiendaLineaApi["total_tienda"]): string {
+  if (t.decidido !== null) return `total de la tienda: ${unidades(t.decidido)} decididas`;
+  if (t.propuesto !== null) return `total de la tienda: sin decidir, propuesta ${unidades(t.propuesto)}`;
+  return "total de la tienda: sin propuesta";
+}
+
+/**
+ * Nota junto al campo de una fila de apertura mientras se escribe («solo se mueve lo modificado»): si la tienda ya tiene total decidido
+ * `D`, pasa a `D + Δ` y las demás filas no se tocan; sin total decidido solo se fija la fila y la tienda sigue sin decidir. `null` si no hay
+ * cifra válida o no cambia nada. Es una estimación: el total real se muestra tras guardar (el servidor no lo baja de lo fijado a mano).
+ */
+export function notaMoverTienda(args: { vigenteFila: number | null; nueva: number | null; total: TiendaLineaApi["total_tienda"] }): string | null {
+  const { vigenteFila, nueva, total } = args;
+  if (nueva === null || vigenteFila === null || nueva === vigenteFila) return null;
+  if (total.decidido === null) return "Cambia solo esta fila; la tienda aún no tiene total decidido y las demás filas no se tocan.";
+  return `Cambia solo esta fila; el total de la tienda pasa a ${unidades(Math.max(0, total.decidido + (nueva - vigenteFila)))}.`;
+}
+
+/** Aviso tras guardar una fila de apertura: el total de la tienda ya actualizado (de la respuesta del `PUT`). */
+export function textoTotalTiendaTras(codigo: string, r: Pick<NonNullable<RespuestaDecidirFilaApi["tienda"]>, "anio" | "decidido" | "suma_filas">): string {
+  const suma = `suma de sus filas: ${unidades(r.suma_filas)}`;
+  if (r.decidido === null) return `${codigo} en ${r.anio} sigue sin total decidido (${suma}).`;
+  return `El total de ${codigo} en ${r.anio} queda en ${unidades(r.decidido)} (${suma}).`;
+}
+
+// ─── Marcas de más peso por agrupación ───
+
+export type SegmentoMarca = {
+  clave: string;
+  tipo: "marca" | "otras";
+  /** 0 a 3: el color del segmento. */
+  indice: number;
+  nombre: string;
+  participacion: number;
+  /** En un `viewBox` de ancho 100. */
+  x: number;
+  ancho: number;
+  pct: string;
+};
+
+export type BarraMarcas = {
+  clave: string;
+  fila_id: string;
+  etiqueta: string;
+  sinDatos: boolean;
+  segmentos: SegmentoMarca[];
+  aria: string;
+};
+
+export const TEXTO_SIN_DATOS_MARCA = "Sin datos de marca en los últimos 12 meses (o recalcula la proyección).";
+
+/** Las marcas de la fila con la misma agrupación de marca (y equivalencia) que `f`. */
+export function marcasDeClave(marcas: readonly MarcasDeFilaApi[], f: ConClaveBase): MarcasDeFilaApi | undefined {
+  const clave = claveFilaBase(f);
+  return marcas.find((m) => claveFilaBase(m) === clave);
+}
+
+/** Porcentajes de 1 decimal que suman exactamente 100 % cuando las participaciones suman 1 (si no suman 1, el real de cada una). */
+export function porcentajesQueSuman100(participaciones: readonly number[]): string[] {
+  const suma = participaciones.reduce((s, p) => s + p, 0);
+  if (Math.abs(suma - 1) > 0.01) return participaciones.map((p) => formatearAvance(p));
+  return repartirEntero(1000, participaciones).map((m) => `${formatearDecimal(m / 10, 1)} %`);
+}
+
+/** Una barra al 100 % por fila base: las 3 marcas de más peso y «Otras (N)» con su % real. Sin composición, `sinDatos`. */
+export function barrasMarcas(base: readonly FilaApi[], marcas: readonly MarcasDeFilaApi[]): BarraMarcas[] {
+  return base
+    .filter((f) => f.tienda_id === null && f.activo)
+    .map((f) => {
+      const etiqueta = nombreFilaBase(f);
+      const m = marcasDeClave(marcas, f);
+      const partes: { tipo: SegmentoMarca["tipo"]; nombre: string; participacion: number }[] = [
+        ...(m?.top ?? []).map((t) => ({ tipo: "marca" as const, nombre: t.marca, participacion: t.participacion })),
+        ...(m?.otras ? [{ tipo: "otras" as const, nombre: `Otras (${formatearNumero(m.otras.marcas)})`, participacion: m.otras.participacion }] : []),
+      ];
+      if (!m || partes.length === 0) {
+        return { clave: claveFilaBase(f), fila_id: f.id, etiqueta, sinDatos: true, segmentos: [], aria: `${etiqueta}: ${TEXTO_SIN_DATOS_MARCA}` };
+      }
+      const pcts = porcentajesQueSuman100(partes.map((p) => p.participacion));
+      let acumulado = 0;
+      const segmentos = partes.map((p, i): SegmentoMarca => {
+        const ancho = Math.max(0, p.participacion) * 100;
+        const s: SegmentoMarca = { clave: `${claveFilaBase(f)}-${i}`, tipo: p.tipo, indice: p.tipo === "otras" ? 3 : i, nombre: p.nombre, participacion: p.participacion, x: acumulado, ancho, pct: pcts[i] };
+        acumulado += ancho;
+        return s;
+      });
+      return { clave: claveFilaBase(f), fila_id: f.id, etiqueta, sinDatos: false, segmentos, aria: `${etiqueta}: ${segmentos.map((s) => `${s.nombre} ${s.pct}`).join(", ")}` };
+    });
+}
+
+/** El pie del gráfico: sobre qué unidades y tiendas se midieron las marcas, o `null` si ninguna fila trae periodo. */
+export function textoPeriodoMarcas(marcas: readonly MarcasDeFilaApi[]): string | null {
+  const p = marcas.find((m) => m.periodo !== null)?.periodo;
+  if (!p) return null;
+  return `Unidades de los últimos 12 meses de las mismas tiendas (${mesAaaaMm(p.desde)} a ${mesAaaaMm(p.hasta)}, ${plural(p.tiendas, "tienda", "tiendas")}), sin normalizar por el Niño.`;
+}
+
+export type ParteReparto = { nombre: string; unidades: number; otras: boolean };
+
+/**
+ * Reparto en pantalla de las unidades de una fila de apertura entre las marcas de la agrupación (3 marcas + otras, con su % real):
+ * enteros que suman la cifra de la fila. `null` si la agrupación no trae composición por marca. Solo dato: no se guarda.
+ */
+export function repartoPorMarca(vigente: number | null | undefined, marcas: MarcasDeFilaApi | undefined): ParteReparto[] | null {
+  if (!marcas || marcas.top.length === 0) return null;
+  const partes = [...marcas.top.map((t) => ({ nombre: t.marca, p: t.participacion, otras: false })), ...(marcas.otras ? [{ nombre: "otras", p: marcas.otras.participacion, otras: true }] : [])];
+  const enteros = repartirEntero(vigente ?? 0, partes.map((x) => x.p));
+  return partes.map((x, i) => ({ nombre: x.nombre, unidades: enteros[i], otras: x.otras }));
+}
+
+/** `MARCA A 88 · MARCA B 40 · MARCA C 30 · otras 52`. */
+export function textoReparto(partes: readonly ParteReparto[]): string {
+  return partes.map((p) => `${p.nombre} ${unidades(p.unidades)}`).join(" · ");
+}
+
+export type FilaRepartoApertura = {
+  clave: string;
+  seccion: string;
+  anio: number;
+  codigo: string;
+  agrupacion: string;
+  vigente: number | null;
+  estado: "ok" | "sin_fila" | "sin_marcas";
+  partes: ParteReparto[] | null;
+};
+
+/** La tabla alternativa del gráfico: una línea por fila de apertura con su reparto por marca. Las filas sin fila de tienda quedan marcadas. */
+export function tablaRepartoApertura(secciones: readonly SeccionApertura[], marcas: readonly MarcasDeFilaApi[]): FilaRepartoApertura[] {
+  return secciones.flatMap((s) =>
+    s.filas.map((x): FilaRepartoApertura => {
+      const vigente = x.registro ? vigenteDeRegistro(x.registro) : null;
+      const partes = x.fila && x.registro ? repartoPorMarca(vigente, marcasDeClave(marcas, x.fila)) : null;
+      return {
+        clave: `${s.clave}-${x.clave}`,
+        seccion: `${s.codigo} · ${s.anio}`,
+        anio: s.anio,
+        codigo: s.codigo,
+        agrupacion: x.nombre,
+        vigente,
+        estado: !x.fila ? "sin_fila" : partes ? "ok" : "sin_marcas",
+        partes,
+      };
+    })
+  );
+}
+
+// ─── Tarjeta de la tienda: filas fijadas y suma de filas ───
+
+/** «2 filas fijadas a mano (también desde Por línea) · suma de filas 7,940»; `null` si no hay filas fijadas. */
+export function textoFilasFijadas(t: Pick<TiendaProyeccionApi, "filas_fijadas" | "suma_filas">): string | null {
+  if (!(t.filas_fijadas > 0)) return null;
+  const suma = t.suma_filas === null ? "" : ` · suma de filas ${unidades(t.suma_filas)}`;
+  return `${plural(t.filas_fijadas, "fila fijada", "filas fijadas")} a mano (también desde Por línea)${suma}`;
+}
+
+/** ¿Se ofrece «Usar la suma de filas»? Solo con filas fijadas y una suma conocida. */
+export function ofreceUsarSumaFilas(t: Pick<TiendaProyeccionApi, "bloque" | "filas_fijadas" | "suma_filas">): boolean {
+  return t.bloque === "nuevas" && t.filas_fijadas > 0 && t.suma_filas !== null;
+}
+
+/** ¿La suma de filas ya es el total decidido de la tienda? (entonces el botón no hace nada). */
+export function sumaFilasYaDecidida(t: Pick<TiendaProyeccionApi, "decidido" | "suma_filas">): boolean {
+  return t.suma_filas !== null && t.decidido === t.suma_filas;
 }
 
 /** Cabecera del CSV de la línea. */

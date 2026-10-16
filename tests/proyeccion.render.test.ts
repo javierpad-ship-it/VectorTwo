@@ -21,7 +21,7 @@ import { TablaMensual } from "../src/app/(app)/planificacion/proyeccion/mensual-
 import { TablaFilas } from "../src/app/(app)/planificacion/proyeccion/tabla-filas";
 import { TarjetaTienda } from "../src/app/(app)/planificacion/proyeccion/tarjeta-tienda";
 import { AtajoTienda } from "../src/app/(app)/planificacion/proyeccion/atajo-tienda";
-import { construirBarras, FILTRO_VISTA_VACIO, seriesMensualesDeFila } from "../src/app/(app)/planificacion/proyeccion/vista";
+import { construirBarras, FILTRO_VISTA_VACIO, nombresDeTiendas, seccionesApertura, seriesMensualesDeFila } from "../src/app/(app)/planificacion/proyeccion/vista";
 import { CamposTienda, camposDeTienda, cambiosDeEdicion, FORM_VACIO } from "../src/app/(app)/maestros/tiendas/formulario-tienda";
 import type { TiendaFila } from "../src/lib/tiendas/tipos-api";
 import {
@@ -120,10 +120,12 @@ describe("celdas de decisión", () => {
 
 describe("tabla de filas de la línea", () => {
   const datos = respuestaLineas();
+  const secciones = seccionesApertura(datos, [Y, Y + 1], nombresDeTiendas(bloques()));
   const salida = html(
     createElement(TablaFilas, {
       filas: datos.filas,
       lineas: datos,
+      secciones,
       anioEnCurso: Y,
       crecimientoDefecto: 0,
       bloqueada: false,
@@ -131,6 +133,7 @@ describe("tabla de filas de la línea", () => {
       filaSeleccionada: null,
       onSeleccionar: noop,
       onDecidir: sinAsync,
+      onVerTienda: noop,
       onCsv: noop,
     })
   );
@@ -154,14 +157,14 @@ describe("tabla de filas de la línea", () => {
   it("ofrece Ver meses y CSV, y una fila sin filas avisa", () => {
     expect(salida).toContain("Ver meses");
     expect(salida).toContain("CSV");
-    const vacia = html(createElement(TablaFilas, { filas: [], lineas: respuestaLineas({ filas: [] }), anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    const vacia = html(createElement(TablaFilas, { filas: [], lineas: respuestaLineas({ filas: [] }), secciones: [], anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
     expect(vacia).toContain("no tiene filas con venta");
   });
 
   it("la fila con la curva nueva lleva su aviso", () => {
     const f = filasDenim();
     f[0].avisos = ["curva_cambio"];
-    const s = html(createElement(TablaFilas, { filas: f, lineas: datos, anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: "f1", onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    const s = html(createElement(TablaFilas, { filas: f, lineas: datos, secciones, anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: "f1", onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
     expect(s).toContain("curva cambio");
     expect(s).toContain('aria-pressed="true"');
   });
@@ -639,7 +642,7 @@ describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => 
 
   it("la tabla marca la fila para revisión con su disponibilidad y venta corregida", () => {
     const datos = respuestaLineas({ filas: [filaRevision()] });
-    const s = html(createElement(TablaFilas, { filas: datos.filas, lineas: datos, anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    const s = html(createElement(TablaFilas, { filas: datos.filas, lineas: datos, secciones: [], anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
     expect(s).toContain("Para revisión · disponibilidad 62.0 % · corregida 181");
     expect(s).toContain("revision cola larga");
   });

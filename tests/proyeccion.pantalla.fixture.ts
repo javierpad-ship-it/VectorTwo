@@ -4,7 +4,10 @@ import type {
   FilaApi,
   FilaDetalleApi,
   FilaMensualApi,
+  FilaTiendaLineaApi,
   IndiceLineaApi,
+  MarcasDeFilaApi,
+  TiendaLineaApi,
   NodoMatrizApi,
   ProyeccionApi,
   RespuestaLineasApi,
@@ -229,6 +232,72 @@ export const INDICE: IndiceLineaApi[] = [
   { genero_id: "g-m", mundo_id: "m-u", linea_id: "l-denim", genero: "MUJER", mundo: "URBANO", linea: "DENIM", estado: "sin_proyectar" },
 ];
 
+/** Lo común de una entrada de `tiendas_linea` (07b): id de tienda, fecha, composición y total de la tienda. */
+export function tiendaLinea(n: number): Pick<TiendaLineaApi, "tienda_id" | "fecha_apertura" | "origen_composicion" | "referente" | "total_tienda"> {
+  return { tienda_id: `tienda-${n}`, fecha_apertura: null, origen_composicion: "red", referente: null, total_tienda: { propuesto: null, decidido: null } };
+}
+
+type CifraApertura ={ anio: number; propuesto: number | null; vigente: number; decidido?: number; origen?: "manual" | "escalada" | "propuesta"; vendido?: number };
+
+/** Una fila de apertura (07b): misma gml / equivalencia / agrupación de marca que la base `nombre`, con un registro `nuevas` por año. */
+export function filaApertura(nombre: string, tiendaId: string, codigo: string, cifras: CifraApertura[], extra: Partial<FilaTiendaLineaApi> = {}): FilaTiendaLineaApi {
+  const base = fila({ nombre, id: "x", hist: [0, 0, 0], vendido: 0, p26: 0, p27: 0 });
+  return {
+    ...base,
+    id: `ft-${codigo}-${nombre}`.replace(/\s+/g, "-"),
+    tienda_id: tiendaId,
+    tienda_codigo: codigo,
+    composicion_s: 0.2,
+    historico_anual: [],
+    anios: cifras.map((c) =>
+      registro(c.anio, {
+        id: `ft-${codigo}-${nombre}-${c.anio}`.replace(/\s+/g, "-"),
+        bloque: "nuevas",
+        subbloque: c.anio === Y ? "nuevas_anterior" : "aperturas",
+        vendido: c.vendido ?? 0,
+        propuesto: c.propuesto,
+        decidido: c.decidido ?? null,
+        origen: c.origen ?? null,
+        propuesta_al_decidir: c.decidido === undefined ? null : c.propuesto,
+        vigente: c.vigente,
+        avance: null,
+      })
+    ),
+    ...extra,
+  };
+}
+
+/** Filas de apertura de DENIM: T10 (nueva del año anterior, 2026) y T12 (apertura 2027, sin fila de VALOR ni de ULTRA LOW: el referente no las vende). */
+export function filasTiendaDenim(): FilaTiendaLineaApi[] {
+  return [
+    filaApertura("RECONOCIDO", "tienda-10", "T10", [{ anio: Y, propuesto: 2800, vigente: 2800, vendido: 2000 }]),
+    filaApertura("MID VALUE", "tienda-10", "T10", [{ anio: Y, propuesto: 1500, vigente: 1500, vendido: 1000 }]),
+    filaApertura("PREMIUM", "tienda-10", "T10", [{ anio: Y, propuesto: 497, vigente: 497, vendido: 420 }]),
+    filaApertura("RECONOCIDO", "tienda-12", "T12", [{ anio: Y + 1, propuesto: 300, vigente: 300 }]),
+    filaApertura("MID VALUE", "tienda-12", "T12", [{ anio: Y + 1, propuesto: 120, vigente: 120, decidido: 120, origen: "manual" }]),
+    filaApertura("PREMIUM", "tienda-12", "T12", [{ anio: Y + 1, propuesto: 64, vigente: 64, origen: "escalada", decidido: 64 }]),
+  ];
+}
+
+/** Composición por marca de las filas base de DENIM: PREMIUM con solo 2 marcas (sin «otras») y ULTRA LOW sin composición. */
+export function marcasDenim(): MarcasDeFilaApi[] {
+  const periodo = { desde: "2025-10-01", hasta: "2026-09-01", tiendas: 9 };
+  const m = (nombre: string, top: [string, number][], otras: MarcasDeFilaApi["otras"]): MarcasDeFilaApi => ({
+    fila_id: `fila-${nombre}`,
+    equivalencia_id: null,
+    agrupacion_marca_id: `am-${nombre}`,
+    periodo,
+    top: top.map(([marca, participacion]) => ({ marca_id: `mk-${marca}`, marca, participacion })),
+    otras,
+  });
+  return [
+    m("RECONOCIDO", [["MARCA A", 0.4], ["MARCA B", 0.25], ["MARCA C", 0.15]], { marcas: 6, participacion: 0.2 }),
+    m("MID VALUE", [["MARCA D", 0.5], ["MARCA A", 0.3], ["MARCA E", 0.1]], { marcas: 2, participacion: 0.1 }),
+    m("VALOR", [["MARCA F", 0.6], ["MARCA G", 0.3], ["MARCA H", 0.05]], { marcas: 1, participacion: 0.05 }),
+    m("PREMIUM", [["MARCA I", 0.7], ["MARCA J", 0.3]], null),
+  ];
+}
+
 export function respuestaLineas(extra: Partial<RespuestaLineasApi> = {}): RespuestaLineasApi {
   return {
     filtro: { genero_id: "g-h", mundo_id: "m-u", linea_id: "l-denim", q: null },
@@ -244,9 +313,11 @@ export function respuestaLineas(extra: Partial<RespuestaLineasApi> = {}): Respue
       { anio: 2026, unidades: 31980, clase: "en_curso", tiendas: 9 },
     ],
     tiendas_linea: [
-      { anio: 2026, bloque: "nuevas", subbloque: "nuevas_anterior", tienda: "T10", vendido: 3420, vigente: 4797, decidida: false },
-      { anio: 2027, bloque: "nuevas", subbloque: "aperturas", tienda: "T12", vendido: 0, vigente: 484, decidida: false },
+      { ...tiendaLinea(10), anio: 2026, bloque: "nuevas", subbloque: "nuevas_anterior", tienda: "T10", vendido: 3420, vigente: 4797, decidida: false, fecha_apertura: "2025-11-20", total_tienda: { propuesto: 9100, decidido: null } },
+      { ...tiendaLinea(12), anio: 2027, bloque: "nuevas", subbloque: "aperturas", tienda: "T12", vendido: 0, vigente: 484, decidida: false, fecha_apertura: "2027-03-15", origen_composicion: "referente", referente: "T03", total_tienda: { propuesto: 7840, decidido: 7840 } },
     ],
+    filas_tienda: filasTiendaDenim(),
+    marcas: marcasDenim(),
     prueba_anterior: { propuesto: 16210, real: 16480, desvio_pct: -1.6, eat_m6: 9.8, eat_m6_cobertura: 1 },
     avisos_linea: ["tienda_nueva_sin_decidir"],
     indice_lineas: INDICE,
@@ -303,6 +374,8 @@ export function tiendaProyeccion(extra: Partial<TiendaProyeccionApi> = {}): Tien
     explicacion: "Composición de T03 (oct-2025 a set-2026), 412 filas. Año maduro completo: 9,850 u. Abre el 15 de marzo: 7,840 u en 2027.",
     nota: null,
     pasa_a_mismas: false,
+    suma_filas: 7840,
+    filas_fijadas: 0,
     filas: [
       fila({ nombre: "RECONOCIDO", id: "tf1", hist: [0, 0, 0], vendido: 0, p26: 0, p27: 5681 }, { tienda_id: "tienda-12" }),
     ].map((f) => ({ ...f, anios: f.anios.map((a) => ({ ...a, anio: 2027, bloque: "nuevas" as const, subbloque: "aperturas" as const, vigente: 5681, propuesto: 5681 })) })),

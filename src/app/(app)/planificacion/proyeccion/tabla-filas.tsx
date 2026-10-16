@@ -5,8 +5,24 @@ import { Button } from "@/components/ui/button";
 import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi, AvisoFila, FilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import { CeldaCrecimiento, CeldaDecision, type DecisionFila } from "./celda-decision";
-import { Avisos, NUM } from "./comunes";
-import { aniosHistoricos, avisosDeFila, formatearAvance, historicoDe, nombreMes, registroDe, resumenColaLarga, totalesDeLinea, unidades } from "./vista";
+import { Avisos, BotonEnlace, NUM } from "./comunes";
+import {
+  aniosHistoricos,
+  avisosDeFila,
+  formatearAvance,
+  historicoDe,
+  nombreMes,
+  notaMoverTienda,
+  registroDe,
+  resumenColaLarga,
+  sumaApertura,
+  tituloSeccionApertura,
+  textoTotalTienda,
+  totalesDeLinea,
+  totalLinea,
+  unidades,
+  type SeccionApertura,
+} from "./vista";
 
 const TH = "px-3 py-2 font-medium";
 
@@ -47,10 +63,15 @@ export function MesesDeRegistro({ registro, titulo }: { registro: AnioFilaApi | 
  * año, vendido, avance, propuesta y decisión de los dos años, y el crecimiento que alimenta la propuesta del año
  * siguiente. Cada celda «decidido» se edita en línea. Al pie, los totales de la línea (mismas tiendas). «Ver meses»
  * despliega los doce meses de cada año.
+ *
+ * `0.10.7`: después de las filas base va una sección por tienda nueva y año (aperturas y nuevas del año anterior) con una fila por
+ * agrupación de marca, editable con el mismo campo + ✓. Mover una fila cambia solo esa fila: el total de la tienda pasa a `D + Δ`. El
+ * pie suma «Tiendas nuevas» y «Total línea».
  */
 export function TablaFilas({
   filas,
   lineas,
+  secciones,
   anioEnCurso,
   crecimientoDefecto,
   bloqueada,
@@ -58,10 +79,12 @@ export function TablaFilas({
   filaSeleccionada,
   onSeleccionar,
   onDecidir,
+  onVerTienda,
   onCsv,
 }: {
   filas: readonly FilaApi[];
-  lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio">;
+  lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio" | "filas_tienda">;
+  secciones: readonly SeccionApertura[];
   anioEnCurso: number;
   crecimientoDefecto: number;
   bloqueada: boolean;
@@ -69,6 +92,7 @@ export function TablaFilas({
   filaSeleccionada: string | null;
   onSeleccionar: (id: string) => void;
   onDecidir: (fila: FilaApi, anio: number, d: DecisionFila) => Promise<boolean>;
+  onVerTienda?: (tiendaId: string) => void;
   onCsv: () => void;
 }) {
   const y = anioEnCurso;
@@ -77,6 +101,7 @@ export function TablaFilas({
   const base = filas.filter((f) => f.tienda_id === null && f.activo);
   const tY = totalesDeLinea(lineas, y);
   const tS = totalesDeLinea(lineas, y + 1);
+  const hayApertura = secciones.length > 0;
   const todasAbiertas = base.length > 0 && base.every((f) => abiertas.has(f.id));
 
   const alternar = (id: string) =>
@@ -209,34 +234,131 @@ export function TablaFilas({
                 </Fragment>
               );
             })}
+            {secciones.map((s) => (
+              <Fragment key={s.clave}>
+                <tr className="bg-neutro-suave/60">
+                  <th colSpan={11} scope="colgroup" className="px-3 py-2 text-left text-xs font-normal">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="font-semibold text-tinta">{tituloSeccionApertura(s)}</span>
+                      <span className="text-tinta-suave">{textoTotalTienda(s.total_tienda)}</span>
+                      <span className="text-tinta-suave">en esta línea: {unidades(s.vigente_en_linea)}</span>
+                      {onVerTienda && <BotonEnlace onClick={() => onVerTienda(s.tienda_id)}>Ver la tienda</BotonEnlace>}
+                    </div>
+                  </th>
+                </tr>
+                {s.filas.map((x) => {
+                  const r = x.registro;
+                  const fila = x.fila;
+                  if (!fila || !r) {
+                    return (
+                      <tr key={`${s.clave}-${x.clave}`}>
+                        <td className="px-3 py-2 pl-6 text-tinta-suave">{x.nombre}</td>
+                        <td colSpan={10} className="px-3 py-2 text-xs italic text-tinta-suave">
+                          Sin fila de apertura: el referente no vende esta agrupación.
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const esY = s.anio === y;
+                  const vigente = r.vigente ?? r.decidido ?? r.propuesto;
+                  const celda = (
+                    <CeldaDecision
+                      key={`${fila.id}-${s.anio}-${r.decidido}-${r.origen}-${r.vigente}`}
+                      registro={r}
+                      anio={s.anio}
+                      anioEnCurso={y}
+                      bloqueada={bloqueada}
+                      ocupado={ocupado}
+                      filaDeTienda
+                      etiqueta={`${x.nombre}, ${s.codigo} decidido ${s.anio}`}
+                      notaCambio={(nueva) => notaMoverTienda({ vigenteFila: vigente, nueva, total: s.total_tienda })}
+                      onDecidir={(d) => onDecidir(fila, s.anio, d)}
+                    />
+                  );
+                  const sinDato = (n: number) => (
+                    <td colSpan={n} className="px-3 py-2 text-center text-tinta-suave">
+                      —
+                    </td>
+                  );
+                  return (
+                    <tr key={`${s.clave}-${x.clave}`} className="hover:bg-fondo/60">
+                      <td className="px-3 py-2 pl-6 align-middle">
+                        <span className="font-medium">{x.nombre}</span>
+                        <span className="ml-2 text-xs text-tinta-suave">
+                          {s.codigo} · {s.anio}
+                        </span>
+                        {r.origen === "escalada" && <span className="ml-2 text-xs text-tinta-suave">escalada</span>}
+                        <Avisos avisos={r.avisos.filter((a) => AVISOS_EN_TABLA.has(a))} />
+                      </td>
+                      {esY ? (
+                        <>
+                          {sinDato(3)}
+                          <td className={`px-3 py-2 ${NUM}`}>{unidades(r.vendido)}</td>
+                          {sinDato(1)}
+                          <td className={`px-3 py-2 ${NUM}`}>{unidades(r.propuesto)}</td>
+                          <td className="px-3 py-2">{celda}</td>
+                          {sinDato(3)}
+                        </>
+                      ) : (
+                        <>
+                          {sinDato(8)}
+                          <td className={`px-3 py-2 ${NUM}`}>{unidades(r.propuesto)}</td>
+                          <td className="px-3 py-2">{celda}</td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
+              </Fragment>
+            ))}
           </tbody>
-          {base.length > 0 && (
+          {(base.length > 0 || hayApertura) && (
             <tfoot className="border-t-2 border-borde bg-neutro-suave/60 font-medium">
-              <tr>
-                <td className="px-3 py-2">Línea (mismas tiendas)</td>
-                {historicos.map((h) => (
-                  <td key={h} className={`px-3 py-2 ${NUM}`}>
-                    {unidades(lineas.historico_linea.find((x) => x.anio === h)?.unidades)}
+              {base.length > 0 && (
+                <tr>
+                  <td className="px-3 py-2">Línea (mismas tiendas)</td>
+                  {historicos.map((h) => (
+                    <td key={h} className={`px-3 py-2 ${NUM}`}>
+                      {unidades(lineas.historico_linea.find((x) => x.anio === h)?.unidades)}
+                    </td>
+                  ))}
+                  <td className={`px-3 py-2 ${NUM}`}>{unidades(tY.vendido)}</td>
+                  <td className="px-3 py-2" />
+                  <td className={`px-3 py-2 ${NUM}`}>{unidades(tY.propuesto)}</td>
+                  <td className={`px-3 py-2 ${NUM}`}>
+                    {unidades(tY.vigente)}
+                    <span className="ml-1 font-sans text-xs font-normal text-tinta-suave">
+                      vigente · {tY.decididas} de {tY.filas}
+                    </span>
                   </td>
-                ))}
-                <td className={`px-3 py-2 ${NUM}`}>{unidades(tY.vendido)}</td>
-                <td className="px-3 py-2" />
-                <td className={`px-3 py-2 ${NUM}`}>{unidades(tY.propuesto)}</td>
-                <td className={`px-3 py-2 ${NUM}`}>
-                  {unidades(tY.vigente)}
-                  <span className="ml-1 font-sans text-xs font-normal text-tinta-suave">
-                    vigente · {tY.decididas} de {tY.filas}
-                  </span>
-                </td>
-                <td className="px-3 py-2" />
-                <td className={`px-3 py-2 ${NUM}`}>{unidades(tS.propuesto)}</td>
-                <td className={`px-3 py-2 ${NUM}`}>
-                  {unidades(tS.vigente)}
-                  <span className="ml-1 font-sans text-xs font-normal text-tinta-suave">
-                    vigente · {tS.decididas} de {tS.filas}
-                  </span>
-                </td>
-              </tr>
+                  <td className="px-3 py-2" />
+                  <td className={`px-3 py-2 ${NUM}`}>{unidades(tS.propuesto)}</td>
+                  <td className={`px-3 py-2 ${NUM}`}>
+                    {unidades(tS.vigente)}
+                    <span className="ml-1 font-sans text-xs font-normal text-tinta-suave">
+                      vigente · {tS.decididas} de {tS.filas}
+                    </span>
+                  </td>
+                </tr>
+              )}
+              {hayApertura && (
+                <>
+                  <tr>
+                    <td className="px-3 py-2">Tiendas nuevas</td>
+                    <td colSpan={6} />
+                    <td className={`px-3 py-2 ${NUM}`}>{unidades(sumaApertura(lineas, y))}</td>
+                    <td colSpan={2} />
+                    <td className={`px-3 py-2 ${NUM}`}>{unidades(sumaApertura(lineas, y + 1))}</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2">Total línea</td>
+                    <td colSpan={6} />
+                    <td className={`px-3 py-2 ${NUM}`}>{unidades(totalLinea(lineas, y))}</td>
+                    <td colSpan={2} />
+                    <td className={`px-3 py-2 ${NUM}`}>{unidades(totalLinea(lineas, y + 1))}</td>
+                  </tr>
+                </>
+              )}
             </tfoot>
           )}
         </table>

@@ -312,6 +312,17 @@ export function actualizarTiendaProyeccion(db: Db, id: string, cambio: TablesUpd
   return db.from("proyeccion_tiendas").update(cambio).eq("id", id).select("*").single();
 }
 
+/**
+ * Bloqueo optimista del total decidido de una tienda: actualiza SOLO si `decidido` sigue siendo el que se leyó (`is not distinct from`:
+ * `is null` o `eq`). `data` es `null` si otro cambio se adelantó (no se tocó nada).
+ */
+export async function actualizarTotalTiendaCondicional(db: Db, id: string, decididoLeido: number | null, cambio: TablesUpdate<"proyeccion_tiendas">) {
+  let c = db.from("proyeccion_tiendas").update(cambio).eq("id", id);
+  c = decididoLeido === null ? c.is("decidido", null) : c.eq("decidido", decididoLeido);
+  const { data, error } = await c.select("id").maybeSingle();
+  return { data, error };
+}
+
 // ─── Factores del Niño ───
 
 export function leerFactoresDb(db: Db) {
@@ -408,4 +419,23 @@ export async function actualizarComposicionFila(db: Db, id: string, composicion:
 export async function actualizarRampaTienda(db: Db, id: string, rampa: readonly number[]) {
   const { error } = await db.from("proyeccion_tiendas").update({ rampa: [...rampa] }).eq("id", id);
   return { error };
+}
+
+// ─── Nombres de marca (07b, `0.10.7`) ───
+
+/** Tanda de ids por consulta de nombres: la URL de PostgREST no crece con el top 3 de cada fila de una línea. */
+export const TANDA_NOMBRES_MARCA = 100;
+
+/**
+ * `id → nombre` de las marcas pedidas (el top 3 de cada fila base de una línea), en tandas de `TANDA_NOMBRES_MARCA` ids. Una sola consulta
+ * liviana por tanda (`id, nombre`): no lee venta ni las tablas de M7.
+ */
+export async function leerNombresMarcas(db: Db, ids: readonly string[]): Promise<{ data: Map<string, string>; error: PostgrestError | null }> {
+  const nombres = new Map<string, string>();
+  for (const tanda of enTandas([...new Set(ids)], TANDA_NOMBRES_MARCA)) {
+    const { data, error } = await db.from("marcas").select("id, nombre").in("id", tanda);
+    if (error) return { data: nombres, error };
+    for (const m of data ?? []) nombres.set(m.id, m.nombre);
+  }
+  return { data: nombres, error: null };
 }

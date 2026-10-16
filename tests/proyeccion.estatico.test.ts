@@ -29,7 +29,7 @@ const TIPOS_DB = "src/lib/supabase/database.types.ts";
 const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && f.ruta.endsWith("route.ts"));
 /** Lógica pura: ni base ni HTTP ni pantalla. */
 const PURAS = [
-  "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
+  "apertura-linea", "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
   "explicar", "cola-larga", "resumen", "matriz", "mensual", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
 ];
 

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
 import { formatearNumero, plural } from "@/lib/formato";
-import type { FilaApi, ProyeccionApi, RespuestaTiendasApi, TiendaProyeccionApi } from "@/lib/proyeccion/tipos-api";
+import type { FilaApi, ProyeccionApi, RespuestaDecidirFilaApi, RespuestaTiendasApi, TiendaProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { AlertaError, Avisos, BotonEnlace, NUM } from "./comunes";
 import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
 import {
@@ -18,9 +18,13 @@ import {
   leerEntero,
   leerRampa,
   nombreMes,
+  ofreceUsarSumaFilas,
+  sumaFilasYaDecidida,
   textoComposicion,
+  textoFilasFijadas,
   textoPerfilApertura,
   textoRampa,
+  textoTotalTiendaTras,
   unidades,
 } from "./vista";
 
@@ -134,7 +138,7 @@ function FilasDeTienda({
             </div>
           )}
           <p className="mt-2 text-xs text-tinta-suave">
-            Una fila fijada a mano no se escala con el total de la tienda; las demás sí. Las filas de tiendas nuevas no entran en las filas base de «Por línea»: la matriz las suma en sus propias columnas.
+            Cambiar una fila (aquí o en Por línea) solo mueve esa fila: el total de la tienda pasa a D + Δ y las demás no se tocan. Las filas de tiendas nuevas no entran en las filas base de «Por línea»: la matriz las suma en sus propias columnas.
           </p>
         </>
       )}
@@ -255,6 +259,8 @@ function DecisionTienda({ t, bloqueada, ocupado, onEnviar }: { t: TiendaProyecci
   const decidida = t.decidido !== null;
   const deshabilitada = bloqueada || ocupado;
   const notaLimpia = nota.trim() === "" ? null : nota.trim();
+  const filasFijadas = textoFilasFijadas(t);
+  const sumaYaDecidida = sumaFilasYaDecidida(t);
 
   async function guardarCifra() {
     const l = leerEntero(texto);
@@ -293,19 +299,38 @@ function DecisionTienda({ t, bloqueada, ocupado, onEnviar }: { t: TiendaProyecci
         </Field>
       </div>
       {motivo && <p className="text-xs text-alerta">{motivo}</p>}
+      {filasFijadas && (
+        <p className="rounded-md bg-fondo px-3 py-2 text-xs text-tinta-suave">
+          {filasFijadas}
+        </p>
+      )}
       {!bloqueada && (
-        <div className="flex flex-wrap gap-2">
-          <Button tamano="sm" disabled={deshabilitada || t.propuesto === null} onClick={() => void onEnviar({ origen: "propuesta", nota: notaLimpia })}>
-            Aceptar la propuesta
-          </Button>
-          <Button variante="secundario" tamano="sm" disabled={deshabilitada} onClick={() => void guardarCifra()}>
-            Guardar esta cifra
-          </Button>
-          {decidida && (
-            <Button variante="fantasma" tamano="sm" disabled={deshabilitada} onClick={() => void onEnviar({ decidido: null, origen: "manual" })}>
-              Volver a la propuesta
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <Button tamano="sm" disabled={deshabilitada || t.propuesto === null} onClick={() => void onEnviar({ origen: "propuesta", nota: notaLimpia })}>
+              Aceptar la propuesta
             </Button>
-          )}
+            <Button variante="secundario" tamano="sm" disabled={deshabilitada} onClick={() => void guardarCifra()}>
+              Guardar esta cifra
+            </Button>
+            {ofreceUsarSumaFilas(t) && t.suma_filas !== null && (
+              <Button
+                variante="secundario"
+                tamano="sm"
+                disabled={deshabilitada || sumaYaDecidida}
+                title={sumaYaDecidida ? "La suma de filas ya es el total decidido" : `Decidir ${unidades(t.suma_filas)} como total de la tienda`}
+                onClick={() => void onEnviar({ decidido: t.suma_filas, origen: "manual", nota: notaLimpia })}
+              >
+                Usar la suma de filas
+              </Button>
+            )}
+            {decidida && (
+              <Button variante="fantasma" tamano="sm" disabled={deshabilitada} onClick={() => void onEnviar({ decidido: null, origen: "manual" })}>
+                Volver a la propuesta
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-tinta-suave">Aceptar la propuesta re-escala las filas no fijadas a ese total; las fijadas a mano se conservan.</p>
         </div>
       )}
       {t.propuesta_al_decidir !== null && decidida && t.propuesta_al_decidir !== t.propuesto && (
@@ -481,9 +506,11 @@ export function TarjetaTienda({
             bloqueada={bloqueada}
             onCambiarFila={async (fila, decidido) => {
               setAviso(null);
-              const r = await accion.ejecutar(() => api.put(`${rutaProyeccion(proyeccion.id)}/filas/${fila.id}/anios/${t.anio}`, { decidido, origen: "manual" }));
+              const r = await accion.ejecutar(() => api.put<RespuestaDecidirFilaApi>(`${rutaProyeccion(proyeccion.id)}/filas/${fila.id}/anios/${t.anio}`, { decidido, origen: "manual" }));
               if (!r.ok) return false;
               await onCambio();
+              // La fila movió el total de la tienda (D + Δ): se dice el total ya actualizado.
+              if (r.valor.tienda) setAviso(textoTotalTiendaTras(t.codigo, r.valor.tienda));
               return true;
             }}
           />

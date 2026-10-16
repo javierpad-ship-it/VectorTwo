@@ -1,9 +1,11 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { registrarErrorDb } from "@/lib/api/errores-db";
 import type { TablesInsert } from "@/lib/supabase/database.types";
 import { cargarCatalogo } from "./contexto";
 import {
   actualizarComposicionFila,
   actualizarTiendaProyeccion,
+  actualizarTotalTiendaCondicional,
   cambiarEstadoProyeccion,
   leerAniosPorIds,
   leerProyeccionDb,
@@ -13,12 +15,13 @@ import {
   upsertAnios,
   type ProyeccionDb,
 } from "./consultas";
-import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, fraccionDeTienda, recalcularBaseSiguiente, registroDe, unidadesMadurasDeTienda, type ContextoModelo } from "./decision";
+import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, fraccionDeTienda, moverTotalTienda, recalcularBaseSiguiente, registroDe, unidadesMadurasDeTienda, type ContextoModelo, type ResultadoDecisionTienda, type TotalesOtrosAnios } from "./decision";
+import { notaMoverTotal, totalTiendaTrasMover } from "./apertura-linea";
 import { conteosResumen } from "./resumen";
 import { explicar, textoCurva } from "./explicar";
 import { anioMaduroSoles, mesesCompletos, unidadesMadurasEntero } from "./tiendas-nuevas";
 import { aAnioApi, aFilaModelo, aRegistro, payloadAnioDecision, comoJson, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
-import { motivoRechazoAplicarCurva, motivoRechazoDecision, motivoRechazoEdicion } from "./reglas";
+import { motivoRechazoAplicarCurva, motivoRechazoDecision, motivoRechazoEdicion, motivoRechazoTotalTienda } from "./reglas";
 import {
   aTiendaApi,
   contextoModelo,
@@ -37,7 +40,7 @@ import {
   type Salida,
 } from "./servicio-base";
 import type { DecisionCuerpo, DecisionTiendaCuerpo } from "./esquemas";
-import { claveBaseDe, type AnioFilaApi, type FilaModelo, type ResumenProyeccion, type TiendaProyeccionApi } from "./tipos";
+import { claveBaseDe, type FilaModelo, type RegistroModelo, type RespuestaDecidirFilaApi, type ResumenProyeccion, type TiendaProyeccionApi } from "./tipos";
 
 /**
  * Escrituras de las decisiones sobre una proyección en trabajo (Parte 1 y tiendas nuevas) y "aplicar curva nueva". Todas
@@ -46,6 +49,9 @@ import { claveBaseDe, type AnioFilaApi, type FilaModelo, type ResumenProyeccion,
  */
 
 const db = (): Db => supabaseAdmin();
+
+const MENSAJE_TIENDA_CAMBIO = "La tienda cambió mientras editabas; recarga y vuelve a intentar.";
+const MENSAJE_GUARDADO_PARCIAL = "No se pudo terminar de guardar el cambio. Recarga la proyección y revisa la tienda antes de volver a intentar.";
 
 const estadoDe = (p: ProyeccionDb) => (p.estado === "cerrada" ? "cerrada" : p.estado === "archivada" ? "archivada" : ("en_trabajo" as const));
 
@@ -117,10 +123,14 @@ async function grupoDe(d: Db, proyeccionId: string, gmlId: string, agrupacionMar
 
 /**
  * Decide el total de un año de una fila: `decidido = null` vuelve a la propuesta, `origen = propuesta` copia la propuesta, `manual`
- * escribe la cifra. En una fila base del año en curso recalcula en el acto la propuesta del año siguiente (B2); en una fila de
- * tienda fija la cifra de esa fila y re-escala las demás con el total decidido de la tienda, si lo hay.
+ * escribe la cifra. En una fila base del año en curso recalcula en el acto la propuesta del año siguiente (B2).
+ *
+ * `0.10.7` (07b), fila de tienda: aceptar la propuesta la FIJA (`manual`, D1). Si la tienda ya tiene total decidido `D`, el total pasa a
+ * `D + Δ` («solo se mueve lo modificado», decisión de Javier) y se guarda como decisión del planner (quién, cuándo y «ajustado desde la
+ * línea …»); las demás filas no se mueven y `Σ fijadas ≤ D'` siempre (D3). Sin `D`, solo se fija la fila (la tienda sigue sin decidir) y el
+ * año siguiente de la fila se rehace (D2). Con `409 menor_que_vendido` si el total movido queda bajo lo vendido de la tienda en `Y`.
  */
-export async function decidirFila(id: string, filaId: string, anio: number, cuerpo: DecisionCuerpo, actor: Actor): Promise<Salida<AnioFilaApi>> {
+export async function decidirFila(id: string, filaId: string, anio: number, cuerpo: DecisionCuerpo, actor: Actor): Promise<Salida<RespuestaDecidirFilaApi>> {
   const d = db();
   const pR = await proyeccionOr404(d, id);
   if (pR.respuesta) return falla(pR.respuesta);
@@ -188,10 +198,10 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
     ctx
   );
 
-  const editable = await sigueEditable(d, id);
-  if (editable.respuesta) return falla(editable.respuesta);
-
   if (modelo.tienda_id === null) {
+    // Justo antes de la primera escritura: cuanto menos se lee entre esta comprobación y el guardado, menos crece la ventana con un cierre.
+    const editable = await sigueEditable(d, id);
+    if (editable.respuesta) return falla(editable.respuesta);
     const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [Y, Y + 1], ahora, actor);
     if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
     await refrescarResumen(d, p);
@@ -199,18 +209,79 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
     return listo(aAnioApi(r));
   }
 
-  // Una fila de tienda: se guarda su cifra y se re-escala el resto con el total de la tienda (si lo hay).
+  // Una fila de tienda: se guarda su cifra y, si la tienda ya tiene total decidido, ese total se mueve en lo que cambió la fila.
   const tiendaId = modelo.tienda_id;
+  const filaTienda = tiendasRows.data.find((t) => t.tienda_id === tiendaId && t.anio === anio && t.activo);
+  let mover: { decidido: number; nota: string | null } | null = null;
+  const registroNuevo = registroDe(nuevo, anio);
+  if (filaTienda && filaTienda.decidido !== null && !volver && registroNuevo) {
+    // Σ de lo fijado a mano en TODAS las filas de la tienda (con la nueva): el total nunca queda por debajo (D3).
+    // Solo cuentan filas y años activos: una fila desactivada no «fija» nada en el total de la tienda.
+    const deLaTienda = await leerFilasConAnios(d, id, { columnas: "completas", tiendaId, soloActivas: true });
+    if (deLaTienda.error) return fallaDb(deLaTienda.error, "proyección: leer las filas de la tienda");
+    const modelosTienda = deLaTienda.data
+      .filter((f) => f.activo)
+      .map((f) => aFilaModelo({ ...f, proyeccion_fila_anios: f.proyeccion_fila_anios.filter((a) => a.activo) }, k, Y))
+      .map((f) => (f.clave === nuevo.clave ? nuevo : f));
+    const sumaFijadas = modelosTienda.reduce((s, f) => {
+      const r = registroDe(f, anio);
+      return s + (r && r.origen === "manual" && r.decidido !== null ? r.decidido : 0);
+    }, 0);
+    const total = totalTiendaTrasMover({ decidido: filaTienda.decidido, vigenteAnterior: registro.vigente, vigenteNuevo: registroNuevo.vigente ?? 0, sumaFijadas });
+    const rechazoTotal = motivoRechazoTotalTienda({ anio, anioEnCurso: Y, nuevoTotal: total, vendidoTienda: filaTienda.vendido });
+    if (rechazoTotal) return fallaRegla(rechazoTotal);
+    const nodo = cat.data.catalogo.nodos.get(g.gml_id);
+    const linea = nodo ? `${nodo.genero} · ${nodo.mundo} · ${nodo.linea}` : "de esta fila";
+    mover = { decidido: total, nota: notaMoverTotal(filaTienda.nota, linea) };
+  }
+
+  // Justo antes de la primera escritura (ver arriba).
+  const editable = await sigueEditable(d, id);
+  if (editable.respuesta) return falla(editable.respuesta);
+  // Bloqueo optimista: el total nuevo es `D + Δ` sobre el `D` que se leyó; si otro PUT lo movió entretanto, el UPDATE condicional no toca
+  // ninguna fila y se responde 409 SIN haber escrito la fila (el total se mueve ANTES de guardarla, así no queda nada a medias).
+  if (mover && filaTienda) {
+    const bloqueo = await actualizarTotalTiendaCondicional(d, filaTienda.id, filaTienda.decidido, {
+      decidido: mover.decidido,
+      origen: "manual",
+      nota: mover.nota,
+      decidido_at: ahora,
+      decidido_por_id: actor.id,
+      decidido_por_nombre: actor.nombre,
+    });
+    if (bloqueo.error) return fallaDb(bloqueo.error, "proyección: mover el total de la tienda");
+    if (!bloqueo.data) return fallaMensaje(MENSAJE_TIENDA_CAMBIO, 409, "conflicto");
+  }
   const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [anio], ahora, actor);
-  if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
-  const fila = await propagarTienda(d, p, parametros, cat.data.catalogo, tiendasRows.data, ctx, tiendaId, anio, actor, ahora, null);
+  if (w.error) {
+    // La fila no se escribió: se devuelve el total a como estaba (solo si nadie lo movió después).
+    if (mover && filaTienda) {
+      await actualizarTotalTiendaCondicional(d, filaTienda.id, mover.decidido, {
+        decidido: filaTienda.decidido,
+        origen: filaTienda.origen,
+        nota: filaTienda.nota,
+        decidido_at: filaTienda.decidido_at,
+        decidido_por_id: filaTienda.decidido_por_id,
+        decidido_por_nombre: filaTienda.decidido_por_nombre,
+      });
+    }
+    return fallaDb(w.error, "proyección: guardar la decisión");
+  }
+  const fila = await propagarTienda(d, p, parametros, cat.data.catalogo, tiendasRows.data, ctx, tiendaId, anio, actor, ahora, null, mover);
   if (fila.respuesta) return falla(fila.respuesta);
   await refrescarResumen(d, p);
   const recargada = await grupoDe(d, id, g.gml_id, g.agrupacion_marca_id, g.equivalencia_id);
   if (recargada.error) return fallaDb(recargada.error, "proyección: releer la fila");
   const r = recargada.data.find((f) => f.id === filaId);
   const reg = r ? aFilaModelo(r, k, Y).registros.find((x) => x.anio === anio) : undefined;
-  return listo(aAnioApi(reg ?? registro));
+  const t = fila.data.tienda;
+  return listo({ ...aAnioApi(reg ?? registro), tienda: { anio, decidido: t.decidido, suma_filas: t.suma_filas ?? 0 } });
+}
+
+/** Fallo de base a mitad de `propagarTienda`: lo ya guardado puede ser parcial. Detalle crudo al log; al usuario, que recargue. */
+function fallaGuardado(e: Parameters<typeof registrarErrorDb>[0], contexto: string): Salida<never> {
+  registrarErrorDb(e, contexto);
+  return fallaMensaje(MENSAJE_GUARDADO_PARCIAL, 500, "guardado_parcial");
 }
 
 /**
@@ -228,31 +299,46 @@ async function propagarTienda(
   anio: number,
   actor: Actor,
   ahora: string,
-  decision: { decidido: number | null; origen: "propuesta" | "manual"; nota?: string | null; rampa?: readonly number[] | null } | null
+  decision: { decidido: number | null; origen: "propuesta" | "manual"; nota?: string | null; rampa?: readonly number[] | null } | null,
+  /** `0.10.7`: el total de la tienda pasa a este valor (decisión explícita del planner) sin re-escalar las demás filas. */
+  mover: { decidido: number; nota: string | null } | null = null
 ): Promise<Salida<{ tienda: TiendaProyeccionApi; filas_base_recalculadas: number }>> {
   const k = kDe(p);
   const Y = p.anio_en_curso;
   const filas = await leerFilasConAnios(d, p.id, { columnas: "completas", tiendaId });
-  if (filas.error) return fallaDb(filas.error, "proyección: leer las filas de la tienda");
+  if (filas.error) return fallaGuardado(filas.error, "proyección: leer las filas de la tienda");
   const modelos = filas.data.map((f) => aFilaModelo(f, k, Y));
   const fila = tiendasRows.find((t) => t.tienda_id === tiendaId && t.anio === anio);
 
+  // Total decidido de la tienda en sus OTROS años: al rehacer uno (p. ej. `Y+1` tras editar `Y`) se vuelve a aplicar, para que `Σ filas = D` en los dos.
+  const otrosTotales: TotalesOtrosAnios = new Map(
+    tiendasRows
+      .filter((t) => t.tienda_id === tiendaId && t.anio !== anio && t.activo && t.decidido !== null)
+      .map((t) => [t.anio, { decidido: t.decidido as number, decidido_por_nombre: t.decidido_por_nombre, decidido_at: t.decidido_at }] as const)
+  );
   const D = decision ?? (fila && fila.decidido !== null ? { decidido: fila.decidido, origen: (fila.origen === "propuesta" ? "propuesta" : "manual") as "propuesta" | "manual", nota: fila.nota } : null);
-  const r = aplicarDecisionTienda({
-    filas: modelos,
-    tiendaId,
-    anio,
-    decision: D
-      ? { decidido: D.decidido, origen: D.origen, nota: D.nota ?? null, rampa: decision?.rampa ?? null, decidido_por_nombre: actor.nombre, decidido_at: ahora }
-      : { decidido: null, origen: "manual", rampa: null },
-    ctx,
-  });
-  // Si no había total decidido, `aplicarDecisionTienda` no debe borrar las cifras ya fijadas: se guardan las del grupo tal cual.
-  const filasFinales = D ? r.filas : modelos;
+  const r: ResultadoDecisionTienda = mover
+    ? moverTotalTienda({ filas: modelos, tiendaId, anio, decision: mover, ctx, otrosTotales })
+    : aplicarDecisionTienda({
+        filas: modelos,
+        tiendaId,
+        anio,
+        decision: D
+          ? { decidido: D.decidido, origen: D.origen, nota: D.nota ?? null, rampa: decision?.rampa ?? null, decidido_por_nombre: actor.nombre, decidido_at: ahora }
+          : { decidido: null, origen: "manual", rampa: null },
+        ctx,
+        otrosTotales,
+      });
+  // Sin total decidido `aplicarDecisionTienda` solo suelta las escaladas huérfanas y conserva las fijadas (`manual`); además rehace el año
+  // siguiente de la tienda (D2): por eso se guardan SIEMPRE sus filas, no las leídas.
+  const filasFinales = r.filas;
   const anios = decision?.rampa ? [Y, Y + 1] : [anio, ...(anio === Y ? [Y + 1] : [])];
   const ids = idsDe(filas.data);
+  // Otra vez justo antes de escribir: desde la comprobación del handler se han leído filas y tiendas.
+  const editable = await sigueEditable(d, p.id);
+  if (editable.respuesta) return falla(editable.respuesta);
   const w = await guardarRegistros(d, filasFinales, ids, anios, ahora, actor);
-  if (w.error) return fallaDb(w.error, "proyección: guardar las filas de la tienda");
+  if (w.error) return fallaGuardado(w.error, "proyección: guardar las filas de la tienda");
 
   // Totales de la tienda (ambos años) y su decisión.
   // Con una rampa nueva `F` cambia: las unidades maduras (de la tienda y de cada fila) se rehacen con la rampa efectiva.
@@ -263,7 +349,7 @@ async function propagarTienda(
       const filaId = ids.get(f.clave);
       if (md === undefined || !filaId || !f.composicion) continue;
       const e = await actualizarComposicionFila(d, filaId, comoJson({ ...f.composicion, unidades_maduras: md }));
-      if (e.error) return fallaDb(e.error, "proyección: guardar la composición de la tienda");
+      if (e.error) return fallaGuardado(e.error, "proyección: guardar la composición de la tienda");
     }
   }
   const filasDeLaTienda = tiendasRows.filter((t) => t.tienda_id === tiendaId);
@@ -275,7 +361,7 @@ async function propagarTienda(
     const cambio: Parameters<typeof actualizarTiendaProyeccion>[2] = { vendido, propuesto };
     if (decision?.rampa) cambio.rampa = [...decision.rampa];
     if (maduras && t.bloque === "nuevas") cambio.unidades_maduras = unidadesMadurasEntero(maduras.total);
-    if (esEste && decision) {
+    if (esEste && (decision || mover)) {
       const D2 = r.tienda;
       cambio.decidido = D2.decidido;
       cambio.origen = D2.origen;
@@ -286,7 +372,7 @@ async function propagarTienda(
       cambio.decidido_por_nombre = D2.decidido === null ? null : actor.nombre;
     }
     const act = await actualizarTiendaProyeccion(d, t.id, cambio);
-    if (act.error) return fallaDb(act.error, "proyección: guardar la tienda");
+    if (act.error) return fallaGuardado(act.error, "proyección: guardar la tienda");
   }
 
   // B2: la base del año siguiente de cada GML-AM de la tienda que pasa a `M(Y+1)`.
@@ -295,7 +381,7 @@ async function propagarTienda(
     const claves = [...new Set(filasFinales.filter((f) => registroDe(f, Y)?.bloque === "nuevas").map((f) => claveBaseDe(f.clave)))];
     const gmlIds = [...new Set(claves.map((c) => c.split("|")[1]))];
     const grupo = await leerFilasConAnios(d, p.id, { columnas: "completas", gmlIds });
-    if (grupo.error) return fallaDb(grupo.error, "proyección: leer las filas base");
+    if (grupo.error) return fallaGuardado(grupo.error, "proyección: leer las filas base");
     const todas = grupo.data.map((f) => aFilaModelo(f, k, Y));
     const sustituidas = new Map(filasFinales.map((f) => [f.clave, f]));
     const conCambios = todas.map((f) => sustituidas.get(f.clave) ?? f);
@@ -305,16 +391,22 @@ async function propagarTienda(
     const nuevasBases = bases.map((b) => recalcularBaseSiguiente(b, porClave.get(b.clave) ?? [], ctx));
     const idsBase = idsDe(grupo.data);
     const wb = await guardarRegistros(d, nuevasBases, idsBase, [Y + 1], ahora, actor);
-    if (wb.error) return fallaDb(wb.error, "proyección: guardar la base del año siguiente");
+    if (wb.error) return fallaGuardado(wb.error, "proyección: guardar la base del año siguiente");
     recalculadas = nuevasBases.length;
   }
 
   const tiendasActual = await leerTiendasProyeccion(d, p.id);
-  if (tiendasActual.error) return fallaDb(tiendasActual.error, "proyección: releer tiendas");
+  if (tiendasActual.error) return fallaGuardado(tiendasActual.error, "proyección: releer tiendas");
   const rowFinal = tiendasActual.data.find((t) => t.tienda_id === tiendaId && t.anio === anio);
   if (!rowFinal) return fallaMensaje("La tienda no está en esa proyección.", 404);
   // Las filas de la tienda no viajan en la respuesta (pesan mucho): se piden con `GET …/tiendas/[tiendaId]/filas?anio=`.
-  return listo({ tienda: aTiendaApi(rowFinal, [], catalogo, parametros, p), filas_base_recalculadas: recalculadas });
+  // Suma de lo vigente de las filas de la tienda en ese año y cuántas están fijadas (la tarjeta y la respuesta de una fila la usan).
+  const regsAnio = filasFinales.map((f) => registroDe(f, anio)).filter((x): x is RegistroModelo => x !== undefined);
+  const resumenFilas = {
+    suma_filas: regsAnio.length === 0 ? null : regsAnio.reduce((s, x) => s + (x.vigente ?? 0), 0),
+    filas_fijadas: regsAnio.filter((x) => x.origen === "manual" && x.decidido !== null).length,
+  };
+  return listo({ tienda: aTiendaApi(rowFinal, [], catalogo, parametros, p, resumenFilas), filas_base_recalculadas: recalculadas });
 }
 
 // ─── PUT /tiendas/[tiendaId]/anios/[anio] ───
@@ -362,8 +454,6 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
   if (filas.error) return fallaDb(filas.error, "proyección: leer las filas de la tienda");
   const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, filas.data.map((f) => aFilaModelo(f, k, Y)));
 
-  const editable = await sigueEditable(d, id);
-  if (editable.respuesta) return falla(editable.respuesta);
   const resultado = await propagarTienda(d, p, parametros, cat.data.catalogo, tiendasRows.data, ctx, tiendaId, anio, actor, ahora, {
     decidido,
     origen: soloRampa ? (fila.origen === "propuesta" ? "propuesta" : "manual") : cuerpo.origen,

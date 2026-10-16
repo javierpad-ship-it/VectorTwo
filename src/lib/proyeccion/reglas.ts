@@ -1,4 +1,4 @@
-import { CALCULO_CADUCA_MIN, UMBRAL_COLA_LARGA, type EstadoProyeccion } from "./tipos-api";
+import { CALCULO_CADUCA_MIN, MAX_TOTAL, UMBRAL_COLA_LARGA, type EstadoProyeccion } from "./tipos-api";
 
 /**
  * Reglas de estado de la proyección (ficha 07, reglas 36 a 39). Puras: el handler las llama y no las reimplementa.
@@ -66,6 +66,24 @@ export function motivoRechazoDecision(args: {
   }
   if (args.anio === args.anioEnCurso && args.decidido < args.vendido) {
     return { status: 409, codigo: "menor_que_vendido", mensaje: `El total de ${args.anio} no puede ser menor que lo ya vendido (${args.vendido.toLocaleString("es-PE")}).` };
+  }
+  return null;
+}
+
+/**
+ * `0.10.7` (07b). Rechazos del total de la tienda cuando una fila suya movió el total (`D' = D + Δ`): en el año en curso no puede quedar
+ * menor que lo ya vendido por la tienda y ningún total pasa de `MAX_TOTAL`.
+ */
+export function motivoRechazoTotalTienda(args: { anio: number; anioEnCurso: number; nuevoTotal: number; vendidoTienda: number }): RechazoRegla | null {
+  if (args.anio === args.anioEnCurso && args.nuevoTotal < args.vendidoTienda) {
+    return {
+      status: 409,
+      codigo: "menor_que_vendido",
+      mensaje: `El total de la tienda en ${args.anio} no puede quedar menor que lo ya vendido (${args.vendidoTienda.toLocaleString("es-PE")}).`,
+    };
+  }
+  if (args.nuevoTotal > MAX_TOTAL) {
+    return { status: 409, codigo: "total_excesivo", mensaje: "El total de la tienda quedaría demasiado grande: revisa la cifra de la fila." };
   }
   return null;
 }

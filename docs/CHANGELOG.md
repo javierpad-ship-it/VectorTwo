@@ -2,6 +2,18 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.7 · M7 — 2026-10-16
+
+Ficha `docs/modulos/07b-apertura-en-la-linea.md`. Sin migración.
+
+- **Apertura editable desde el detalle de la línea:** bajo las filas base, una sección por tienda nueva y año con una fila por agrupación de marca (PREMIUM → ULTRA LOW), con el mismo campo + ✓. **Solo se mueve lo modificado** (decisión de Javier): si la tienda ya tiene total decidido, ese total pasa a `D + Δ`, las demás filas no se tocan y se guarda como decisión del planner con quién y cuándo; sin total decidido, solo se fija la fila. La pantalla avisa «Cambia solo esta fila; el total de la tienda pasa a X» y, al guardar, el total resultante. Con la proyección cerrada o bloqueada los campos quedan deshabilitados.
+- **Gráfico «Marcas de más peso por agrupación»:** una barra al 100 % por agrupación (y por equivalencia en nodos GMLE) con las 3 marcas de más peso y «Otras» con su % real (últimos 12 meses de las mismas tiendas, sin normalizar por el Niño), y debajo el reparto de la apertura por marca (calculado en pantalla, enteros que suman la cifra de la fila).
+- **Tarjeta de Tiendas nuevas:** suma de las filas, cuántas están fijadas a mano y botón «Usar la suma de filas».
+- **API:** `GET /lineas` añade `filas_tienda` y `marcas` y amplía `tiendas_linea`; `PUT …/filas/[filaId]/anios/[anio]` responde `RespuestaDecidirFilaApi`; `GET /tiendas` añade `suma_filas` y `filas_fijadas`. Todos solo para admin y planner.
+- **Tres defectos corregidos en las filas de tienda nueva:** (D1) aceptar la propuesta con ✓ se perdía al reescalar o recalcular; (D2) fijar una fila del año en curso no rehacía el año siguiente si la tienda no tenía total decidido; (D3) las cifras fijadas ya no pueden pasar el total de la tienda sin que nadie lo decida (`D' = max(D + Δ, Σ fijadas)`).
+- **Tras QA y seguridad:** (a) al editar una fila del año en curso, si la tienda ya tiene total decidido en el año siguiente, ese total se vuelve a aplicar (Σ filas del año siguiente = su total; QA lo encontró como regresión parcial de D2; también se arregló el caso simétrico al cambiar la rampa); (b) dos ediciones a la vez sobre la misma tienda ya no se pisan el total: la segunda recibe `409 conflicto` («La tienda cambió mientras editabas; recarga y vuelve a intentar.»), con reversión del total si falla el guardado de la fila; (c) la comprobación «sigue editable» va pegada a la escritura; (d) las filas e años inactivos no cuentan como fijados; (e) si falla el guardado a medias responde `500 guardado_parcial` pidiendo recargar; (f) una marca sin identificador en `por_marca` se descarta en vez de dar error.
+- **Conocido, sin tocar:** «Volver a la propuesta» en una fila de tienda no mueve el total (la fila vuelve a escalarse con él). El CSV de la línea sigue exportando solo las filas base. Hay dos copias de `repartoPorMarca` y `totalLinea` (en `vista.ts` y en `apertura-linea.ts`; sin diferencias en un fuzz de 200 000 casos). No se midió el costo de `/lineas` ni de `GET /tiendas` con el volumen real; no hubo prueba manual en navegador (sin pila local).
+
 ## 0.10.6 · M7 — 2026-10-16
 
 - **El gráfico «Unidades por año» de la línea muestra las tiendas nuevas:** un segmento aparte (color de alerta, leyenda «Tiendas nuevas (aperturas)») con la cifra vigente de las aperturas del año siguiente y, en el año en curso, de las nuevas del año anterior. Antes solo contaban las mismas tiendas, así que la apertura de 2027 no se veía. La etiqueta de la barra queda «52,724 + 484» (mismas + nuevas) y el total de la barra las incluye. Sin cambios de cálculo.

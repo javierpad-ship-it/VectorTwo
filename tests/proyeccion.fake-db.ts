@@ -48,9 +48,11 @@ export type EstadoFalso = {
   errorVenta: { code: string; message: string } | null;
   /** Gancho de escritura: si devuelve un error, esa operación falla sin tocar nada (para probar reversiones). */
   falloDeEscritura: ((tabla: string, modo: "insert" | "update" | "delete" | "upsert", carga: Fila | Fila[]) => ErrorFalso | null) | null;
+  /** Observador: se avisa de cada operación que se arma (`select`, `insert`, `update`, `upsert`, `delete`) para comprobar el orden de lecturas y escrituras. */
+  alOperar: ((tabla: string, operacion: "select" | "insert" | "update" | "upsert" | "delete") => void) | null;
 };
 
-export const estado: EstadoFalso = { tablas: {}, siguienteId: 1, venta: () => ({}), llamadasVenta: 0, errorVenta: null, falloDeEscritura: null };
+export const estado: EstadoFalso = { tablas: {}, siguienteId: 1, venta: () => ({}), llamadasVenta: 0, errorVenta: null, falloDeEscritura: null, alOperar: null };
 
 export function reiniciar() {
   estado.tablas = {};
@@ -58,6 +60,7 @@ export function reiniciar() {
   estado.llamadasVenta = 0;
   estado.errorVenta = null;
   estado.falloDeEscritura = null;
+  estado.alOperar = null;
 }
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -99,27 +102,32 @@ class Consulta implements PromiseLike<Resultado> {
   constructor(private readonly tabla: string) {}
 
   select(columnas = "*") {
+    if (this.modo === "select") estado.alOperar?.(this.tabla, "select");
     this.pidioSelect = true;
     this.seleccion = columnas;
     return this;
   }
   insert(f: Fila | Fila[]) {
+    estado.alOperar?.(this.tabla, "insert");
     this.modo = "insert";
     this.carga = f;
     return this;
   }
   update(f: Fila) {
+    estado.alOperar?.(this.tabla, "update");
     this.modo = "update";
     this.carga = f;
     return this;
   }
   upsert(f: Fila | Fila[], opciones?: { onConflict?: string }) {
+    estado.alOperar?.(this.tabla, "upsert");
     this.modo = "upsert";
     this.carga = f;
     this.onConflict = opciones?.onConflict ? opciones.onConflict.split(",").map((c) => c.trim()) : null;
     return this;
   }
   delete() {
+    estado.alOperar?.(this.tabla, "delete");
     this.modo = "delete";
     return this;
   }

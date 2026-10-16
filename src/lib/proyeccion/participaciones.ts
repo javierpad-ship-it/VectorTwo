@@ -52,7 +52,10 @@ export function leerParticipaciones(json: unknown): Participaciones | null {
   return {
     periodo_referencia: o.periodo_referencia && typeof o.periodo_referencia === "object" ? o.periodo_referencia : null,
     por_clave_flujo: o.por_clave_flujo,
-    por_marca: Array.isArray(o.por_marca) ? o.por_marca : null,
+    // Un elemento sin `marca_id` (dato guardado a medias) se descarta en vez de romper la lectura de toda la proyección.
+    por_marca: Array.isArray(o.por_marca)
+      ? o.por_marca.filter((m): m is NonNullable<Participaciones["por_marca"]>[number] => m !== null && typeof m === "object" && typeof m.marca_id === "string" && m.marca_id !== "" && typeof m.participacion === "number" && Number.isFinite(m.participacion))
+      : null,
     por_talla: o.por_talla,
   };
 }

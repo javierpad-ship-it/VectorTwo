@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
 import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
-import { leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida } from "./vista";
+import { filaFijada, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida } from "./vista";
 
 /** Lo que se envía a `PUT …/filas/[filaId]/anios/[anio]` (la `decisionSchema` de la ficha). */
 export type DecisionFila = {
@@ -34,6 +34,8 @@ export function CeldaDecision({
   ocupado,
   onDecidir,
   etiqueta,
+  filaDeTienda,
+  notaCambio,
 }: {
   registro: AnioFilaApi | undefined;
   anio: number;
@@ -42,15 +44,26 @@ export function CeldaDecision({
   ocupado: boolean;
   onDecidir: (d: DecisionFila) => Promise<boolean>;
   etiqueta: string;
+  /**
+   * `0.10.7`: la celda es de una fila de apertura. Su cifra está «decidida» solo si se fijó a mano (`filaFijada`); la escalada con el
+   * total de la tienda se ve en gris y se puede fijar escribiendo o con ✓ (que fija la propuesta).
+   */
+  filaDeTienda?: boolean;
+  /** Nota que se muestra junto al campo según lo escrito (`null` = ninguna); para la fila de apertura: «el total de la tienda pasa a X». */
+  notaCambio?: (nueva: number | null) => string | null;
 }) {
   const [texto, setTexto] = useState(registro?.decidido === null || registro?.decidido === undefined ? "" : String(registro.decidido));
   const [motivo, setMotivo] = useState<string | null>(null);
 
   if (!registro) return <span className="text-tinta-suave">—</span>;
   const minimo = minimoDecision(anio, anioEnCurso, registro.vendido);
-  const decidida = registro.decidido !== null;
+  const escalada = filaDeTienda === true && registro.origen === "escalada";
+  const decidida = filaDeTienda ? filaFijada(registro) : registro.decidido !== null;
   const cambio = textoPropuestaCambio(registro);
   const deshabilitada = bloqueada || ocupado;
+  const lectura = leerEntero(texto);
+  const nota = notaCambio && texto.trim() !== "" ? notaCambio(lectura.ok ? lectura.valor : null) : null;
+  const notaAceptar = notaCambio && registro.propuesto !== null ? notaCambio(registro.propuesto) : null;
 
   async function enviar() {
     if (!registro) return;
@@ -66,7 +79,7 @@ export function CeldaDecision({
     }
     const l = leerEntero(texto);
     if (!l.ok) return;
-    if (decidida && registro.decidido === l.valor) {
+    if ((decidida || escalada) && registro.decidido === l.valor) {
       setMotivo(null);
       return;
     }
@@ -84,7 +97,7 @@ export function CeldaDecision({
           placeholder={registro.propuesto === null ? "—" : formatearNumero(registro.propuesto)}
           aria-label={etiqueta}
           aria-invalid={motivo !== null}
-          title={motivo ?? undefined}
+          title={motivo ?? (escalada ? "Escalada desde el total de la tienda" : undefined)}
           onChange={(e) => {
             setTexto(e.target.value);
             setMotivo(null);
@@ -95,7 +108,7 @@ export function CeldaDecision({
               void enviar();
             }
           }}
-          className={`h-8 w-24! text-right font-mono tabular-nums ${motivo ? "border-alerta!" : ""}`}
+          className={`h-8 w-24! text-right font-mono tabular-nums ${motivo ? "border-alerta!" : ""} ${escalada ? "text-tinta-suave" : ""}`}
         />
         {!decidida ? (
           <Button
@@ -103,7 +116,7 @@ export function CeldaDecision({
             tamano="sm"
             className="px-2"
             disabled={deshabilitada || registro.propuesto === null}
-            title={registro.propuesto === null ? "No hay propuesta que aceptar" : "Aceptar la propuesta tal cual"}
+            title={registro.propuesto === null ? "No hay propuesta que aceptar" : `Aceptar la propuesta tal cual${notaAceptar ? `. ${notaAceptar}` : ""}`}
             aria-label={`Aceptar la propuesta: ${etiqueta}`}
             onClick={() => void onDecidir({ origen: "propuesta" })}
           >
@@ -114,7 +127,15 @@ export function CeldaDecision({
             <span className="text-exito" title={`Decidido (${registro.origen === "manual" ? "cifra escrita" : "propuesta aceptada"})`} aria-label="Decidido">
               ✓
             </span>
-            <Button variante="fantasma" tamano="sm" className="px-2" disabled={deshabilitada} title="Volver a la propuesta" aria-label={`Volver a la propuesta: ${etiqueta}`} onClick={() => void onDecidir({ decidido: null, origen: "manual" })}>
+            <Button
+              variante="fantasma"
+              tamano="sm"
+              className="px-2"
+              disabled={deshabilitada}
+              title={filaDeTienda ? "Dejar de fijar la cifra (vuelve a escalarse con el total de la tienda)" : "Volver a la propuesta"}
+              aria-label={`${filaDeTienda ? "Dejar de fijar" : "Volver a la propuesta"}: ${etiqueta}`}
+              onClick={() => void onDecidir({ decidido: null, origen: "manual" })}
+            >
               ↺
             </Button>
           </>
@@ -131,6 +152,7 @@ export function CeldaDecision({
         )}
       </div>
       {motivo && <span className="max-w-48 text-right text-xs text-alerta">{motivo}</span>}
+      {!motivo && nota && <span className="max-w-56 text-right text-xs text-tinta-suave">{nota}</span>}
     </div>
   );
 }

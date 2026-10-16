@@ -354,9 +354,12 @@ export function aplicarDecision(
   if (!registro) return fila;
   const decidido =
     decision.decidido === null ? null : decision.origen === "propuesta" ? registro.propuesto : Math.max(0, Math.round(decision.decidido));
+  // `0.10.7` (D1): en una fila de tienda, aceptar la propuesta es FIJARLA (`manual` con `decidido = propuesto`). Lo único que sobrevive al
+  // recálculo, al re-escalado y a `aPrevias` en una fila de tienda es `manual`; así la regla de «fijada» no cambia en esos cuatro sitios.
+  const origen: "propuesta" | "manual" = fila.tienda_id !== null && decision.origen === "propuesta" ? "manual" : decision.origen;
   const previa: DecisionPrevia = {
     decidido,
-    origen: decidido === null ? null : decision.origen,
+    origen: decidido === null ? null : origen,
     nota: decidido === null ? null : (decision.nota ?? null),
     propuesta_al_decidir: decidido === null ? null : registro.propuesto,
     crecimiento_pct: decision.crecimiento_pct === undefined ? registro.crecimiento_pct : decision.crecimiento_pct,
@@ -531,6 +534,60 @@ export function recalcularFilasTienda(
   });
 }
 
+/** Total decidido de una tienda en un año (`año → total`), con la firma de quien lo decidió. */
+export type TotalesOtrosAnios = ReadonlyMap<number, { decidido: number; decidido_por_nombre: string | null; decidido_at: string | null }>;
+
+/**
+ * Regla 23. Reparte `decidido` entre las filas de la tienda de un año: las fijadas (`manual`) conservan su cifra y las demás pasan a
+ * `escalada`. Devuelve las filas completas (solo cambia ese año) y los avisos del reparto.
+ */
+function escalarAnioTienda(
+  filas: readonly FilaModelo[],
+  anio: number,
+  decidido: number,
+  firma: { decidido_por_nombre: string | null; decidido_at: string | null },
+  ctx: ContextoModelo
+): { filas: FilaModelo[]; avisos: AvisoFila[] } {
+  const conRegistro = filas.filter((f) => registroDe(f, anio));
+  const escalables: FilaEscalable[] = conRegistro.map((f) => {
+    const r = registroDe(f, anio) as RegistroModelo;
+    return {
+      id: f.clave,
+      propuesto: r.propuesto,
+      fijada: r.origen === "manual" && r.decidido !== null ? r.decidido : null,
+      peso: f.composicion?.s ?? 0,
+    };
+  });
+  const { asignado, escaladas, avisos } = escalarTienda(escalables, decidido);
+  const nuevas = filas.map((fila) => {
+    const r = registroDe(fila, anio);
+    if (!r || !asignado.has(fila.clave)) return fila;
+    const valor = asignado.get(fila.clave) as number;
+    const esEscalada = escaladas.has(fila.clave);
+    const previa: DecisionPrevia = {
+      decidido: valor,
+      origen: esEscalada ? "escalada" : "manual",
+      nota: r.nota,
+      propuesta_al_decidir: esEscalada ? r.propuesto : r.propuesta_al_decidir,
+      crecimiento_pct: null,
+      decidido_por_nombre: firma.decidido_por_nombre ?? r.decidido_por_nombre,
+      decidido_at: firma.decidido_at ?? r.decidido_at,
+      meses: null,
+      curva_origen_usada: fila.curva_origen,
+    };
+    const nuevo = armarRegistro({ ...r, avisos: r.avisos.filter((a) => a !== "curva_cambio" && a !== "propuesta_cambio") }, previa, contextoDeReparto(fila, anio, ctx, pesosDeFila(fila, anio, ctx)));
+    return sustituirRegistro(fila, nuevo);
+  });
+  return { filas: nuevas, avisos };
+}
+
+/** Vuelve a aplicar el total decidido de la tienda en `anio` (si lo hay) tras haber rehecho sus propuestas. Sin total, deja las filas como están. */
+function reaplicarTotalOtroAnio(filas: FilaModelo[], anio: number, totales: TotalesOtrosAnios | undefined, ctx: ContextoModelo): FilaModelo[] {
+  const t = totales?.get(anio);
+  if (!t) return filas;
+  return escalarAnioTienda(filas, anio, t.decidido, { decidido_por_nombre: t.decidido_por_nombre, decidido_at: t.decidido_at }, ctx).filas;
+}
+
 export type ResultadoDecisionTienda = {
   filas: FilaModelo[];
   tienda: Pick<TiendaModelo, "vendido" | "propuesto" | "decidido" | "origen" | "propuesta_al_decidir" | "nota" | "avisos" | "rampa">;
@@ -558,6 +615,8 @@ export function aplicarDecisionTienda(args: {
     decidido_at?: string | null;
   };
   ctx: ContextoModelo;
+  /** Total decidido de la tienda en los OTROS años (con quién y cuándo): tras rehacer un año se vuelve a aplicar (`Σ filas = D`). */
+  otrosTotales?: TotalesOtrosAnios;
 }): ResultadoDecisionTienda {
   const { tiendaId, anio, decision, ctx } = args;
   let filas = args.filas.filter((f) => f.tienda_id === tiendaId);
@@ -588,65 +647,101 @@ export function aplicarDecisionTienda(args: {
       return fila;
     });
   } else {
-    const escalables: FilaEscalable[] = conRegistro.map((f) => {
-      const r = registroDe(f, anio) as RegistroModelo;
-      return {
-        id: f.clave,
-        propuesto: r.propuesto,
-        fijada: r.origen === "manual" && r.decidido !== null ? r.decidido : null,
-        peso: f.composicion?.s ?? 0,
-      };
-    });
-    const { asignado, escaladas, avisos } = escalarTienda(escalables, decidido);
-    avisosTienda.push(...avisos);
-    nuevas = filas.map((fila) => {
-      const r = registroDe(fila, anio);
-      if (!r || !asignado.has(fila.clave)) return fila;
-      const valor = asignado.get(fila.clave) as number;
-      const esEscalada = escaladas.has(fila.clave);
-      const previa: DecisionPrevia = {
-        decidido: valor,
-        origen: esEscalada ? "escalada" : "manual",
-        nota: r.nota,
-        propuesta_al_decidir: esEscalada ? r.propuesto : r.propuesta_al_decidir,
-        crecimiento_pct: null,
-        decidido_por_nombre: decision.decidido_por_nombre ?? r.decidido_por_nombre,
-        decidido_at: decision.decidido_at ?? r.decidido_at,
-        meses: null,
-        curva_origen_usada: fila.curva_origen,
-      };
-      const nuevo = armarRegistro({ ...r, avisos: r.avisos.filter((a) => a !== "curva_cambio" && a !== "propuesta_cambio") }, previa, contextoDeReparto(fila, anio, ctx, pesosDeFila(fila, anio, ctx)));
-      return sustituirRegistro(fila, nuevo);
-    });
+    const escalado = escalarAnioTienda(filas, anio, decidido, { decidido_por_nombre: decision.decidido_por_nombre ?? null, decidido_at: decision.decidido_at ?? null }, ctx);
+    avisosTienda.push(...escalado.avisos);
+    nuevas = escalado.filas;
   }
+
+  // 1b. Rampa nueva en el año siguiente: el año en curso también se rehízo en el paso 1 y su total decidido se vuelve a aplicar.
+  if (decision.rampa && anio !== ctx.anio) nuevas = reaplicarTotalOtroAnio(nuevas, ctx.anio, args.otrosTotales, ctx);
 
   // 3. La decisión de `Y` de una tienda nueva que pasa a `M(Y+1)` alimenta la base del año siguiente (B2).
-  const clavesBaseAfectadas: string[] = [];
-  if (anio === ctx.anio) {
-    // El año siguiente de la propia tienda (maduro_propio) depende de lo vigente de `Y`.
-    nuevas = recalcularFilasTienda(nuevas, ctx.anio + 1, decision.rampa ?? null, ctx);
-    if (ctx.mismasSiguiente.has(tiendaId)) {
-      for (const fila of nuevas) if (registroDe(fila, ctx.anio)?.bloque === "nuevas") clavesBaseAfectadas.push(claveBaseDe(fila.clave));
-    }
-  }
-
-  const registros = nuevas.map((f) => registroDe(f, anio)).filter((r): r is RegistroModelo => r !== undefined);
-  const vendido = registros.reduce((s, r) => s + r.vendido, 0);
-  const propuesto = registros.some((r) => r.propuesto !== null) ? registros.reduce((s, r) => s + (r.propuesto ?? 0), 0) : null;
+  const sig = propagarAnioSiguienteTienda(nuevas, tiendaId, anio, decision.rampa ?? null, ctx, args.otrosTotales);
+  const totales = totalesDeTienda(sig.filas, anio);
   return {
-    filas: nuevas,
+    filas: sig.filas,
     tienda: {
-      vendido,
-      propuesto,
+      ...totales,
       decidido,
       origen: decidido === null ? null : decision.origen,
-      propuesta_al_decidir: decidido === null ? null : propuesto,
+      propuesta_al_decidir: decidido === null ? null : totales.propuesto,
       nota: decidido === null ? null : (decision.nota ?? null),
       avisos: avisosTienda,
       rampa: rampaDeTienda(ctx.tiendas.get(tiendaId), decision.rampa ?? null, ctx),
     },
-    clavesBaseAfectadas: [...new Set(clavesBaseAfectadas)],
-    filas_base_recalculadas: new Set(clavesBaseAfectadas).size,
+    clavesBaseAfectadas: sig.clavesBaseAfectadas,
+    filas_base_recalculadas: sig.clavesBaseAfectadas.length,
+  };
+}
+
+/**
+ * Tras decidir un año de la tienda: si es el año en curso, el año siguiente de la propia tienda (`maduro_propio`) depende de lo vigente de
+ * `Y` y se rehace; y, si la tienda pasa a `M(Y+1)`, devuelve las claves de las filas base cuya propuesta de `Y+1` hay que rehacer (B2).
+ */
+function propagarAnioSiguienteTienda(
+  filas: FilaModelo[],
+  tiendaId: string,
+  anio: number,
+  rampa: readonly number[] | null,
+  ctx: ContextoModelo,
+  otrosTotales?: TotalesOtrosAnios
+): { filas: FilaModelo[]; clavesBaseAfectadas: string[] } {
+  if (anio !== ctx.anio) return { filas, clavesBaseAfectadas: [] };
+  // Rehacer `Y+1` suelta las filas `escalada` a su propuesta: si la tienda ya tiene total decidido en `Y+1`, se vuelve a aplicar (las `manual` se conservan).
+  const nuevas = reaplicarTotalOtroAnio(recalcularFilasTienda(filas, ctx.anio + 1, rampa, ctx), ctx.anio + 1, otrosTotales, ctx);
+  const claves: string[] = [];
+  if (ctx.mismasSiguiente.has(tiendaId)) {
+    for (const fila of nuevas) if (registroDe(fila, ctx.anio)?.bloque === "nuevas") claves.push(claveBaseDe(fila.clave));
+  }
+  return { filas: nuevas, clavesBaseAfectadas: [...new Set(claves)] };
+}
+
+/** `vendido` y `propuesto` de la tienda en un año: la suma de sus filas. */
+function totalesDeTienda(filas: readonly FilaModelo[], anio: number): { vendido: number; propuesto: number | null } {
+  const registros = filas.map((f) => registroDe(f, anio)).filter((r): r is RegistroModelo => r !== undefined);
+  return {
+    vendido: registros.reduce((s, r) => s + r.vendido, 0),
+    propuesto: registros.some((r) => r.propuesto !== null) ? registros.reduce((s, r) => s + (r.propuesto ?? 0), 0) : null,
+  };
+}
+
+/**
+ * `0.10.7` (07b), decisión de Javier: «solo se mueve lo modificado». Cuando se fija una fila de tienda y la tienda ya tiene total decidido, el
+ * total pasa a `decidido` (`D + Δ`, lo calcula `totalTiendaTrasMover`) como decisión explícita del planner y las DEMÁS filas no se tocan
+ * (a diferencia de `aplicarDecisionTienda`, que re-escala las no fijadas). La fila fijada ya viene guardada en `filas`. En `Y` rehace el año
+ * siguiente de la tienda y devuelve las claves base de B2, igual que `aplicarDecisionTienda`.
+ */
+export function moverTotalTienda(args: {
+  filas: readonly FilaModelo[];
+  tiendaId: string;
+  anio: number;
+  decision: { decidido: number; nota: string | null };
+  ctx: ContextoModelo;
+  otrosTotales?: TotalesOtrosAnios;
+}): ResultadoDecisionTienda {
+  const { tiendaId, anio, decision, ctx } = args;
+  const sig = propagarAnioSiguienteTienda(
+    args.filas.filter((f) => f.tienda_id === tiendaId),
+    tiendaId,
+    anio,
+    null,
+    ctx,
+    args.otrosTotales
+  );
+  const totales = totalesDeTienda(sig.filas, anio);
+  return {
+    filas: sig.filas,
+    tienda: {
+      ...totales,
+      decidido: Math.max(0, Math.round(decision.decidido)),
+      origen: "manual",
+      propuesta_al_decidir: totales.propuesto,
+      nota: decision.nota,
+      avisos: [],
+      rampa: rampaDeTienda(ctx.tiendas.get(tiendaId), null, ctx),
+    },
+    clavesBaseAfectadas: sig.clavesBaseAfectadas,
+    filas_base_recalculadas: sig.clavesBaseAfectadas.length,
   };
 }
 

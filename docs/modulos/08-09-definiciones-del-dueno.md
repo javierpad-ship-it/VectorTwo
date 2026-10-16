@@ -94,3 +94,11 @@ Estado: **en definición con Javier; tres rondas de respuestas (2026-10-15).** E
 3. **Destinos**: una línea a tienda cuenta como ingreso; una `intercompany_directo` también (el stock es completo); la reposición directa regular se modela como ingreso esperado = % directo × demanda. Recomendación: sí.
 4. **Confirmar con exceso**: se confirma con aviso (la oportunidad manda). Recomendación: sí.
 5. **Quién cancela y quién edita una compra ajena**: cancelar, quien registró o un planner; editar un borrador ajeno, solo el planner; recibir, cualquiera. Recomendación: así.
+
+## Respuestas de Javier (2026-10-16, ronda 6: apertura en la línea, ficha 07b; prevalecen sobre la propuesta de la ficha)
+
+49. **Apertura editable desde Por línea.** La apertura de una tienda nueva se ve y se edita en la tabla de la línea, una fila por agrupación de marca, con el mismo campo y ✓ que las filas base. Aceptar con ✓ en una fila de tienda la fija y sobrevive a Recalcular.
+50. **«Solo se mueve lo modificado».** Al fijar una fila de una tienda con total decidido, el total de la tienda se mueve en lo que cambió esa fila y las demás filas no se tocan; nunca queda por debajo de lo fijado a mano. Sin total decidido, solo se fija la fila. No se pregunta nada al planner. Vale también para la tarjeta de Tiendas nuevas.
+51. **Marcas representativas: 3 más «Otras» con su % real.** Las 3 marcas de más unidades por agrupación de marca (últimos 12 meses de las mismas tiendas) y «Otras» con su porcentaje real, que suma 100 %. No se reescalan a las 3. Es solo dato: no se decide ni se guarda por marca.
+52. **Orden de las agrupaciones de marca: PREMIUM → ULTRA LOW**, el de `agrupaciones_marca.orden`, en tablas, secciones y gráficos de la línea.
+53. **El gráfico anual de la línea incluye las tiendas nuevas** (nuevas del año anterior y aperturas del año), de modo que la barra, el «Total línea» y la Matriz coinciden.

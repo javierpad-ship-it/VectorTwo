@@ -10,7 +10,8 @@ type Params = { params: Promise<{ id: string }> };
 /**
  * Parte 1, por línea (`requirePlanner`, solo lectura). `?genero_id&mundo_id&linea_id&q`. Con la línea elegida trae sus filas
  * GML × agrupación de marca con los dos años, el histórico de unidades (cada año con su red de mismas tiendas), las tiendas
- * nuevas y cierres que la tocan y la prueba con el año anterior; sin filtro, solo el índice de líneas y sus estados.
+ * nuevas y cierres que la tocan (con fecha, referente y total de la tienda), las filas de apertura de las tiendas nuevas (`filas_tienda`),
+ * las marcas de más peso por fila base (`marcas`) y la prueba con el año anterior; sin filtro, solo el índice de líneas y sus estados.
  */
 export async function GET(request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();

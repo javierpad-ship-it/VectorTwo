@@ -10,7 +10,10 @@ type Params = { params: Promise<{ id: string; filaId: string; anio: string }> };
 /**
  * Decide el total de un año de una fila (`requirePlanner`). `decidido: null` vuelve a la propuesta; `origen: "propuesta"` copia
  * la propuesta; `manual` escribe la cifra. En una fila base del año en curso recalcula en el acto la propuesta del año siguiente.
- * `409 cerrada` / `calculo_en_curso` / `menor_que_vendido` / `fila_inactiva` / `sin_propuesta`.
+ * `409 cerrada` / `archivada` / `calculo_en_curso` / `menor_que_vendido` / `fila_inactiva` / `sin_propuesta`.
+ *
+ * `0.10.7` (07b), fila de tienda: aceptar la propuesta la fija (`manual`); con el total de la tienda ya decidido, ese total pasa a `D + Δ`
+ * (solo se mueve lo modificado) y la respuesta trae `tienda: { anio, decidido, suma_filas }`. Sin total decidido solo se fija la fila.
  */
 export async function PUT(request: NextRequest, { params }: Params) {
   const { perfil, response } = await requirePlanner();

@@ -9,12 +9,13 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input } from "@/components/ui/form";
 import { formatearNumero, plural } from "@/lib/formato";
-import type { FilaApi, IndiceLineaApi, ProyeccionApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
+import type { FilaApi, FilaTiendaLineaApi, IndiceLineaApi, ProyeccionApi, RespuestaDecidirFilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
 import { AlertaError, BadgeEstadoLinea, BotonEnlace, Cargando } from "./comunes";
 import { DetalleFila } from "./detalle-fila";
 import { SelectoresLinea } from "./filtros-vista";
 import { GraficoBarras } from "./grafico-barras";
+import { GraficoMarcas } from "./grafico-marcas";
 import { TablaFilas } from "./tabla-filas";
 import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
 import {
@@ -27,8 +28,11 @@ import {
   filtrarIndice,
   lineaElegida,
   mesAaaaMm,
+  nombresDeTiendas,
   resumenTiendasLinea,
+  seccionesApertura,
   textoPruebaAnterior,
+  textoTotalTiendaTras,
   tiendasSinDecidirQueAlimentan,
   vecinas,
   type FiltroVista,
@@ -50,6 +54,7 @@ export function LineaTab({
   onFiltro,
   onFila,
   onIrATiendas,
+  onIrATienda,
   onCambio,
   onRecalcular,
 }: {
@@ -62,6 +67,8 @@ export function LineaTab({
   onFiltro: (cambios: Partial<FiltroVista>) => void;
   onFila: (id: string | null) => void;
   onIrATiendas: () => void;
+  /** Lleva a la tarjeta de una tienda en Tiendas nuevas y cierres. */
+  onIrATienda?: (tiendaId: string) => void;
   onCambio: () => Promise<void>;
   onRecalcular: () => void;
 }) {
@@ -85,6 +92,8 @@ export function LineaTab({
   const baseFilas = datos ? datos.filas.filter((f) => f.tienda_id === null && f.activo) : [];
   const conCurvaNueva = filasConCurvaNueva(baseFilas);
   const gmlId = baseFilas[0]?.gml_id ?? null;
+  const nombresTiendas = useMemo(() => nombresDeTiendas(proyeccion.bloques), [proyeccion.bloques]);
+  const secciones = useMemo(() => (datos ? seccionesApertura(datos, [y, y + 1], nombresTiendas) : []), [datos, y, nombresTiendas]);
 
   useEffect(() => {
     if (filaId) refDetalle.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -96,9 +105,11 @@ export function LineaTab({
 
   async function decidir(fila: FilaApi, anio: number, cuerpo: DecisionFila): Promise<boolean> {
     setAviso(null);
-    const r = await accion.ejecutar(() => api.put(`${ruta}/filas/${fila.id}/anios/${anio}`, cuerpo));
+    const r = await accion.ejecutar(() => api.put<RespuestaDecidirFilaApi>(`${ruta}/filas/${fila.id}/anios/${anio}`, cuerpo));
     if (!r.ok) return false;
     await recargarTodo();
+    // Una fila de apertura mueve el total de su tienda (D + Δ): se dice el total ya actualizado.
+    if (fila.tienda_id !== null && r.valor.tienda) setAviso(textoTotalTiendaTras((fila as Partial<FilaTiendaLineaApi>).tienda_codigo ?? "La tienda", r.valor.tienda));
     return true;
   }
 
@@ -229,6 +240,8 @@ export function LineaTab({
                   <TablaFilas
                     filas={datos.filas}
                     lineas={datos}
+                    secciones={secciones}
+                    onVerTienda={onIrATienda}
                     anioEnCurso={y}
                     crecimientoDefecto={proyeccion.parametros.crecimiento_pct_defecto}
                     bloqueada={bloqueada}
@@ -257,6 +270,13 @@ export function LineaTab({
                   <p className="mt-2 text-xs text-tinta-suave">
                     {ETIQUETA_ESTADO_LINEA[elegida.estado]} · {formatearNumero(baseFilas.length)} filas con venta en los últimos 24 meses.
                   </p>
+                </Card>
+
+                <Card
+                  titulo="Marcas de más peso por agrupación"
+                  descripcion="Las 3 marcas que más unidades venden en cada agrupación de la línea y el resto. Es un dato para ver, no una decisión: el volumen se decide por agrupación de marca."
+                >
+                  <GraficoMarcas base={baseFilas} marcas={datos.marcas} secciones={secciones} anios={[y, y + 1]} />
                 </Card>
               </>
             )}
