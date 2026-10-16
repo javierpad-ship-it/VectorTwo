@@ -4,7 +4,7 @@ import { cargarCatalogo } from "./contexto";
 import { leerFilaCompleta, leerFilasConAnios, leerTiendasProyeccion } from "./consultas";
 import { filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
 import { armarMensual } from "./mensual";
-import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, type Catalogo } from "./persistencia";
+import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, ordenMarcaDe, type Catalogo } from "./persistencia";
 import { aTiendaApi, falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
 import type { ProyeccionDb } from "./consultas";
 import type { FiltroMatrizApi, HistoricoFila, FilaDetalleApi, RespuestaLineasApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
@@ -102,7 +102,16 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
   const tiendasRows = await leerTiendasProyeccion(d, id);
   if (tiendasRows.error) return fallaDb(tiendasRows.error, "proyección: leer tiendas");
 
-  const base_ = completas.data.filter((x) => x.tienda_id === null);
+  // Cada GML (y equivalencia) conserva su lugar; dentro de cada uno, las agrupaciones de marca en el orden del catálogo (PREMIUM → ULTRA LOW).
+  const sinTienda = completas.data.filter((x) => x.tienda_id === null);
+  const lugarGml = new Map<string, number>();
+  for (const x of sinTienda) if (!lugarGml.has(x.gml_id)) lugarGml.set(x.gml_id, lugarGml.size);
+  const base_ = [...sinTienda].sort(
+    (x, y) =>
+      (lugarGml.get(x.gml_id) ?? 0) - (lugarGml.get(y.gml_id) ?? 0) ||
+      (x.equivalencia_id ?? "").localeCompare(y.equivalencia_id ?? "") ||
+      ordenMarcaDe(x.agrupacion_marca_id, b.catalogo) - ordenMarcaDe(y.agrupacion_marca_id, b.catalogo)
+  );
   const filasApi = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y)).filter((x): x is NonNullable<typeof x> => x !== null);
   const modelos = base_.map((x) => aFilaModelo(x, b.k, Y));
 

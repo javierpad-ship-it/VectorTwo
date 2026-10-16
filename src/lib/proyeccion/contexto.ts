@@ -90,6 +90,7 @@ export async function cargarCatalogo(db: Db): Promise<Leido<{ catalogo: Catalogo
     catalogo: {
       nodos,
       agrupacionesMarca: new Map(marcas.data.map((a) => [a.id, a.nombre])),
+      ordenAgrupacionesMarca: new Map(marcas.data.map((a) => [a.id, a.orden])),
       agrupacionesEstacionalidad: new Map(estacionalidad.data.map((a) => [a.id, { nombre: a.nombre, temporada: a.temporada }])),
     },
     equivalencias: equivalencias.data,

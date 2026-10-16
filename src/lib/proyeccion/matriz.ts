@@ -44,7 +44,19 @@ export type FilaPlana = Pick<
   linea_id: string;
   anios: AnioPlano[];
   participaciones?: Participaciones | null;
+  /** `orden` de la agrupación de marca en el catálogo; sin él se ordena por nombre. */
+  agrupacion_marca_orden?: number;
 };
+
+/** PREMIUM → ULTRA LOW según el `orden` del catálogo; a igual orden (o sin él), por nombre. */
+export function compararAgrupacionMarca(
+  a: Pick<FilaPlana, "agrupacion_marca" | "agrupacion_marca_orden">,
+  b: Pick<FilaPlana, "agrupacion_marca" | "agrupacion_marca_orden">
+): number {
+  const oa = a.agrupacion_marca_orden ?? Number.MAX_SAFE_INTEGER;
+  const ob = b.agrupacion_marca_orden ?? Number.MAX_SAFE_INTEGER;
+  return oa === ob ? a.agrupacion_marca.localeCompare(b.agrupacion_marca, "es") : oa < ob ? -1 : 1;
+}
 
 export type FiltroLineas = Omit<FiltroMatrizApi, "por">;
 
@@ -300,7 +312,7 @@ export function armarMatriz(
       const porAm = agruparPor(delGenero, (f) => f.agrupacion_marca_id);
       const hijos: Linea[] = [];
       const nodosAm: NodoMatrizApi[] = [];
-      for (const [, delAm] of [...porAm].sort((a, b) => comparar(a[1][0].agrupacion_marca, b[1][0].agrupacion_marca))) {
+      for (const [, delAm] of [...porAm].sort((a, b) => compararAgrupacionMarca(a[1][0], b[1][0]))) {
         const l = resumirLinea(delAm, anio, umbral);
         l.agrupacion_marca = delAm[0].agrupacion_marca;
         l.ids = { genero_id: delAm[0].genero_id, agrupacion_marca_id: delAm[0].agrupacion_marca_id };

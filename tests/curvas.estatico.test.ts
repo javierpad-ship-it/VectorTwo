@@ -248,8 +248,8 @@ describe("M6b pantallas (frontend): nada de lo retirado, y los contratos de la v
     expect(fuente(`${DIR}page.tsx`)).toMatch(/<Suspense[\s\S]*<CurvasPanel/);
   });
 
-  it("solo hay una versión vigente (0.10.4 · M6)", () => {
-    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.4 · M6"');
+  it("solo hay una versión vigente (0.10.5 · M7)", () => {
+    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.5 · M7"');
   });
 });
 

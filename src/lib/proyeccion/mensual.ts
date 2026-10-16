@@ -1,4 +1,4 @@
-import { filasVisibles, type AnioPlano, type FilaPlana } from "./matriz";
+import { compararAgrupacionMarca, filasVisibles, type AnioPlano, type FilaPlana } from "./matriz";
 import type {
   AvisoFila,
   Bloque,
@@ -96,7 +96,7 @@ export function armarMensual(
       comparar(x.fila.genero, y.fila.genero) ||
       comparar(x.fila.mundo, y.fila.mundo) ||
       comparar(x.fila.linea, y.fila.linea) ||
-      (porAgrupacion ? comparar(x.fila.agrupacion_marca, y.fila.agrupacion_marca) : 0)
+      (porAgrupacion ? compararAgrupacionMarca(x.fila, y.fila) : 0)
   )) {
     if (acum.size === 0) continue;
     resultado.push({
@@ -149,7 +149,7 @@ export function armarFilasCerradas(filas: readonly FilaPlana[], anios: readonly 
       comparar(a.mundo, b.mundo) ||
       comparar(a.linea, b.linea) ||
       comparar(a.equivalencia ?? "", b.equivalencia ?? "") ||
-      comparar(a.agrupacion_marca, b.agrupacion_marca) ||
+      compararAgrupacionMarca(a, b) ||
       comparar(a.tienda_id ?? "", b.tienda_id ?? "")
   );
   for (const f of ordenadas) {

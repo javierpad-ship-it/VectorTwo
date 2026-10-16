@@ -2,6 +2,10 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.5 · M7 — 2026-10-16
+
+- **Orden de las agrupaciones de marca:** en M7 (filas de la línea, matriz por agrupación de marca, mensual y contrato de M8) salen **PREMIUM → RECONOCIDO → VALOR → MID VALUE → ULTRA LOW**, según el `orden` del catálogo (antes salían por `id`, o sea sin criterio, o por nombre). Dato: `agrupaciones_marca.orden` pasó a 10, 20, 30, 40 y 50 en ese orden (config, sin migración); cambiarlo desde Marcas reordena todo. Las agrupaciones sin orden van al final. Sin cambios de cálculo.
+
 ## 0.10.4 · M6 — 2026-10-16
 
 Pantallas de la ficha 06c (`docs/modulos/06c-curvas-composicion-y-curva-usuario.md`): composición de la agrupación, curva del usuario `U` y modelo avanzado `F`. El backend (migración `0022`, `POST …/composicion`, `F` y `T` con backtesting honesto, `U` en el PUT) ya estaba; esto es la vista de trabajo, la lista, las versiones y la pantalla de M7. Sin migración.

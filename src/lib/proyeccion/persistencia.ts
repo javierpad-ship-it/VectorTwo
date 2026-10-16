@@ -299,6 +299,8 @@ export type NombresNodo = { genero_id: string; mundo_id: string; linea_id: strin
 export type Catalogo = {
   nodos: ReadonlyMap<string, NombresNodo>;
   agrupacionesMarca: ReadonlyMap<string, string>;
+  /** `orden` de la agrupación de marca (PREMIUM → ULTRA LOW): ordena las filas por agrupación. */
+  ordenAgrupacionesMarca?: ReadonlyMap<string, number>;
   agrupacionesEstacionalidad: ReadonlyMap<string, { nombre: string; temporada: string }>;
 };
 
@@ -318,6 +320,11 @@ export function aAniosApi(modelo: FilaModelo, anioEnCurso: number): AnioFilaApi[
     ...aAnioApi(r),
     cola_larga: modelo.tienda_id === null && r.anio === anioEnCurso ? (modelo.historico?.cola_larga ?? null) : null,
   }));
+}
+
+/** Posición de la agrupación de marca en el catálogo (las que no están, al final). */
+export function ordenMarcaDe(agrupacionMarcaId: string, c: Pick<Catalogo, "ordenAgrupacionesMarca">): number {
+  return c.ordenAgrupacionesMarca?.get(agrupacionMarcaId) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function agrupacionDeFila(f: Pick<FilaDb, "agrupacion_estacionalidad_id">, c: Catalogo) {
@@ -358,6 +365,7 @@ export function aFilaPlana(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso:
     linea_id: n.linea_id,
     equivalencia: n.equivalencia,
     agrupacion_marca: n.agrupacion_marca,
+    agrupacion_marca_orden: ordenMarcaDe(f.agrupacion_marca_id, c),
     agrupacion_estacionalidad: agrupacionDeFila(f, c),
     avisos: comoAvisos(f.avisos),
     activo: f.activo,

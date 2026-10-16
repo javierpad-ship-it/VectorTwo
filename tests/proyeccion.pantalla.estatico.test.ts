@@ -107,8 +107,8 @@ describe("estructura de la pantalla /planificacion/proyeccion", () => {
     for (const f of archivos) expect(fuente(`${DIR}${f}`), f).not.toMatch(/llega en la 0\.10\.1/);
   });
 
-  it("la versión vigente es 0.10.4 · M6", () => {
-    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.4 · M6"');
+  it("la versión vigente es 0.10.5 · M7", () => {
+    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.5 · M7"');
   });
 });
 

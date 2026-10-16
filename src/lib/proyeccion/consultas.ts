@@ -367,7 +367,7 @@ export async function leerTiendaPorId(db: Db, id: string) {
 // ─── Catálogos mínimos (nombres para la API) ───
 
 export function leerNombresAgrupacionesMarca(db: Db) {
-  return leerTodo<{ id: string; nombre: string }>((d, h) => db.from("agrupaciones_marca").select("id, nombre").order("id").range(d, h));
+  return leerTodo<{ id: string; nombre: string; orden: number }>((d, h) => db.from("agrupaciones_marca").select("id, nombre, orden").order("orden").order("id").range(d, h));
 }
 
 export function leerAgrupacionesEstacionalidadTodas(db: Db) {
