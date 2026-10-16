@@ -28,6 +28,9 @@ export function GraficoBarras({ barras, anioEnCurso }: { barras: readonly BarraA
           <span aria-hidden className="inline-block h-3 w-3 rounded-sm bg-exito" /> Año siguiente (proyección)
         </li>
         <li className="inline-flex items-center gap-1.5">
+          <span aria-hidden className="inline-block h-3 w-3 rounded-sm bg-alerta" /> Tiendas nuevas (aperturas)
+        </li>
+        <li className="inline-flex items-center gap-1.5">
           <span aria-hidden className="inline-block h-3 w-3 rounded-sm bg-alerta/15" /> Año del Niño
         </li>
       </ul>
@@ -64,7 +67,7 @@ export function GraficoBarras({ barras, anioEnCurso }: { barras: readonly BarraA
                   y={s.y}
                   width={s.ancho}
                   height={s.alto}
-                  className={s.tipo === "real" ? "fill-marca-oscura" : s.tipo === "siguiente" ? "fill-exito" : "stroke-marca-oscura"}
+                  className={s.tipo === "real" ? "fill-marca-oscura" : s.tipo === "siguiente" ? "fill-exito" : s.tipo === "nuevas" ? "fill-alerta" : "stroke-marca-oscura"}
                   fill={s.tipo === "resto" ? `url(#${idPatron})` : undefined}
                   strokeWidth={s.tipo === "resto" ? 1 : 0}
                 />

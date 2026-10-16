@@ -285,9 +285,12 @@ describe("gráfico de barras por año", () => {
     const [, , , y, s] = barras();
     expect(y.real).toBe(31980);
     expect(y.resto).toBe(45204 - 31980);
-    expect(y.total).toBe(45204);
+    // Las tiendas nuevas (T10 en 2026, la apertura T12 en 2027) van aparte: no están en M(año).
+    expect(y.nuevas).toBe(4797);
+    expect(y.total).toBe(45204 + 4797);
     expect(s.siguiente).toBe(52724);
-    expect(s.total).toBe(52724);
+    expect(s.nuevas).toBe(484);
+    expect(s.total).toBe(52724 + 484);
   });
 
   it("2023 es año del Niño y la geometría lo marca con una banda", () => {
@@ -301,17 +304,20 @@ describe("gráfico de barras por año", () => {
     const y = g.barras.find((b) => b.anio === 2026);
     expect(y).toBeDefined();
     const altos = y!.segmentos.map((s) => s.alto);
-    expect(y!.segmentos.map((s) => s.tipo)).toEqual(["real", "resto"]);
+    expect(y!.segmentos.map((s) => s.tipo)).toEqual(["real", "resto", "nuevas"]);
     const real = y!.segmentos[0];
     const resto = y!.segmentos[1];
     expect(real.alto / resto.alto).toBeCloseTo(31980 / (45204 - 31980), 5);
     const base = g.area.y + g.area.alto;
     expect(base - (real.y)).toBeCloseTo(real.alto, 5);
     expect(altos.reduce((a, b) => a + b, 0)).toBeCloseTo(base - y!.yTotal, 5);
-    expect(y!.etiquetaTotal).toBe("31,980 + 13,224");
+    expect(y!.etiquetaTotal).toBe("31,980 + 13,224 + 4,797");
+    const sig = g.barras.find((b) => b.anio === 2027)!;
+    expect(sig.segmentos.map((s) => s.tipo)).toEqual(["siguiente", "nuevas"]);
+    expect(sig.etiquetaTotal).toBe("52,724 + 484");
     // El eje llega al máximo con marcas redondas y el cero abajo.
     expect(g.ticksY[0].valor).toBe(0);
-    expect(g.ticksY[g.ticksY.length - 1].valor).toBeGreaterThanOrEqual(52724);
+    expect(g.ticksY[g.ticksY.length - 1].valor).toBeGreaterThanOrEqual(52724 + 484);
   });
 
   it("sin filas (índice sin línea) sale una barra por año con lo que haya, sin lanzar", () => {

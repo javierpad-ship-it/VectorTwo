@@ -574,6 +574,8 @@ export type BarraAnual = {
   resto: number;
   /** Total del año siguiente. */
   siguiente: number;
+  /** Tiendas nuevas del año (aperturas, o las del año anterior en el año en curso) con su cifra vigente en la línea; no están en `M(año)`. */
+  nuevas?: number;
   total: number;
   /** Tiendas de `M(año)`; `null` si no se sabe. */
   tiendas: number | null;
@@ -588,12 +590,13 @@ const vigenteDeRegistro = (a: AnioFilaApi | undefined): number => a?.vigente ?? 
  */
 export function construirBarras(args: {
   anioEnCurso: number;
-  lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio">;
+  lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio"> & Partial<Pick<RespuestaLineasApi, "tiendas_linea">>;
   bloques?: BloquesApi;
 }): BarraAnual[] {
   const y = args.anioEnCurso;
   const { filas, historico_linea: hist, totales_por_anio: tot } = args.lineas;
   const base = filas.filter((f) => f.tienda_id === null && f.activo);
+  const nuevasDe = (anio: number) => (args.lineas.tiendas_linea ?? []).filter((t) => t.anio === anio && t.bloque === "nuevas").reduce((acc, t) => acc + (t.vigente ?? 0), 0);
   const tiendasDe = (anio: number) => hist.find((h) => h.anio === anio)?.tiendas ?? args.bloques?.[anio]?.mismas.length ?? null;
   const barras: BarraAnual[] = [];
 
@@ -604,14 +607,16 @@ export function construirBarras(args: {
   const vendido = base.length > 0 ? base.reduce((s, f) => s + (f.anios.find((a) => a.anio === y)?.vendido ?? 0), 0) : (hist.find((h) => h.anio === y)?.unidades ?? 0);
   const totalY = tot.find((t) => t.anio === y)?.vigente ?? base.reduce((s, f) => s + vigenteDeRegistro(f.anios.find((a) => a.anio === y)), 0);
   const resto = Math.max(0, totalY - vendido);
-  barras.push({ anio: y, tipo: "en_curso", real: vendido, resto, siguiente: 0, total: vendido + resto, tiendas: tiendasDe(y), clase: hist.find((h) => h.anio === y)?.clase ?? null });
+  const nuevasY = nuevasDe(y);
+  barras.push({ anio: y, tipo: "en_curso", real: vendido, resto, siguiente: 0, nuevas: nuevasY, total: vendido + resto + nuevasY, tiendas: tiendasDe(y), clase: hist.find((h) => h.anio === y)?.clase ?? null });
 
   const totalSig = tot.find((t) => t.anio === y + 1)?.vigente ?? base.reduce((s, f) => s + vigenteDeRegistro(f.anios.find((a) => a.anio === y + 1)), 0);
-  barras.push({ anio: y + 1, tipo: "siguiente", real: 0, resto: 0, siguiente: totalSig, total: totalSig, tiendas: tiendasDe(y + 1), clase: null });
+  const nuevasSig = nuevasDe(y + 1);
+  barras.push({ anio: y + 1, tipo: "siguiente", real: 0, resto: 0, siguiente: totalSig, nuevas: nuevasSig, total: totalSig + nuevasSig, tiendas: tiendasDe(y + 1), clase: null });
   return barras;
 }
 
-export type SegmentoBarra = { tipo: "real" | "resto" | "siguiente"; x: number; y: number; ancho: number; alto: number; valor: number };
+export type SegmentoBarra = { tipo: "real" | "resto" | "siguiente" | "nuevas"; x: number; y: number; ancho: number; alto: number; valor: number };
 export type BarraGeom = {
   anio: number;
   tipo: BarraAnual["tipo"];
@@ -656,6 +661,7 @@ export function geometriaBarras(barras: readonly BarraAnual[], dim: { ancho?: nu
       { tipo: "real", valor: b.real },
       { tipo: "resto", valor: b.resto },
       { tipo: "siguiente", valor: b.siguiente },
+      { tipo: "nuevas", valor: b.nuevas ?? 0 },
     ];
     for (const p of partes) {
       if (p.valor <= 0) continue;
@@ -664,8 +670,11 @@ export function geometriaBarras(barras: readonly BarraAnual[], dim: { ancho?: nu
       segmentos.push({ tipo: p.tipo, x, y: yArriba, ancho: anchoBarra, alto: Math.max(0, yAbajo - yArriba), valor: p.valor });
       acumulado += p.valor;
     }
-    const etiquetaTotal = b.tipo === "en_curso" && b.resto > 0 ? `${unidades(b.real)} + ${unidades(b.resto)}` : unidades(b.total);
+    const nuevas = b.nuevas ?? 0;
+    const cuerpo = b.tipo === "en_curso" && b.resto > 0 ? `${unidades(b.real)} + ${unidades(b.resto)}` : unidades(b.total - nuevas);
+    const etiquetaTotal = nuevas > 0 ? `${cuerpo} + ${unidades(nuevas)}` : cuerpo;
     const que = b.tipo === "historico" ? "real" : b.tipo === "en_curso" ? `vendido ${unidades(b.real)} más resto proyectado ${unidades(b.resto)}` : "proyección del año siguiente";
+    const conNuevas = nuevas > 0 ? `, de ellas ${unidades(nuevas)} de tiendas nuevas` : "";
     return {
       anio: b.anio,
       tipo: b.tipo,
@@ -677,7 +686,7 @@ export function geometriaBarras(barras: readonly BarraAnual[], dim: { ancho?: nu
       etiquetaTotal,
       tiendas: b.tiendas,
       clase: b.clase,
-      aria: `${b.anio}: ${unidades(b.total)} unidades (${que})${b.tiendas !== null ? `, ${plural(b.tiendas, "tienda", "tiendas")} en la base` : ""}${b.clase === "atipico" ? ", año del Niño" : ""}`,
+      aria: `${b.anio}: ${unidades(b.total)} unidades (${que})${conNuevas}${b.tiendas !== null ? `, ${plural(b.tiendas, "tienda", "tiendas")} en la base` : ""}${b.clase === "atipico" ? ", año del Niño" : ""}`,
     };
   });
 

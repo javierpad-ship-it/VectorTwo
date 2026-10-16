@@ -2,6 +2,10 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.6 · M7 — 2026-10-16
+
+- **El gráfico «Unidades por año» de la línea muestra las tiendas nuevas:** un segmento aparte (color de alerta, leyenda «Tiendas nuevas (aperturas)») con la cifra vigente de las aperturas del año siguiente y, en el año en curso, de las nuevas del año anterior. Antes solo contaban las mismas tiendas, así que la apertura de 2027 no se veía. La etiqueta de la barra queda «52,724 + 484» (mismas + nuevas) y el total de la barra las incluye. Sin cambios de cálculo.
+
 ## 0.10.5 · M7 — 2026-10-16
 
 - **Orden de las agrupaciones de marca:** en M7 (filas de la línea, matriz por agrupación de marca, mensual y contrato de M8) salen **PREMIUM → RECONOCIDO → VALOR → MID VALUE → ULTRA LOW**, según el `orden` del catálogo (antes salían por `id`, o sea sin criterio, o por nombre). Dato: `agrupaciones_marca.orden` pasó a 10, 20, 30, 40 y 50 en ese orden (config, sin migración); cambiarlo desde Marcas reordena todo. Las agrupaciones sin orden van al final. Sin cambios de cálculo.
