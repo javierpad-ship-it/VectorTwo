@@ -87,6 +87,17 @@ export type EntradaExplicar = {
   totalMaduro?: number | null;
   /** `V'`: lo vendido de `1..k` llevado a nivel normal por el Niño (`avance_propio`). */
   vendidoNormalizado?: number | null;
+  /** `F`: la fracción de un año maduro que la tienda alcanza en su año de apertura (`apertura`, `0.10.1`). */
+  fraccionAnioApertura?: number | null;
+  /** `K = E ÷ F`: el año maduro deducido, en soles (`apertura`, `0.10.1`). */
+  anioMaduroSoles?: number | null;
+  /**
+   * Fila de cola larga PARA REVISIÓN (`avance`, `0.10.1`): la propuesta es la demanda corregida por disponibilidad y la cifra de
+   * avance normal (`referenciaAlternativa`) va al lado.
+   */
+  /** Año siguiente (`crecimiento`) de una fila para revisión sin decidir en `Y`: la base de `Y` es la venta corregida `A_f`. */
+  baseColaLarga?: number | null;
+  colaLarga?: { demandaCorregida: number; disponibilidad: number; tiendaMesesConStock: number; tiendaMeses: number; umbral: number } | null;
 };
 
 function textoResto(restoMeses: readonly number[] | null | undefined, k: number): string {
@@ -120,6 +131,22 @@ export function explicar(e: EntradaExplicar): string {
   const curva = e.curvaTexto ?? "sin curva vigente";
   switch (e.metodo) {
     case "avance": {
+      if (e.colaLarga) {
+        const c = e.colaLarga;
+        const alt = e.referenciaAlternativa === null || e.referenciaAlternativa === undefined ? "—" : u(e.referenciaAlternativa);
+        const poco = e.planAnterior
+          ? ` Con poco avance de la curva (${pct(e.avance ?? 0)}) la proyección cerrada «${e.planAnterior.nombre}» tenía ${u(e.planAnterior.total)}, pero la propuesta es la venta corregida.`
+          : "";
+        const partes = [
+          `${e.anio} → cola larga con quiebres de stock: disponibilidad ${pct(c.disponibilidad)} (${formatearNumero(c.tiendaMesesConStock)} de ${formatearNumero(c.tiendaMeses)} tienda-meses con stock al cierre del mes). ` +
+            `La propuesta es la venta corregida por disponibilidad y estacionalidad: ${u(c.demandaCorregida)} u (≥ ${u(c.umbral)}: para revisión)` +
+            `${e.propuesto !== null && Math.round(e.propuesto) !== Math.round(c.demandaCorregida) ? `, con lo vendido ${rangoMeses(1, e.k)} (${u(e.vendido)}) como mínimo` : ""}` +
+            `; por avance normal (vendido ${rangoMeses(1, e.k)} ${u(e.vendido)} ÷ avance ${pct(e.avance ?? 0)}, ${curva}) saldrían ${alt}${textoResto(e.restoMeses, e.k)}.${poco}`,
+        ];
+        const nino = textoNinoCierre(e.phi, e.k);
+        if (nino) partes.push(nino);
+        return partes.join(" ");
+      }
       const partes = [
         `${e.anio} → vendido ${rangoMeses(1, e.k)} ${u(e.vendido)}${e.tiendas !== undefined ? ` (${formatearNumero(e.tiendas)} ${e.tiendas === 1 ? "tienda" : "tiendas"})` : ""} ÷ avance ${pct(e.avance ?? 0)} (${curva}) = ${e.propuesto === null ? "sin cifra" : u(e.propuesto)}${textoResto(e.restoMeses, e.k)}.`,
       ];
@@ -141,15 +168,28 @@ export function explicar(e: EntradaExplicar): string {
       const nino = e.phi && tramosNino(e.phi, 1, 12).length > 0 ? ` Normalizada por el Niño de ${e.anioEnCurso}: ${u(e.baseTotal ?? 0)} → ${u(e.baseNormalizada ?? 0)}.` : "";
       const objetivo =
         e.phiObjetivo && tramosNino(e.phiObjetivo, 1, 12).length > 0 ? ` ${e.anio} se espera atípico: la curva se pondera por el factor del Niño.` : "";
+      const corregida =
+        e.baseColaLarga !== null && e.baseColaLarga !== undefined
+          ? ` La cifra de ${e.anioEnCurso} de esta fila es la venta corregida por quiebres de stock (${u(e.baseColaLarga)}), no el avance normal.`
+          : "";
       return (
         `${e.anio} → base = vigente ${e.anioEnCurso} de las mismas tiendas ${e.baseVigente === null || e.baseVigente === undefined ? "—" : u(e.baseVigente)}` +
         `${aportes ? ` ${aportes}` : ""} = ${e.baseTotal === null || e.baseTotal === undefined ? "—" : u(e.baseTotal)}.${nino}` +
-        ` × (1 + ${formatearDecimal(e.crecimiento ?? 0, 1)} %) = ${e.propuesto === null ? "sin cifra" : u(e.propuesto)}, repartido con ${curva}.${objetivo}`
+        ` × (1 + ${formatearDecimal(e.crecimiento ?? 0, 1)} %) = ${e.propuesto === null ? "sin cifra" : u(e.propuesto)}, repartido con ${curva}.${objetivo}${corregida}`
       );
     }
     case "apertura": {
       const tienda = e.tienda ? `${e.tienda.codigo} ${e.tienda.nombre}` : "La tienda";
-      const esperada = e.ventaEsperada === null || e.ventaEsperada === undefined ? "sin venta esperada" : `venta esperada S/ ${u(e.ventaEsperada)} al mes (sin IGV, madura)`;
+      const anioApertura = e.apertura ? e.apertura.slice(0, 4) : String(e.anio);
+      const fraccion =
+        e.fraccionAnioApertura !== null && e.fraccionAnioApertura !== undefined
+          ? ` · la tienda alcanza el ${pct(e.fraccionAnioApertura)} de un año maduro` +
+            `${e.anioMaduroSoles !== null && e.anioMaduroSoles !== undefined ? ` → año maduro S/ ${u(e.anioMaduroSoles)}` : ""}`
+          : "";
+      const esperada =
+        e.ventaEsperada === null || e.ventaEsperada === undefined
+          ? "sin venta esperada"
+          : `venta esperada S/ ${u(e.ventaEsperada)} en ${anioApertura}, su año de apertura (sin IGV)${fraccion}`;
       const rampa = e.rampa && e.rampa.some((r) => r !== 1) ? `rampa ${e.rampa.map((r) => formatearDecimal(r, 2)).join(" · ")}` : "sin rampa";
       const abre = e.apertura ? ` abre ${e.apertura}` : "";
       const real = e.k > 0 && e.vendido > 0 ? ` Vendido ${rangoMeses(1, e.k)} ${u(e.vendido)}; menos de tres meses completos: el resto va por venta esperada.` : "";

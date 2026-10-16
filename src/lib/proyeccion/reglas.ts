@@ -93,7 +93,16 @@ export function motivoRechazoArchivarCerrada(args: { estado: EstadoProyeccion; a
   };
 }
 
-export type FilaParaCerrar = { clave: string; propuesto: number | null; decidido: number | null };
+/** `avisos` del registro (`revision_cola_larga` bloquea el cierre aunque la propuesta quede bajo el umbral, p. ej. en `Y+1` con crecimiento negativo). */
+export type FilaParaCerrar = { clave: string; propuesto: number | null; decidido: number | null; avisos?: readonly string[] };
+
+export type FilaSinDecidir = {
+  clave: string;
+  anio: number;
+  propuesto: number;
+  /** `umbral`: propuesta ≥ umbral de cola larga; `revision_cola_larga`: cola larga con quiebres relevantes y demanda corregida sobre el umbral. */
+  motivo: "umbral" | "revision_cola_larga";
+};
 
 export type ResultadoCerrar =
   | { ok: true; cola_larga: number }
@@ -101,14 +110,16 @@ export type ResultadoCerrar =
       ok: false;
       rechazo: RechazoRegla;
       /** Las `MAX_FILAS_SIN_DECIDIR_LISTADAS` de mayor propuesta; el total va en `total_filas_sin_decidir`. */
-      filas_sin_decidir?: { clave: string; anio: number; propuesto: number }[];
+      filas_sin_decidir?: FilaSinDecidir[];
       total_filas_sin_decidir?: number;
+      /** `0.10.1`: cuántas de las sin decidir son para revisión por cola larga. */
+      total_filas_para_revision?: number;
       tiendas_sin_decidir?: { tienda_id: string; anio: number }[];
     };
 
 /**
- * Regla 37. Bloquea si queda sin decidir, en cualquiera de los dos años, una fila base con `propuesto ≥ umbral` o una
- * tienda nueva con venta esperada; una proyección desactualizada se cierra solo con `forzar`. La cola larga se cierra con
+ * Regla 37. Bloquea si queda sin decidir, en cualquiera de los dos años, una fila base con `propuesto ≥ umbral` o con
+ * `revision_cola_larga` (`0.10.1`) o una tienda nueva con venta esperada; una proyección desactualizada se cierra solo con `forzar`. La cola larga se cierra con
  * la propuesta y queda `cola_larga` en `avisos`.
  */
 export function motivoRechazoCerrar(args: {
@@ -129,23 +140,36 @@ export function motivoRechazoCerrar(args: {
   }
   const umbral = args.umbralColaLarga ?? UMBRAL_COLA_LARGA;
 
-  const sinDecidir: { clave: string; anio: number; propuesto: number }[] = [];
+  const sinDecidir: FilaSinDecidir[] = [];
   let colaLarga = 0;
   for (const f of args.filasBase) {
     for (const anio of [args.anioEnCurso, args.anioEnCurso + 1]) {
       const r = f.anios[anio];
       if (!r || r.decidido !== null) continue;
-      if (r.propuesto !== null && r.propuesto >= umbral) sinDecidir.push({ clave: f.clave, anio, propuesto: r.propuesto });
+      const revision = r.avisos?.includes("revision_cola_larga") === true;
+      if (r.propuesto !== null && revision) sinDecidir.push({ clave: f.clave, anio, propuesto: r.propuesto, motivo: "revision_cola_larga" });
+      else if (r.propuesto !== null && r.propuesto >= umbral) sinDecidir.push({ clave: f.clave, anio, propuesto: r.propuesto, motivo: "umbral" });
       else colaLarga += 1;
     }
   }
   if (sinDecidir.length > 0) {
-    const principales = sinDecidir.slice().sort((a, b) => b.propuesto - a.propuesto || a.clave.localeCompare(b.clave) || a.anio - b.anio).slice(0, MAX_FILAS_SIN_DECIDIR_LISTADAS);
+    const orden = (a: FilaSinDecidir, b: FilaSinDecidir) => b.propuesto - a.propuesto || a.clave.localeCompare(b.clave) || a.anio - b.anio;
+    // Las de mayor propuesta de cada motivo (las de revisión tienen propuesta baja y no deben quedar fuera de la lista).
+    const porUmbral = sinDecidir.filter((f) => f.motivo === "umbral").sort(orden);
+    const porRevision = sinDecidir.filter((f) => f.motivo === "revision_cola_larga").sort(orden);
+    const n = sinDecidir.length;
+    const detalle =
+      porRevision.length === 0
+        ? `propuesta de ${umbral} unidades o más`
+        : porUmbral.length === 0
+          ? "cola larga con quiebres de stock, para revisión"
+          : `${porUmbral.length} con propuesta de ${umbral} unidades o más y ${porRevision.length} de cola larga con quiebres de stock, para revisión`;
     return {
       ok: false,
-      rechazo: { status: 409, codigo: "filas_sin_decidir", mensaje: `Faltan ${sinDecidir.length} ${sinDecidir.length === 1 ? "fila" : "filas"} por decidir (propuesta de ${umbral} unidades o más).` },
-      filas_sin_decidir: principales,
-      total_filas_sin_decidir: sinDecidir.length,
+      rechazo: { status: 409, codigo: "filas_sin_decidir", mensaje: `Faltan ${n} ${n === 1 ? "fila" : "filas"} por decidir (${detalle}).` },
+      filas_sin_decidir: [...porUmbral.slice(0, MAX_FILAS_SIN_DECIDIR_LISTADAS), ...porRevision.slice(0, MAX_FILAS_SIN_DECIDIR_LISTADAS)],
+      total_filas_sin_decidir: n,
+      total_filas_para_revision: porRevision.length,
     };
   }
   const tiendasSin = args.tiendas.filter((t) => t.venta_esperada !== null && t.decidido === null).map((t) => ({ tienda_id: t.tienda_id, anio: t.anio }));

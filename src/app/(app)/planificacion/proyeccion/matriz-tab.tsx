@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { hojasMatriz } from "@/lib/proyeccion/excel";
 import type { IndiceLineaApi, NodoMatrizApi, ProyeccionApi, RespuestaMatrizApi } from "@/lib/proyeccion/tipos-api";
-import { AlertaError, BadgeEstadoLinea, Cargando, NUM } from "./comunes";
+import { AlertaError, BadgeEstadoLinea, BotonEnlace, Cargando, NUM } from "./comunes";
 import { ComposicionBloques } from "./composicion-bloques";
 import { descargarLibro } from "./descarga-libro";
 import { FiltrosVista, type OpcionCatalogo } from "./filtros-vista";
@@ -22,6 +22,7 @@ import {
   nodoVisible,
   nombreArchivoProyeccion,
   resumenBloquesAnio,
+  textoParaRevision,
   textoPieMatriz,
   unidades,
   claveGenero,
@@ -154,7 +155,7 @@ export function MatrizTab({
               onIrALinea={onIrALinea}
               onIrATiendas={onIrATiendas}
             />
-            <p className="mt-3 text-sm text-tinta-suave">{textoPieMatriz(datos.resumen, y)}</p>
+            <PieMatriz resumen={datos.resumen} anioEnCurso={y} solo={filtro.solo} onVerRevision={() => onFiltro({ solo: "para_revision" })} />
             <p className="mt-1 text-xs text-tinta-suave">
               Total {y} = mismas tiendas + nuevas del año anterior + aperturas{conCierresY ? " + cierres" : ""}; la venta a la fecha es la parte real de ese total y no se suma. Las celdas de tiendas nuevas llevan a la pestaña Tiendas nuevas y cierres.
             </p>
@@ -296,6 +297,21 @@ export function TablaMatriz({
                 </tbody>
               </table>
             </div>
+    </>
+  );
+}
+
+/** El pie de la matriz: cuántas líneas se ven y, si hay, las filas para revisión (cola larga con quiebres) con un atajo al filtro. */
+export function PieMatriz({ resumen, anioEnCurso, solo, onVerRevision }: { resumen: RespuestaMatrizApi["resumen"]; anioEnCurso: number; solo: string; onVerRevision: () => void }) {
+  return (
+    <>
+      <p className="mt-3 text-sm text-tinta-suave">{textoPieMatriz(resumen, anioEnCurso)}</p>
+      {resumen.filas_para_revision > 0 && (
+        <p className="mt-1 text-sm font-medium text-alerta">
+          {textoParaRevision(resumen.filas_para_revision)} (cola larga con quiebres de stock; hay que decidirlas para cerrar).{" "}
+          {solo !== "para_revision" && <BotonEnlace onClick={onVerRevision}>Ver solo las líneas para revisión</BotonEnlace>}
+        </p>
+      )}
     </>
   );
 }

@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import type { BloquesApi, ProyeccionApi, RespuestaProyeccionApi } from "@/lib/proyeccion/tipos-api";
-import { RAMPA_MADURACION, UMBRAL_COLA_LARGA } from "@/lib/proyeccion/tipos-api";
+import { RAMPA_MADURACION, UMBRAL_COLA_LARGA, UMBRAL_DISPONIBILIDAD } from "@/lib/proyeccion/tipos-api";
 import { AlertaError } from "./comunes";
 import { ComposicionBloques } from "./composicion-bloques";
 import { useAccion } from "./use-proyeccion";
-import { leerEntero, leerPorcentaje, leerRampa, mesAaaaMm, mesesElegibles, nombrePorDefecto, textoPerfilApertura, textoTendencia, textoRampa } from "./vista";
+import { leerEntero, leerPorcentaje, leerRampa, leerUmbralDisponibilidad, mesAaaaMm, mesesElegibles, nombrePorDefecto, textoPerfilApertura, textoTendencia, textoRampa } from "./vista";
 
 const ID_FORM = "form-proyeccion";
 
@@ -70,6 +70,7 @@ export function FormularioProyeccion({
   const [crecimiento, setCrecimiento] = useState(String(editando ? proyeccion.parametros.crecimiento_pct_defecto : 0));
   const [rampa, setRampa] = useState<string[]>(casillasDeRampa(editando ? proyeccion.parametros.rampa_maduracion : RAMPA_MADURACION));
   const [cola, setCola] = useState(String(editando ? proyeccion.parametros.umbral_cola_larga : UMBRAL_COLA_LARGA));
+  const [disponibilidad, setDisponibilidad] = useState(String(editando ? (proyeccion.parametros.umbral_disponibilidad ?? UMBRAL_DISPONIBILIDAD) : UMBRAL_DISPONIBILIDAD));
   const [copiarDe, setCopiarDe] = useState(copiarDeInicial ?? "");
   const [motivo, setMotivo] = useState<string | null>(null);
   const accion = useAccion();
@@ -89,8 +90,10 @@ export function FormularioProyeccion({
     if (!r.ok) return setMotivo(r.motivo);
     const c = leerEntero(cola);
     if (!c.ok) return setMotivo("El umbral de cola larga debe ser un número entero.");
+    const u = leerUmbralDisponibilidad(disponibilidad);
+    if (!u.ok) return setMotivo(u.motivo);
     setMotivo(null);
-    const parametros = { crecimiento_pct_defecto: g.valor, rampa_maduracion: r.valor, umbral_cola_larga: c.valor };
+    const parametros = { crecimiento_pct_defecto: g.valor, rampa_maduracion: r.valor, umbral_cola_larga: c.valor, umbral_disponibilidad: u.valor };
     let cuerpoEdicion: Record<string, unknown> | null = null;
     if (editando) {
       // Al editar solo se manda lo que cambió: un parámetro igual no debe dejar la proyección «pendiente de recalcular».
@@ -98,6 +101,7 @@ export function FormularioProyeccion({
       const cambiados: Record<string, unknown> = {};
       if (parametros.crecimiento_pct_defecto !== p0.crecimiento_pct_defecto) cambiados.crecimiento_pct_defecto = parametros.crecimiento_pct_defecto;
       if (parametros.umbral_cola_larga !== p0.umbral_cola_larga) cambiados.umbral_cola_larga = parametros.umbral_cola_larga;
+      if (parametros.umbral_disponibilidad !== (p0.umbral_disponibilidad ?? UMBRAL_DISPONIBILIDAD)) cambiados.umbral_disponibilidad = parametros.umbral_disponibilidad;
       if (textoRampa(parametros.rampa_maduracion) !== textoRampa(p0.rampa_maduracion)) cambiados.rampa_maduracion = parametros.rampa_maduracion;
       cuerpoEdicion = {
         ...(nombre.trim() !== proyeccion.nombre ? { nombre: nombre.trim() } : {}),
@@ -169,6 +173,13 @@ export function FormularioProyeccion({
             <Input inputMode="numeric" value={cola} disabled={accion.ocupado} onChange={(e) => setCola(e.target.value)} className="font-mono" />
           </Field>
         </div>
+
+        <Field
+          label="Umbral de disponibilidad (0 a 1)"
+          hint={`Una fila de cola larga con disponibilidad menor que este umbral tuvo un quiebre relevante y se corrige por demanda (queda «para revisión» si supera el umbral de cola larga). Por defecto ${UMBRAL_DISPONIBILIDAD}. La disponibilidad es un proxy mensual: tienda-meses con stock al cierre del mes ÷ tienda-meses totales. Una tienda sin stock puede ser un quiebre o una línea que no se surte en esa tienda; por eso el umbral es editable.`}
+        >
+          <Input inputMode="decimal" value={disponibilidad} disabled={accion.ocupado} onChange={(e) => { setDisponibilidad(e.target.value); setMotivo(null); }} className="max-w-40 font-mono" />
+        </Field>
 
         <div className="space-y-2">
           <p className="text-sm font-medium">

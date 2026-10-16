@@ -2,6 +2,16 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.2 · M7 — 2026-10-16
+
+Pantalla de la proyección con los cambios de la ronda 4 del backend (ficha 07, «Cambios 0.10.1»). Sin migración.
+
+- **Cola larga con disponibilidad:** cada fila cuya propuesta de Y queda bajo el umbral muestra su validación (disponibilidad, tienda-meses con stock, ritmo, meses sin stock en ninguna tienda, venta corregida y veredicto). Una fila **para revisión** tiene como PROPUESTA la demanda corregida y el avance normal al lado como referencia; hay que decidirla para cerrar. Se avisa que una línea que solo llevan algunas tiendas sale con disponibilidad baja y demanda corregida inflada.
+- **«Para revisión»:** chip en la Matriz, la cifra «N filas para revisión» en la cabecera, la Matriz y el diálogo de cerrar, que enumera por separado (hasta 50 de cada motivo) las filas sin decidir por umbral y las de revisión, con su demanda corregida y disponibilidad.
+- **Umbral de disponibilidad** (0 a 1, por defecto 0.75) en «Nueva proyección» y en Parámetros, con la ayuda honesta del proxy mensual.
+- **Venta esperada** de las tiendas nuevas: «Venta esperada del año de apertura (S/, sin IGV)» en la tarjeta, el atajo y Tiendas.
+- Avisos nuevos (`revision_cola_larga`, `cola_larga_con_quiebres`, `sin_stock_historico`, `apertura_tardia`); se quita el de canibalización. Motivo «método nuevo» cuando la proyección se calculó con una versión anterior del método.
+
 ## 0.10.1 · M6 — 2026-10-15
 
 Navegación entre agrupaciones en la vista de trabajo de M6 (pedido de Javier tras probar la 0.9.7): botones **← Anterior** y **Siguiente →** junto a "← Agrupaciones", con la posición ("3 de 15") y el nombre de la agrupación vecina; siguen el orden de la lista tal como se veía al pulsar "Trabajar" (con sus filtros; tras recargar o entrar por enlace directo usan la lista completa y el contador dice "lista completa"); se deshabilitan en los extremos, piden confirmación si hay una nota, un "Calcular hasta" elegido o parámetros distintos de los de apertura, y admiten los atajos ← y → cuando el foco no está en un campo. Sin migración. Total: 2 888 pruebas en 155 archivos, lint, `tsc` y build en verde. Pendiente de la ficha `06c`: ver todas las GML del grupo, curva propuesta por el usuario y modelo avanzado F.

@@ -4,7 +4,7 @@ import { leerTodo } from "@/lib/arbol/consultas";
 import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
 import { periodoADb } from "@/lib/ventas/periodo";
 import type { FilaConAnios, TiendaPyDb } from "./persistencia";
-import { TANDA_UPSERT, type VentaProyeccion } from "./tipos";
+import { TANDA_UPSERT, type ColaLargaApi, type VentaProyeccion } from "./tipos";
 
 /**
  * Acceso a datos de M7 (solo servidor). ÚNICO archivo de `src/` que nombra la función `venta_proyeccion` y que lee o
@@ -204,6 +204,20 @@ export async function leerFilaCompleta(db: Db, proyeccionId: string, filaId: str
   return { data: (data as FilaConAnios | null) ?? null, error };
 }
 
+/**
+ * `historico.cola_larga` (la validación de disponibilidad) de unas filas por id, sin traer el `historico` entero. Lo usa `cerrar` para
+ * decir con qué demanda corregida y qué disponibilidad queda cada fila para revisión.
+ */
+export async function leerColaLargaDeFilas(db: Db, proyeccionId: string, ids: readonly string[]): Promise<Resultado<Map<string, ColaLargaApi>>> {
+  const salida = new Map<string, ColaLargaApi>();
+  for (const tanda of enTandas([...ids], TANDA_IN)) {
+    const { data, error } = await db.from("proyeccion_filas").select("id, cola_larga:historico->cola_larga").eq("proyeccion_id", proyeccionId).in("id", tanda);
+    if (error) return { data: salida, error };
+    for (const f of (data ?? []) as unknown as { id: string; cola_larga: ColaLargaApi | null }[]) if (f.cola_larga) salida.set(f.id, f.cola_larga);
+  }
+  return { data: salida, error: null };
+}
+
 /** `gml_id` y nivel guardado de todas las filas (para detectar `nivel_cambiado`). */
 export async function leerNivelesProyectados(db: Db, proyeccionId: string): Promise<Resultado<{ gml_id: string; nivel_proyectado: string }[]>> {
   const r = await leerTodo<{ id: string; gml_id: string; nivel_proyectado: string }>((d, h) =>
@@ -335,6 +349,8 @@ export async function leerVentaTanda(
       por_tienda: v.por_tienda ?? [],
       equivalencias: v.equivalencias ?? [],
       detalle_w12: v.detalle_w12 ?? [],
+      // Una lectura anterior a la migración 0021 no trae `disponibilidad`: llega vacía (toda cola larga queda `sin_dato`).
+      disponibilidad: v.disponibilidad ?? [],
       cargas: v.cargas ?? {},
     },
     error: null,
@@ -380,6 +396,12 @@ export async function leerIdentidadFila(db: Db, proyeccionId: string, filaId: st
     .eq("id", filaId)
     .maybeSingle();
   return { data, error };
+}
+
+/** Reescribe la `composicion` (jsonb) de una fila de tienda: las unidades maduras dependen de la rampa. */
+export async function actualizarComposicionFila(db: Db, id: string, composicion: Json) {
+  const { error } = await db.from("proyeccion_filas").update({ composicion }).eq("id", id);
+  return { error };
 }
 
 /** Cambia la rampa de una tienda de la proyección (un año). */

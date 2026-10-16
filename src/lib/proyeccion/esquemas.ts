@@ -56,6 +56,10 @@ export const parametrosSchema = z.strictObject({
   umbral_avance: z.number("El umbral de avance debe ser un número.").min(0, "El umbral de avance debe estar entre 0 y 1.").max(1, "El umbral de avance debe estar entre 0 y 1."),
   umbral_cobertura: z.number("El umbral de cobertura debe ser un número.").min(0, "El umbral de cobertura no puede ser negativo.").max(5, "El umbral de cobertura no puede superar 5."),
   umbral_cola_larga: z.int("El umbral de cola larga debe ser un número entero.").min(0, "El umbral de cola larga no puede ser negativo.").max(100000, "El umbral de cola larga es demasiado grande."),
+  umbral_disponibilidad: z
+    .number("El umbral de disponibilidad debe ser un número.")
+    .min(0, "El umbral de disponibilidad debe estar entre 0 y 1.")
+    .max(1, "El umbral de disponibilidad debe estar entre 0 y 1."),
   rampa_maduracion: rampa,
 });
 

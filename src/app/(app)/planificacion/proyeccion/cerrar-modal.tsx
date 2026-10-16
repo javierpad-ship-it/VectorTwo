@@ -10,8 +10,27 @@ import { Modal } from "@/components/ui/modal";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { AlertaError } from "./comunes";
 import { rutaProyeccion, useAccion } from "./use-proyeccion";
-import { lineasDeCierre, listaSinDecidir, listaTiendasSinDecidir, MAX_SIN_DECIDIR } from "./vista";
+import { lineasDeCierre, listaSinDecidir, listaTiendasSinDecidir, MAX_SIN_DECIDIR, textoMotivoDesactualizada, type GrupoSinDecidir } from "./vista";
 import { formatearNumero } from "@/lib/formato";
+
+/** Una lista de filas sin decidir (hasta `MAX_SIN_DECIDIR`, con el total y una pista de dónde decidirlas). */
+export function GrupoLista({ titulo, grupo, pista }: { titulo: string; grupo: GrupoSinDecidir; pista: string }) {
+  const resto = grupo.total - grupo.lineas.length;
+  return (
+    <div className="space-y-1">
+      <p className="text-sm font-medium">
+        {grupo.total > MAX_SIN_DECIDIR ? `${titulo}: primeras ${MAX_SIN_DECIDIR} de ${formatearNumero(grupo.total)}` : `${titulo} (${formatearNumero(grupo.total)})`}
+      </p>
+      <ul className="max-h-56 list-disc space-y-0.5 overflow-y-auto rounded-md border border-borde bg-fondo py-2 pl-7 pr-3 text-xs">
+        {grupo.lineas.map((l, i) => (
+          <li key={i}>{l}</li>
+        ))}
+      </ul>
+      {resto > 0 && <p className="text-xs text-tinta-suave">… y {formatearNumero(resto)} más.</p>}
+      <p className="text-xs text-tinta-suave">{pista}</p>
+    </div>
+  );
+}
 
 /**
  * Cerrar la proyección (ficha 07, paso 7). Resume filas decididas y sin decidir por año, cola larga que se cerrará con la
@@ -56,18 +75,19 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
     >
       <div className="space-y-4">
         {accion.error && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} />}
-        {sinDecidir && (
-          <div className="space-y-1">
-            <p className="text-sm font-medium">
-              {sinDecidir.total > MAX_SIN_DECIDIR ? `Primeras ${MAX_SIN_DECIDIR} de ${formatearNumero(sinDecidir.total)} filas por decidir (las de mayor propuesta):` : `Filas por decidir (${formatearNumero(sinDecidir.total)}):`}
-            </p>
-            <ul className="max-h-56 list-disc space-y-0.5 overflow-y-auto rounded-md border border-borde bg-fondo py-2 pl-7 pr-3 text-xs">
-              {sinDecidir.lineas.map((l, i) => (
-                <li key={i}>{l}</li>
-              ))}
-            </ul>
-            {sinDecidir.total > MAX_SIN_DECIDIR && <p className="text-xs text-tinta-suave">… y {formatearNumero(sinDecidir.total - MAX_SIN_DECIDIR)} más. Decídelas en Por línea; la matriz con «Solo sin proyectar» ayuda a encontrarlas.</p>}
-          </div>
+        {sinDecidir && sinDecidir.umbral.total > 0 && (
+          <GrupoLista
+            titulo={`Filas por decidir con propuesta de ${proyeccion.parametros.umbral_cola_larga} unidades o más`}
+            grupo={sinDecidir.umbral}
+            pista="Decídelas en Por línea; la matriz con «Solo sin proyectar» ayuda a encontrarlas."
+          />
+        )}
+        {sinDecidir && sinDecidir.revision.total > 0 && (
+          <GrupoLista
+            titulo="Filas para revisión por cola larga con quiebres de stock"
+            grupo={sinDecidir.revision}
+            pista="Su propuesta es la demanda corregida por disponibilidad; compárala con el avance normal en el detalle de la fila. En la matriz, el chip «Para revisión» las encuentra."
+          />
         )}
         {tiendasSinDecidir && (
           <div className="space-y-1">
@@ -85,12 +105,12 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
           ))}
         </ul>
         <p className="text-sm text-tinta-suave">
-          Se bloquea si queda sin decidir, en cualquiera de los dos años, una fila con propuesta mayor o igual a {proyeccion.parametros.umbral_cola_larga} unidades, o una tienda nueva con venta esperada. Lo demás (la cola larga) se cierra con la propuesta y queda marcado.
+          Se bloquea si queda sin decidir, en cualquiera de los dos años, una fila con propuesta mayor o igual a {proyeccion.parametros.umbral_cola_larga} unidades, una fila para revisión (cola larga con quiebres de stock) o una tienda nueva con venta esperada. Lo demás (la cola larga) se cierra con la propuesta y queda marcado.
           Una proyección cerrada es solo lectura: para seguir, se copia.
         </p>
         {desactualizada && (
           <Alert tono="alerta">
-            <span className="block">La proyección está desactualizada: {proyeccion.desactualizada.map((m) => m.mensaje).join("; ")}. Lo recomendable es recalcular antes de cerrar.</span>
+            <span className="block">La proyección está desactualizada: {proyeccion.desactualizada.map(textoMotivoDesactualizada).join("; ")}. Lo recomendable es recalcular antes de cerrar.</span>
             <label className="mt-2 flex items-center gap-2 text-sm">
               <Checkbox checked={forzar} onChange={setForzar} label="Cerrar de todos modos" />
               Cerrar de todos modos, con los datos con que se calculó

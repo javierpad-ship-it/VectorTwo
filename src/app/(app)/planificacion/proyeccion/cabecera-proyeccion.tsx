@@ -4,7 +4,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { BadgeEstadoProyeccion } from "./comunes";
-import { formatearMomento, resumenCabecera } from "./vista";
+import { formatearMomento, resumenCabecera, textoMotivoDesactualizada } from "./vista";
 
 /**
  * Cabecera de la proyección abierta (ficha 07, pasos 0, 6 y 7): una línea con lo esencial (datos hasta, bloques de
@@ -92,7 +92,7 @@ export function CabeceraProyeccion({
           <span className="block font-medium">La proyección está desactualizada:</span>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {proyeccion.desactualizada.map((m, i) => (
-              <li key={`${m.codigo}-${i}`}>{m.mensaje}</li>
+              <li key={`${m.codigo}-${i}`}>{textoMotivoDesactualizada(m)}</li>
             ))}
           </ul>
           <span className="mt-2 block text-xs">Recalcular rehace propuestas, bloques y curvas y conserva todas tus decisiones; las que cambien de propuesta o de curva quedan marcadas.</span>

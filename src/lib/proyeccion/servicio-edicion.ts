@@ -2,7 +2,9 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TablesInsert } from "@/lib/supabase/database.types";
 import { cargarCatalogo } from "./contexto";
 import {
+  actualizarComposicionFila,
   actualizarTiendaProyeccion,
+  cambiarEstadoProyeccion,
   leerAniosPorIds,
   leerFilasConAnios,
   leerIdentidadFila,
@@ -10,9 +12,10 @@ import {
   upsertAnios,
   type ProyeccionDb,
 } from "./consultas";
-import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, recalcularBaseSiguiente, registroDe, type ContextoModelo } from "./decision";
+import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, fraccionDeTienda, recalcularBaseSiguiente, registroDe, unidadesMadurasDeTienda, type ContextoModelo } from "./decision";
+import { conteosResumen } from "./resumen";
 import { explicar, textoCurva } from "./explicar";
-import { mesesCompletos } from "./tiendas-nuevas";
+import { anioMaduroSoles, mesesCompletos } from "./tiendas-nuevas";
 import { aAnioApi, aFilaModelo, aRegistro, payloadAnioDecision, comoJson, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
 import { motivoRechazoAplicarCurva, motivoRechazoDecision, motivoRechazoEdicion } from "./reglas";
 import {
@@ -27,12 +30,13 @@ import {
   parametrosDe,
   proyeccionOr404,
   sello,
+  limiteCalculoVivo,
   type Actor,
   type Db,
   type Salida,
 } from "./servicio-base";
 import type { DecisionCuerpo, DecisionTiendaCuerpo } from "./esquemas";
-import { claveBaseDe, type AnioFilaApi, type FilaModelo, type TiendaProyeccionApi } from "./tipos";
+import { claveBaseDe, type AnioFilaApi, type FilaModelo, type ResumenProyeccion, type TiendaProyeccionApi } from "./tipos";
 
 /**
  * Escrituras de las decisiones sobre una proyección en trabajo (Parte 1 y tiendas nuevas) y "aplicar curva nueva". Todas
@@ -71,6 +75,27 @@ async function guardarRegistros(d: Db, filas: readonly FilaModelo[], ids: Readon
     }
   }
   return upsertAnios(d, payloads);
+}
+
+/**
+ * El `resumen` guarda conteos (`decididas`, `filas_para_revision`, `totales`, `avisos`) que son un reflejo de lo decidido, no una foto
+ * del momento de calcular: tras cada decisión se rehacen desde las filas actuales (columnas ligeras, sin `historico`) para que la
+ * cabecera, el modal de Cerrar y la lista de proyecciones no digan «0 decididas» después de decidir. Es un `UPDATE` condicional
+ * (solo en trabajo y sin cálculo vivo); si falla no se pierde la decisión, que ya está guardada: el siguiente refresco lo repone.
+ */
+export async function refrescarResumen(d: Db, p: ProyeccionDb): Promise<void> {
+  const resumen = p.resumen as unknown as ResumenProyeccion | null;
+  if (resumen === null || typeof resumen !== "object") return;
+  const filas = await leerFilasConAnios(d, p.id, { columnas: "ligeras", soloActivas: true });
+  if (filas.error) return;
+  const k = kDe(p);
+  const Y = p.anio_en_curso;
+  const conteos = conteosResumen(
+    filas.data.map((f) => ({ clave: f.clave, tienda_id: f.tienda_id, registros: f.proyeccion_fila_anios.filter((a) => a.activo).map((a) => aRegistro(a, null, k, Y)) })),
+    Y
+  );
+  const nuevo: ResumenProyeccion = { ...resumen, ...conteos };
+  await cambiarEstadoProyeccion(d, p.id, "en_trabajo", { resumen: comoJson(nuevo) }, { sinCalculoDesde: limiteCalculoVivo(sello()) });
 }
 
 const idsDe = (filas: readonly FilaConAnios[]) => new Map(filas.map((f) => [f.clave, f.id]));
@@ -163,6 +188,7 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
   if (modelo.tienda_id === null) {
     const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [Y, Y + 1], ahora, actor);
     if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
+    await refrescarResumen(d, p);
     const r = registroDe(nuevo, anio) as NonNullable<ReturnType<typeof registroDe>>;
     return listo(aAnioApi(r));
   }
@@ -173,6 +199,7 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
   if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
   const fila = await propagarTienda(d, p, parametros, cat.data.catalogo, tiendasRows.data, ctx, tiendaId, anio, actor, ahora, null);
   if (fila.respuesta) return falla(fila.respuesta);
+  await refrescarResumen(d, p);
   const recargada = await grupoDe(d, id, g.gml_id, g.agrupacion_marca_id, g.equivalencia_id);
   if (recargada.error) return fallaDb(recargada.error, "proyección: releer la fila");
   const r = recargada.data.find((f) => f.id === filaId);
@@ -222,6 +249,17 @@ async function propagarTienda(
   if (w.error) return fallaDb(w.error, "proyección: guardar las filas de la tienda");
 
   // Totales de la tienda (ambos años) y su decisión.
+  // Con una rampa nueva `F` cambia: las unidades maduras (de la tienda y de cada fila) se rehacen con la rampa efectiva.
+  const maduras = decision?.rampa ? unidadesMadurasDeTienda(filasFinales, ctx.tiendas.get(tiendaId), decision.rampa) : null;
+  if (maduras) {
+    for (const f of filasFinales) {
+      const md = maduras.porFila.get(f.clave);
+      const filaId = ids.get(f.clave);
+      if (md === undefined || !filaId || !f.composicion) continue;
+      const e = await actualizarComposicionFila(d, filaId, comoJson({ ...f.composicion, unidades_maduras: md }));
+      if (e.error) return fallaDb(e.error, "proyección: guardar la composición de la tienda");
+    }
+  }
   const filasDeLaTienda = tiendasRows.filter((t) => t.tienda_id === tiendaId);
   for (const t of filasDeLaTienda) {
     const registros = filasFinales.map((f) => registroDe(f, t.anio)).filter((x): x is NonNullable<typeof x> => x !== undefined);
@@ -230,6 +268,7 @@ async function propagarTienda(
     const esEste = t.anio === anio;
     const cambio: Parameters<typeof actualizarTiendaProyeccion>[2] = { vendido, propuesto };
     if (decision?.rampa) cambio.rampa = [...decision.rampa];
+    if (maduras && t.bloque === "nuevas") cambio.unidades_maduras = maduras.total === null ? null : Math.round(maduras.total);
     if (esEste && decision) {
       const D2 = r.tienda;
       cambio.decidido = D2.decidido;
@@ -326,6 +365,7 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
     rampa: cuerpo.rampa ?? null,
   });
   if (resultado.respuesta) return falla(resultado.respuesta);
+  await refrescarResumen(d, p);
 
   // La frase de la tarjeta se rehace solo si cambió la rampa (lo único que la altera); si no, queda la que se guardó al calcular.
   const t = resultado.data.tienda;
@@ -338,6 +378,8 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
         .filter((x): x is string => x !== null)
     ),
   ];
+  // `F` y `K = E ÷ F` con la rampa nueva (la frase de una apertura los nombra).
+  const fraccion = t.bloque === "nuevas" ? fraccionDeTienda(filas.data.map((f) => aFilaModelo(f, k, Y)), ctx.tiendas.get(tiendaId), t.rampa) : null;
   const frase = explicar({
     metodo: t.metodo,
     anio,
@@ -357,6 +399,8 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
     mesesCompletos: t.bloque === "nuevas" ? mesesCompletos(t.fecha_usada, Y, k) : 0,
     referenciaAlternativa: t.referencia_alternativa,
     referenciaTresMeses: t.referencia_tres_meses,
+    fraccionAnioApertura: fraccion,
+    anioMaduroSoles: fraccion !== null && t.venta_esperada !== null ? anioMaduroSoles(t.venta_esperada, fraccion) : null,
     crecimiento: parametros.crecimiento_pct_defecto,
   });
   const fila2 = (await leerTiendasProyeccion(d, id)).data.find((x) => x.tienda_id === tiendaId && x.anio === anio);
@@ -414,6 +458,7 @@ export async function aplicarCurva(id: string, cuerpo: { fila_anio_ids?: string[
     if (editable.respuesta) return falla(editable.respuesta);
     const r = await upsertAnios(d, lote);
     if (r.error) return fallaDb(r.error, "proyección: aplicar la curva nueva");
+    await refrescarResumen(d, pR.data);
   }
   const aplicadas = lote.length;
   return listo({ aplicadas });

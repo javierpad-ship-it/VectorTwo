@@ -214,6 +214,8 @@ describe("mapeo de filas a la API", () => {
     corrida_id: "k1",
     modelo: "A",
     origen: "propia",
+    origen_curva: "sistema",
+    curva_manual: null,
     recomendada: true,
     eat: "12.34" as unknown as number,
     error_max: 5,

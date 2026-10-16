@@ -5,6 +5,7 @@ import { indiceMes, partesDeFecha } from "./calendario";
 import { proponerCierre, pruebaPorAvance } from "./cierre";
 import { proponerCierreTienda } from "./cierres-tienda";
 import { composicionPromedio, composicionTienda, tieneHistoria, type ComposicionTienda, type HechoTiendaFila } from "./composicion";
+import { aColaLargaApi, avisosColaLarga, disponibilidadFila, proponerPorDemandaCorregida, type FilaDisponibilidad } from "./cola-larga";
 import { curvaFila, type ResultadoCurvaFila } from "./curva-fila";
 import {
   aplicarDecisionTienda,
@@ -18,19 +19,25 @@ import {
 import { explicar, textoCurva } from "./explicar";
 import { factoresMes, normalizar, UNOS } from "./nino";
 import { participacionesFila } from "./participaciones";
+import { conteosResumen } from "./resumen";
 import { soloReales } from "./reparto";
 import {
+  anioMaduroSoles,
+  fraccionAnioApertura,
   maduroDeVigente,
   mesesCompletos,
   perfilApertura,
   proponerFilaTienda,
+  unidadesMadurasDeFila,
 } from "./tiendas-nuevas";
 import {
   claveBaseDe,
   claveFila,
   SIN_PREVIAS,
+  UMBRAL_APERTURA_TARDIA,
   VERSION_METODO,
   type AvisoFila,
+  type ColaLargaApi,
   type DetalleW12,
   type EntradaCalculo,
   type FilaModelo,
@@ -100,6 +107,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
   const k = e.k;
   const previas = e.previas ?? SIN_PREVIAS;
   const umbralCola = e.parametros.umbral_cola_larga;
+  const umbralDisponibilidad = e.parametros.umbral_disponibilidad;
   const gDefecto = e.parametros.crecimiento_pct_defecto;
 
   // ── 0. Bloques de tiendas ──
@@ -385,7 +393,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
   };
 
   // Estado por (tienda, año): filas y método.
-  const estadoTienda = new Map<string, { filas: FilaModelo[]; metodo: Metodo; plan: PlanTienda | null; unidadesMaduras: number | null; avisos: Set<AvisoFila>; maduro: number | null; vendidoNormalizado: number | null }>();
+  const estadoTienda = new Map<string, { filas: FilaModelo[]; metodo: Metodo; plan: PlanTienda | null; unidadesMaduras: number | null; avisos: Set<AvisoFila>; maduro: number | null; vendidoNormalizado: number | null; fraccion: number | null; anioMaduro: number | null }>();
 
   const procesarTienda = (t: TiendaProy, z: number) => {
     const c = clasificarTienda(t, z);
@@ -398,10 +406,6 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     const rampa = plan?.rampa ?? [...e.parametros.rampa_maduracion];
     const E = t.venta_esperada;
     const avisosT = new Set<AvisoFila>(plan?.avisos ?? []);
-    // Canibalización: solo aviso (no se resta nada a las mismas tiendas de la zona).
-    if (c.bloque === "nuevas" && t.zona && e.tiendas.some((o) => o.id !== t.id && o.tipo === "Tienda" && o.activo && o.zona === t.zona)) {
-      avisosT.add("canibalizacion");
-    }
     const filasDeEstaTienda: FilaModelo[] = [];
     let metodoTienda: Metodo = "sin_propuesta";
     let unidadesMaduras: number | null = E === null ? null : 0;
@@ -420,7 +424,30 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       });
       if (hayVenta) claves.add(clave);
     }
-    if (E !== null && comp) unidadesMaduras = comp.filas.reduce((s, f) => s + (f.p > 0 ? (E * 12 * f.s) / f.p : 0), 0);
+    // `0.10.1` (decisión 22): `E` son los soles del AÑO de apertura. `F = Σ_f s_f A_f` con `A_f = Σ_{m∈Z_0} c_m r_m φ_m` (solo filas con curva).
+    let fraccion: number | null = null;
+    let anioMaduro: number | null = null;
+    const conCurva = new Set<string>();
+    if (E !== null && comp && c.bloque === "nuevas" && t.fecha_apertura) {
+      const z0 = partesDeFecha(t.fecha_apertura).anio;
+      const rZ0 = pesosDeTienda(info, "nuevas", rampa, z0);
+      const filasF: { s: number; curva: number[]; phi: readonly number[] }[] = [];
+      for (const cf of comp.filas) {
+        const a = bases.get(cf.fila);
+        const u = a ? unidadDe(a.gml_id, a.equivalencia_id) : null;
+        if (!u || !u.curva) continue;
+        conCurva.add(cf.fila);
+        filasF.push({ s: cf.s, curva: u.curva, phi: phiDe(u, z0) });
+      }
+      fraccion = fraccionAnioApertura(filasF, rZ0);
+      anioMaduro = anioMaduroSoles(E, fraccion);
+      if (filasF.length > 0 && fraccion < UMBRAL_APERTURA_TARDIA) avisosT.add("apertura_tardia");
+    }
+    const maduras = (f: { fila: string; s: number; p: number } | undefined): number | null => {
+      if (E === null) return null;
+      return f && fraccion !== null && conCurva.has(f.fila) ? unidadesMadurasDeFila({ E, s: f.s, p: f.p, F: fraccion }) : 0;
+    };
+    if (E !== null && comp) unidadesMaduras = comp.filas.reduce((s, f) => s + (maduras(f) ?? 0), 0);
 
     for (const clave of [...claves].sort()) {
       const a = bases.get(clave);
@@ -428,7 +455,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       const u = unidadDe(a.gml_id, a.equivalencia_id);
       if (!u) continue;
       const cf = comp?.filas.find((f) => f.fila === clave);
-      const md = E !== null && cf && cf.p > 0 ? (E * 12 * cf.s) / cf.p : E !== null ? 0 : null;
+      const md = maduras(cf);
       const fila = filaDeTienda(t, clave, a, u, comp, plan?.origen ?? "propia", md);
       const phi = phiDe(u, z);
       const real = esY ? serieTienda(t.id, clave, Y) : Array<number>(12).fill(0);
@@ -514,7 +541,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       registrar(fila, reg);
       filasDeEstaTienda.push(fila);
     }
-    estadoTienda.set(`${t.id}#${z}`, { filas: filasDeEstaTienda, metodo: metodoTienda, plan, unidadesMaduras, avisos: avisosT, maduro: maduroTienda, vendidoNormalizado: vendidoNormTienda });
+    estadoTienda.set(`${t.id}#${z}`, { filas: filasDeEstaTienda, metodo: metodoTienda, plan, unidadesMaduras, avisos: avisosT, maduro: maduroTienda, vendidoNormalizado: vendidoNormTienda, fraccion, anioMaduro });
   };
 
   const tiendasConBloque = e.tiendas.filter((t) => ["nuevas", "cierres"].includes(clasificarTienda(t, Y).bloque) || ["nuevas", "cierres"].includes(clasificarTienda(t, Y1).bloque));
@@ -576,6 +603,8 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       referenciaTresMeses: ref3,
       totalMaduro: maduro,
       vendidoNormalizado: c.bloque === "nuevas" ? st.vendidoNormalizado : null,
+      fraccionAnioApertura: c.bloque === "nuevas" ? st.fraccion : null,
+      anioMaduroSoles: c.bloque === "nuevas" ? st.anioMaduro : null,
       crecimiento: gDefecto,
     });
     tiendasModelo.push({
@@ -622,6 +651,17 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     l.push(d);
     detallePorBase.set(cb, l);
   }
+  const dispPorBase = new Map<string, FilaDisponibilidad[]>();
+  for (const d of e.venta.disponibilidad) {
+    if (!enVentana.has(d.periodo.slice(0, 7))) continue;
+    const cb = claveBase(d.gml_id, d.equivalencia_id, d.agrupacion_marca_id);
+    const l = dispPorBase.get(cb) ?? [];
+    l.push(d);
+    dispPorBase.set(cb, l);
+  }
+  // `normalizado_nino: false` a propósito: `detalle_w12` no trae el mes de cada hecho, así que las participaciones son sobre unidades
+  // reales de `W12` (ver `PeriodoReferencia` en tipos-api.ts). Poner `true` sin normalizar sería afirmar algo falso a M8.
+  const periodoReferencia = { desde: ventana[0], hasta: ventana[ventana.length - 1], meses: ventana.length, tiendas: "mismas" as const, anio: Y, normalizado_nino: false };
   const salientesIds = [...mismasEnCurso].filter((id) => !mismasSiguiente.has(id));
   let sumaPropuestaPrueba = 0;
   let sumaRealPrueba = 0;
@@ -641,9 +681,24 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     const phiY = phiDe(u, Y);
     const planAnt = e.planAnterior?.totales.get(clave) ?? null;
     const ventaPrev = aSerie(Y - 1).u.reduce((x, y) => x + y, 0) > 0;
-    const cierre = proponerCierre({ serie: sY.u, k, curva: u.curva, factoresMes: phiY, umbralAvance: e.parametros.umbral_avance, planAnterior: planAnt, ventaAnioAnterior: ventaPrev });
+    const cierreAvance = proponerCierre({ serie: sY.u, k, curva: u.curva, factoresMes: phiY, umbralAvance: e.parametros.umbral_avance, planAnterior: planAnt, ventaAnioAnterior: ventaPrev });
+    // Cola larga con disponibilidad (0.10.1): bajo el umbral se mide la disponibilidad; en una fila para revisión la propuesta es `A_f`.
+    let colaLarga: ColaLargaApi | null = null;
+    let cierre = cierreAvance;
+    if (cierreAvance.propuesto !== null && cierreAvance.propuesto < umbralCola) {
+      const medida = disponibilidadFila({
+        disponibilidad: dispPorBase.get(clave) ?? [],
+        ventana,
+        curva: u.curva,
+        factoresMes: (z) => phiDe(u, z),
+        nTiendas: mismasEnCurso.size,
+        umbrales: { cola_larga: umbralCola, disponibilidad: umbralDisponibilidad },
+      });
+      colaLarga = aColaLargaApi(medida);
+      cierre = proponerPorDemandaCorregida({ cierre: cierreAvance, resultado: medida, serie: sY.u, k, curva: u.curva, factoresMes: phiY });
+    }
     for (const x of cierre.avisos) avisos.add(x);
-    if (cierre.propuesto !== null && cierre.propuesto < umbralCola) avisos.add("cola_larga");
+    for (const x of avisosColaLarga(colaLarga?.veredicto ?? null, cierre.propuesto, umbralCola)) avisos.add(x);
 
     // Histórico por año con la red de cada año.
     const anios: HistoricoAnio[] = [];
@@ -706,6 +761,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       tendencia,
       prueba_anterior: prueba,
       pesos_equivalencias: u.pesos_equivalencias,
+      cola_larga: colaLarga,
       salientes,
     };
 
@@ -722,8 +778,18 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       avance: cierre.avance,
       phi: phiY,
       restoMeses: resto,
-      planAnterior: planAnt !== null && planNombre ? { nombre: planNombre, total: planAnt } : null,
+      planAnterior: planAnt !== null && planNombre && cierreAvance.metodo === "plan_anterior" ? { nombre: planNombre, total: planAnt } : null,
       referenciaAlternativa: cierre.referencia_alternativa,
+      colaLarga:
+        colaLarga?.veredicto === "revision" && colaLarga.demanda_corregida !== null && colaLarga.disponibilidad !== null
+          ? {
+              demandaCorregida: colaLarga.demanda_corregida,
+              disponibilidad: colaLarga.disponibilidad,
+              tiendaMesesConStock: colaLarga.tienda_meses_con_stock,
+              tiendaMeses: colaLarga.tienda_meses,
+              umbral: umbralCola,
+            }
+          : null,
     });
 
     const reg = armarRegistro(
@@ -758,7 +824,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       curva_origen: u.curva_origen,
       factores_mes: u.factores_mes,
       historico,
-      participaciones: e.configFlujo ? participacionesFila(detalle, e.configFlujo) : null,
+      participaciones: e.configFlujo ? participacionesFila(detalle, e.configFlujo, periodoReferencia) : null,
       composicion: null,
       avisos: [...avisos],
       activo: true,
@@ -842,42 +908,19 @@ function armarResumen(args: {
   perfiles: ResumenProyeccion["perfiles_apertura"];
   fueraBloque: number;
 }): ResumenProyeccion {
-  const Y = args.anio;
-  const filasPorAnio: Record<number, number> = { [Y]: 0, [Y + 1]: 0 };
-  const decididas: Record<number, number> = { [Y]: 0, [Y + 1]: 0 };
-  const totales: ResumenProyeccion["totales"] = {
-    [Y]: { mismas: 0, nuevas_anterior: 0, aperturas: 0, cierres: 0, total: 0 },
-    [Y + 1]: { mismas: 0, nuevas_anterior: 0, aperturas: 0, cierres: 0, total: 0 },
-  };
-  const avisos: ResumenProyeccion["avisos"] = {};
-  for (const f of args.filas) {
-    for (const r of f.registros) {
-      const t = totales[r.anio];
-      if (!t) continue;
-      const v = r.vigente ?? 0;
-      if (r.bloque === "mismas") t.mismas += v;
-      else if (r.bloque === "cierres") t.cierres += v;
-      else if (r.subbloque === "nuevas_anterior") t.nuevas_anterior += v;
-      else t.aperturas += v;
-      t.total += v;
-      if (f.tienda_id === null) {
-        filasPorAnio[r.anio] += 1;
-        if (r.decidido !== null) decididas[r.anio] += 1;
-      }
-      for (const a of r.avisos) avisos[a] = (avisos[a] ?? 0) + 1;
-    }
-  }
+  const c = conteosResumen(args.filas, args.anio);
   return {
     filas: args.filasBase.length,
-    filas_por_anio: filasPorAnio,
-    decididas,
-    totales,
-    avisos,
+    filas_por_anio: c.filas_por_anio,
+    decididas: c.decididas,
+    totales: c.totales,
+    avisos: c.avisos,
     huella_cargas: args.huellaCargas,
     curvas_usadas: args.curvasUsadas,
     desvio_prueba_anterior_pct: args.desvio,
     perfiles_apertura: args.perfiles,
     fuera_bloque: args.fueraBloque,
+    filas_para_revision: c.filas_para_revision,
     version_metodo: VERSION_METODO,
     duracion_ms: null,
   };

@@ -16,6 +16,7 @@ import {
   type BloquesAnioApi,
   type BloquesApi,
   type ClaseAnioFila,
+  type ColaLargaApi,
   type EstadoLinea,
   type FilaApi,
   type FilaDetalleApi,
@@ -27,6 +28,7 @@ import {
   type SoloMatriz,
   type TiendaBloqueApi,
   type TiendaProyeccionApi,
+  type VeredictoColaLarga,
 } from "@/lib/proyeccion/tipos-api";
 
 // ─── Pestañas y estado en la URL ───
@@ -201,8 +203,11 @@ export const TEXTO_AVISO: Record<AvisoFila, { texto: string; tono: TonoAviso }> 
   sin_referente: { texto: "Sin tienda de referencia: se usa la composición promedio de las mismas tiendas.", tono: "info" },
   referente_sin_historia: { texto: "El referente no tiene doce meses cerrados: se usó el promedio de las mismas tiendas.", tono: "alerta" },
   fijadas_exceden: { texto: "Las filas fijadas a mano suman más que el total de la tienda: el resto quedó en 0.", tono: "alerta" },
-  cierre_no_proyectado: { texto: "Tienda que cierra: por ahora solo se muestra su venta real; la proyección de sus meses restantes llega en la 0.10.1.", tono: "info" },
-  canibalizacion: { texto: "Una apertura puede restar venta a las tiendas de su zona; revisa las mismas tiendas de esa zona antes de decidir.", tono: "info" },
+  cierre_no_proyectado: { texto: "Tienda que cierra: por ahora solo se muestra su venta real; la proyección de sus meses restantes llega en una versión próxima.", tono: "info" },
+  revision_cola_larga: { texto: "Cola larga con quiebres de stock: la venta pudo quedar muy por debajo de la demanda. La propuesta es la demanda corregida por disponibilidad (el avance normal va al lado) y hay que decidirla para poder cerrar.", tono: "alerta" },
+  cola_larga_con_quiebres: { texto: "Cola larga con quiebres de stock, pero la demanda corregida no supera el umbral: se cierra con la propuesta.", tono: "info" },
+  sin_stock_historico: { texto: "No hay stock cargado de esta fila en los últimos doce meses: no se pudo medir la disponibilidad y se trata como cola larga normal.", tono: "info" },
+  apertura_tardia: { texto: "La venta esperada cubre menos de un cuarto de un año maduro (la tienda abre tarde en el año o tiene una rampa muy baja): revisa la cifra.", tono: "info" },
   apertura_dudosa: { texto: "La tienda no vendió en un mes en que debía estar abierta: si abrió después, corrige la fecha de apertura en Tiendas.", tono: "alerta" },
   cierre_dudoso: { texto: "La tienda vendió después de su fecha de cierre o dejó de vender antes: revisa la fecha de cierre en Tiendas.", tono: "alerta" },
 };
@@ -273,6 +278,7 @@ export const ETIQUETA_SOLO: Record<SoloMatriz, string> = {
   curva_cambio: "La curva cambió",
   propuesta_cambio: "La propuesta cambió",
   cola_larga: "Cola larga",
+  para_revision: "Para revisión",
 };
 
 export const ETIQUETA_TEMPORADA_FILTRO: Record<string, string> = { invierno: "Invierno", verano: "Verano", todo_el_ano: "Toda temporada" };
@@ -318,6 +324,7 @@ export function resumenCabecera(p: ProyeccionApi): string[] {
   const res = p.resumen;
   if (res) {
     piezas.push(`${plural(res.filas, "fila", "filas")}: ${formatearNumero(res.decididas?.[y] ?? 0)} decididas en ${y}, ${formatearNumero(res.decididas?.[y + 1] ?? 0)} en ${y + 1}`);
+    if ((res.filas_para_revision ?? 0) > 0) piezas.push(textoParaRevision(res.filas_para_revision ?? 0));
     if (res.desvio_prueba_anterior_pct !== null && res.desvio_prueba_anterior_pct !== undefined) {
       piezas.push(`en ${y - 1} el método se desvió ${formatearPct(res.desvio_prueba_anterior_pct)} (dentro de muestra)`);
     }
@@ -420,6 +427,7 @@ export function lineasDeCierre(p: Pick<ProyeccionApi, "anio_en_curso" | "resumen
       const dec = r.decididas?.[anio] ?? 0;
       lineas.push(`${anio}: ${plural(dec, "fila decidida", "filas decididas")} y ${plural(Math.max(0, total - dec), "sin decidir", "sin decidir")}`);
     }
+    if ((r.filas_para_revision ?? 0) > 0) lineas.push(`${textoParaRevision(r.filas_para_revision ?? 0)}: cola larga con quiebres de stock; hay que decidirlas para cerrar`);
     const cola = r.avisos?.cola_larga ?? 0;
     if (cola > 0) lineas.push(cola === 1 ? "1 registro de cola larga se cerrará con la propuesta" : `${formatearNumero(cola)} registros de cola larga se cerrarán con la propuesta`);
     const curva = r.avisos?.curva_cambio ?? 0;
@@ -427,14 +435,25 @@ export function lineasDeCierre(p: Pick<ProyeccionApi, "anio_en_curso" | "resumen
     const cambio = r.avisos?.propuesta_cambio ?? 0;
     if (cambio > 0) lineas.push(cambio === 1 ? "1 decisión con la propuesta distinta (se cierra con tu cifra)" : `${formatearNumero(cambio)} decisiones con la propuesta distinta (se cierran con tu cifra)`);
   }
-  if (p.desactualizada.length > 0) lineas.push(`Desactualizada: ${p.desactualizada.map((m) => m.mensaje).join("; ")}`);
+  if (p.desactualizada.length > 0) lineas.push(`Desactualizada: ${p.desactualizada.map(textoMotivoDesactualizada).join("; ")}`);
   return lineas;
 }
 
 /** Máximo de filas sin decidir que lista el diálogo de cierre (el resto se cuenta). */
 export const MAX_SIN_DECIDIR = 50;
 
-export type ItemSinDecidir = { clave?: string; anio?: number; propuesto?: number | null; genero?: string; mundo?: string; linea?: string; agrupacion_marca?: string; equivalencia?: string | null; nombre?: string };
+export type ItemSinDecidir = { clave?: string; anio?: number; propuesto?: number | null; motivo?: "umbral" | "revision_cola_larga"; demanda_corregida?: number | null; disponibilidad?: number | null; genero?: string | null; mundo?: string | null; linea?: string | null; agrupacion_marca?: string | null; equivalencia?: string | null; nombre?: string };
+
+/** `1 fila para revisión` / `12 filas para revisión`. */
+export function textoParaRevision(n: number): string {
+  return plural(n, "fila para revisión", "filas para revisión");
+}
+
+/** Motivo de «desactualizada» en palabras: el del método nuevo se explica aparte; el resto, tal como lo dice el servidor. */
+export function textoMotivoDesactualizada(m: { codigo: string; mensaje: string }): string {
+  if (m.codigo === "version_metodo") return "El método de cálculo cambió (método nuevo): recalcula para aplicarlo. Tus decisiones se conservan.";
+  return m.mensaje;
+}
 
 /** Nombre legible de una fila sin decidir: el que mande el servidor o, si solo hay `clave`, una forma corta para no dejar la fila anónima. */
 export function nombreFilaSinDecidir(i: ItemSinDecidir): string {
@@ -445,17 +464,38 @@ export function nombreFilaSinDecidir(i: ItemSinDecidir): string {
   return partes.length >= 2 && partes[1] ? `Fila ${partes[1].slice(0, 8)}${partes[3] ? ` · ${partes[3].slice(0, 8)}` : ""}` : "Fila sin nombre";
 }
 
+export type GrupoSinDecidir = { lineas: string[]; total: number };
+
 /**
- * La lista de filas sin decidir de un `409 filas_sin_decidir`, legible: «HOMBRE · URBANO · DENIM · RECONOCIDO · 2027 ·
- * propuesta 20,395». Las de mayor propuesta primero, limitada a `MAX_SIN_DECIDIR` y con el total.
+ * Las filas sin decidir de un `409 filas_sin_decidir`, legibles y separadas por motivo: las de propuesta mayor o igual al
+ * umbral de cola larga y las «para revisión» (cola larga con quiebres), estas con su demanda corregida y disponibilidad. Cada
+ * grupo lista hasta `MAX_SIN_DECIDIR` (las de mayor propuesta) y lleva su total.
  */
-export function listaSinDecidir(detalle: Record<string, unknown> | null | undefined): { lineas: string[]; total: number } | null {
+export function listaSinDecidir(detalle: Record<string, unknown> | null | undefined): { umbral: GrupoSinDecidir; revision: GrupoSinDecidir } | null {
   const crudo = detalle?.filas_sin_decidir;
   if (!Array.isArray(crudo) || crudo.length === 0) return null;
-  const items = (crudo as ItemSinDecidir[]).slice().sort((a, b) => (b.propuesto ?? 0) - (a.propuesto ?? 0));
-  const totalServidor = Number(detalle?.total_filas_sin_decidir);
-  const total = Number.isFinite(totalServidor) && totalServidor >= items.length ? totalServidor : items.length;
-  return { total, lineas: items.slice(0, MAX_SIN_DECIDIR).map((i) => `${nombreFilaSinDecidir(i)} · ${i.anio ?? "—"} · propuesta ${unidades(i.propuesto)}`) };
+  const items = crudo as ItemSinDecidir[];
+  const esRevision = (i: ItemSinDecidir) => i.motivo === "revision_cola_larga";
+  /** Una línea por FILA (no por año): sus años van juntos, para que el conteo sea de filas. */
+  const porFila = (xs: ItemSinDecidir[]): { propuesta: number; texto: string }[] => {
+    const grupos = new Map<string, ItemSinDecidir[]>();
+    xs.forEach((i, n) => grupos.set(i.clave ?? `#${n}`, [...(grupos.get(i.clave ?? `#${n}`) ?? []), i]));
+    return [...grupos.values()].map((g) => {
+      const ordenados = g.slice().sort((a, b) => (a.anio ?? 0) - (b.anio ?? 0));
+      const anios = ordenados.map((i) => `${i.anio ?? "—"}: ${unidades(i.propuesto)}`).join(" · ");
+      const rev = ordenados.find((i) => esRevision(i) && (i.demanda_corregida != null || i.disponibilidad != null));
+      const extra = rev ? [rev.demanda_corregida == null ? null : `demanda corregida ${unidades(rev.demanda_corregida)}`, rev.disponibilidad == null ? null : `disponibilidad ${formatearAvance(rev.disponibilidad)}`].filter(Boolean) : [];
+      return { propuesta: Math.max(...ordenados.map((i) => i.propuesto ?? 0)), texto: `${nombreFilaSinDecidir(ordenados[0])} · propuesta ${anios}${extra.length > 0 ? ` (${extra.join(" · ")})` : ""}` };
+    });
+  };
+  const deRevision = porFila(items.filter(esRevision)).sort((a, b) => b.propuesta - a.propuesta);
+  const deUmbral = porFila(items.filter((i) => !esRevision(i))).sort((a, b) => b.propuesta - a.propuesta);
+  const totalRevision = typeof detalle?.total_filas_para_revision === "number" ? detalle.total_filas_para_revision : 0;
+  const totalTodas = typeof detalle?.total_filas_sin_decidir === "number" ? detalle.total_filas_sin_decidir : 0;
+  return {
+    umbral: { total: Math.max(deUmbral.length, totalTodas - totalRevision), lineas: deUmbral.slice(0, MAX_SIN_DECIDIR).map((x) => x.texto) },
+    revision: { total: Math.max(deRevision.length, totalRevision), lineas: deRevision.slice(0, MAX_SIN_DECIDIR).map((x) => x.texto) },
+  };
 }
 
 /** Las tiendas nuevas sin decidir de un `409 tiendas_sin_decidir`, con su código de los bloques de la proyección. */
@@ -472,6 +512,54 @@ export function listaTiendasSinDecidir(detalle: Record<string, unknown> | null |
 export function textoTendencia(pct: number | null | undefined, anioEnCurso: number): string | null {
   if (pct === null || pct === undefined || !Number.isFinite(pct)) return null;
   return `Referencia: la tendencia de ${anioEnCurso - 1} frente a ${anioEnCurso - 2} fue ${formatearPct(pct)}.`;
+}
+
+// ─── Cola larga con disponibilidad (0.10.1) ───
+
+export const ETIQUETA_VEREDICTO: Record<VeredictoColaLarga, string> = {
+  cierra: "Sin quiebre relevante: se cierra con la propuesta",
+  cierra_con_quiebres: "Con quiebres, pero la demanda corregida no supera el umbral: se cierra con la propuesta",
+  revision: "Para revisión: hay que decidirla para cerrar",
+  sin_dato: "Sin stock cargado: no se pudo medir la disponibilidad",
+};
+
+/** El aviso que acompaña a una fila de cola larga: una línea que solo llevan algunas tiendas sale con disponibilidad baja y `A_f` inflada. */
+export const ADVERTENCIA_SURTIDO_PARCIAL =
+  "Ojo: si esta línea la llevan solo algunas tiendas, la disponibilidad sale baja (una tienda sin stock no siempre es un quiebre) y la demanda corregida queda inflada. Contrástala con el avance normal antes de decidir.";
+
+/** Texto corto de la validación de una fila para la tabla; `null` si no hay nada que decir (cierra sin quiebres o sin dato). */
+export function resumenColaLarga(c: ColaLargaApi | null | undefined): string | null {
+  if (!c || c.veredicto === "cierra" || c.veredicto === "sin_dato") return null;
+  const partes = [c.veredicto === "revision" ? "Para revisión" : "Cola larga con quiebres"];
+  if (c.disponibilidad !== null) partes.push(`disponibilidad ${formatearAvance(c.disponibilidad)}`);
+  if (c.demanda_corregida !== null) partes.push(`corregida ${unidades(c.demanda_corregida)}`);
+  return partes.join(" · ");
+}
+
+/** Las cifras de la validación de disponibilidad, rotuladas, para el detalle. */
+export function datosColaLarga(c: ColaLargaApi): { rotulo: string; valor: string }[] {
+  return [
+    { rotulo: "Disponibilidad", valor: formatearAvance(c.disponibilidad) },
+    { rotulo: "Tienda-meses con stock", valor: `${formatearNumero(c.tienda_meses_con_stock)} de ${formatearNumero(c.tienda_meses)}` },
+    { rotulo: "Ritmo (u por tienda-mes con stock)", valor: c.ritmo === null ? "—" : formatearDecimal(c.ritmo, 1) },
+    { rotulo: "Meses sin stock en ninguna tienda", valor: formatearNumero(c.meses_tiendas_sin_stock) },
+    { rotulo: "Venta corregida (A_f)", valor: c.demanda_corregida === null ? "—" : formatearDecimal(c.demanda_corregida, 1) },
+  ];
+}
+
+/** ¿La fila está para revisión? (aviso del registro o de la fila). */
+export function esParaRevision(f: Pick<FilaApi, "avisos" | "anios">): boolean {
+  return f.avisos.includes("revision_cola_larga") || f.anios.some((a) => a.avisos.includes("revision_cola_larga"));
+}
+
+/** Umbral de disponibilidad: número de 0 a 1 (coma o punto decimal). */
+export function leerUmbralDisponibilidad(texto: string): LecturaNumero {
+  const t = texto.trim().replace(",", ".");
+  if (t === "") return { ok: false, motivo: "Escribe el umbral de disponibilidad (entre 0 y 1)." };
+  if (!/^\d+(\.\d+)?$/.test(t)) return { ok: false, motivo: "El umbral de disponibilidad debe ser un número." };
+  const n = Number(t);
+  if (n > 1) return { ok: false, motivo: "El umbral de disponibilidad debe estar entre 0 y 1." };
+  return { ok: true, valor: n };
 }
 
 // ─── Gráfico de barras por año (Parte 1) ───

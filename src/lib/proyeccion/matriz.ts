@@ -1,3 +1,4 @@
+import { pendienteDeRevision } from "./cola-larga";
 import {
   SOLO_MATRIZ,
   UMBRAL_COLA_LARGA,
@@ -92,6 +93,7 @@ type Linea = {
   avisos: AvisoFila[];
   conTiendasNuevas: boolean;
   colaLarga: boolean;
+  paraRevision: boolean;
   curvaCambio: boolean;
   propuestaCambio: boolean;
 };
@@ -112,7 +114,9 @@ export function estadoLinea(filas: readonly FilaPlana[], anioEnCurso: number, um
   const requeridasDecididas = base.every((f) =>
     anios.every((a) => {
       const r = registro(f, a);
-      if (!r || r.propuesto === null || r.propuesto < umbralColaLarga) return true;
+      if (!r || r.propuesto === null) return true;
+      // `0.10.1`: una fila `revision_cola_larga` se decide aunque su propuesta quede bajo el umbral.
+      if (r.propuesto < umbralColaLarga && !r.avisos.includes("revision_cola_larga")) return true;
       return r.decidido !== null;
     })
   );
@@ -184,9 +188,15 @@ function resumirLinea(filas: readonly FilaPlana[], anio: number, umbral: number)
     avisos,
     conTiendasNuevas: filas.some((f) => f.anios.some((a) => a.bloque === "nuevas" && vigenteDe(a) > 0)),
     colaLarga: filas.some((f) => f.tienda_id === null && (registro(f, anio)?.propuesto ?? Infinity) < umbral),
+    paraRevision: filas.some((f) => filaParaRevision(f, anio)),
     curvaCambio: avisos.includes("curva_cambio"),
     propuestaCambio: avisos.includes("propuesta_cambio"),
   };
+}
+
+/** Fila base con algún año `revision_cola_larga` sin decidir (`0.10.1`). */
+function filaParaRevision(f: FilaPlana, anioEnCurso: number): boolean {
+  return f.activo && f.tienda_id === null && [anioEnCurso, anioEnCurso + 1].some((a) => { const r = registro(f, a); return r !== undefined && pendienteDeRevision(r); });
 }
 
 function pasaSolo(l: Linea, solo: SoloMatriz | null): boolean {
@@ -205,6 +215,8 @@ function pasaSolo(l: Linea, solo: SoloMatriz | null): boolean {
       return l.propuestaCambio;
     case "cola_larga":
       return l.colaLarga;
+    case "para_revision":
+      return l.paraRevision;
   }
 }
 
@@ -249,7 +261,7 @@ function nodoDe(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMatrizAp
 
 export type ResultadoMatriz = {
   nodos: NodoMatrizApi[];
-  resumen: { lineas: number; lineas_total: number; porcentaje_total: number | null };
+  resumen: { lineas: number; lineas_total: number; porcentaje_total: number | null; filas_para_revision: number };
 };
 
 const comparar = (a: string, b: string) => a.localeCompare(b, "es");
@@ -313,11 +325,13 @@ export function armarMatriz(
   }
 
   const compania = nodos[0];
+  const lineasVisibles = new Set(lineas.map((l) => l.gml_id));
   return {
     nodos,
     resumen: {
       lineas: lineas.length,
       lineas_total: lineasTotal.size,
+      filas_para_revision: filtradas.filter((f) => lineasVisibles.has(f.gml_id) && filaParaRevision(f, anio)).length,
       porcentaje_total: totalSinFiltro > 0 ? (compania.en_curso.total / totalSinFiltro) * 100 : null,
     },
   };

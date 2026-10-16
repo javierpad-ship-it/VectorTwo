@@ -1,6 +1,6 @@
 import type { PeriodoParaClase } from "@/lib/curvas/atipicos";
 import type { ConfigFlujo } from "@/lib/marcas/gml/flujo";
-import { claveIncluye, clavesPertenencia } from "@/lib/proyeccion/bloques";
+import { claveIncluye, clavesPertenencia, esMisma } from "@/lib/proyeccion/bloques";
 import type { FilaPlana } from "@/lib/proyeccion/matriz";
 import type {
   AgrupacionProy,
@@ -138,7 +138,7 @@ export const tiendas = (extra: Record<string, Partial<TiendaProy>> = {}): Tienda
     tienda("T6", "2025-01-01"),
     tienda("T2", "2025-11-20", null, { nombre: "Tienda nueva A" }),
     tienda("T3", "2026-07-01"),
-    tienda("T4", "2027-03-15", null, { zona: "Norte", venta_esperada: 85000, referente_id: "T1", nombre: "Tienda nueva B" }),
+    tienda("T4", "2027-03-15", null, { zona: "Norte", venta_esperada: 850000, referente_id: "T1", nombre: "Tienda nueva B" }),
     tienda("T5", "2019-01-01", "2027-06-30"),
     tienda("T7", "2019-01-01", "2026-06-30"),
     tienda("T8", "2019-01-01", "2025-12-31"),
@@ -213,7 +213,17 @@ export function serie(molde: Molde, desde: string, hasta: string, f: (anio: numb
   });
 }
 
-const INICIO = "2023-01";
+/** Hechos sin venta con stock (la línea está en la tienda pero no se vendió): cuentan como disponibilidad. */
+export function conStockSinVenta(molde: Molde, desde: string, hasta: string, stock = 10): Hecho[] {
+  return meses(desde, hasta).map((p) => {
+    const { precio: _precio, ...resto } = molde;
+    void _precio;
+    return { ...resto, periodo: p, unidades: 0, soles: 0, stock };
+  });
+}
+
+export const INICIO_HECHOS = "2023-01";
+const INICIO = INICIO_HECHOS;
 const FIN = "2026-09";
 const plano = (n: number) => () => n;
 
@@ -242,6 +252,8 @@ export function hechosBase(): Hecho[] {
   h.push(...serie(denim("CD"), INICIO, FIN, plano(500)));
   // DENIM × PREMIUM (cola larga): T1 5 u/mes → V = 45, P = 60.
   h.push(...serie({ ...denim("T1", AM.pre, MARCA.beta) }, INICIO, FIN, plano(5)));
+  // Las otras dos tiendas de M(2026) también tienen esa línea con stock (sin vender): disponibilidad plena, cola larga normal.
+  for (const t of ["T5", "T6"]) h.push(...conStockSinVenta(denim(t, AM.pre, MARCA.beta), t === "T6" ? "2025-01" : INICIO, FIN));
 
   // ABRIGO × RECONOCIDO (GMLE; invierno): 2023 con Niño (×0,63), 2024 y 2025 normales, 2026 con su patrón.
   const abrigo = (tienda: string): Molde => ({ tienda, nodo: "abrigo", eq: EQ.parka, agm: AM.rec, marca: MARCA.alfa, talla: TALLA.central, precio: 200 });
@@ -302,6 +314,9 @@ export function construirVenta(
   const porTienda = new Map<string, { [campo: string]: number | string | null }>();
   const pesos = new Map<string, number>();
   const detalleW12 = new Map<string, { [campo: string]: number | string | null }>();
+  const disponibilidad = new Map<string, { [campo: string]: number | string | null }>();
+  const tiendasConStock = new Map<string, Set<string>>();
+  const mismasY = listaTiendas.filter((t) => esMisma(t, anio)).length;
   const cargas: Record<string, string> = {};
 
   const sumar = (mapa: Map<string, { [campo: string]: number | string | null }>, clave: string, base: { [campo: string]: number | string | null }, u: number, s: number, st = 0) => {
@@ -315,9 +330,26 @@ export function construirVenta(
   for (const h of hechos) {
     if (opciones.hasta && h.periodo > opciones.hasta) continue;
     cargas[h.periodo] = `carga-${h.periodo}`;
-    if (!esTienda.has(h.tienda)) continue;
     const gml = N[h.nodo];
     const eqFila = NODO_GMLE.has(gml) ? h.eq : null;
+    // Disponibilidad (0.10.1): solo desde `desdeW12`; stock de las tiendas de M(Y) y, aparte, el del CD.
+    if (h.periodo >= desdeW12) {
+      const claveD = [gml, eqFila, h.agm, h.periodo].join("|");
+      const d = disponibilidad.get(claveD) ?? { gml_id: gml, equivalencia_id: eqFila, agrupacion_marca_id: h.agm, periodo: `${h.periodo}-01`, tiendas_total: mismasY, tiendas_con_stock: 0, unidades_con_stock: 0, stock_cd: 0 };
+      const stock = h.stock ?? h.unidades * 2;
+      if (!esTienda.has(h.tienda)) d.stock_cd = (d.stock_cd as number) + stock;
+      else if (claveIncluye(claves[h.tienda] ?? "00000", anio, anio) && stock > 0) {
+        const vistas = tiendasConStock.get(claveD) ?? new Set<string>();
+        if (!vistas.has(h.tienda)) {
+          vistas.add(h.tienda);
+          d.tiendas_con_stock = (d.tiendas_con_stock as number) + 1;
+        }
+        tiendasConStock.set(claveD, vistas);
+        d.unidades_con_stock = (d.unidades_con_stock as number) + h.unidades;
+      }
+      disponibilidad.set(claveD, d);
+    }
+    if (!esTienda.has(h.tienda)) continue;
     const clave = claves[h.tienda] ?? "00000";
     const periodo = `${h.periodo}-01`;
     const soles = h.soles ?? h.unidades * 100;
@@ -350,6 +382,7 @@ export function construirVenta(
       return { gml_id, equivalencia_id, unidades };
     }),
     detalle_w12: [...detalleW12.values()].map((f) => limpiar(f, ["venta_soles", "costo_vendido", "stock_unidades"]) as never),
+    disponibilidad: [...disponibilidad.values()].map((f) => f as never),
     cargas,
   };
 }
@@ -390,7 +423,7 @@ export function entrada(cambios: Partial<EntradaCalculo> & { hechos?: Hecho[]; d
     anio: Y,
     k,
     hoy: "2026-10-15",
-    parametros: { crecimiento_pct_defecto: 5, umbral_avance: 0.3, umbral_cobertura: 0.25, umbral_cola_larga: 100, rampa_maduracion: [1, 1, 1] },
+    parametros: { crecimiento_pct_defecto: 5, umbral_avance: 0.3, umbral_cobertura: 0.25, umbral_cola_larga: 100, umbral_disponibilidad: 0.75, rampa_maduracion: [1, 1, 1] },
     tiendas: lista,
     nodos: nodos(),
     agrupaciones: agrupaciones(),
@@ -403,6 +436,12 @@ export function entrada(cambios: Partial<EntradaCalculo> & { hechos?: Hecho[]; d
     ...cambios,
   };
 }
+
+/** DENIM × VALOR: T1 vende `u` por mes; T6 tiene stock sin vender; T5 no tiene la línea en el período (M(2026) = T1, T6, T5). */
+export const lineaDenimValor = (u: number, opciones: { stockT1?: number; conT6?: boolean } = {}): Hecho[] => [
+  ...serie({ tienda: "T1", nodo: "denim", eq: EQ.skinny, agm: AM.val, marca: MARCA.beta, talla: TALLA.central }, INICIO, "2026-09", () => u).map((h) => (opciones.stockT1 === undefined ? h : { ...h, stock: opciones.stockT1 })),
+  ...(opciones.conT6 === false ? [] : conStockSinVenta({ tienda: "T6", nodo: "denim", eq: EQ.skinny, agm: AM.val, marca: MARCA.beta, talla: TALLA.central }, "2025-01", "2026-09")),
+];
 
 /** Clave de la fila base DENIM × RECONOCIDO, etc. */
 export const clave = (nodo: keyof typeof N, agm: string, eq: string | null = null) => `|${N[nodo]}|${eq ?? ""}|${agm}`;

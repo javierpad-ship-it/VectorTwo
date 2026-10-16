@@ -3,7 +3,7 @@ import { cargarCatalogo } from "./contexto";
 import { leerFilaCompleta, leerFilasConAnios, leerTiendasProyeccion } from "./consultas";
 import { filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
 import { armarMensual } from "./mensual";
-import { aAnioApi, aFilaApi, aFilaModelo, aFilaPlana, type Catalogo } from "./persistencia";
+import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, type Catalogo } from "./persistencia";
 import { aTiendaApi, falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
 import type { ProyeccionDb } from "./consultas";
 import type { FiltroMatrizApi, HistoricoFila, FilaDetalleApi, RespuestaLineasApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
@@ -195,7 +195,7 @@ export async function leerFilaDetalle(id: string, filaId: string): Promise<Salid
     curva_origen: m.curva_origen,
     factores_mes: m.factores_mes,
     participaciones: m.participaciones,
-    anios: m.registros.map(aAnioApi),
+    anios: aAniosApi(m, b.p.anio_en_curso),
   });
 }
 

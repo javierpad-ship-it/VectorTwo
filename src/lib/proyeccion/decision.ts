@@ -1,3 +1,5 @@
+import { partesDeFecha } from "./calendario";
+import { avisosColaLarga } from "./cola-larga";
 import { curvaCambio, detalleCambioCurva } from "./curva-fila";
 import { explicar, textoCurva } from "./explicar";
 import { UNOS } from "./nino";
@@ -6,11 +8,13 @@ import { aporteSaliente, proponerSiguiente, type AporteBase } from "./siguiente"
 import { fraccionAbierta } from "./cierres-tienda";
 import {
   escalarTienda,
+  fraccionAnioApertura,
   maduroDeVigente,
   mesesCompletos,
   proponerFilaTienda,
   rampaMensual,
   sumaCurva,
+  unidadesMadurasDeFila,
   type FilaEscalable,
 } from "./tiendas-nuevas";
 import {
@@ -270,7 +274,8 @@ export function recalcularBaseSiguiente(
 
   const avisos: AvisoFila[] = [...resultado.avisos];
   for (const a of base.avisos) if (a === "objetivo_atipico" || a === "sin_factor") if (!avisos.includes(a)) avisos.push(a);
-  if (resultado.propuesto !== null && resultado.propuesto < ctx.umbral_cola_larga) avisos.push("cola_larga");
+  // Cola larga (0.10.1): la fila de `Y+1` hereda el veredicto de disponibilidad de `Y`, porque su base sale de `Y`.
+  for (const a of avisosColaLarga(base.historico?.cola_larga?.veredicto ?? null, resultado.propuesto, ctx.umbral_cola_larga)) if (!avisos.includes(a)) avisos.push(a);
 
   const explicacion = explicar({
     metodo: resultado.metodo,
@@ -287,6 +292,7 @@ export function recalcularBaseSiguiente(
     baseNormalizada: resultado.base_normalizada,
     crecimiento: g,
     aportes: detalleAportes,
+    baseColaLarga: base.historico?.cola_larga?.veredicto === "revision" && regY.decidido === null ? (base.historico.cola_larga.demanda_corregida ?? null) : null,
   });
 
   const registro = armarRegistro(
@@ -414,6 +420,40 @@ export function pesosDeTienda(info: InfoTienda | undefined, bloque: "nuevas" | "
 }
 
 /**
+ * `F = Σ_f s_f × A_f` de una tienda con una rampa dada (`0.10.1`): `A_f = Σ_{m∈Z_0} c_m r_m φ_m` con `Z_0` el año de su apertura,
+ * sobre sus filas con composición y curva. `null` sin fecha de apertura o sin ninguna fila.
+ */
+export function fraccionDeTienda(filas: readonly FilaModelo[], info: InfoTienda | undefined, rampa: readonly number[]): number | null {
+  if (!info?.fecha_apertura) return null;
+  const z0 = partesDeFecha(info.fecha_apertura).anio;
+  const r = pesosDeTienda(info, "nuevas", rampa, z0);
+  const items = filas.flatMap((f) => (f.composicion && f.curva ? [{ s: f.composicion.s, curva: f.curva, phi: f.factores_mes?.[z0] ?? UNOS }] : []));
+  return items.length === 0 ? null : fraccionAnioApertura(items, r);
+}
+
+/**
+ * `Md_f = E × s_f ÷ (p_f × F)` de cada fila de UNA tienda con una rampa dada, y su suma (`unidades_maduras` de la tienda). `F` se
+ * rehace con esa rampa: las unidades maduras guardadas pueden ser de otra. `null` sin venta esperada (`E`).
+ */
+export function unidadesMadurasDeTienda(
+  filas: readonly FilaModelo[],
+  info: InfoTienda | undefined,
+  rampa: readonly number[]
+): { fraccion: number | null; total: number | null; porFila: Map<string, number> } {
+  const E = info?.venta_esperada ?? null;
+  const fraccion = fraccionDeTienda(filas, info, rampa);
+  const porFila = new Map<string, number>();
+  if (E === null) return { fraccion, total: null, porFila };
+  let total = 0;
+  for (const f of filas) {
+    const md = f.composicion && f.curva && fraccion !== null ? unidadesMadurasDeFila({ E, s: f.composicion.s, p: f.composicion.p, F: fraccion }) : 0;
+    porFila.set(f.clave, md);
+    total += md;
+  }
+  return { fraccion, total, porFila };
+}
+
+/**
  * Rehace las propuestas de los registros de UNA tienda y un año sobre lo guardado (sin releer venta), con la rampa
  * indicada: lo usa "cambiar la rampa de la tienda". Conserva las decisiones por fila (cifras fijadas) y el total de la
  * tienda se vuelve a escalar en `aplicarDecisionTienda`.
@@ -424,11 +464,18 @@ export function recalcularFilasTienda(
   rampa: readonly number[] | null,
   ctx: ContextoModelo
 ): FilaModelo[] {
+  // `F` depende de la rampa: se rehace con la rampa efectiva de la tienda (las unidades maduras guardadas pueden ser de otra rampa).
+  const fraccionPorTienda = new Map<string, number | null>();
   return filas.map((fila) => {
     const registro = registroDe(fila, anio);
     if (!registro || fila.tienda_id === null || registro.bloque === "cierres") return fila;
     const info = ctx.tiendas.get(fila.tienda_id);
     const rampaUsada = rampaDeTienda(info, rampa, ctx);
+    const tiendaId = fila.tienda_id;
+    if (!fraccionPorTienda.has(tiendaId)) fraccionPorTienda.set(tiendaId, fraccionDeTienda(filas.filter((x) => x.tienda_id === tiendaId), info, rampaUsada));
+    const F = fraccionPorTienda.get(tiendaId) ?? null;
+    const E = info?.venta_esperada ?? null;
+    const maduras = E === null ? null : fila.composicion && fila.curva && F !== null ? unidadesMadurasDeFila({ E, s: fila.composicion.s, p: fila.composicion.p, F }) : 0;
     const r = pesosDeTienda(info, "nuevas", rampaUsada, anio);
     const phi = fila.factores_mes?.[anio] ?? UNOS;
     const esY = anio === ctx.anio;
@@ -450,7 +497,7 @@ export function recalcularFilasTienda(
       curva: fila.curva,
       rampa: r,
       phi,
-      maduras: fila.composicion?.unidades_maduras ?? (info?.venta_esperada == null ? null : 0),
+      maduras,
       maduroPrevio,
       crecimiento: g,
     });

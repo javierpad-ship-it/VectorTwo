@@ -269,7 +269,12 @@ class Consulta implements PromiseLike<Resultado> {
     const salida: Fila = {};
     for (const parte of dividir(seleccion)) {
       const m = /^(\w+)\((.*)\)$/.exec(parte);
-      if (m) {
+      const ruta = /^(\w+):(\w+)->(\w+)$/.exec(parte);
+      if (ruta) {
+        // `alias:columna->clave` de PostgREST sobre un jsonb.
+        const json = f[ruta[2]];
+        salida[ruta[1]] = json !== null && typeof json === "object" ? ((json as Fila)[ruta[3]] ?? null) : null;
+      } else if (m) {
         const rel = RELACIONES[this.tabla]?.[m[1]];
         if (!rel) throw new Error(`relación no soportada: ${this.tabla} → ${m[1]}`);
         const tablaRel = estado.tablas[m[1]] ?? [];

@@ -30,7 +30,7 @@ const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && 
 /** Lógica pura: ni base ni HTTP ni pantalla. */
 const PURAS = [
   "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
-  "explicar", "matriz", "mensual", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
+  "explicar", "cola-larga", "resumen", "matriz", "mensual", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
 ];
 
 describe("M7 regla 44: la lectura de venta y las tablas", () => {
@@ -101,6 +101,25 @@ describe("M7: pureza de la lógica", () => {
   it("VERSION_METODO vive en tipos-api.ts y entra en el resumen del cálculo", () => {
     expect(fuente(`${LIB}tipos-api.ts`)).toMatch(/export const VERSION_METODO\s*=\s*\d+/);
     expect(fuente(`${LIB}calculo.ts`)).toMatch(/version_metodo:\s*VERSION_METODO/);
+  });
+});
+
+describe("M7 regla 45: sin canibalización (0.10.1, decisión 20)", () => {
+  const nombra = (f: { ruta: string; texto: string }) => /canibaliz/i.test(f.texto);
+  it("ningún archivo de la lógica ni de la API de M7 nombra la canibalización; AvisoFila no la admite", () => {
+    const usan = src.filter((f) => (f.ruta.startsWith(LIB) || f.ruta.startsWith("src/app/api/proyeccion/")) && nombra(f)).map((f) => f.ruta);
+    expect(usan).toEqual([]);
+    expect(fuente(`${LIB}tipos-api.ts`)).not.toMatch(/canibaliz/i);
+  });
+  it("tampoco la pantalla de la proyección", () => {
+    const usan = src.filter((f) => f.ruta.startsWith("src/app/(app)/planificacion/proyeccion/") && nombra(f)).map((f) => f.ruta);
+    expect(usan).toEqual([]);
+  });
+  it("`zona` solo es una etiqueta: ninguna función del método la lee para calcular ni avisar", () => {
+    for (const f of src.filter((x) => x.ruta.startsWith(LIB))) {
+      if (["bloques.ts", "contexto.ts", "tipos-api.ts"].some((n) => f.ruta.endsWith(`/${n}`))) continue; // la guardan y la copian, no la usan
+      expect(sinComentarios(f.texto), f.ruta).not.toMatch(/\.zona\b/);
+    }
   });
 });
 

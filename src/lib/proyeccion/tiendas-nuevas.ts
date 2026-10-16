@@ -5,10 +5,41 @@ import { MESES_MIN_AVANCE, RAMPA_MAX, type AvisoFila, type Metodo, type Subbloqu
 /**
  * Tiendas nuevas (ficha 07, paso 4 y reglas 19 a 23). Puro.
  *
- * El año de una tienda nueva sale de tres insumos: su venta esperada `E` (soles por mes, sin IGV, de la
- * tienda madura), la composición del referente (`s_f`, `p_f`; unidades maduras por fila
- * `Md_f = E × 12 × s_f ÷ p_f`) y la rampa de maduración `r_m`, todo repartido con la curva de la unidad.
+ * El año de una tienda nueva sale de tres insumos: su venta esperada `E` (`0.10.1`, decisión 22: soles, sin IGV, del AÑO DE
+ * APERTURA; ni mensual ni de tienda madura), la composición del referente (`s_f`, `p_f`) y la rampa de maduración `r_m`, todo
+ * repartido con la curva de la unidad:
+ *
+ *   A_f  = Σ_{m ∈ Z_0} c_m r_m φ_m      fracción del año de apertura `Z_0` que la fila alcanza a vender (con `φ` de unos es la de la ficha)
+ *   F    = Σ_f s_f A_f                   la misma fracción, ponderada por la composición en soles
+ *   K    = E ÷ F                         soles de un año maduro completo
+ *   Md_f = E × s_f ÷ (p_f × F)           unidades maduras por fila
+ *   P_f  = round(Md_f × A_f)             propuesta del año de apertura: Σ_f P_f × p_f ≈ E
  */
+
+/** Una fila de la composición con lo que hace falta para `F`: su `s_f`, su curva y el `φ` de `Z_0`. */
+export type FilaParaFraccion = { s: number; curva: readonly number[] | null; phi: readonly number[] };
+
+/** `A_f`: fracción del año de apertura que la fila alcanza a vender, con `r` = rampa mensual de `Z_0` (`rampaMensual(apertura, rampa, Z_0)`). */
+export function fraccionDeFila(curva: readonly number[], r: readonly number[], phi: readonly number[]): number {
+  return sumaCurva(curva, r, phi, 0, 12);
+}
+
+/** `F = Σ_f s_f × A_f` sobre las filas con curva (una fila sin curva no tiene `A_f`: no entra). */
+export function fraccionAnioApertura(filas: readonly FilaParaFraccion[], r: readonly number[]): number {
+  let f = 0;
+  for (const x of filas) if (x.curva !== null) f += x.s * fraccionDeFila(x.curva, r, x.phi);
+  return f;
+}
+
+/** `Md_f = E × s_f ÷ (p_f × F)`; 0 si no hay precio o `F` (nada que repartir). */
+export function unidadesMadurasDeFila(args: { E: number; s: number; p: number; F: number }): number {
+  return args.p > 0 && args.F > 0 ? (args.E * args.s) / (args.p * args.F) : 0;
+}
+
+/** `K = E ÷ F`: lo que vendería la tienda en un año completo y madura; `null` sin `F`. */
+export function anioMaduroSoles(E: number, F: number): number | null {
+  return F > 0 ? E / F : null;
+}
 
 // ─── Rampa ───
 

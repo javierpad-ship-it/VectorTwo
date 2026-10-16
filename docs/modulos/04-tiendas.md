@@ -11,7 +11,7 @@ El **estado** de cada tienda (Planificada · Activa · Cerrada) **no se guarda: 
 **Qué consume la Fase 2 de aquí** (M5, M6 y M7 se especifican al cerrar la Fase 1; esto es lo que M4 les deja listo):
 
 - **M5 (carga de ventas y stock por tienda)**: cada fila de venta o stock trae un código de tienda; M5 lo resuelve contra `tiendas.codigo` (comparación sobre `upper`) y omite con motivo `tienda_desconocida` las que no existan, igual que M1 hace con géneros y mundos. Una tienda **Cerrada** sigue siendo válida para cargar su histórico (es `activo = true`); solo una tienda **desactivada** (`activo = false`) rechaza filas. **Ver 05c** ([05c-ubicaciones-conciliacion](05c-ubicaciones-conciliacion.md), 2026-10-12): lo anterior sigue valiendo para tiendas reales, pero las ubicaciones del archivo que **no son tiendas** (la central, las oficinas) ya no se crean aquí como tiendas desactivadas; viven en una lista propia, `ubicaciones_ignoradas`, administrada desde una pestaña nueva de esta pantalla, y si existe una tienda con el mismo nombre la tienda manda. Cuando M5 cuelgue filas de `tiendas`, `DELETE /api/tiendas/[id]` empezará a responder `409` con el conteo.
-- **M7 (proyección)**: una tienda **Planificada** con `fecha_apertura` dentro del horizonte se proyecta desde esa fecha usando `venta_esperada_promedio` (soles por mes) como escala, porque no tiene histórico; una tienda **Cerrada** deja de proyectarse a partir del día siguiente a `fecha_cierre`; una tienda **Activa** se proyecta con su histórico. El centro de distribución no vende y no se proyecta: es stock, no venta.
+- **M7 (proyección)**: una tienda **Planificada** con `fecha_apertura` dentro del horizonte se proyecta desde esa fecha usando `venta_esperada_promedio` (**soles, sin IGV, del año de apertura**: desde `fecha_apertura` hasta el 31 de diciembre de ese año; `0.10.1`, decisión 22) como escala, porque no tiene histórico; una tienda **Cerrada** deja de proyectarse a partir del día siguiente a `fecha_cierre`; una tienda **Activa** se proyecta con su histórico. El centro de distribución no vende y no se proyecta: es stock, no venta.
 
 ## Modelo de datos
 
@@ -34,7 +34,7 @@ Migración `supabase/migrations/0004_tiendas.sql`, idempotente, sin bloques `do 
 | `razon_social` | `text null` | `check tiendas_razon_social_len_check (razon_social is null or length(razon_social) between 1 and 120)` |
 | `fecha_apertura` | `date null` | primer día en que la tienda vende |
 | `fecha_cierre` | `date null` | último día en que la tienda vende (inclusive); `check tiendas_cierre_requiere_apertura_check (fecha_cierre is null or fecha_apertura is not null)` y `check tiendas_cierre_apertura_check (fecha_cierre is null or fecha_cierre >= fecha_apertura)` |
-| `venta_esperada_promedio` | `numeric(14,2) null` | soles por mes; `check tiendas_venta_no_negativa_check (venta_esperada_promedio is null or venta_esperada_promedio >= 0)` y `check tiendas_venta_solo_tienda_check (venta_esperada_promedio is null or tipo = 'Tienda')` |
+| `venta_esperada_promedio` | `numeric(14,2) null` | soles, sin IGV, que la tienda venderá en su **año de apertura** (ni mensual ni de tienda madura: M7 deduce el año maduro `K = E ÷ F` con la curva y la fracción del año; `0.10.1`; la columna no se renombra, solo cambia su `comment`); `check tiendas_venta_no_negativa_check (venta_esperada_promedio is null or venta_esperada_promedio >= 0)` y `check tiendas_venta_solo_tienda_check (venta_esperada_promedio is null or tipo = 'Tienda')` |
 
 Índices: solo los dos únicos. La tabla tiene del orden de una docena de filas; filtros por tipo, estado y zona se hacen en memoria.
 
@@ -42,7 +42,7 @@ Migración `supabase/migrations/0004_tiendas.sql`, idempotente, sin bloques `do 
 
 **Por qué el cierre exige apertura y es inclusive.** Un cierre sin apertura no dice nada a M7 (¿desde cuándo había venta?); si la apertura de una tienda vieja no se conoce con exactitud, se carga una aproximada. `fecha_cierre` es el **último día con venta**: una tienda con cierre hoy sigue Activa hoy y pasa a Cerrada mañana. Es la lectura más natural de "la tienda cerró el 31 de marzo" (vendió el 31) y queda registrada como decisión para que M7 la respete (pregunta abierta 6 por si Javier la entiende al revés).
 
-**Por qué la venta esperada no se restringe a las Planificadas.** Es lo que M7 usará para escalar una tienda sin histórico, así que importa en las Planificadas; pero una tienda que acaba de abrir sigue sin histórico útil durante meses, y conservar el valor tras la apertura no estorba. Sí se rechaza en un CD (no vende). Moneda y periodicidad (soles por mes) son un supuesto heredado de V1: pregunta abierta 4.
+**Por qué la venta esperada no se restringe a las Planificadas.** Es lo que M7 usará para escalar una tienda sin histórico, así que importa en las Planificadas; pero una tienda que acaba de abrir sigue sin histórico útil durante meses, y conservar el valor tras la apertura no estorba. Sí se rechaza en un CD (no vende). Moneda y periodicidad: **resuelto en la ronda 4 de Javier (`0.10.1`, decisión 22)**: soles, sin IGV, del año de apertura; no es mensual ni de tienda madura (era un supuesto heredado de V1, pregunta 4). Los valores cargados con el significado anterior los reescribe Javier; no hay conversión automática.
 
 **`activo` no es el estado.** Son dos cosas distintas y las dos se muestran:
 
@@ -70,7 +70,7 @@ tiendas ── codigo (R401, RD50…) · nombre · tipo (Tienda | Centro de Dist
    │       zona · razon_social (texto libre normalizado, autocompletado)
    │       fecha_apertura ──┐
    │       fecha_cierre   ──┼─► estadoTienda(tienda, hoy) = Planificada | Activa | Cerrada   (no se guarda)
-   │       venta_esperada_promedio (S/ por mes; solo tipo Tienda)
+   │       venta_esperada_promedio (S/, sin IGV, del año de apertura; solo tipo Tienda)
    │
    ├──▶ (M5) venta y stock traen codigo de tienda → se resuelve aquí; tienda desactivada = fila omitida
    └──▶ (M7) Planificada → proyecta con venta_esperada desde fecha_apertura · Cerrada → deja de proyectar tras fecha_cierre
@@ -256,7 +256,7 @@ Un solo panel con tres pestañas (`Tabs`): **Tiendas · Calendario · Importar**
 | Razón social | `Input` con `<datalist>` de razones ya usadas | opcional |
 | Fecha de apertura | `Input type="date"` | opcional; `hint` "Sin fecha, la tienda queda Planificada" |
 | Fecha de cierre | `Input type="date"`, `min` = apertura | deshabilitada sin apertura; anterior a apertura → "La fecha de cierre no puede ser anterior a la de apertura." |
-| Venta esperada (S/ por mes) | `Input type="number" step="0.01" min="0"` | `hint` "Solo para tiendas que aún no abren: M7 la usa en lugar del histórico"; deshabilitada en CD |
+| Venta esperada del año de apertura (S/, sin IGV) | `Input type="number" step="0.01" min="0"` | `hint` "Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura: M7 deduce el año maduro con la curva y la fracción del año."; deshabilitada en CD; el importador la rotula igual (`0.10.1`) |
 
 Debajo del formulario, antes de guardar, un `Badge` con el estado que tendrá la tienda según las fechas escritas ("Quedará Planificada" / "Activa" / "Cerrada"), calculado con `estadoTienda` y `hoy` del cliente. Tras crear: `Alert` de éxito y el formulario se limpia conservando zona y razón social (para cargar varias de la misma zona seguidas).
 
@@ -440,7 +440,7 @@ Observaciones menores de QA que quedan abiertas a propósito; ninguna pierde dat
 1. **Lista oficial de tiendas.** ¿Sirve el archivo *CODIGOS DE TIENDAS LUKERS* de V1 tal cual (Cod.Tda, Tda#, Tienda, Zona, Razón Social) o hay una versión nueva? ¿Trae fechas de apertura? Si no, ¿las tienes aunque sea aproximadas (mes y año) para las 11 actuales? Sin fecha de apertura una tienda se ve **Planificada** y M7 no la proyectaría con su histórico.
 2. **Nombres en mayúsculas.** Las tiendas se guardarán normalizadas (`LUKERS PROLONGACIÓN IQUITOS`), como todo maestro. ¿Los archivos de venta y stock traen el **código** de tienda (`R401`) y no el nombre? El importador de M5 resolverá por código; si solo viniera el nombre, hay que saberlo ahora.
 3. **Zona y razón social.** Hoy son texto libre con autocompletado (dos zonas, dos razones sociales; `LUKERS CENTRAL` sin zona). ¿En la Fase 2 vas a proyectar o reportar por zona? Si sí, conviene hacerlas catálogo con FK desde ya.
-4. **Venta esperada.** La ficha la toma como **soles por mes** (como en V1). ¿Es así, o la piensas en unidades, o por semana? ¿Es venta neta o con IGV? Solo cambia la etiqueta y la fórmula de M7, pero mejor fijarlo antes de cargar valores.
+4. **Venta esperada.** ~~La ficha la tomaba como soles por mes (como en V1).~~ **Resuelta (ronda 4, `0.10.1`, decisión 22): soles, sin IGV, del año de apertura** (desde la apertura hasta el 31 de diciembre de ese año); no es venta mensual ni de tienda madura. Cambiaron la etiqueta, la ayuda y la fórmula de M7.
 5. **El centro de distribución.** ¿Lleva fecha de apertura (y por tanto estado), o lo dejamos sin fechas y la pantalla lo muestra como "CD" sin estado? Hoy, sin fechas, saldría Planificada, que es engañoso; si prefieres lo segundo, es una línea en `estadoTienda` (los CD devuelven `Activa` siempre que estén `activo`).
 6. **Fecha de cierre.** La ficha la entiende como el **último día con venta** (la tienda que cierra el 31 vende el 31). ¿Es así como la registras?
 7. **Tiendas existentes con datos distintos en el archivo.** Igual que en marcas: el importador no modifica lo que ya existe, solo muestra las diferencias. ¿Está bien, o quieres una opción "actualizar existentes" (se haría en M2 y M4 a la vez)?

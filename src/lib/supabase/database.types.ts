@@ -294,6 +294,7 @@ export type Database = {
           aprobada_at: string;
           corrida_id: string;
           created_at: string;
+          curva_manual: Json | null;
           eat: number | null;
           error_max: number | null;
           estado: string;
@@ -302,6 +303,7 @@ export type Database = {
           modelo: string;
           nota: string | null;
           origen: string;
+          origen_curva: string;
           p01: number;
           p02: number;
           p03: number;
@@ -327,6 +329,7 @@ export type Database = {
           aprobada_at?: string;
           corrida_id: string;
           created_at?: string;
+          curva_manual?: Json | null;
           eat?: number | null;
           error_max?: number | null;
           estado?: string;
@@ -335,6 +338,7 @@ export type Database = {
           modelo: string;
           nota?: string | null;
           origen: string;
+          origen_curva?: string;
           p01: number;
           p02: number;
           p03: number;
@@ -360,6 +364,7 @@ export type Database = {
           aprobada_at?: string;
           corrida_id?: string;
           created_at?: string;
+          curva_manual?: Json | null;
           eat?: number | null;
           error_max?: number | null;
           estado?: string;
@@ -368,6 +373,7 @@ export type Database = {
           modelo?: string;
           nota?: string | null;
           origen?: string;
+          origen_curva?: string;
           p01?: number;
           p02?: number;
           p03?: number;
@@ -2126,6 +2132,14 @@ export type Database = {
       venta_estacionalidad_agrupacion: {
         Args: {
           p_agrupacion_id?: string;
+        };
+        Returns: Json;
+      };
+      venta_composicion_agrupacion: {
+        Args: {
+          p_agrupacion_id: string;
+          p_hasta: string;
+          p_red: Json;
         };
         Returns: Json;
       };

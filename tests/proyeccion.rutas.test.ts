@@ -46,7 +46,7 @@ import { POST as archivar } from "@/app/api/proyeccion/proyecciones/[id]/archiva
 import { GET as leerFactores, PUT as guardarFactores } from "@/app/api/proyeccion/factores/route";
 import { POST as sincronizar } from "@/app/api/proyeccion/factores/sincronizar/route";
 import { GET as cerrada } from "@/app/api/proyeccion/cerrada/route";
-import { construirVenta, AG, AM, EQ, GEN, LIN, MUN, N, tiendas as tiendasFixture, vigentes } from "./proyeccion.fixture";
+import { construirVenta, lineaDenimValor, AG, AM, EQ, GEN, LIN, MUN, N, tiendas as tiendasFixture, vigentes } from "./proyeccion.fixture";
 import type { AnioFilaApi, FilaApi, FilaDetalleApi, FactorApi, ProyeccionApi, RespuestaCerradaApi, RespuestaFilasTiendaApi, RespuestaLineasApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaProyeccionApi, RespuestaTiendasApi, TiendaProyeccionApi } from "@/lib/proyeccion/tipos-api";
 
 const URL_BASE = "http://localhost/api/proyeccion";
@@ -81,6 +81,7 @@ beforeEach(() => {
       por_tienda: v.por_tienda.filter((f) => nodos.has(f.gml_id)),
       equivalencias: v.equivalencias.filter((f) => nodos.has(f.gml_id)),
       detalle_w12: v.detalle_w12.filter((f) => nodos.has(f.gml_id)),
+      disponibilidad: v.disponibilidad.filter((f) => nodos.has(f.gml_id)),
       cargas: v.cargas,
     };
   };
@@ -148,7 +149,7 @@ describe("crear y calcular", () => {
     expect(p).toMatchObject({ anio_en_curso: 2026, anio_siguiente: 2027, estado: "en_trabajo", hasta_periodo: "2026-09", calculando: false });
     expect(p.parametros.crecimiento_pct_defecto).toBe(5);
     expect(p.bloques[2026].nuevas.map((t) => t.codigo).sort()).toEqual(["T2", "T3", "T9"]);
-    expect(p.resumen?.version_metodo).toBe(2);
+    expect(p.resumen?.version_metodo).toBe(3);
     expect(p.resumen?.duracion_ms).not.toBeNull();
     expect(p.desactualizada).toEqual([]);
     expect(proyecciones()[0].calculando_desde).toBeNull();
@@ -329,7 +330,7 @@ describe("decisiones (PUT) y B2", () => {
     expect((await decidirTienda(enviar("PUT", "/x", { decidido: 5, origen: "manual" }), ctx(id as string, { tiendaId: "T8", anio: "2026" }))).status).toBe(404);
   });
 
-  it("cambiar la rampa de una apertura rehace su propuesta; T4 con rampa [0,7; 0,85; 1] baja frente a la de [1, 1, 1]", async () => {
+  it("cambiar la rampa de una apertura rehace su propuesta; con la venta esperada del año de apertura (0.10.1) el total en soles sigue siendo E y cambia el reparto por meses", async () => {
     const { id } = await nueva();
     const total = (await leer<RespuestaTiendasApi>(await tiendas(get("/t", "?anio=2027&bloque=nuevas"), ctx(id as string)))).data.tiendas.find((t) => t.codigo === "T4") as TiendaProyeccionApi;
     expect(total.rampa).toEqual([1, 1, 1]);
@@ -337,7 +338,26 @@ describe("decisiones (PUT) y B2", () => {
     expect(r.status).toBe(200);
     const nuevo = (await leer<TiendaProyeccionApi>(r)).data;
     expect(nuevo.rampa).toEqual([0.7, 0.85, 1]);
-    expect(nuevo.propuesto).toBeLessThan(total.propuesto as number);
+    // `F` se rehace con la rampa: ninguna rampa cambia lo que la tienda vende en su año de apertura (E), solo cómo se reparte.
+    expect(Math.abs((nuevo.propuesto as number) - (total.propuesto as number))).toBeLessThanOrEqual(5);
+    expect(nuevo.explicacion).toContain("año de apertura");
+    expect(nuevo.explicacion).toContain("de un año maduro");
+    expect(nuevo.explicacion).toContain("rampa 0.70 · 0.85 · 1.00");
+    // Las unidades maduras de la tarjeta se rehacen con la rampa efectiva (F cambia): coinciden con las de un cálculo completo.
+    const dbT4 = () => filasDe("proyeccion_tiendas").find((t) => t.tienda_id === "T4" && t.anio === 2027) as Fila;
+    const compT4 = () => filasDe("proyeccion_filas").filter((f) => f.tienda_id === "T4").map((f) => [f.clave, (f.composicion as { unidades_maduras: number }).unidades_maduras] as const).sort();
+    expect(nuevo.unidades_maduras).not.toBe(total.unidades_maduras);
+    expect(dbT4().unidades_maduras).toBe(nuevo.unidades_maduras);
+    const md = (nuevo.unidades_maduras as number) / 1; // Σ Md_f
+    expect(compT4().reduce((a, [, u]) => a + u, 0)).toBeCloseTo(md, 0);
+    expect(nuevo.explicacion).toContain(`año maduro ${(nuevo.unidades_maduras as number).toLocaleString("en-US")} u`);
+    const antesCalculo = { unidades: dbT4().unidades_maduras, filas: compT4() };
+    expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
+    expect(dbT4().unidades_maduras).toBe(antesCalculo.unidades);
+    for (const [i, [clave, u]] of compT4().entries()) {
+      expect(clave).toBe(antesCalculo.filas[i][0]);
+      expect(u).toBeCloseTo(antesCalculo.filas[i][1], 6);
+    }
     expect(nuevo.decidido).toBeNull();
     expect((await decidirTienda(enviar("PUT", "/x", { rampa: [0] }), ctx(id as string, { tiendaId: "T4", anio: "2027" }))).status).toBe(400);
   });
@@ -416,9 +436,50 @@ describe("matriz y mensual (casos 13 y 14)", () => {
   });
 });
 
+describe("umbral de disponibilidad (0.10.1)", () => {
+  it("nace en 0,75, es editable al crear y por PATCH (pide recalcular), se valida entre 0 y 1 y manda en el veredicto", async () => {
+    contexto.hechos = [...contexto.hechos, ...lineaDenimValor(8)];
+    const porDefecto = await nueva("Por defecto");
+    expect(porDefecto.cuerpo.data.parametros).toMatchObject({ umbral_disponibilidad: 0.75, umbral_cola_larga: 100 });
+    const filaValor = () => filasDe("proyeccion_filas").find((f) => f.clave === `|${N.denim}||${AM.val}`) as Fila;
+    const propuesto = () => (filasDe("proyeccion_fila_anios").find((a) => a.fila_id === filaValor().id && a.anio === 2026) as Fila).propuesto;
+    expect(propuesto()).toBe(144);
+
+    // PATCH: el parámetro se guarda y marca recalculo_pendiente; al recalcular manda en el veredicto (0,667 ≥ 0,5: sin quiebre relevante).
+    const p = await editar(enviar("PATCH", "/x", { parametros: { umbral_disponibilidad: 0.5 } }), ctx(porDefecto.id as string));
+    expect(p.status).toBe(200);
+    const editada = (await leer<ProyeccionApi>(p)).data;
+    expect(editada.parametros.umbral_disponibilidad).toBe(0.5);
+    expect(editada.desactualizada.map((m) => m.codigo)).toContain("recalculo_pendiente");
+    expect((await calcular(enviar("POST", "/x"), ctx(porDefecto.id as string))).status).toBe(201);
+    expect(propuesto()).toBe(96);
+
+    expect((await editar(enviar("PATCH", "/x", { parametros: { umbral_disponibilidad: 1.2 } }), ctx(porDefecto.id as string))).status).toBe(400);
+    expect((await editar(enviar("PATCH", "/x", { parametros: { umbral_disponibilidad: -0.1 } }), ctx(porDefecto.id as string))).status).toBe(400);
+    expect((await crear(enviar("POST", "/proyecciones", { nombre: "Otra", parametros: { umbral_disponibilidad: "alto" } }))).status).toBe(400);
+    expect((await crear(enviar("POST", "/proyecciones", { nombre: "Otra", parametros: { umbral_disponibilidad: 0.4 } }))).status).toBe(201);
+    expect(proyecciones().find((x) => x.nombre === "Otra")?.parametros).toMatchObject({ umbral_disponibilidad: 0.4 });
+  });
+
+  it("una proyección calculada con version_metodo 2 aparece desactualizada (version_metodo); recalcular la deja al día y conserva las decisiones", async () => {
+    const { id } = await nueva();
+    await decidirFila(enviar("PUT", "/x", { decidido: 1900, origen: "manual" }), ctx(id as string, { filaId: idFila(DENIM_REC), anio: "2026" }));
+    expect((await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data.desactualizada).toEqual([]);
+    const p = proyecciones().find((x) => x.id === id) as Fila;
+    p.resumen = { ...(p.resumen as Record<string, unknown>), version_metodo: 2 };
+    const vieja = (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data;
+    expect(vieja.desactualizada.map((m) => m.codigo)).toEqual(["version_metodo"]);
+    expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
+    const nueva_ = (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data;
+    expect(nueva_.desactualizada).toEqual([]);
+    expect(nueva_.resumen?.version_metodo).toBe(3);
+    expect(filasDe("proyeccion_fila_anios").find((a) => a.fila_id === idFila(DENIM_REC) && a.anio === 2026)).toMatchObject({ decidido: 1900 });
+  });
+});
+
 describe("cerrar, archivar y el contrato de M8 (casos 14 y 17)", () => {
-  async function decidirTodo(id: string) {
-    for (const f of filasDe("proyeccion_filas").filter((x) => x.tienda_id === null)) {
+  async function decidirTodo(id: string, salvo?: string) {
+    for (const f of filasDe("proyeccion_filas").filter((x) => x.tienda_id === null && x.id !== salvo)) {
       for (const anio of [2026, 2027]) {
         const a = filasDe("proyeccion_fila_anios").find((x) => x.fila_id === f.id && x.anio === anio) as Fila;
         if (a.propuesto !== null && (a.propuesto as number) >= 100) {
@@ -459,6 +520,88 @@ describe("cerrar, archivar y el contrato de M8 (casos 14 y 17)", () => {
     const p = (await leer<ProyeccionApi & { archivada_id: string | null }>(ok)).data;
     expect(p).toMatchObject({ estado: "cerrada", nota: "Cierre de prueba", archivada_id: null });
     expect(proyecciones()[0].cerrada_por_nombre).toBe("Javier");
+  });
+
+  it("una cerrada de 0.10.0 (participaciones sin periodo_referencia ni por_marca) se lee con ambos en null y no se toca", async () => {
+    const { id } = await nueva();
+    await decidirTodo(id as string);
+    await cerrar(enviar("POST", "/x", {}), ctx(id as string));
+    const fila = filasDe("proyeccion_filas").find((f) => f.clave === DENIM_REC) as Fila;
+    const completa = fila.participaciones as { por_clave_flujo: unknown; por_talla: unknown };
+    fila.participaciones = { por_clave_flujo: completa.por_clave_flujo, por_talla: completa.por_talla };
+    const c = await leer<RespuestaCerradaApi>(await cerrada(get("/cerrada", "?anio=2026")));
+    const d = c.data.filas.find((f) => f.bloque === "mismas" && f.linea === "DENIM" && f.agrupacion_marca === "RECONOCIDO") as RespuestaCerradaApi["filas"][number];
+    expect(d.participaciones_historicas?.periodo_referencia).toBeNull();
+    expect(d.participaciones_historicas?.por_marca).toBeNull();
+    expect(d.participaciones_historicas?.por_talla.length).toBeGreaterThan(0);
+  });
+
+  it("cola larga con quiebres: cerrar responde 409 filas_sin_decidir con la fila para revisión (demanda corregida y disponibilidad); decidirla deja cerrar", async () => {
+    contexto.hechos = [...contexto.hechos, ...lineaDenimValor(8)];
+    const { id } = await nueva();
+    const filaValor = filasDe("proyeccion_filas").find((f) => f.clave === `|${N.denim}||${AM.val}`) as Fila;
+    expect(filaValor).toBeDefined();
+    const antes = filasDe("proyeccion_fila_anios").find((a) => a.fila_id === filaValor.id && a.anio === 2026) as Fila;
+    expect(antes).toMatchObject({ propuesto: 144, referencia_alternativa: 96, metodo: "avance" });
+    expect(antes.avisos).toContain("revision_cola_larga");
+    expect((filaValor.historico as { cola_larga: { veredicto: string } }).cola_larga.veredicto).toBe("revision");
+
+    // Todo lo demás decidido (lo ≥ umbral y las tiendas): solo queda la fila de revisión.
+    await decidirTodo(id as string, filaValor.id as string);
+    const sin = await cerrar(enviar("POST", "/x", {}), ctx(id as string));
+    const c = await leer(sin);
+    expect(sin.status).toBe(409);
+    expect(c.codigo).toBe("filas_sin_decidir");
+    expect(c.error).toContain("cola larga con quiebres de stock");
+    expect(c.total_filas_para_revision).toBe(2);
+    const lista = c.filas_sin_decidir as { clave: string; anio: number; propuesto: number; motivo: string; demanda_corregida: number | null; disponibilidad: number | null; nombre: string }[];
+    const y = lista.find((x) => x.clave === filaValor.clave && x.anio === 2026);
+    expect(y).toMatchObject({ propuesto: 144, motivo: "revision_cola_larga", demanda_corregida: 144 });
+    expect(y?.disponibilidad).toBeCloseTo(24 / 36, 3);
+    expect(y?.nombre).toContain("DENIM");
+
+    // Detalle de la fila: el registro de Y trae cola_larga y el de Y+1 no.
+    const det = await leer<FilaDetalleApi>(await detalleFila(get("/f"), ctx(id as string, { filaId: filaValor.id as string })));
+    expect(det.data.anios.find((a) => a.anio === 2026)?.cola_larga).toMatchObject({ veredicto: "revision", demanda_corregida: 144, tienda_meses_con_stock: 24, tienda_meses: 36 });
+    expect(det.data.anios.find((a) => a.anio === 2027)?.cola_larga).toBeNull();
+
+    // La matriz cuenta la fila y el chip «para revisión» la encuentra.
+    const m = await leer<RespuestaMatrizApi>(await matriz(get("/m", "?solo=para_revision"), ctx(id as string)));
+    expect(m.data.resumen.filas_para_revision).toBe(1);
+    expect(m.data.nodos.filter((n) => n.nivel === "linea").map((n) => n.nombre)).toEqual(["DENIM"]);
+
+    // El resumen refleja lo decidido: la cabecera y el modal de Cerrar leen estos conteos.
+    const antesResumen = (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data.resumen;
+    expect(antesResumen?.filas_para_revision).toBe(1);
+    const decididasAntes = antesResumen?.decididas[2026] as number;
+    expect(decididasAntes).toBeGreaterThan(0);
+
+    // Aceptar la propuesta (A_f) en los dos años deja cerrar.
+    for (const anio of ["2026", "2027"]) {
+      expect((await decidirFila(enviar("PUT", "/x", { origen: "propuesta" }), ctx(id as string, { filaId: filaValor.id as string, anio }))).status).toBe(200);
+    }
+    const despuesResumen = (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data.resumen;
+    expect(despuesResumen?.filas_para_revision).toBe(0);
+    expect(despuesResumen?.decididas[2026]).toBe(decididasAntes + 1);
+    // También en la lista de proyecciones del estado inicial.
+    const enLista = (await leer<RespuestaProyeccionApi>(await estadoInicial())).data.proyecciones.find((x) => x.id === id);
+    expect(enLista?.resumen?.filas_para_revision).toBe(0);
+    // Volver a la propuesta lo deja pendiente otra vez.
+    await decidirFila(enviar("PUT", "/x", { decidido: null }), ctx(id as string, { filaId: filaValor.id as string, anio: "2026" }));
+    expect((await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data.resumen?.filas_para_revision).toBe(1);
+    await decidirFila(enviar("PUT", "/x", { origen: "propuesta" }), ctx(id as string, { filaId: filaValor.id as string, anio: "2026" }));
+    expect((await cerrar(enviar("POST", "/x", {}), ctx(id as string))).status).toBe(200);
+  });
+
+  it("con quiebres pero A_f bajo el umbral la fila no bloquea: se cierra sola con la propuesta (cola_larga_con_quiebres)", async () => {
+    contexto.hechos = [...contexto.hechos, ...lineaDenimValor(5)];
+    const { id } = await nueva();
+    await decidirTodo(id as string);
+    expect((await cerrar(enviar("POST", "/x", {}), ctx(id as string))).status).toBe(200);
+    const filaValor = filasDe("proyeccion_filas").find((f) => f.clave === `|${N.denim}||${AM.val}`) as Fila;
+    const a = filasDe("proyeccion_fila_anios").find((x) => x.fila_id === filaValor.id && x.anio === 2026) as Fila;
+    expect(a).toMatchObject({ propuesto: 60, decidido: null });
+    expect(a.avisos).toEqual(expect.arrayContaining(["cola_larga", "cola_larga_con_quiebres"]));
   });
 
   it("una cerrada es solo lectura: decidir, aplicar curva, calcular, editar y eliminar responden 409; ya cerrada no se cierra otra vez", async () => {
@@ -524,6 +667,10 @@ describe("cerrar, archivar y el contrato de M8 (casos 14 y 17)", () => {
     for (const f of filas) if (f.meses) expect(f.meses.reduce((a, b) => a + b, 0)).toBe(f.total);
     const d = filas.find((f) => f.bloque === "mismas" && f.linea === "DENIM" && f.agrupacion_marca === "RECONOCIDO") as RespuestaCerradaApi["filas"][number];
     expect(d.participaciones_historicas?.por_talla.reduce((a, b) => a + b.participacion, 0)).toBeCloseTo(1, 9);
+    // 0.10.1 (decisión 24): periodo de referencia y eje por marca; cada eje suma 1.
+    expect(d.participaciones_historicas?.periodo_referencia).toEqual({ desde: "2025-10", hasta: "2026-09", meses: 12, tiendas: "mismas", anio: 2026, normalizado_nino: false });
+    expect(d.participaciones_historicas?.por_marca?.reduce((a, b) => a + b.participacion, 0)).toBeCloseTo(1, 9);
+    expect(d.participaciones_historicas?.por_clave_flujo.reduce((a, b) => a + b.participacion, 0)).toBeCloseTo(1, 9);
     expect(d.origen_meses?.slice(0, 9).every((o) => o === "real")).toBe(true);
     expect(filas.filter((f) => f.tienda_id !== null).every((f) => f.participaciones_historicas === null)).toBe(true);
     expect(new Set(filas.map((f) => f.bloque))).toEqual(new Set(["mismas", "nuevas", "cierres"]));

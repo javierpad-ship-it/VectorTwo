@@ -25,6 +25,7 @@ import {
   leerCerradaDeAnio,
   leerFactoresDb,
   leerFilasConAnios,
+  leerColaLargaDeFilas,
   leerNivelesProyectados,
   leerNombresDeAnio,
   leerTiendasProyeccion,
@@ -63,6 +64,7 @@ import {
   payloadTiendaCalculo,
   payloadTiendaDecision,
   aFilaPlana,
+  comoAvisos,
   type FilaConAnios,
 } from "./persistencia";
 import {
@@ -151,7 +153,7 @@ async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, o:
         calculado_at: p.calculado_at,
         hasta_periodo: p.hasta_periodo,
         recalculo_pendiente: parametros.recalculo_pendiente,
-        resumen: resumen ? { curvas_usadas: resumen.curvas_usadas ?? [] } : null,
+        resumen: resumen ? { curvas_usadas: resumen.curvas_usadas ?? [], version_metodo: resumen.version_metodo } : null,
         parametros: { factores_usados: parametros.factores_usados, bloques: parametros.bloques },
       },
       estadoActualDe(ctx, nivelesCambiados(niveles, actuales))
@@ -375,6 +377,7 @@ export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerp
     parametros.umbral_avance = nuevos.umbral_avance;
     parametros.umbral_cobertura = nuevos.umbral_cobertura;
     parametros.umbral_cola_larga = nuevos.umbral_cola_larga;
+    parametros.umbral_disponibilidad = nuevos.umbral_disponibilidad;
     parametros.rampa_maduracion = nuevos.rampa_maduracion;
   }
   if (recalcular) parametros.recalculo_pendiente = true;
@@ -576,6 +579,7 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
     por_tienda: ventas.flatMap((v) => v.por_tienda),
     equivalencias: ventas.flatMap((v) => v.equivalencias),
     detalle_w12: ventas.flatMap((v) => v.detalle_w12),
+    disponibilidad: ventas.flatMap((v) => v.disponibilidad),
     cargas: ventas[0]?.cargas ?? {},
   };
 
@@ -603,6 +607,7 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
       umbral_avance: parametros.umbral_avance,
       umbral_cobertura: parametros.umbral_cobertura,
       umbral_cola_larga: parametros.umbral_cola_larga,
+      umbral_disponibilidad: parametros.umbral_disponibilidad,
       rampa_maduracion: parametros.rampa_maduracion,
     },
     tiendas: ctx.tiendas,
@@ -732,7 +737,7 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     filasBase: filas.data.map((f) => ({
       clave: f.clave,
       anios: Object.fromEntries(
-        f.proyeccion_fila_anios.filter((a) => a.activo).map((a) => [a.anio, { clave: f.clave, propuesto: a.propuesto, decidido: a.decidido }])
+        f.proyeccion_fila_anios.filter((a) => a.activo).map((a) => [a.anio, { clave: f.clave, propuesto: a.propuesto, decidido: a.decidido, avisos: comoAvisos(a.avisos) }])
       ),
     })),
     tiendas: tiendas.data.filter((t) => t.activo && t.bloque === "nuevas").map((t) => ({ tienda_id: t.tienda_id, anio: t.anio, venta_esperada: t.venta_esperada_usada === null ? null : Number(t.venta_esperada_usada), decidido: t.decidido })),
@@ -746,12 +751,25 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
       // Nombre del GML (género · mundo · línea · equivalencia · marca) para que la lista se lea sin traducir claves.
       const catalogo = await cargarContextoCatalogo(d);
       if (catalogo.respuesta) return falla(catalogo.respuesta);
-      filasLegibles = resultado.filas_sin_decidir.map((f) => ({ ...f, ...nombreDeFilaPorClave(f.clave, catalogo.data) }));
+      // Las de revisión por cola larga traen además la demanda corregida y la disponibilidad con que quedaron.
+      const idPorClave = new Map(filas.data.map((f) => [f.clave, f.id]));
+      const ids = resultado.filas_sin_decidir.filter((f) => f.motivo === "revision_cola_larga").map((f) => idPorClave.get(f.clave)).filter((x): x is string => x !== undefined);
+      const colas = await leerColaLargaDeFilas(d, id, ids);
+      if (colas.error) return fallaDb(colas.error, "proyección: cola larga");
+      filasLegibles = resultado.filas_sin_decidir.map((f) => {
+        const cola = f.motivo === "revision_cola_larga" ? colas.data.get(idPorClave.get(f.clave) ?? "") : undefined;
+        return {
+          ...f,
+          ...nombreDeFilaPorClave(f.clave, catalogo.data),
+          ...(f.motivo === "revision_cola_larga" ? { demanda_corregida: cola?.demanda_corregida ?? null, disponibilidad: cola?.disponibilidad ?? null } : {}),
+        };
+      });
     }
     return falla(
       errorConCodigoExtra(resultado.rechazo.mensaje, resultado.rechazo.status, resultado.rechazo.codigo, {
         filas_sin_decidir: filasLegibles,
         total_filas_sin_decidir: resultado.total_filas_sin_decidir,
+        total_filas_para_revision: resultado.total_filas_para_revision,
         tiendas_sin_decidir: resultado.tiendas_sin_decidir,
         desactualizada: des.data,
       })

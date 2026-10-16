@@ -191,11 +191,11 @@ export function CamposTienda({
         />
       </Field>
       <Field
-        label="Venta esperada mensual (sin IGV)"
+        label="Venta esperada del año de apertura (S/, sin IGV)"
         hint={
           esCd
             ? "Un centro de distribución no vende."
-            : "S/ por mes, sin IGV, de la tienda ya madura (en régimen). M7 la usa para proyectar una tienda que aún no abre."
+            : "Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura: M7 deduce el año maduro con la curva y la fracción del año."
         }
         className="md:col-span-2"
       >
@@ -206,7 +206,7 @@ export function CamposTienda({
           value={valor.venta}
           disabled={esCd}
           onChange={(e) => onCambio({ ...valor, venta: e.target.value })}
-          placeholder="85000"
+          placeholder="850000"
         />
       </Field>
       {tiendasReferencia && (

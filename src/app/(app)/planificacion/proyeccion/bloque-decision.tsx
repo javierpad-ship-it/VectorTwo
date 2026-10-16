@@ -90,6 +90,7 @@ export function BloqueDecision({
   const deshabilitada = bloqueada || ocupado;
   const cambio = textoPropuestaCambio(registro);
   const normal = textoFactoresMes(factoresMes);
+  const paraRevision = registro.avisos.includes("revision_cola_larga");
   const hayCurvaNueva = registro.meses_propuestos !== null && registro.meses_propuestos !== undefined;
 
   async function guardar() {
@@ -160,12 +161,22 @@ export function BloqueDecision({
         </div>
         {registro.referencia_alternativa !== null && (
           <div>
-            <dt className="text-xs text-tinta-suave">{registro.metodo === "plan_anterior" ? "Por avance saldrían" : "Cifra alternativa"}</dt>
+            <dt className="text-xs text-tinta-suave">{paraRevision && esActual ? "Con el avance normal saldrían" : registro.metodo === "plan_anterior" ? "Por avance saldrían" : "Cifra alternativa"}</dt>
             <dd className={NUM}>{unidades(registro.referencia_alternativa)}</dd>
           </div>
         )}
       </dl>
 
+      {paraRevision && esActual && (
+        <p className="rounded-md border border-alerta/30 bg-alerta-suave px-3 py-2 text-sm text-alerta">
+          Para revisión: la propuesta es la demanda corregida por disponibilidad ({unidades(registro.propuesto)}); el avance normal ({unidades(registro.referencia_alternativa)}) queda como referencia. Hay que decidir esta fila para poder cerrar.
+        </p>
+      )}
+      {paraRevision && !esActual && (
+        <p className="rounded-md border border-alerta/30 bg-alerta-suave px-3 py-2 text-sm text-alerta">
+          Para revisión: la propuesta es la base de {anioEnCurso} normalizada por el Niño × (1 + crecimiento), y esa base sale de la demanda corregida de {anioEnCurso}. Decide primero {anioEnCurso}; esta fila también hay que decidirla para poder cerrar.
+        </p>
+      )}
       {registro.explicacion && <p className="rounded-md bg-fondo px-3 py-2 text-sm leading-relaxed text-tinta">{registro.explicacion}</p>}
       {normal && (
         <p className="text-xs text-tinta-suave">

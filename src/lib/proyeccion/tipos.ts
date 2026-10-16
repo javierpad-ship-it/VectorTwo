@@ -7,6 +7,7 @@ import type { ConfigFlujo } from "@/lib/marcas/gml/flujo";
 import type { AgrupacionProy, CurvaVigenteProy } from "./curva-fila";
 import type { FactorProy } from "./nino";
 import type { DetalleW12 } from "./participaciones";
+import type { FilaDisponibilidad } from "./cola-larga";
 import type { TiendaProy } from "./bloques";
 import type {
   AnioFilaApi,
@@ -27,6 +28,7 @@ import type {
 export * from "./tipos-api";
 export type { TiendaProy } from "./bloques";
 export type { DetalleW12 } from "./participaciones";
+export type { FilaDisponibilidad } from "./cola-larga";
 export type { AgrupacionProy, CurvaVigenteProy } from "./curva-fila";
 export type { FactorProy } from "./nino";
 
@@ -65,6 +67,11 @@ export type VentaProyeccion = {
   por_tienda: FilaVentaTienda[];
   equivalencias: PesoEquivalencia[];
   detalle_w12: DetalleW12[];
+  /**
+   * `0.10.1`: disponibilidad mensual (proxy) por fila y mes dentro de `[p_desde_w12, hasta]`, sobre las tiendas de `M(Y)`; trae además
+   * el stock del CD (la única lectura del CD en M7). Una lectura anterior a la migración no la trae: llega vacía.
+   */
+  disponibilidad: FilaDisponibilidad[];
   /** `aaaa-mm → carga_id`. */
   cargas: Record<string, string>;
 };
@@ -136,7 +143,7 @@ export type EntradaCalculo = {
   hoy: string;
   parametros: Pick<
     ParametrosProyeccion,
-    "crecimiento_pct_defecto" | "umbral_avance" | "umbral_cobertura" | "umbral_cola_larga" | "rampa_maduracion"
+    "crecimiento_pct_defecto" | "umbral_avance" | "umbral_cobertura" | "umbral_cola_larga" | "umbral_disponibilidad" | "rampa_maduracion"
   >;
   tiendas: TiendaProy[];
   nodos: NodoProy[];

@@ -35,6 +35,7 @@ export function filtrarUniverso(venta: VentaProyeccion, anio: number, k: number,
     filas: venta.filas.filter((f) => dentro.has(claveUniverso(f))),
     por_tienda: venta.por_tienda.filter((f) => dentro.has(claveUniverso(f))),
     detalle_w12: venta.detalle_w12.filter((f) => dentro.has(claveUniverso(f))),
+    disponibilidad: venta.disponibilidad.filter((f) => dentro.has(claveUniverso(f))),
   };
 }
 

@@ -9,6 +9,13 @@
 export const UMBRAL_AVANCE = 0.3;
 export const UMBRAL_COBERTURA = 0.25;
 export const UMBRAL_COLA_LARGA = 100;
+/**
+ * `0.10.1`: una fila de cola larga con `dispon < UMBRAL_DISPONIBILIDAD` tuvo un quiebre relevante (proxy mensual: tienda-meses con
+ * stock al cierre del mes ÷ tienda-meses totales; ficha 07, «Cambios 0.10.1», punto 2).
+ */
+export const UMBRAL_DISPONIBILIDAD = 0.75;
+/** `0.10.1`: con `F < UMBRAL_APERTURA_TARDIA` la venta esperada cubre pocos meses del año de apertura (aviso `apertura_tardia`). */
+export const UMBRAL_APERTURA_TARDIA = 0.25;
 export const RAMPA_MADURACION: readonly number[] = [1, 1, 1];
 export const RAMPA_MAX = 5;
 export const MESES_MIN_AVANCE = 3;
@@ -21,8 +28,12 @@ export const TANDA_UPSERT = 500;
 export const CALCULO_CADUCA_MIN = 15;
 export const RATIO_MIN = 0.05;
 export const RATIO_MAX = 3;
-/** Entra en `resumen` para detectar fórmulas cambiadas (como `VERSION_MODELO` de M6). */
-export const VERSION_METODO = 2;
+/**
+ * Entra en `resumen` para detectar fórmulas cambiadas (como `VERSION_MODELO` de M6). `2`: revisión del avance propio, el factor por
+ * mes y el poco avance. `3` (`0.10.1`): venta esperada del año de apertura, cola larga con disponibilidad y participaciones con
+ * periodo y eje por marca; una proyección en trabajo con `version_metodo < 3` queda desactualizada hasta recalcular.
+ */
+export const VERSION_METODO = 3;
 
 // ─── Enumeraciones ───
 
@@ -39,7 +50,9 @@ export type MotivoDesactualizada =
   | "tiendas_cambiadas"
   | "factores_cambiados"
   | "periodos_cambiados"
-  | "recalculo_pendiente";
+  | "recalculo_pendiente"
+  /** `0.10.1`: la proyección se calculó con una versión anterior del método (`resumen.version_metodo < VERSION_METODO`). */
+  | "version_metodo";
 
 export type MotivoBloqueo = "sin_meses" | "meses_faltantes" | "tienda_sin_apertura_con_venta" | "sin_mismas_tiendas";
 
@@ -65,9 +78,20 @@ export type AvisoFila =
   | "referente_sin_historia"
   | "fijadas_exceden"
   | "cierre_no_proyectado"
-  | "canibalizacion"
   | "apertura_dudosa"
-  | "cierre_dudoso";
+  | "cierre_dudoso"
+  // 0.10.1 (el aviso por zona de la 0.10.0 se eliminó: decisión 20 de la ronda 4)
+  /** Cola larga con quiebres relevantes y demanda corregida bajo el umbral: informativo, se cierra con la propuesta. */
+  | "cola_larga_con_quiebres"
+  /**
+   * Cola larga con quiebres relevantes y demanda corregida `A_f` sobre el umbral: bloquea el cierre hasta decidirla. Su PROPUESTA es
+   * `A_f` y el avance normal va en `referencia_alternativa` (decisión de Javier, ronda 4).
+   */
+  | "revision_cola_larga"
+  /** Sin stock cargado en `W12` para la fila: no se pudo medir la disponibilidad (cola larga normal). */
+  | "sin_stock_historico"
+  /** Tienda cuya venta esperada cubre menos del 25 % de un año maduro (abre tarde o rampa muy baja): informativo. */
+  | "apertura_tardia";
 
 export type Metodo =
   | "avance"
@@ -114,6 +138,8 @@ export type ParametrosProyeccion = {
   umbral_avance: number;
   umbral_cobertura: number;
   umbral_cola_larga: number;
+  /** `0.10.1`: por debajo de esta disponibilidad (0 a 1) una fila de cola larga tuvo un quiebre relevante. Por defecto `UMBRAL_DISPONIBILIDAD`. */
+  umbral_disponibilidad: number;
   rampa_maduracion: number[];
   factores_usados: { anio: number; temporada: TemporadaFactor; ratio: number | null; origen: "calculado" | "manual" | null }[];
   bloques: BloquesApi;
@@ -122,6 +148,31 @@ export type ParametrosProyeccion = {
 };
 
 // ─── Filas y años ───
+
+export type VeredictoColaLarga = "cierra" | "cierra_con_quiebres" | "revision" | "sin_dato";
+
+/**
+ * Validación de disponibilidad de una fila de cola larga (`0.10.1`). `disponibilidad` y `demanda_corregida` son `null` cuando no se
+ * pudieron medir (`sin_dato`) o la fila no tiene curva. La disponibilidad es un PROXY mensual: tienda-meses con stock al cierre del
+ * mes ÷ tienda-meses totales (M5 no tiene días con stock).
+ */
+export type ColaLargaApi = {
+  /**
+   * `A_f`: venta anual corregida por disponibilidad y estacionalidad (unidades, un decimal). Con veredicto `revision` es la propuesta del
+   * registro de `Y` (`propuesto`); con otro veredicto, solo informativa.
+   */
+  demanda_corregida: number | null;
+  /** `dispon_f` de 0 a 1. */
+  disponibilidad: number | null;
+  tienda_meses_con_stock: number;
+  tienda_meses: number;
+  meses_cd_con_stock: number;
+  veredicto: VeredictoColaLarga;
+  /** `ritmo_f`: unidades por tienda-mes con stock (informativo). */
+  ritmo: number | null;
+  /** Meses de `W12` en que ninguna tienda tenía stock de la fila (informativo). */
+  meses_tiendas_sin_stock: number;
+};
 
 export type AnioFilaApi = {
   anio: number;
@@ -146,6 +197,12 @@ export type AnioFilaApi = {
   origen_meses: OrigenMes[] | null;
   avance: number | null;
   avisos: AvisoFila[];
+  /**
+   * `0.10.1`, solo en el registro de `Y` de una fila base con propuesta bajo el umbral de cola larga y solo en las respuestas que
+   * leen `historico` (`/lineas` y `/filas/[filaId]`); `null` (o ausente) en el resto. La fila de `Y+1` hereda el veredicto de `Y`
+   * (lo dicen sus `avisos`).
+   */
+  cola_larga?: ColaLargaApi | null;
   /** Id del registro (`proyeccion_fila_anios.id`); lo pone la lectura, no el método. */
   id?: string;
 };
@@ -201,14 +258,31 @@ export type HistoricoFila = {
     eat_m6: number | null;
   } | null;
   pesos_equivalencias: { equivalencia_id: string; peso: number }[];
+  /** `0.10.1`: la validación de disponibilidad (solo si la propuesta de `Y` quedó bajo el umbral de cola larga). */
+  cola_larga?: ColaLargaApi | null;
   /** Real a `k` de las tiendas de `M(Y)` que salen de `M(Y+1)` (resta de la base del año siguiente; B2). */
   salientes: { tienda_id: string; vendido: number; meses: number[] }[];
 };
 
 export type CurvaOrigen = { agrupacion_id: string; curva_id: string; version: number; peso: number };
 
+/**
+ * Participaciones históricas de una fila base (decisión 24, `0.10.1`). `periodo_referencia` dice sobre qué doce meses y qué tiendas se
+ * midieron (`W12` sobre `M(Y)`, normalizado por el Niño). Una cerrada calculada en `0.10.0` no trae `periodo_referencia` ni
+ * `por_marca`: la lectura los entrega `null`.
+ */
+/**
+ * `normalizado_nino` dice si las participaciones se midieron con las unidades llevadas a nivel normal por el factor del Niño. Hoy es
+ * SIEMPRE `false`: `detalle_w12` (de `venta_proyeccion`) no trae el mes de cada hecho y sin él no se puede dividir por `φ_{año,mes}`;
+ * las participaciones son sobre unidades reales de `W12`. (La ficha 07 daba `true`; para que lo sea hay que añadir `periodo` a
+ * `detalle_w12` en SQL y normalizar en `participacionesFila`.) M8 debe leerlo, no suponerlo.
+ */
+export type PeriodoReferencia = { desde: string; hasta: string; meses: number; tiendas: "mismas"; anio: number; normalizado_nino: boolean };
 export type Participaciones = {
+  periodo_referencia: PeriodoReferencia | null;
   por_clave_flujo: { clave_flujo: string; marca_id: string | null; participacion: number }[];
+  /** Toda unidad de marca (`marcas_unidad`) con venta en `W12`, tenga o no tratamiento en 02b; suma 1. */
+  por_marca: { marca_id: string; participacion: number }[] | null;
   por_talla: { agrupacion_talla_id: string; participacion: number }[];
 };
 
@@ -311,6 +385,8 @@ export type ResumenProyeccion = {
   desvio_prueba_anterior_pct: number | null;
   perfiles_apertura: { tienda: string; ratios: number[] }[];
   fuera_bloque: number;
+  /** `0.10.1`: filas base con algún año `revision_cola_larga` sin decidir (lo que bloquea el cierre por cola larga). */
+  filas_para_revision?: number;
   version_metodo: number;
   duracion_ms: number | null;
   /**
@@ -424,7 +500,14 @@ export type RespuestaMatrizApi = {
   filtro: FiltroMatrizApi;
   nodos: NodoMatrizApi[];
   bloques: BloquesApi;
-  resumen: { lineas: number; lineas_total: number; porcentaje_total: number | null; desvio_prueba_anterior_pct: number | null };
+  resumen: {
+    lineas: number;
+    lineas_total: number;
+    porcentaje_total: number | null;
+    desvio_prueba_anterior_pct: number | null;
+    /** `0.10.1`: filas base (del recorte filtrado) con algún año `revision_cola_larga` sin decidir; el «12 filas para revisión» de la cabecera. */
+    filas_para_revision: number;
+  };
 };
 
 export type FiltroMatrizApi = {
@@ -445,6 +528,8 @@ export const SOLO_MATRIZ = [
   "curva_cambio",
   "propuesta_cambio",
   "cola_larga",
+  /** `0.10.1`: líneas con alguna fila `revision_cola_larga` sin decidir. */
+  "para_revision",
 ] as const;
 export type SoloMatriz = (typeof SOLO_MATRIZ)[number];
 

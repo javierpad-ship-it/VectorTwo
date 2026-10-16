@@ -1,6 +1,7 @@
 import type { Json, Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { avanceAcumulado } from "./cierre";
 import type { FilaPlana } from "./matriz";
+import { leerParticipaciones } from "./participaciones";
 import {
   vigenteDe,
   type AnioFilaApi,
@@ -15,7 +16,6 @@ import {
   type OrigenComposicion,
   type OrigenDecision,
   type OrigenMes,
-  type Participaciones,
   type PreviasCalculo,
   type RegistroModelo,
   type Subbloque,
@@ -34,6 +34,17 @@ export type FilaConAnios = FilaDb & { proyeccion_fila_anios: AnioDb[] };
 
 export const comoJson = (v: unknown): Json => v as Json;
 const comoLista = <T>(json: Json | null | undefined): T[] => (Array.isArray(json) ? (json as unknown as T[]) : []);
+/** `avisos` guardados → códigos (los desconocidos, p. ej. el aviso por zona de la `0.10.0`, se descartan al leer). */
+export function comoAvisos(json: Json | null | undefined): AvisoFila[] {
+  return comoLista<string>(json).filter((a): a is AvisoFila => (AVISOS_CONOCIDOS as readonly string[]).includes(a));
+}
+
+const AVISOS_CONOCIDOS: readonly AvisoFila[] = [
+  "sin_curva", "curva_incompleta", "curva_cambio", "propuesta_cambio", "avance_bajo", "plan_anterior", "sin_venta_anio", "sin_base", "sin_factor",
+  "objetivo_atipico", "temporadas_mezcladas", "mes_negativo", "quiebre", "cola_larga", "nivel_cambiado", "bloque_cambiado", "sin_venta_esperada",
+  "sin_referente", "referente_sin_historia", "fijadas_exceden", "cierre_no_proyectado", "apertura_dudosa", "cierre_dudoso",
+  "cola_larga_con_quiebres", "revision_cola_larga", "sin_stock_historico", "apertura_tardia",
+];
 
 const METODOS: readonly Metodo[] = ["avance", "plan_anterior", "crecimiento", "apertura", "avance_propio", "maduro_propio", "cierre", "sin_propuesta"];
 const metodoDe = (v: string): Metodo => ((METODOS as readonly string[]).includes(v) ? (v as Metodo) : "sin_propuesta");
@@ -71,7 +82,7 @@ export function aRegistro(a: AnioDb, curva: readonly number[] | null, k: number,
     meses_propuestos: a.meses_propuestos,
     origen_meses: a.origen_meses === null ? null : a.origen_meses.map((o): OrigenMes => (o === "real" ? "real" : "proyectado")),
     avance,
-    avisos: comoLista<AvisoFila>(a.avisos),
+    avisos: comoAvisos(a.avisos),
     id: a.id,
     curva_origen_usada: comoLista<CurvaOrigen>(a.curva_origen_usada),
     curva_origen_propuesta: a.curva_origen_propuesta === null ? null : comoLista<CurvaOrigen>(a.curva_origen_propuesta),
@@ -94,9 +105,9 @@ export function aFilaModelo(f: FilaConAnios, k: number, anioEnCurso: number): Fi
     curva_origen: comoLista<CurvaOrigen>(f.curva_origen),
     factores_mes: f.factores_mes === null ? null : (f.factores_mes as unknown as Record<number, number[]>),
     historico: f.historico === null || typeof f.historico !== "object" ? null : (f.historico as unknown as HistoricoFila),
-    participaciones: f.participaciones === null ? null : (f.participaciones as unknown as Participaciones),
+    participaciones: leerParticipaciones(f.participaciones),
     composicion: f.composicion === null ? null : (f.composicion as unknown as { origen: OrigenComposicion; s: number; p: number; unidades_maduras: number }),
-    avisos: comoLista<AvisoFila>(f.avisos),
+    avisos: comoAvisos(f.avisos),
     activo: f.activo,
     registros: [...f.proyeccion_fila_anios]
       .sort((x, y) => x.anio - y.anio)
@@ -197,7 +208,7 @@ export function aTiendaModelo(t: TiendaPyDb): TiendaModelo {
     explicacion: t.explicacion,
     referencia_alternativa: t.referencia_alternativa,
     referencia_tres_meses: t.referencia_tres_meses,
-    avisos: comoLista<AvisoFila>(t.avisos),
+    avisos: comoAvisos(t.avisos),
   };
 }
 
@@ -298,6 +309,17 @@ export const aAnioApi = (r: RegistroModelo): AnioFilaApi => {
   return api;
 };
 
+/**
+ * Los registros de una fila a la API. `cola_larga` (la validación de disponibilidad, que vive en `historico`) solo se pone en el
+ * registro de `Y` de una fila base; en el resto `null`.
+ */
+export function aAniosApi(modelo: FilaModelo, anioEnCurso: number): AnioFilaApi[] {
+  return modelo.registros.map((r) => ({
+    ...aAnioApi(r),
+    cola_larga: modelo.tienda_id === null && r.anio === anioEnCurso ? (modelo.historico?.cola_larga ?? null) : null,
+  }));
+}
+
 function agrupacionDeFila(f: Pick<FilaDb, "agrupacion_estacionalidad_id">, c: Catalogo) {
   if (!f.agrupacion_estacionalidad_id) return null;
   const a = c.agrupacionesEstacionalidad.get(f.agrupacion_estacionalidad_id);
@@ -337,9 +359,9 @@ export function aFilaPlana(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso:
     equivalencia: n.equivalencia,
     agrupacion_marca: n.agrupacion_marca,
     agrupacion_estacionalidad: agrupacionDeFila(f, c),
-    avisos: comoLista<AvisoFila>(f.avisos),
+    avisos: comoAvisos(f.avisos),
     activo: f.activo,
-    participaciones: conParticipaciones && f.participaciones !== null ? (f.participaciones as unknown as Participaciones) : null,
+    participaciones: conParticipaciones ? leerParticipaciones(f.participaciones) : null,
     anios: f.proyeccion_fila_anios
       .filter((a) => a.activo)
       .sort((x, y) => x.anio - y.anio)
@@ -375,7 +397,7 @@ export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: n
       completo: a.anio < anioEnCurso || k === 12,
       tiendas: a.tiendas.length,
     })),
-    anios: modelo.registros.filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false).map(aAnioApi),
+    anios: aAniosApi(modelo, anioEnCurso).filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false),
     avisos: modelo.avisos,
     activo: f.activo,
   };

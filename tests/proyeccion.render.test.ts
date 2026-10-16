@@ -1,12 +1,13 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { ColaLargaDetalle } from "../src/app/(app)/planificacion/proyeccion/cola-larga";
 import { AntesDeProyectar } from "../src/app/(app)/planificacion/proyeccion/antes-de-proyectar";
 import { BloqueDecision } from "../src/app/(app)/planificacion/proyeccion/bloque-decision";
 import { CabeceraProyeccion } from "../src/app/(app)/planificacion/proyeccion/cabecera-proyeccion";
 import { CeldaCrecimiento, CeldaDecision } from "../src/app/(app)/planificacion/proyeccion/celda-decision";
 import { ArchivarModal } from "../src/app/(app)/planificacion/proyeccion/archivar-modal";
-import { CerrarModal } from "../src/app/(app)/planificacion/proyeccion/cerrar-modal";
+import { CerrarModal, GrupoLista } from "../src/app/(app)/planificacion/proyeccion/cerrar-modal";
 import { AlertaError } from "../src/app/(app)/planificacion/proyeccion/comunes";
 import { ComposicionBloques } from "../src/app/(app)/planificacion/proyeccion/composicion-bloques";
 import { TablaFactores } from "../src/app/(app)/planificacion/proyeccion/factores-tab";
@@ -15,7 +16,7 @@ import { FormularioProyeccion } from "../src/app/(app)/planificacion/proyeccion/
 import { GraficoBarras } from "../src/app/(app)/planificacion/proyeccion/grafico-barras";
 import { GraficoMensualFila } from "../src/app/(app)/planificacion/proyeccion/grafico-mensual-fila";
 import { LineaTab } from "../src/app/(app)/planificacion/proyeccion/linea-tab";
-import { TablaMatriz } from "../src/app/(app)/planificacion/proyeccion/matriz-tab";
+import { PieMatriz, TablaMatriz } from "../src/app/(app)/planificacion/proyeccion/matriz-tab";
 import { TablaMensual } from "../src/app/(app)/planificacion/proyeccion/mensual-tab";
 import { TablaFilas } from "../src/app/(app)/planificacion/proyeccion/tabla-filas";
 import { TarjetaTienda } from "../src/app/(app)/planificacion/proyeccion/tarjeta-tienda";
@@ -25,7 +26,9 @@ import { CamposTienda, camposDeTienda, cambiosDeEdicion, FORM_VACIO } from "../s
 import type { TiendaFila } from "../src/lib/tiendas/tipos-api";
 import {
   bloques,
+  colaLarga,
   detalleFila,
+  filaRevision,
   factores,
   filasDenim,
   INDICE,
@@ -220,8 +223,11 @@ describe("tarjeta de tienda nueva", () => {
     const s = html(createElement(TarjetaTienda, { ...props, t: tiendaProyeccion() }));
     expect(s).toContain("2027 · T12 · Tienda nueva B");
     expect(s).toContain("Apertura en 2027");
-    expect(s).toContain("S/ 85,000 / mes");
-    expect(s).toContain("sin IGV, tienda madura");
+    expect(s).toContain("venta esperada del año de apertura");
+    expect(s).toContain("S/ 85,000 <span");
+    expect(s).toContain("sin IGV, desde que abre hasta el 31 de diciembre");
+    expect(s).not.toContain("/ mes");
+    expect(s).not.toContain("tienda madura)");
     expect(s).toContain("T03 · Tienda 3");
     expect(s).toContain("Composición de T03");
     expect(s).toContain("año maduro completo: <span class=\"font-mono\">9,850</span> u");
@@ -232,7 +238,8 @@ describe("tarjeta de tienda nueva", () => {
     expect(s).toContain("Rampa de maduración de la tienda");
     expect(s).toContain("1 · 1 · 1");
     expect(s).toContain("(sin rampa)");
-    expect(s).toContain("Una apertura puede restar venta");
+    expect(s).toContain("La venta esperada cubre menos de un cuarto de un año maduro");
+    expect(s).not.toMatch(/restar venta|canibaliz/i);
     expect(s).toContain("Filas de T12");
   });
 
@@ -267,10 +274,11 @@ describe("tarjeta de tienda nueva", () => {
     expect(s).toContain("Decidiste 6,000 con la propuesta en 7,500");
   });
 
-  it("un cierre solo se clasifica: sin decisión y con el aviso de la 0.10.1", () => {
+  it("un cierre solo se clasifica: sin decisión y con el aviso de una versión próxima", () => {
     const s = html(createElement(TarjetaTienda, { ...props, t: tiendaProyeccion({ bloque: "cierres", subbloque: null, avisos: ["cierre_no_proyectado"], metodo: "cierre", venta_esperada: null }) }));
     expect(s).toContain("Cierre en 2027");
-    expect(s).toContain("0.10.1");
+    expect(s).toContain("llega en una versión próxima");
+    expect(s).not.toContain("0.10.1");
     expect(s).not.toContain("Aceptar la propuesta");
     expect(s).not.toContain("Rampa de maduración");
   });
@@ -547,8 +555,10 @@ describe("línea, filtros, formulario y cierre", () => {
     const s = html(createElement(AtajoTienda, { tienda: m4, tiendas: [m4, otra], onCerrar: noop, onGuardado: noop }));
     expect(s).toContain("T12 · TIENDA NUEVA B");
     expect(s).toContain('value="2027-03-15"');
-    expect(s).toContain("Venta esperada mensual (sin IGV)");
-    expect(s).toContain("S/ por mes, sin IGV, de la tienda ya madura");
+    expect(s).toContain("Venta esperada del año de apertura (S/, sin IGV)");
+    expect(s).toContain('placeholder="850000"');
+    expect(s).toContain("Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura.");
+    expect(s).not.toContain("S/ por mes");
     expect(s).toContain("Tienda de referencia");
     expect(s).toContain("T03 · TIENDA 3");
     expect(s).not.toContain("T12 · TIENDA NUEVA B</option>");
@@ -573,10 +583,10 @@ describe("errores de la API", () => {
 describe("Tiendas (M4): tienda de referencia y ayuda de la venta esperada", () => {
   const m4: TiendaFila = { id: "t1", codigo: "T01", nombre: "TIENDA 1", tipo: "Tienda", zona: null, razon_social: null, fecha_apertura: "2020-01-10", fecha_cierre: null, venta_esperada_promedio: null, activo: true, created_at: "", updated_at: "", estado: "Activa" };
 
-  it("el formulario trae el selector de referente y la ayuda «S/ por mes, sin IGV, tienda madura»", () => {
+  it("el formulario trae el selector de referente y la ayuda «soles del año de apertura, sin IGV»", () => {
     const s = html(createElement(CamposTienda, { valor: FORM_VACIO, onCambio: noop, idLista: "x", tiendasReferencia: [m4, { ...m4, id: "t2", codigo: "T02", nombre: "TIENDA 2" }], idActual: "t1" }));
-    expect(s).toContain("Venta esperada mensual (sin IGV)");
-    expect(s).toContain("S/ por mes, sin IGV, de la tienda ya madura (en régimen)");
+    expect(s).toContain("Venta esperada del año de apertura (S/, sin IGV)");
+    expect(s).toContain("Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura");
     expect(s).toContain("Tienda de referencia");
     expect(s).toContain("Sin referente (promedio de la red)");
     expect(s).toContain("T02 · TIENDA 2");
@@ -596,5 +606,125 @@ describe("Tiendas (M4): tienda de referencia y ayuda de la venta esperada", () =
     expect(camposDeTienda(con).referencia).toBe("t2");
     expect(cambiosDeEdicion(con, camposDeTienda(con))).toBeNull();
     expect(cambiosDeEdicion(con, { ...camposDeTienda(con), referencia: "" })).toEqual({ tienda_referencia_id: null });
+  });
+});
+
+describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => {
+  const base = { anioEnCurso: 2026, bloqueada: false, ocupado: false, crecimientoDefecto: 0, factoresMes: null, onDecidir: sinAsync, onAplicarCurva: sinAsync };
+
+  it("el detalle de la fila muestra disponibilidad, tienda-meses, ritmo, meses sin stock, venta corregida, veredicto y la advertencia", () => {
+    const s = html(createElement(ColaLargaDetalle, { cola: colaLarga() }));
+    expect(s).toContain("Cola larga · disponibilidad");
+    expect(s).toContain("62.0 %");
+    expect(s).toContain("67 de 108");
+    expect(s).toContain("1.4");
+    expect(s).toContain("Meses sin stock en ninguna tienda");
+    expect(s).toContain("180.5");
+    expect(s).toContain("Para revisión: hay que decidirla para cerrar");
+    expect(s).toContain("si esta línea la llevan solo algunas tiendas");
+    expect(s).toContain("demanda corregida queda inflada");
+    expect(s).toContain("proxy mensual");
+  });
+
+  it("cierra con quiebres: informativo, con la advertencia; sin dato: no se pudo medir y sin cifras", () => {
+    const q = html(createElement(ColaLargaDetalle, { cola: colaLarga({ veredicto: "cierra_con_quiebres", demanda_corregida: 90 }) }));
+    expect(q).toContain("se cierra con la propuesta");
+    expect(q).toContain("demanda corregida queda inflada");
+    const sd = html(createElement(ColaLargaDetalle, { cola: colaLarga({ veredicto: "sin_dato", disponibilidad: null, demanda_corregida: null }) }));
+    expect(sd).toContain("no se pudo medir la disponibilidad");
+    expect(sd).not.toContain("Tienda-meses con stock");
+    const ok = html(createElement(ColaLargaDetalle, { cola: colaLarga({ veredicto: "cierra" }) }));
+    expect(ok).not.toContain("demanda corregida queda inflada");
+  });
+
+  it("la tabla marca la fila para revisión con su disponibilidad y venta corregida", () => {
+    const datos = respuestaLineas({ filas: [filaRevision()] });
+    const s = html(createElement(TablaFilas, { filas: datos.filas, lineas: datos, anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    expect(s).toContain("Para revisión · disponibilidad 62.0 % · corregida 181");
+    expect(s).toContain("revision cola larga");
+  });
+
+  it("«Tu decisión» de una fila para revisión: la propuesta es la demanda corregida y el avance normal va al lado", () => {
+    const f = filaRevision();
+    const s = html(createElement(BloqueDecision, { ...base, anio: 2026, registro: f.anios[0] }));
+    expect(s).toContain("Para revisión: la propuesta es la demanda corregida por disponibilidad (180)");
+    expect(s).toContain("el avance normal (60) queda como referencia");
+    expect(s).toContain("Con el avance normal saldrían");
+    expect(s).toContain("Hay que decidir esta fila para poder cerrar");
+    expect(s).toContain("Aceptar la propuesta");
+  });
+
+  it("«Tu decisión» de Y+1 en una fila para revisión no repite la frase de Y: usa la base de Y normalizada × (1 + crecimiento)", () => {
+    const f = filaRevision();
+    const s = html(createElement(BloqueDecision, { ...base, anio: 2027, registro: f.anios[1] }));
+    expect(s).toContain("la propuesta es la base de 2026 normalizada por el Niño × (1 + crecimiento)");
+    expect(s).not.toContain("la propuesta es la demanda corregida por disponibilidad");
+    expect(s).not.toContain("el avance normal (—)");
+    expect(s).not.toContain("Con el avance normal saldrían");
+  });
+
+  it("el bloque de cola larga no usa una frase circular", () => {
+    const s = html(createElement(ColaLargaDetalle, { cola: colaLarga() }));
+    expect(s).not.toContain("saldría la cifra de");
+    expect(s).toContain("va la cifra que saldría con el avance normal, solo como referencia");
+  });
+
+  it("la matriz dice «N filas para revisión» con atajo al filtro; sin filas no dice nada", () => {
+    const r = respuestaMatriz().resumen;
+    const s = html(createElement(PieMatriz, { resumen: r, anioEnCurso: Y, solo: "", onVerRevision: noop }));
+    expect(s).toContain("12 filas para revisión");
+    expect(s).toContain("Ver solo las líneas para revisión");
+    expect(html(createElement(PieMatriz, { resumen: r, anioEnCurso: Y, solo: "para_revision", onVerRevision: noop }))).not.toContain("Ver solo las líneas");
+    expect(html(createElement(PieMatriz, { resumen: { ...r, filas_para_revision: 0 }, anioEnCurso: Y, solo: "", onVerRevision: noop }))).not.toContain("para revisión");
+  });
+
+  it("el chip «Para revisión» está entre los filtros Solo", () => {
+    const s = html(createElement(FiltrosVista, { filtro: FILTRO_VISTA_VACIO, indice: INDICE, agrupacionesEstacionalidad: [], agrupacionesMarca: [], onCambiar: noop, onLimpiar: noop }));
+    expect(s).toContain("Para revisión");
+  });
+
+  it("el cierre lista por separado las filas por umbral y las de revisión, con totales y el tope de 50", () => {
+    const g = { total: 55, lineas: Array.from({ length: 50 }, (_, i) => `HOMBRE · URBANO · DENIM · VALOR · 2026 · propuesta ${i} (demanda corregida 180 · disponibilidad 62.0 %)`) };
+    const s = html(createElement(GrupoLista, { titulo: "Filas para revisión por cola larga con quiebres de stock", grupo: g, pista: "ayuda" }));
+    expect(s).toContain("primeras 50 de 55");
+    expect(s).not.toMatch(/\(\d+\) \(\d+\)/);
+    expect(s).toContain("… y 5 más.");
+    expect(s).toContain("demanda corregida 180 · disponibilidad 62.0 %");
+    const corto = html(createElement(GrupoLista, { titulo: "Filas", grupo: { total: 2, lineas: ["a", "b"] }, pista: "p" }));
+    expect(corto).toContain("Filas (2)");
+    expect(html(createElement(GrupoLista, { titulo: "Filas para revisión por cola larga con quiebres de stock", grupo: { total: 2, lineas: ["a", "b"] }, pista: "p" }))).toContain("quiebres de stock (2)");
+    expect(corto).not.toContain("más.");
+  });
+
+  it("el cierre resume las filas para revisión y explica que bloquean", () => {
+    const s = html(createElement(CerrarModal, { proyeccion: proyeccion(), onCerrar: noop, onCerrada: noop, onRecalcular: noop }));
+    expect(s).toContain("12 filas para revisión: cola larga con quiebres de stock; hay que decidirlas para cerrar");
+    expect(s).toContain("una fila para revisión (cola larga con quiebres de stock)");
+  });
+
+  it("«Nueva proyección» trae el umbral de disponibilidad (0.75) con la ayuda honesta del proxy", () => {
+    const estado = respuestaProyeccion();
+    const s = html(createElement(FormularioProyeccion, { estado, bloques: estado.bloques_hoy, perfiles: [], onCerrar: noop, onGuardada: noop }));
+    expect(s).toContain("Umbral de disponibilidad (0 a 1)");
+    expect(s).toContain('value="0.75"');
+    expect(s).toContain("tienda-meses con stock al cierre del mes ÷ tienda-meses totales");
+    expect(s).toContain("Una tienda sin stock puede ser un quiebre o una línea que no se surte en esa tienda");
+    expect(s).toContain("el umbral es editable");
+  });
+
+  it("los parámetros de una proyección existente traen su umbral de disponibilidad", () => {
+    const estado = respuestaProyeccion();
+    const p = proyeccion();
+    p.parametros.umbral_disponibilidad = 0.6;
+    const s = html(createElement(FormularioProyeccion, { estado, proyeccion: p, bloques: p.bloques, perfiles: [], onCerrar: noop, onGuardada: noop }));
+    expect(s).toContain('value="0.6"');
+    expect(s).toContain("pendiente de recalcular");
+  });
+
+  it("la cabecera explica el método nuevo como motivo de desactualizada", () => {
+    const acciones = { calculandoLocal: false, ocupado: false, onRecalcular: noop, onParametros: noop, onCerrar: noop, onArchivar: noop, onEliminar: noop, onCopiar: noop };
+    const s = html(createElement(CabeceraProyeccion, { ...acciones, proyeccion: proyeccion({ desactualizada: [{ codigo: "version_metodo", mensaje: "x" }] }) }));
+    expect(s).toContain("método nuevo");
+    expect(s).toContain("12 filas para revisión");
   });
 });

@@ -80,8 +80,8 @@ export function AtajoTienda({
         <Field label="Fecha de cierre" hint="Último día con venta (inclusive). Vacía si la tienda sigue abierta.">
           <Input type="date" value={campos.fecha_cierre} min={campos.fecha_apertura || undefined} disabled={!campos.fecha_apertura} onChange={(e) => setCampos({ ...campos, fecha_cierre: e.target.value })} />
         </Field>
-        <Field label="Venta esperada mensual (sin IGV)" hint="S/ por mes, sin IGV, de la tienda ya madura (en régimen).">
-          <Input type="number" step="0.01" min="0" value={campos.venta} onChange={(e) => setCampos({ ...campos, venta: e.target.value })} placeholder="85000" />
+        <Field label="Venta esperada del año de apertura (S/, sin IGV)" hint="Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura.">
+          <Input type="number" step="0.01" min="0" value={campos.venta} onChange={(e) => setCampos({ ...campos, venta: e.target.value })} placeholder="850000" />
         </Field>
         <Field label="Tienda de referencia" hint="Aquella a cuya composición de venta debe parecerse. Sin referente, el promedio de las mismas tiendas.">
           <Select value={campos.referencia} onChange={(e) => setCampos({ ...campos, referencia: e.target.value })}>

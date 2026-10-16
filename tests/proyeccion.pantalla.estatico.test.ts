@@ -97,8 +97,18 @@ describe("estructura de la pantalla /planificacion/proyeccion", () => {
     }
   });
 
-  it("la versión vigente es 0.10.1 · M6", () => {
-    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.1 · M6"');
+  it("el importador de tiendas no mapea solo una columna de venta mensual o promedio como venta del año de apertura", () => {
+    const c = fuente("src/app/(app)/maestros/tiendas/importar-tiendas.tsx");
+    expect(c).not.toMatch(/alias:\s*\[[^\]]*VENTA_MENSUAL/);
+    expect(c).not.toMatch(/alias:\s*\[[^\]]*VENTA_PROM"/);
+  });
+
+  it("los textos de la pantalla no prometen una versión concreta para los cierres de tienda", () => {
+    for (const f of archivos) expect(fuente(`${DIR}${f}`), f).not.toMatch(/llega en la 0\.10\.1/);
+  });
+
+  it("la versión vigente es 0.10.2 · M7", () => {
+    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.2 · M7"');
   });
 });
 

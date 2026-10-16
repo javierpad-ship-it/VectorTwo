@@ -37,6 +37,14 @@ import {
   MAX_SIN_DECIDIR,
   nombreFilaSinDecidir,
   textoTendencia,
+  textoParaRevision,
+  textoMotivoDesactualizada,
+  resumenColaLarga,
+  datosColaLarga,
+  esParaRevision,
+  leerUmbralDisponibilidad,
+  ETIQUETA_VEREDICTO,
+  ETIQUETA_SOLO,
   mesAaaaMm,
   mesAnioTexto,
   mesesElegibles,
@@ -69,7 +77,7 @@ import {
   FILTRO_VISTA_VACIO,
 } from "../src/app/(app)/planificacion/proyeccion/vista";
 import type { AvisoFila } from "../src/lib/proyeccion/tipos-api";
-import { bloques, detalleFila, filaMensual, filasDenim, INDICE, nodo, proyeccion, respuestaLineas, respuestaMensual, tiendaProyeccion, Y } from "./proyeccion.pantalla.fixture";
+import { bloques, colaLarga, detalleFila, filaRevision, filaMensual, filasDenim, INDICE, nodo, proyeccion, respuestaLineas, respuestaMensual, tiendaProyeccion, Y } from "./proyeccion.pantalla.fixture";
 
 /** Lógica de vista de la pantalla de M7 con datos sintéticos (T01…T12): nada real de Lukers. */
 
@@ -246,13 +254,15 @@ describe("avisos", () => {
   it("todo aviso del contrato tiene su texto", () => {
     const todos: AvisoFila[] = [
       "sin_curva", "curva_incompleta", "curva_cambio", "propuesta_cambio", "avance_bajo", "plan_anterior", "sin_venta_anio", "sin_base", "sin_factor", "objetivo_atipico", "temporadas_mezcladas", "mes_negativo", "quiebre",
-      "cola_larga", "nivel_cambiado", "bloque_cambiado", "sin_venta_esperada", "sin_referente", "referente_sin_historia", "fijadas_exceden", "cierre_no_proyectado", "canibalizacion", "apertura_dudosa", "cierre_dudoso",
+      "cola_larga", "nivel_cambiado", "bloque_cambiado", "sin_venta_esperada", "sin_referente", "referente_sin_historia", "fijadas_exceden", "cierre_no_proyectado", "apertura_dudosa", "cierre_dudoso",
+      "revision_cola_larga", "cola_larga_con_quiebres", "sin_stock_historico", "apertura_tardia",
     ];
     for (const a of todos) {
       expect(TEXTO_AVISO[a].texto.length).toBeGreaterThan(10);
       expect(["alerta", "info"]).toContain(TEXTO_AVISO[a].tono);
     }
     expect(Object.keys(TEXTO_AVISO)).toHaveLength(todos.length);
+    expect(Object.keys(TEXTO_AVISO)).not.toContain("canibalizacion");
   });
 
   it("los avisos de la fila salen sin repetir y con los de alerta primero", () => {
@@ -513,12 +523,18 @@ describe("concordancia del cierre, filas sin decidir y tendencia", () => {
     expect(con({ propuesta_cambio: 2 })).toContain("2 decisiones con la propuesta distinta (se cierran con tu cifra)");
   });
 
-  it("la lista de filas sin decidir es legible, ordenada por propuesta y limitada a 50 con el total", () => {
-    const items = Array.from({ length: 70 }, (_, i) => ({ clave: `|g${i}||a`, anio: i % 2 ? 2027 : 2026, propuesto: 100 + i, genero: "HOMBRE", mundo: "URBANO", linea: "DENIM", agrupacion_marca: "RECONOCIDO" }));
-    const l = listaSinDecidir({ filas_sin_decidir: items });
-    expect(l?.total).toBe(70);
-    expect(l?.lineas).toHaveLength(MAX_SIN_DECIDIR);
-    expect(l?.lineas[0]).toBe("HOMBRE · URBANO · DENIM · RECONOCIDO · 2027 · propuesta 169");
+  it("la lista de filas sin decidir cuenta FILAS (no años), separada por motivo, ordenada por propuesta y limitada a 50 de cada una", () => {
+    const base = { genero: "HOMBRE", mundo: "URBANO", linea: "DENIM", agrupacion_marca: "RECONOCIDO" };
+    const umbral = Array.from({ length: 60 }, (_, i) => ({ ...base, clave: `|g${i}||a`, anio: 2026, propuesto: 100 + i, motivo: "umbral" as const }));
+    const revision = Array.from({ length: 25 }, (_, i) => [2026, 2027].map((anio) => ({ ...base, clave: `|r${i}||a`, anio, propuesto: 10 + i + (anio - 2026), motivo: "revision_cola_larga" as const, demanda_corregida: 180.4, disponibilidad: 0.62 }))).flat();
+    const l = listaSinDecidir({ filas_sin_decidir: [...umbral, ...revision], total_filas_sin_decidir: 85, total_filas_para_revision: 25 });
+    expect(l?.umbral.total).toBe(60);
+    expect(l?.umbral.lineas).toHaveLength(MAX_SIN_DECIDIR);
+    expect(l?.umbral.lineas[0]).toBe("HOMBRE · URBANO · DENIM · RECONOCIDO · propuesta 2026: 159");
+    // Las dos filas-año de una misma fila son UNA línea y UNA fila en el total.
+    expect(l?.revision.total).toBe(25);
+    expect(l?.revision.lineas).toHaveLength(25);
+    expect(l?.revision.lineas[0]).toBe("HOMBRE · URBANO · DENIM · RECONOCIDO · propuesta 2026: 34 · 2027: 35 (demanda corregida 180 · disponibilidad 62.0 %)");
     expect(listaSinDecidir({})).toBeNull();
     expect(listaSinDecidir({ filas_sin_decidir: [] })).toBeNull();
     expect(listaSinDecidir(null)).toBeNull();
@@ -539,5 +555,60 @@ describe("concordancia del cierre, filas sin decidir y tendencia", () => {
     expect(textoTendencia(4.9, 2026)).toBe("Referencia: la tendencia de 2025 frente a 2024 fue +4.9 %.");
     expect(textoTendencia(null, 2026)).toBeNull();
     expect(textoTendencia(undefined, 2026)).toBeNull();
+  });
+});
+
+describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => {
+  it("«N filas para revisión» en la cabecera y en el cierre", () => {
+    expect(textoParaRevision(1)).toBe("1 fila para revisión");
+    expect(textoParaRevision(12)).toBe("12 filas para revisión");
+    expect(resumenCabecera(proyeccion()).join(" · ")).toContain("12 filas para revisión");
+    expect(resumenCabecera(proyeccion({ resumen: { ...proyeccion().resumen!, filas_para_revision: 0 } })).join(" · ")).not.toContain("para revisión");
+    expect(lineasDeCierre(proyeccion()).join("|")).toContain("12 filas para revisión: cola larga con quiebres de stock; hay que decidirlas para cerrar");
+  });
+
+  it("el filtro «para revisión» existe y tiene su etiqueta", () => {
+    expect(ETIQUETA_SOLO.para_revision).toBe("Para revisión");
+    expect(leerFiltro(params("solo=para_revision")).solo).toBe("para_revision");
+  });
+
+  it("el método nuevo se explica como motivo de desactualizada; los demás motivos, tal cual", () => {
+    expect(textoMotivoDesactualizada({ codigo: "version_metodo", mensaje: "x" })).toMatch(/método nuevo/);
+    expect(textoMotivoDesactualizada({ codigo: "cargas_nuevas", mensaje: "Se publicó 2026-10." })).toBe("Se publicó 2026-10.");
+    expect(lineasDeCierre(proyeccion({ desactualizada: [{ codigo: "version_metodo", mensaje: "x" }] })).join("|")).toContain("método nuevo");
+  });
+
+  it("resume la validación de una fila en una línea; cierra sin quiebres o sin dato no dice nada", () => {
+    expect(resumenColaLarga(colaLarga())).toBe("Para revisión · disponibilidad 62.0 % · corregida 181");
+    expect(resumenColaLarga(colaLarga({ veredicto: "cierra_con_quiebres" }))).toMatch(/^Cola larga con quiebres/);
+    expect(resumenColaLarga(colaLarga({ veredicto: "cierra" }))).toBeNull();
+    expect(resumenColaLarga(colaLarga({ veredicto: "sin_dato", disponibilidad: null, demanda_corregida: null }))).toBeNull();
+    expect(resumenColaLarga(null)).toBeNull();
+  });
+
+  it("el detalle trae disponibilidad, tienda-meses, ritmo, meses sin stock y venta corregida", () => {
+    const d = Object.fromEntries(datosColaLarga(colaLarga()).map((x) => [x.rotulo, x.valor]));
+    expect(d["Disponibilidad"]).toBe("62.0 %");
+    expect(d["Tienda-meses con stock"]).toBe("67 de 108");
+    expect(d["Ritmo (u por tienda-mes con stock)"]).toBe("1.4");
+    expect(d["Meses sin stock en ninguna tienda"]).toBe("1");
+    expect(d["Venta corregida (A_f)"]).toBe("180.5");
+    expect(datosColaLarga(colaLarga({ ritmo: null, demanda_corregida: null, disponibilidad: null }))[0].valor).toBe("—");
+    expect(Object.keys(ETIQUETA_VEREDICTO)).toEqual(["cierra", "cierra_con_quiebres", "revision", "sin_dato"]);
+  });
+
+  it("una fila está para revisión si algún registro lo avisa", () => {
+    expect(esParaRevision(filaRevision())).toBe(true);
+    expect(esParaRevision(filasDenim()[0])).toBe(false);
+  });
+
+  it("umbral de disponibilidad: de 0 a 1, coma o punto", () => {
+    expect(leerUmbralDisponibilidad("0,75")).toEqual({ ok: true, valor: 0.75 });
+    expect(leerUmbralDisponibilidad("0")).toEqual({ ok: true, valor: 0 });
+    expect(leerUmbralDisponibilidad("1")).toEqual({ ok: true, valor: 1 });
+    expect(leerUmbralDisponibilidad("1.1").ok).toBe(false);
+    expect(leerUmbralDisponibilidad("-0.1").ok).toBe(false);
+    expect(leerUmbralDisponibilidad("").ok).toBe(false);
+    expect(leerUmbralDisponibilidad("x").ok).toBe(false);
   });
 });

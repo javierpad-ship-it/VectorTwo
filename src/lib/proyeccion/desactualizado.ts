@@ -9,6 +9,7 @@ import { curvaCambio, detalleCambioCurva } from "./curva-fila";
 import { factorDe, type FactorProy } from "./nino";
 import {
   TEMPORADAS_FACTOR,
+  VERSION_METODO,
   type AvisoFila,
   type BloquesApi,
   type CurvaOrigen,
@@ -28,7 +29,8 @@ export type ProyeccionParaEstado = {
   /** `aaaa-mm` (o `aaaa-mm-dd`). */
   hasta_periodo: string;
   recalculo_pendiente?: boolean;
-  resumen: Pick<ResumenProyeccion, "curvas_usadas"> | null;
+  /** `version_metodo` ausente = no se sabe: no se marca. */
+  resumen: (Pick<ResumenProyeccion, "curvas_usadas"> & Partial<Pick<ResumenProyeccion, "version_metodo">>) | null;
   parametros: Pick<ParametrosProyeccion, "factores_usados" | "bloques">;
 };
 
@@ -125,6 +127,11 @@ export function motivosDesactualizada(p: ProyeccionParaEstado, actual: EstadoAct
 
   if (calculado && actual.periodos_updated_at && posterior(actual.periodos_updated_at, calculado)) {
     motivos.push({ codigo: "periodos_cambiados", mensaje: "Se editaron los periodos atípicos después de calcular." });
+  }
+  // `0.10.1`: calculada con un método anterior (otra fórmula de venta esperada, cola larga sin disponibilidad): recalcular.
+  const version = p.resumen?.version_metodo;
+  if (typeof version === "number" && version < VERSION_METODO) {
+    motivos.push({ codigo: "version_metodo", mensaje: "Se calculó con una versión anterior del método: recalcula para aplicar el método nuevo (las decisiones se conservan)." });
   }
   if (p.recalculo_pendiente) motivos.push({ codigo: "recalculo_pendiente", mensaje: "Cambiaste los parámetros: recalcula para verlos aplicados." });
   return motivos;

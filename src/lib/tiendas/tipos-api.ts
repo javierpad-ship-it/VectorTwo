@@ -28,7 +28,10 @@ export type TiendaFila = {
   fecha_apertura: string | null;
   /** ISO `aaaa-mm-dd` o `null`; último día con venta (inclusive). */
   fecha_cierre: string | null;
-  /** Soles por mes, sin IGV, de la tienda ya madura (en régimen); solo en tipo Tienda. */
+  /**
+   * Soles, sin IGV, que la tienda venderá en su año de apertura (desde que abre hasta el 31 de diciembre de ese año); solo en tipo
+   * Tienda. No es venta mensual ni de tienda madura (`0.10.1`).
+   */
   venta_esperada_promedio: number | null;
   /**
    * M7: tienda a cuya composición de venta debe parecerse esta si es nueva. Solo la reciben admin y planner (al

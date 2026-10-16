@@ -43,10 +43,11 @@ const CAMPOS: CampoImportador<Campo>[] = [
   { campo: "fecha_cierre", etiqueta: "Fecha de cierre", alias: ["FECHA_CIERRE", "CIERRE", "FECHA_FIN", "FIN"], opcional: true, hint: NOTA_OPCIONAL },
   {
     campo: "venta_esperada",
-    etiqueta: "Venta esperada",
-    alias: ["VENTA_ESPERADA", "VENTA_ESPERADA_PROMEDIO", "VENTA_PROM", "VENTA_MENSUAL"],
+    etiqueta: "Venta esperada del año de apertura",
+    // Sin alias de venta mensual o promedio (VENTA_MENSUAL, VENTA_PROM): un Excel mensual se cargaría en silencio como venta anual.
+    alias: ["VENTA_ESPERADA", "VENTA_ESPERADA_PROMEDIO", "VENTA_ESPERADA_ANIO_APERTURA", "VENTA_APERTURA"],
     opcional: true,
-    hint: `S/ por mes, sin IGV, de la tienda ya madura. ${NOTA_OPCIONAL}`,
+    hint: `S/ sin IGV que la tienda venderá desde que abre hasta el 31 de diciembre de ese año (no es mensual ni de tienda madura). ${NOTA_OPCIONAL}`,
   },
   {
     campo: "tienda_referencia",

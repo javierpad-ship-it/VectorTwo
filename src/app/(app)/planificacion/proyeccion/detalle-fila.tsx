@@ -12,6 +12,7 @@ import type { FilaDetalleApi, ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { BloqueDecision } from "./bloque-decision";
 import type { DecisionFila } from "./celda-decision";
 import { AlertaError, Avisos, Cargando, NUM } from "./comunes";
+import { ColaLargaDetalle } from "./cola-larga";
 import { GraficoMensualFila } from "./grafico-mensual-fila";
 import { MesesDeRegistro } from "./tabla-filas";
 import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
@@ -75,6 +76,7 @@ export function DetalleFila({
 
   const nombre = d ? `${d.genero} · ${d.mundo} · ${d.linea} · ${d.equivalencia ? `${d.equivalencia} · ` : ""}${d.agrupacion_marca}` : "Detalle de la fila";
   const pa = d?.historico?.prueba_anterior ?? null;
+  const colaLarga = d?.anios.find((a) => a.anio === y)?.cola_larga ?? d?.historico?.cola_larga ?? null;
   const tendencia = d?.historico?.tendencia ?? null;
 
   return (
@@ -187,6 +189,8 @@ export function DetalleFila({
               </div>
               <p className="mt-1 text-xs text-tinta-suave">● = quiebre de stock (cobertura menor que 0.25 con venta): señal, no cambia las cifras. Fondo rojizo = mes del Niño.</p>
             </div>
+
+            {colaLarga && <ColaLargaDetalle cola={colaLarga} />}
 
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-3">

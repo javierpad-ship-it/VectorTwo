@@ -14,6 +14,7 @@ import type {
   TiendaBloqueApi,
   TiendaProyeccionApi,
   FactorApi,
+  ColaLargaApi,
 } from "../src/lib/proyeccion/tipos-api";
 
 /**
@@ -71,6 +72,7 @@ export function proyeccion(extra: Partial<ProyeccionApi> = {}): ProyeccionApi {
       umbral_avance: 0.3,
       umbral_cobertura: 0.25,
       umbral_cola_larga: 100,
+      umbral_disponibilidad: 0.75,
       rampa_maduracion: [1, 1, 1],
       factores_usados: [],
       bloques: bloques(),
@@ -88,6 +90,7 @@ export function proyeccion(extra: Partial<ProyeccionApi> = {}): ProyeccionApi {
       curvas_usadas: [],
       desvio_prueba_anterior_pct: -1.9,
       perfiles_apertura: [{ tienda: "T05", ratios: [2.9, 1.8, 1.2, 1, 1, 1] }],
+      filas_para_revision: 12,
       fuera_bloque: 0,
       version_metodo: 2,
       duracion_ms: 18000,
@@ -303,7 +306,7 @@ export function tiendaProyeccion(extra: Partial<TiendaProyeccionApi> = {}): Tien
     filas: [
       fila({ nombre: "RECONOCIDO", id: "tf1", hist: [0, 0, 0], vendido: 0, p26: 0, p27: 5681 }, { tienda_id: "tienda-12" }),
     ].map((f) => ({ ...f, anios: f.anios.map((a) => ({ ...a, anio: 2027, bloque: "nuevas" as const, subbloque: "aperturas" as const, vigente: 5681, propuesto: 5681 })) })),
-    avisos: ["sin_referente", "canibalizacion"],
+    avisos: ["sin_referente", "apertura_tardia"],
     ...extra,
   };
 }
@@ -333,7 +336,7 @@ export function respuestaMatriz(extra: Partial<RespuestaMatrizApi> = {}): Respue
       nodo("linea", "POLO", { genero_id: "g-h", mundo_id: "m-u", linea_id: "l-polo" }, { estado: "curva_cambio", variacion_pct: 2.7 }),
     ],
     bloques: bloques(),
-    resumen: { lineas: 2, lineas_total: 41, porcentaje_total: 6.4, desvio_prueba_anterior_pct: -1.9 },
+    resumen: { lineas: 2, lineas_total: 41, porcentaje_total: 6.4, desvio_prueba_anterior_pct: -1.9, filas_para_revision: 12 },
     ...extra,
   };
 }
@@ -377,4 +380,16 @@ export function factores(): FactorApi[] {
     { anio: 2026, temporada: "verano", ratio_calculado: 1.24, ratio_aplicado: null, ratio_efectivo: 1.24, origen: "calculado", parcial: true, tiendas_comunes: 9, meses_comparados: 1, calculado_at: "2026-10-14T15:00:00Z", nota: null, objetivo: false },
     { anio: 2027, temporada: "invierno", ratio_calculado: null, ratio_aplicado: null, ratio_efectivo: null, origen: null, parcial: false, tiendas_comunes: null, meses_comparados: null, calculado_at: null, nota: null, objetivo: true },
   ];
+}
+
+export function colaLarga(extra: Partial<ColaLargaApi> = {}): ColaLargaApi {
+  return { demanda_corregida: 180.5, disponibilidad: 0.62, tienda_meses_con_stock: 67, tienda_meses: 108, meses_cd_con_stock: 10, veredicto: "revision", ritmo: 1.4, meses_tiendas_sin_stock: 1, ...extra };
+}
+
+/** Una fila de cola larga «para revisión»: la propuesta es la demanda corregida (180) y el avance normal (60) queda al lado. */
+export function filaRevision(): FilaApi {
+  const f = fila({ nombre: "VALOR", id: "fr", hist: [40, 50, 55], vendido: 45, p26: 180, p27: 190 });
+  f.anios[0] = { ...f.anios[0], propuesto: 180, vigente: 180, metodo: "avance", referencia_alternativa: 60, avisos: ["revision_cola_larga"], cola_larga: colaLarga() };
+  f.anios[1] = { ...f.anios[1], avisos: ["revision_cola_larga"] };
+  return f;
 }

@@ -14,7 +14,7 @@ import {
 } from "@/lib/proyeccion/reglas";
 import { bloquesDeAnio } from "@/lib/proyeccion/bloques";
 import { crearSchema, decisionSchema, decisionTiendaSchema, aplicarCurvaSchema, editarSchema, factoresPutSchema, matrizQuerySchema, parametrosSchema, mensualQuerySchema } from "@/lib/proyeccion/esquemas";
-import { participacionesFila } from "@/lib/proyeccion/participaciones";
+import { leerParticipaciones, participacionesFila } from "@/lib/proyeccion/participaciones";
 import { AG, AM, EQ, MARCA, N, Y, agrupaciones, clave, configFlujo, entrada, meses, nodos, tiendas, vigentes } from "./proyeccion.fixture";
 
 const AHORA = "2026-10-15T15:00:00.000Z";
@@ -300,7 +300,9 @@ describe("curva de la fila (regla 25)", () => {
   });
 });
 
-describe("participaciones históricas (regla 26)", () => {
+const PERIODO = { desde: "2025-10", hasta: "2026-09", meses: 12, tiendas: "mismas" as const, anio: 2026, normalizado_nino: false };
+
+describe("participaciones históricas (reglas 26 y 48)", () => {
   it("cada eje suma 1; claveFlujo se evalúa sobre la unidad de marca (ALFA JEANS cuenta en la clave de ALFA)", () => {
     const detalle = [
       { gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.alfa, agrupacion_talla_id: "t-central", unidades: 50 },
@@ -308,7 +310,7 @@ describe("participaciones históricas (regla 26)", () => {
       { gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.alfa, agrupacion_talla_id: "t-extrema", unidades: 30 },
       { gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.delta, agrupacion_talla_id: "t-central", unidades: 20 },
     ];
-    const p = participacionesFila(detalle, configFlujo())!;
+    const p = participacionesFila(detalle, configFlujo(), PERIODO)!;
     expect(p.por_clave_flujo.reduce((a, x) => a + x.participacion, 0)).toBeCloseTo(1, 12);
     expect(p.por_talla.reduce((a, x) => a + x.participacion, 0)).toBeCloseTo(1, 12);
     expect(p.por_clave_flujo.find((x) => x.clave_flujo === "marca:m-alfa")?.participacion).toBeCloseTo(0.8, 12);
@@ -316,9 +318,36 @@ describe("participaciones históricas (regla 26)", () => {
     expect(p.por_talla.find((x) => x.agrupacion_talla_id === "t-central")?.participacion).toBeCloseTo(0.7, 12);
   });
 
+  it("regla 48: periodo_referencia y por_marca con TODAS las unidades de marca (con o sin tratamiento); suma 1", () => {
+    const detalle = [
+      { gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.alfa, agrupacion_talla_id: "t-central", unidades: 50 },
+      // ALFA JEANS es miembro del conjunto de ALFA: suma en ALFA.
+      { gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.alfaJeans, agrupacion_talla_id: "t-extrema", unidades: 10 },
+      { gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.delta, agrupacion_talla_id: "t-central", unidades: 30 },
+      // BETA no tiene tratamiento en 02b y aun así aparece en por_marca.
+      { gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.beta, agrupacion_talla_id: "t-central", unidades: 10 },
+    ];
+    const p = participacionesFila(detalle, configFlujo(), PERIODO)!;
+    expect(p.periodo_referencia).toEqual(PERIODO);
+    expect(p.por_marca?.map((x) => x.marca_id).sort()).toEqual([MARCA.alfa, MARCA.beta, MARCA.delta].sort());
+    expect(p.por_marca?.reduce((a, x) => a + x.participacion, 0)).toBeCloseTo(1, 12);
+    expect(p.por_marca?.find((x) => x.marca_id === MARCA.alfa)?.participacion).toBeCloseTo(0.6, 12);
+    expect(p.por_marca?.find((x) => x.marca_id === MARCA.beta)?.participacion).toBeCloseTo(0.1, 12);
+    // Los otros dos ejes siguen como antes.
+    expect(p.por_clave_flujo.reduce((a, x) => a + x.participacion, 0)).toBeCloseTo(1, 12);
+    expect(p.por_talla.reduce((a, x) => a + x.participacion, 0)).toBeCloseTo(1, 12);
+  });
+
+  it("una cerrada de 0.10.0 (sin periodo_referencia ni por_marca) se lee con ambos en null", () => {
+    const viejo = { por_clave_flujo: [{ clave_flujo: "otras", marca_id: null, participacion: 1 }], por_talla: [{ agrupacion_talla_id: "t", participacion: 1 }] };
+    expect(leerParticipaciones(viejo)).toEqual({ periodo_referencia: null, por_clave_flujo: viejo.por_clave_flujo, por_marca: null, por_talla: viejo.por_talla });
+    expect(leerParticipaciones(null)).toBeNull();
+    expect(leerParticipaciones({ por_marca: [] })).toBeNull();
+  });
+
   it("una fila sin venta en W12 → null", () => {
-    expect(participacionesFila([], configFlujo())).toBeNull();
-    expect(participacionesFila([{ gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.alfa, agrupacion_talla_id: "t", unidades: 0 }], configFlujo())).toBeNull();
+    expect(participacionesFila([], configFlujo(), PERIODO)).toBeNull();
+    expect(participacionesFila([{ gml_id: N.denim, equivalencia_id: null, agrupacion_marca_id: AM.rec, marca_id: MARCA.alfa, agrupacion_talla_id: "t", unidades: 0 }], configFlujo(), PERIODO)).toBeNull();
   });
 });
 

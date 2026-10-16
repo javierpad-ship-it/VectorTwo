@@ -6,12 +6,12 @@ import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi, AvisoFila, FilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import { CeldaCrecimiento, CeldaDecision, type DecisionFila } from "./celda-decision";
 import { Avisos, NUM } from "./comunes";
-import { aniosHistoricos, avisosDeFila, formatearAvance, historicoDe, nombreMes, registroDe, totalesDeLinea, unidades } from "./vista";
+import { aniosHistoricos, avisosDeFila, formatearAvance, historicoDe, nombreMes, registroDe, resumenColaLarga, totalesDeLinea, unidades } from "./vista";
 
 const TH = "px-3 py-2 font-medium";
 
 /** Los avisos que se ven en la tabla (el resto, en el detalle de la fila). */
-const AVISOS_EN_TABLA: ReadonlySet<AvisoFila> = new Set<AvisoFila>(["curva_cambio", "propuesta_cambio", "sin_curva", "avance_bajo", "plan_anterior", "cola_larga"]);
+const AVISOS_EN_TABLA: ReadonlySet<AvisoFila> = new Set<AvisoFila>(["curva_cambio", "propuesta_cambio", "sin_curva", "avance_bajo", "plan_anterior", "cola_larga", "revision_cola_larga", "cola_larga_con_quiebres"]);
 
 /** Los doce meses de un registro: real en gris y redonda, proyectado en cursiva (solo para ver). */
 export function MesesDeRegistro({ registro, titulo }: { registro: AnioFilaApi | undefined; titulo: string }) {
@@ -139,6 +139,11 @@ export function TablaFilas({
                           {nombre}
                         </button>
                         <Avisos avisos={avisos} />
+                        {resumenColaLarga(rY?.cola_larga) && (
+                          <span className="basis-full text-xs text-alerta" title="Validación de disponibilidad de la cola larga">
+                            {resumenColaLarga(rY?.cola_larga)}
+                          </span>
+                        )}
                         <button type="button" onClick={() => alternar(f.id)} aria-expanded={abiertas.has(f.id)} className="text-xs text-tinta-suave hover:text-tinta">
                           {abiertas.has(f.id) ? "▾ meses" : "▸ meses"}
                         </button>

@@ -389,12 +389,12 @@ export function TarjetaTienda({
         <div className="space-y-3 px-4 py-4">
           <p className="text-sm text-tinta-suave">
             {t.bloque === "cierres" ? "Cierra" : "Abre"} el <span className="font-mono text-tinta">{t.fecha_usada}</span>
-            {" · "}venta esperada{" "}
+            {" · "}venta esperada del año de apertura{" "}
             {t.venta_esperada === null ? (
               <span className="text-alerta">sin cargar</span>
             ) : (
               <span className="text-tinta">
-                S/ {formatearNumero(t.venta_esperada)} / mes <span className="text-tinta-suave">(sin IGV, tienda madura)</span>
+                S/ {formatearNumero(t.venta_esperada)} <span className="text-tinta-suave">(sin IGV, desde que abre hasta el 31 de diciembre)</span>
               </span>
             )}
             {" · "}referente: <span className="text-tinta">{t.referente ? `${t.referente.codigo} · ${t.referente.nombre}` : "ninguno (promedio de las mismas tiendas)"}</span>
@@ -469,7 +469,7 @@ export function TarjetaTienda({
             />
           ) : (
             <p className="rounded-lg border border-borde px-3 py-3 text-sm text-tinta-suave">
-              Por ahora un cierre solo se clasifica: se muestra su venta real hasta el último mes cerrado. La proyección de sus meses restantes llega en la 0.10.1; no hay nada que decidir.
+              Por ahora un cierre solo se clasifica: se muestra su venta real hasta el último mes cerrado. La proyección de sus meses restantes llega en una versión próxima; no hay nada que decidir.
             </p>
           )}
 
