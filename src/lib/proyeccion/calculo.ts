@@ -29,6 +29,7 @@ import {
   perfilApertura,
   proponerFilaTienda,
   unidadesMadurasDeFila,
+  unidadesMadurasEntero,
 } from "./tiendas-nuevas";
 import {
   claveBaseDe,
@@ -556,6 +557,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     let decidido: number | null = null;
     let origen: "propuesta" | "manual" | null = null;
     const avisos = new Set<AvisoFila>(st.avisos);
+    if (st.unidadesMaduras !== null && unidadesMadurasEntero(st.unidadesMaduras) === null) avisos.add("cifra_excesiva");
     if (previa && previa.decidido !== null) {
       const r = aplicarDecisionTienda({
         filas: st.filas,
@@ -617,7 +619,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       referente_id_usado: t.referente_id,
       origen_composicion: st.plan?.origen ?? "propia",
       rampa: st.plan?.rampa ?? [...e.parametros.rampa_maduracion],
-      unidades_maduras: st.unidadesMaduras === null ? null : Math.round(st.unidadesMaduras),
+      unidades_maduras: unidadesMadurasEntero(st.unidadesMaduras),
       vendido,
       propuesto,
       metodo,

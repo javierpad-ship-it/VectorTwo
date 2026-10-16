@@ -72,6 +72,7 @@ export function parametrosDe(json: unknown): ParametrosProyeccion {
     rampa_maduracion: Array.isArray(o.rampa_maduracion) && o.rampa_maduracion.length > 0 ? o.rampa_maduracion.map(Number) : [...RAMPA_MADURACION],
     factores_usados: Array.isArray(o.factores_usados) ? o.factores_usados : [],
     bloques: o.bloques && typeof o.bloques === "object" ? (o.bloques as BloquesApi) : {},
+    ...(Array.isArray(o.ediciones) && o.ediciones.length > 0 ? { ediciones: o.ediciones } : {}),
     ...(o.recalculo_pendiente ? { recalculo_pendiente: true } : {}),
   };
 }

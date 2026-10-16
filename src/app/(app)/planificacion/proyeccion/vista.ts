@@ -208,6 +208,7 @@ export const TEXTO_AVISO: Record<AvisoFila, { texto: string; tono: TonoAviso }> 
   cola_larga_con_quiebres: { texto: "Cola larga con quiebres de stock, pero la demanda corregida no supera el umbral: se cierra con la propuesta.", tono: "info" },
   sin_stock_historico: { texto: "No hay stock cargado de esta fila en los últimos doce meses: no se pudo medir la disponibilidad y se trata como cola larga normal.", tono: "info" },
   apertura_tardia: { texto: "La venta esperada cubre menos de un cuarto de un año maduro (la tienda abre tarde en el año o tiene una rampa muy baja): revisa la cifra.", tono: "info" },
+  cifra_excesiva: { texto: "Una cifra del método salió fuera de rango (por ejemplo, una venta esperada que cubre casi nada del año): no se propone nada; escribe el total o revisa la venta esperada y la fecha de apertura en Tiendas.", tono: "alerta" },
   apertura_dudosa: { texto: "La tienda no vendió en un mes en que debía estar abierta: si abrió después, corrige la fecha de apertura en Tiendas.", tono: "alerta" },
   cierre_dudoso: { texto: "La tienda vendió después de su fecha de cierre o dejó de vender antes: revisa la fecha de cierre en Tiendas.", tono: "alerta" },
 };

@@ -25,14 +25,14 @@ export async function GET(_request: NextRequest, { params }: Params) {
  * `recalculo_pendiente`. `409 cerrada` / `409 calculo_en_curso`.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const { response } = await requirePlanner();
+  const { perfil, response } = await requirePlanner();
   if (response) return response;
 
   const { id, respuesta: respuestaId } = await idDeRuta(params, NO_ENCONTRADA);
   if (respuestaId) return respuestaId;
   const { datos, respuesta } = await leerCuerpo(request, editarSchema);
   if (respuesta) return respuesta;
-  const r = await editarProyeccion(id, datos);
+  const r = await editarProyeccion(id, datos, { id: perfil.id, nombre: perfil.nombre });
   if (r.respuesta) return r.respuesta;
   return ok(r.data);
 }

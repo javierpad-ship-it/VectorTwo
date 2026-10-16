@@ -1,6 +1,6 @@
 import { diasDelMes, indiceMes, partesDeFecha } from "./calendario";
 import { repartirEntero } from "./reparto";
-import { MESES_MIN_AVANCE, RAMPA_MAX, type AvisoFila, type Metodo, type Subbloque } from "./tipos-api";
+import { MAX_TOTAL, MESES_MIN_AVANCE, RAMPA_MAX, type AvisoFila, type Metodo, type Subbloque } from "./tipos-api";
 
 /**
  * Tiendas nuevas (ficha 07, paso 4 y reglas 19 a 23). Puro.
@@ -34,6 +34,11 @@ export function fraccionAnioApertura(filas: readonly FilaParaFraccion[], r: read
 /** `Md_f = E × s_f ÷ (p_f × F)`; 0 si no hay precio o `F` (nada que repartir). */
 export function unidadesMadurasDeFila(args: { E: number; s: number; p: number; F: number }): number {
   return args.p > 0 && args.F > 0 ? (args.E * args.s) / (args.p * args.F) : 0;
+}
+
+/** Las unidades maduras de una tienda como entero para la base: `null` si no hay o no caben (`> MAX_TOTAL`, no finitas). */
+export function unidadesMadurasEntero(x: number | null): number | null {
+  return x === null || !Number.isFinite(x) || x > MAX_TOTAL ? null : Math.round(x);
 }
 
 /** `K = E ÷ F`: lo que vendería la tienda en un año completo y madura; `null` sin `F`. */
@@ -205,6 +210,23 @@ const redondear = (x: number) => Math.max(0, Math.round(x));
  *   - año siguiente de una apertura → `apertura`: `Md_f × Σ c_m r_m φ_m`.
  */
 export function proponerFilaTienda(e: EntradaFilaTienda): ResultadoFilaTienda {
+  return acotar(proponerFilaTiendaSinCota(e));
+}
+
+const cabe = (x: number | null): boolean => x === null || (Number.isFinite(x) && x <= MAX_TOTAL);
+
+/**
+ * Una cifra que no es finita o pasa de `MAX_TOTAL` (p. ej. `F` casi 0 que dispara `Md_f`) no se propone: `propuesto = null`, método
+ * `sin_propuesta` y aviso `cifra_excesiva`; las referencias fuera de rango se descartan. Así un desbordamiento no tumba el cálculo
+ * entero al escribir un `integer` en la base.
+ */
+function acotar(r: ResultadoFilaTienda): ResultadoFilaTienda {
+  const sinReferencias = { referencia_alternativa: cabe(r.referencia_alternativa) ? r.referencia_alternativa : null, referencia_tres_meses: cabe(r.referencia_tres_meses) ? r.referencia_tres_meses : null };
+  if (cabe(r.propuesto) && cabe(r.vendido)) return { ...r, ...sinReferencias };
+  return { ...r, ...sinReferencias, propuesto: null, metodo: "sin_propuesta", avisos: r.avisos.includes("cifra_excesiva") ? r.avisos : [...r.avisos, "cifra_excesiva"] };
+}
+
+function proponerFilaTiendaSinCota(e: EntradaFilaTienda): ResultadoFilaTienda {
   const vendido = e.esAnioEnCurso ? e.real.slice(0, e.k).reduce((a, b) => a + Math.max(0, b), 0) : 0;
   if (e.curva === null) {
     return { vendido, propuesto: null, metodo: "sin_propuesta", referencia_alternativa: null, referencia_tres_meses: null, maduro_propio: null, vendido_normalizado: null, denominador: null, avisos: ["sin_curva"] };

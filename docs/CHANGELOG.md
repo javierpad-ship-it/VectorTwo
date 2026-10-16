@@ -2,6 +2,18 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.10.3 · M7 — 2026-10-16
+
+Endurecimiento de M7 tras la auditoría de seguridad de la 0.10.2 (sin hallazgos bloqueantes ni importantes; seis menores corregidos). Sin migración.
+
+- **Cerrar contra decidir a la vez:** tras cerrar se relee lo pendiente y, si algo quedó sin decidir, el cierre se deshace (y el archivado anterior) con el mismo 409; la carrera queda acotada, no eliminada del todo.
+- **Cerrar a la fuerza (`?forzar=1`) ya no salta el método:** una proyección calculada con un método anterior responde `409 version_metodo` aunque se fuerce; recalcular lo arregla.
+- **Cifras desmedidas:** `A_f` y la venta esperada de tiendas nuevas se acotan a 100 000 000; si no caben, la fila queda sin dato o sin propuesta con el aviso `cifra_excesiva`, en vez de tumbar el cálculo entero.
+- **Resumen:** `refrescarResumen` solo pisa las claves de conteo sobre una lectura fresca.
+- **Auditoría de parámetros:** cada edición registra quién, cuándo y qué cambió (valor anterior y nuevo) en `parametros.ediciones`, últimas 50.
+- **Pruebas de roles:** las rutas de proyección entran al test con guardas reales (147 pruebas) y el 401/403 cubre cerrar, calcular, matriz, mensual, editar, eliminar y archivar.
+- Total: 2 986 pruebas en 156 archivos, lint, `tsc` y build en verde.
+
 ## 0.10.2 · M7 — 2026-10-16
 
 Pantalla de la proyección con los cambios de la ronda 4 del backend (ficha 07, «Cambios 0.10.1»). Sin migración.

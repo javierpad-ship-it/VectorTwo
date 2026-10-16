@@ -1,6 +1,6 @@
 import type { ResultadoCierre } from "./cierre";
 import { repartirResto } from "./reparto";
-import type { AvisoFila, ColaLargaApi, VeredictoColaLarga } from "./tipos-api";
+import { MAX_TOTAL, type AvisoFila, type ColaLargaApi, type VeredictoColaLarga } from "./tipos-api";
 
 /**
  * Cola larga con validación de disponibilidad (ficha 07, «Cambios 0.10.1», punto 2; reglas 46 y 47). Puro.
@@ -127,7 +127,13 @@ export function disponibilidadFila(e: EntradaDisponibilidad): ResultadoDisponibi
 
   const dispon = tcsTotal / tiendaMeses;
   const ritmo = unidadesNorm / tcsTotal;
-  const demanda = e.curva && denominador > 0 ? unidadesNorm / denominador : null;
+  const cruda = e.curva && denominador > 0 ? unidadesNorm / denominador : null;
+  // `A_f` explota si casi ninguna tienda tuvo stock (denominador ≈ 0): fuera de rango no es una medida, es ruido. Se trata como «sin dato»
+  // (la propuesta sigue siendo la de avance y no se escribe una cifra que no cabe en la base).
+  if (cruda !== null && !(Number.isFinite(cruda) && cruda <= MAX_TOTAL)) {
+    return { ...base, dispon: null, ritmo: null, demanda_corregida: null, veredicto: "sin_dato" };
+  }
+  const demanda = cruda;
   let veredicto: VeredictoColaLarga;
   if (dispon >= e.umbrales.disponibilidad || demanda === null) veredicto = "cierra";
   else veredicto = demanda >= e.umbrales.cola_larga ? "revision" : "cierra_con_quiebres";

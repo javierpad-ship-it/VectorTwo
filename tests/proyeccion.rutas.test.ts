@@ -100,7 +100,17 @@ describe("permisos y forma de las respuestas", () => {
       expect((await cerrada(get("/cerrada", "?anio=2026"))).status).toBe(esperado);
       expect((await leerUna(get("/proyecciones/x"), ctx(INEXISTENTE))).status).toBe(esperado);
       expect((await decidirTienda(enviar("PUT", "/x", {}), ctx(INEXISTENTE, { tiendaId: INEXISTENTE, anio: "2026" }))).status).toBe(esperado);
+      // Cerrar, calcular, leer la matriz, editar y eliminar (las rutas más delicadas) tampoco pasan sin sesión ni con el rol de lectura.
+      expect((await cerrar(enviar("POST", "/x", {}), ctx(INEXISTENTE))).status).toBe(esperado);
+      expect((await calcular(enviar("POST", "/x", {}), ctx(INEXISTENTE))).status).toBe(esperado);
+      expect((await matriz(get("/m"), ctx(INEXISTENTE))).status).toBe(esperado);
+      expect((await editar(enviar("PATCH", "/x", { parametros: { umbral_disponibilidad: 0.5 } }), ctx(INEXISTENTE))).status).toBe(esperado);
+      expect((await eliminar(get("/x"), ctx(INEXISTENTE))).status).toBe(esperado);
+      expect((await archivar(enviar("POST", "/x", {}), ctx(INEXISTENTE))).status).toBe(esperado);
+      expect((await mensual(get("/m"), ctx(INEXISTENTE))).status).toBe(esperado);
     }
+    expect(base.llamadasVenta).toBe(0);
+    expect(proyecciones()).toHaveLength(0);
     estadoFalso.rol = "planner";
     const r = await estadoInicial();
     expect(r.status).toBe(200);
@@ -433,6 +443,112 @@ describe("matriz y mensual (casos 13 y 14)", () => {
     const todas = await leer<RespuestaMensualApi>(await mensual(get("/m"), ctx(id as string)));
     for (const fila of todas.data.filas) for (const x of fila.anios) expect(x.meses.reduce<number>((s, v) => s + (v ?? 0), 0)).toBe(x.total);
     expect((await mensual(get("/m", "?bloque=otro"), ctx(id as string))).status).toBe(400);
+  });
+});
+
+describe("cierre: carrera, método viejo y auditoría (0.10.3)", () => {
+  async function decidirLoGrande(id: string) {
+    for (const f of filasDe("proyeccion_filas").filter((x) => x.tienda_id === null)) {
+      for (const anio of [2026, 2027]) {
+        const a = filasDe("proyeccion_fila_anios").find((x) => x.fila_id === f.id && x.anio === anio) as Fila;
+        if (a.propuesto !== null && (a.propuesto as number) >= 100) await decidirFila(enviar("PUT", "/x", { origen: "propuesta" }), ctx(id, { filaId: f.id as string, anio: String(anio) }));
+      }
+    }
+    for (const t of filasDe("proyeccion_tiendas").filter((x) => x.bloque === "nuevas" && x.venta_esperada_usada !== null)) {
+      await decidirTienda(enviar("PUT", "/x", { origen: "propuesta" }), ctx(id, { tiendaId: t.tienda_id as string, anio: String(t.anio) }));
+    }
+  }
+
+  it("una decisión deshecha entre la comprobación y el UPDATE de cerrar: se relee, el cierre se revierte (y el archivado) y responde 409", async () => {
+    const a = await nueva("Primera");
+    await decidirLoGrande(a.id as string);
+    expect((await cerrar(enviar("POST", "/x", {}), ctx(a.id as string))).status).toBe(200);
+    const b = await nueva("Segunda", { copiar_de: a.id });
+    await decidirLoGrande(b.id as string);
+    // Entre la comprobación y el UPDATE de cerrar «alguien» vuelve una fila a la propuesta (la decisión pasó su comprobación antes del cierre).
+    const filaB = filasDe("proyeccion_filas").find((f) => f.proyeccion_id === b.id && f.clave === DENIM_REC) as Fila;
+    base.falloDeEscritura = (tabla, modo, carga) => {
+      if (tabla === "proyecciones" && modo === "update" && (carga as Fila).estado === "cerrada") {
+        const reg = filasDe("proyeccion_fila_anios").find((x) => x.fila_id === filaB.id && x.anio === 2027) as Fila;
+        reg.decidido = null;
+        reg.origen = null;
+      }
+      return null;
+    };
+    const r = await cerrar(enviar("POST", "/x", {}), ctx(b.id as string));
+    base.falloDeEscritura = null;
+    expect(r.status).toBe(409);
+    const c = await leer(r);
+    expect(c.codigo).toBe("filas_sin_decidir");
+    expect(c.error).toContain("el cierre se deshizo");
+    // La segunda sigue en trabajo (sin rastro de cierre) y la primera sigue siendo la única cerrada.
+    expect(proyecciones().find((p) => p.id === b.id)).toMatchObject({ estado: "en_trabajo", cerrada_at: null, cerrada_por_nombre: null });
+    expect(proyecciones().find((p) => p.id === a.id)?.estado).toBe("cerrada");
+    expect(proyecciones().filter((p) => p.estado === "cerrada")).toHaveLength(1);
+    // Decidida la fila, cierra y archiva a la anterior.
+    await decidirFila(enviar("PUT", "/x", { origen: "propuesta" }), ctx(b.id as string, { filaId: filaB.id as string, anio: "2027" }));
+    expect((await cerrar(enviar("POST", "/x", {}), ctx(b.id as string))).status).toBe(200);
+    expect(proyecciones().find((p) => p.id === a.id)?.estado).toBe("archivada");
+  });
+
+  it("?forzar=1 no salta version_metodo: método viejo (o sin versión) → 409 aunque todo esté decidido; recalcular lo arregla", async () => {
+    const { id } = await nueva();
+    await decidirLoGrande(id as string);
+    const p = proyecciones().find((x) => x.id === id) as Fila;
+    const resumenBueno = p.resumen;
+    const forzar = () => cerrar(new NextRequest(`${URL_BASE}/x?forzar=1`, { method: "POST", body: "{}", headers: { "content-type": "application/json" } }), ctx(id as string));
+    p.resumen = { ...(resumenBueno as Record<string, unknown>), version_metodo: 2 };
+    const vieja = await forzar();
+    expect(vieja.status).toBe(409);
+    expect((await leer(vieja)).codigo).toBe("version_metodo");
+    const sinVersion = { ...(resumenBueno as Record<string, unknown>) };
+    delete sinVersion.version_metodo;
+    p.resumen = sinVersion;
+    expect((await leer(await forzar())).codigo).toBe("version_metodo");
+    p.resumen = null;
+    expect((await leer(await forzar())).codigo).toBe("version_metodo");
+    expect(p.estado).toBe("en_trabajo");
+    expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
+    await decidirLoGrande(id as string);
+    expect((await forzar()).status).toBe(200);
+  });
+
+  it("refrescarResumen con una foto vieja de la proyección solo pisa las claves de conteo: no deshace un resumen más nuevo", async () => {
+    const { id } = await nueva();
+    const vieja = structuredClone(proyecciones().find((x) => x.id === id) as Fila);
+    // Otro cálculo dejó un resumen nuevo (otra huella y versión) mientras quien llama tenía la foto vieja.
+    const actual = proyecciones().find((x) => x.id === id) as Fila;
+    actual.resumen = { ...(actual.resumen as Record<string, unknown>), huella_cargas: "huella-nueva", duracion_ms: 4321 };
+    const { refrescarResumen } = await import("@/lib/proyeccion/servicio-edicion");
+    const { clienteFalso } = await import("./proyeccion.fake-db");
+    await refrescarResumen(clienteFalso() as never, vieja as never);
+    const r = (proyecciones().find((x) => x.id === id) as Fila).resumen as Record<string, unknown>;
+    expect(r.huella_cargas).toBe("huella-nueva");
+    expect(r.duracion_ms).toBe(4321);
+    expect(r.version_metodo).toBe(3);
+    expect((r.decididas as Record<string, number>)[2026]).toBe(0);
+    // Una proyección que ya no está en trabajo no se toca.
+    actual.estado = "archivada";
+    const antes = JSON.stringify(actual.resumen);
+    await refrescarResumen(clienteFalso() as never, vieja as never);
+    expect(JSON.stringify(actual.resumen)).toBe(antes);
+  });
+
+  it("editar parámetros deja constancia de quién, cuándo y qué cambió (umbral_disponibilidad incluido); sin cambios reales no se anota", async () => {
+    const { id } = await nueva();
+    const p1 = await editar(enviar("PATCH", "/x", { parametros: { umbral_disponibilidad: 0.5, umbral_cola_larga: 120 } }), ctx(id as string));
+    expect(p1.status).toBe(200);
+    const e1 = (await leer<ProyeccionApi>(p1)).data.parametros.ediciones ?? [];
+    expect(e1).toHaveLength(1);
+    expect(e1[0]).toMatchObject({ por: "Javier", cambios: [{ campo: "umbral_cola_larga", de: 100, a: 120 }, { campo: "umbral_disponibilidad", de: 0.75, a: 0.5 }] });
+    expect(Number.isNaN(Date.parse(e1[0].en))).toBe(false);
+    // Repetir los mismos valores no añade una edición; uno distinto sí, y el historial sobrevive a recalcular.
+    await editar(enviar("PATCH", "/x", { parametros: { umbral_disponibilidad: 0.5 } }), ctx(id as string));
+    expect((await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data.parametros.ediciones).toHaveLength(1);
+    await editar(enviar("PATCH", "/x", { parametros: { umbral_disponibilidad: 0.6 } }), ctx(id as string));
+    await calcular(enviar("POST", "/x"), ctx(id as string));
+    const e2 = (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data.parametros.ediciones ?? [];
+    expect(e2.map((x) => x.cambios.map((c) => `${c.campo}:${c.de}→${c.a}`))).toEqual([["umbral_cola_larga:100→120", "umbral_disponibilidad:0.75→0.5"], ["umbral_disponibilidad:0.5→0.6"]]);
   });
 });
 

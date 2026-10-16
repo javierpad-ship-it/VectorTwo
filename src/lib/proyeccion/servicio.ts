@@ -104,9 +104,12 @@ import { filtrarUniverso } from "./universo";
 import {
   PARALELO,
   TANDA_GML,
+  MAX_EDICIONES_PARAMETROS,
+  VERSION_METODO,
   claveFila,
   type AvisoFila,
   type BloquesApi,
+  type EdicionParametros,
   type FactorApi,
   type Motivo,
   type ParametrosProyeccion,
@@ -329,7 +332,10 @@ export async function crearProyeccion(cuerpo: CrearProyeccionCuerpo, actor: Acto
 
 // ─── Editar / eliminar ───
 
-export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerpo): Promise<Salida<ProyeccionApi>> {
+/** Parámetros editables por `PATCH` (los demás los fija el cálculo). */
+const CAMPOS_EDITABLES = ["crecimiento_pct_defecto", "umbral_avance", "umbral_cobertura", "umbral_cola_larga", "umbral_disponibilidad", "rampa_maduracion"] as const;
+
+export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerpo, actor: Actor): Promise<Salida<ProyeccionApi>> {
   const d = db();
   const pR = await proyeccionOr404(d, id);
   if (pR.respuesta) return falla(pR.respuesta);
@@ -372,6 +378,16 @@ export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerp
           if (r.error) return fallaDb(r.error, "proyección: rampa de las tiendas");
         }
       }
+    }
+    // Auditoría: quién cambió qué (los valores de antes y de después de cada parámetro que se movió).
+    const cambios: EdicionParametros["cambios"] = [];
+    for (const campo of CAMPOS_EDITABLES) {
+      const de = parametros[campo];
+      const a = nuevos[campo];
+      if (JSON.stringify(de) !== JSON.stringify(a)) cambios.push({ campo, de, a });
+    }
+    if (cambios.length > 0) {
+      parametros.ediciones = [...(parametros.ediciones ?? []), { por: actor.nombre, por_id: actor.id, en: sello(), cambios }].slice(-MAX_EDICIONES_PARAMETROS);
     }
     parametros.crecimiento_pct_defecto = nuevos.crecimiento_pct_defecto;
     parametros.umbral_avance = nuevos.umbral_avance;
@@ -744,6 +760,7 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     desactualizada: des.data.length > 0,
     forzar,
     umbralColaLarga: parametros.umbral_cola_larga,
+    metodoViejo: !esMetodoVigente(p.resumen),
   });
   if (!resultado.ok) {
     let filasLegibles: Record<string, unknown>[] | undefined;
@@ -810,7 +827,58 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     await revertirArchivado();
     return fallaMensaje("La proyección cambió mientras se cerraba (empezó a calcularse o ya no está en trabajo). Vuelve a cargar.", 409, "estado_cambiado");
   }
+
+  // Carrera con una decisión: el cierre no es transaccional y una decisión (p. ej. «volver a la propuesta») que pasó su comprobación justo
+  // antes de este UPDATE puede escribirse después. Se vuelven a leer las pendientes con la proyección ya cerrada; si aparece alguna, se
+  // revierte el cierre (y el archivado) como en cualquier otro fallo y se responde con el mismo 409 que habría dado antes.
+  const pendientes = await pendientesDeCierre(d, id, p.anio_en_curso, parametros.umbral_cola_larga);
+  if (pendientes.respuesta) {
+    await revertirCierre(d, id);
+    await revertirArchivado();
+    return falla(pendientes.respuesta);
+  }
   return listo({ ...aProyeccionApi(cerrada.data, [], sello()), archivada_id: archivadaId });
+}
+
+/** `true` si el `resumen` guardado es del método vigente (`version_metodo ≥ VERSION_METODO`); sin `resumen` o sin versión, no. */
+export function esMetodoVigente(resumen: unknown): boolean {
+  const v = resumen !== null && typeof resumen === "object" ? (resumen as Partial<ResumenProyeccion>).version_metodo : undefined;
+  return typeof v === "number" && v >= VERSION_METODO;
+}
+
+/** Deshace el `UPDATE` de cerrar (la proyección vuelve a `en_trabajo`; `cerrada_*` se limpian). */
+async function revertirCierre(d: Db, id: string) {
+  await cambiarEstadoProyeccion(d, id, "cerrada", { estado: "en_trabajo", cerrada_at: null, cerrada_por_id: null, cerrada_por_nombre: null });
+}
+
+/** Las filas y tiendas que siguen sin decidir justo ahora (misma regla que el cierre; `forzar` no aplica): `respuesta` si hay alguna. */
+async function pendientesDeCierre(d: Db, id: string, anioEnCurso: number, umbralColaLarga: number): Promise<{ respuesta: NextResponse | null }> {
+  const filas = await leerFilasConAnios(d, id, { columnas: "ligeras", tiendaId: null, soloActivas: true });
+  if (filas.error) return { respuesta: fallaDb(filas.error, "proyección: releer las filas").respuesta };
+  const tiendas = await leerTiendasProyeccion(d, id);
+  if (tiendas.error) return { respuesta: fallaDb(tiendas.error, "proyección: releer las tiendas").respuesta };
+  const r = motivoRechazoCerrar({
+    estado: "en_trabajo",
+    calculandoDesde: null,
+    ahora: sello(),
+    anioEnCurso,
+    filasBase: filas.data.map((f) => ({
+      clave: f.clave,
+      anios: Object.fromEntries(f.proyeccion_fila_anios.filter((a) => a.activo).map((a) => [a.anio, { clave: f.clave, propuesto: a.propuesto, decidido: a.decidido, avisos: comoAvisos(a.avisos) }])),
+    })),
+    tiendas: tiendas.data.filter((t) => t.activo && t.bloque === "nuevas").map((t) => ({ tienda_id: t.tienda_id, anio: t.anio, venta_esperada: t.venta_esperada_usada === null ? null : Number(t.venta_esperada_usada), decidido: t.decidido })),
+    desactualizada: false,
+    forzar: true,
+    umbralColaLarga,
+  });
+  if (r.ok) return { respuesta: null };
+  return {
+    respuesta: errorConCodigoExtra(`${r.rechazo.mensaje} Alguien cambió una decisión mientras se cerraba: el cierre se deshizo.`, r.rechazo.status, r.rechazo.codigo, {
+      total_filas_sin_decidir: r.total_filas_sin_decidir,
+      total_filas_para_revision: r.total_filas_para_revision,
+      tiendas_sin_decidir: r.tiendas_sin_decidir,
+    }),
+  };
 }
 
 /** Archivar la `cerrada` de un año deja a M8 sin proyección: exige `confirmar_sin_cerrada` (si no, `409 ultima_cerrada`). */

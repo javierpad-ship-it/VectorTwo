@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { mes } from "@/lib/curvas/esquemas";
 import { motivoRampaInvalida } from "./tiendas-nuevas";
-import { RATIO_MAX, RATIO_MIN, SOLO_MATRIZ, TEMPORADAS_FACTOR } from "./tipos-api";
+import { MAX_TOTAL, RATIO_MAX, RATIO_MIN, SOLO_MATRIZ, TEMPORADAS_FACTOR } from "./tipos-api";
 
 /**
  * Esquemas zod de M7 (ficha 07, sección 7, "Contratos de API"). Cada cuerpo se valida con `leerCuerpo`; los mensajes
@@ -13,7 +13,7 @@ const tieneAlgo = (v: object) => Object.keys(v).length > 0;
 
 export const MAX_NOMBRE = 80;
 /** Tope de un total decidido (unidades): evita desbordar columnas y sumas con una cifra tecleada de más. */
-export const MAX_TOTAL = 100_000_000;
+export { MAX_TOTAL };
 /** Registros por llamada de `aplicar-curva`. */
 export const MAX_REGISTROS_CURVA = 200;
 export const MAX_NOTA_PROYECCION = 500;

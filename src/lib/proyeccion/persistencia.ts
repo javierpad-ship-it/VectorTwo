@@ -43,7 +43,7 @@ const AVISOS_CONOCIDOS: readonly AvisoFila[] = [
   "sin_curva", "curva_incompleta", "curva_cambio", "propuesta_cambio", "avance_bajo", "plan_anterior", "sin_venta_anio", "sin_base", "sin_factor",
   "objetivo_atipico", "temporadas_mezcladas", "mes_negativo", "quiebre", "cola_larga", "nivel_cambiado", "bloque_cambiado", "sin_venta_esperada",
   "sin_referente", "referente_sin_historia", "fijadas_exceden", "cierre_no_proyectado", "apertura_dudosa", "cierre_dudoso",
-  "cola_larga_con_quiebres", "revision_cola_larga", "sin_stock_historico", "apertura_tardia",
+  "cola_larga_con_quiebres", "revision_cola_larga", "sin_stock_historico", "apertura_tardia", "cifra_excesiva",
 ];
 
 const METODOS: readonly Metodo[] = ["avance", "plan_anterior", "crecimiento", "apertura", "avance_propio", "maduro_propio", "cierre", "sin_propuesta"];

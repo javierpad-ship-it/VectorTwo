@@ -9,6 +9,8 @@
 export const UMBRAL_AVANCE = 0.3;
 export const UMBRAL_COBERTURA = 0.25;
 export const UMBRAL_COLA_LARGA = 100;
+/** Tope de un total anual (unidades): una cifra mayor no cabe en un `integer` de la base ni tiene sentido (mismo tope que una decisión). */
+export const MAX_TOTAL = 100_000_000;
 /**
  * `0.10.1`: una fila de cola larga con `dispon < UMBRAL_DISPONIBILIDAD` tuvo un quiebre relevante (proxy mensual: tienda-meses con
  * stock al cierre del mes ÷ tienda-meses totales; ficha 07, «Cambios 0.10.1», punto 2).
@@ -91,7 +93,9 @@ export type AvisoFila =
   /** Sin stock cargado en `W12` para la fila: no se pudo medir la disponibilidad (cola larga normal). */
   | "sin_stock_historico"
   /** Tienda cuya venta esperada cubre menos del 25 % de un año maduro (abre tarde o rampa muy baja): informativo. */
-  | "apertura_tardia";
+  | "apertura_tardia"
+  /** Una cifra del método (unidades maduras, propuesta de una tienda nueva) no es finita o pasa de `MAX_TOTAL`: no se propone (queda sin cifra). */
+  | "cifra_excesiva";
 
 export type Metodo =
   | "avance"
@@ -133,6 +137,17 @@ export type BloquesAnioApi = {
 };
 export type BloquesApi = Record<number, BloquesAnioApi>;
 
+/** Quién cambió qué parámetro y cuándo (auditoría de `PATCH`): se guarda en `parametros.ediciones` (jsonb), sin tabla nueva. */
+export type EdicionParametros = {
+  por: string | null;
+  por_id: string | null;
+  /** ISO. */
+  en: string;
+  cambios: { campo: string; de: number | number[]; a: number | number[] }[];
+};
+/** Cuántas ediciones de parámetros se conservan (las más recientes). */
+export const MAX_EDICIONES_PARAMETROS = 50;
+
 export type ParametrosProyeccion = {
   crecimiento_pct_defecto: number;
   umbral_avance: number;
@@ -143,6 +158,8 @@ export type ParametrosProyeccion = {
   rampa_maduracion: number[];
   factores_usados: { anio: number; temporada: TemporadaFactor; ratio: number | null; origen: "calculado" | "manual" | null }[];
   bloques: BloquesApi;
+  /** `0.10.3`: historial de quién editó parámetros (umbrales, crecimiento, rampa) y qué cambió; las más recientes al final. */
+  ediciones?: EdicionParametros[];
   /** Cambiaste parámetros o «datos hasta» después de calcular: hay que recalcular (`PATCH` lo marca, `calcular` lo limpia). */
   recalculo_pendiente?: boolean;
 };

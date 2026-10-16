@@ -12,7 +12,7 @@ import { cuerpoDeFuncion, limpiar, primeraSentencia, rutasDeApi } from "./api.gu
  *   - rol comprador (solo lectura) -> 403;
  * y en ambos casos el handler no llega a tocar ninguna tabla de datos.
  *
- * Fuera de alcance: `tiendas` y `proyeccion` (tienen sus propios tests).
+ * Fuera de alcance: `tiendas` (tiene sus propios tests). `proyeccion` entra con sus guards reales (todas sus rutas son `requirePlanner`).
  */
 
 const estado = vi.hoisted(() => ({
@@ -50,7 +50,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 const RAIZ = path.resolve(__dirname, "..");
 const API = path.join(RAIZ, "src", "app", "api");
 const ESCRITURA = ["POST", "PUT", "PATCH", "DELETE"] as const;
-const EXCLUIDAS = /^(tiendas|proyeccion)\//;
+const EXCLUIDAS = /^tiendas\//;
 const UUID = "00000000-0000-4000-8000-000000000001";
 
 type Caso = { ruta: string; metodo: (typeof ESCRITURA)[number]; exigeRol: boolean };

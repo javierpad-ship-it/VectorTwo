@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { aColaLargaApi, avisosColaLarga, disponibilidadFila, pendienteDeRevision, type MesDisponibilidad } from "@/lib/proyeccion/cola-larga";
 import { motivosDesactualizada, type EstadoActual, type ProyeccionParaEstado } from "@/lib/proyeccion/desactualizado";
 import { armarMatriz, estadoLinea } from "@/lib/proyeccion/matriz";
+import { proponerFilaTienda, unidadesMadurasEntero } from "@/lib/proyeccion/tiendas-nuevas";
+import { MAX_TOTAL } from "@/lib/proyeccion/tipos-api";
 import { proponerCierre } from "@/lib/proyeccion/cierre";
 import { proponerPorDemandaCorregida } from "@/lib/proyeccion/cola-larga";
 import { conteosResumen } from "@/lib/proyeccion/resumen";
@@ -394,6 +396,44 @@ describe("la explicación de una fila para revisión", () => {
     expect(proponerPorDemandaCorregida({ cierre: normal, resultado: { veredicto: "revision", demanda_corregida: 150 }, serie: [10, 10, 10, 10, 10, 10, 10, 10, 10, 0, 0, 0], k: 9, curva: PLANA, factoresMes: UNOS }).referencia_alternativa).toBe(normal.propuesto);
     // Con otro veredicto no toca nada.
     expect(proponerPorDemandaCorregida({ cierre, resultado: { veredicto: "cierra", demanda_corregida: 144 }, serie, k: 2, curva: PLANA, factoresMes: UNOS })).toBe(cierre);
+  });
+});
+
+describe("cifras fuera de rango (MAX_TOTAL): no tumban el cálculo", () => {
+  it("A_f desbordado (casi ninguna tienda con stock entre un millón de tiendas) no es una medida: sin_dato y la propuesta sigue siendo la de avance", () => {
+    const r = medir(dato(VENTANA, 1, 100), { n: 1_000_000_000 });
+    expect(r).toMatchObject({ veredicto: "sin_dato", demanda_corregida: null, dispon: null });
+    // Un A_f grande pero que cabe sigue siendo una medida.
+    expect(medir(dato(VENTANA.slice(0, 9), 6, 8)).demanda_corregida).toBeCloseTo(144, 9);
+    expect(Number.isFinite(medir(dato(VENTANA, 1, 1), { n: 1e300 }).tienda_meses)).toBe(true);
+  });
+
+  it("proponerFilaTienda: unidades maduras que desbordan (o no son finitas) → sin cifra, aviso cifra_excesiva y referencias descartadas", () => {
+    const base = { esAnioEnCurso: false, k: 0, subbloque: "aperturas" as const, nCompletos: 0, real: Array(12).fill(0), curva: PLANA, rampa: UNOS, phi: UNOS, maduroPrevio: null, crecimiento: 0 };
+    for (const maduras of [1e12, Infinity, Number.NaN]) {
+      const r = proponerFilaTienda({ ...base, maduras });
+      expect(r).toMatchObject({ propuesto: null, metodo: "sin_propuesta" });
+      expect(r.avisos).toContain("cifra_excesiva");
+    }
+    const ok = proponerFilaTienda({ ...base, maduras: 1200 });
+    expect(ok).toMatchObject({ propuesto: 1200, metodo: "apertura" });
+    expect(ok.avisos).not.toContain("cifra_excesiva");
+    expect(unidadesMadurasEntero(1e12)).toBeNull();
+    expect(unidadesMadurasEntero(Infinity)).toBeNull();
+    expect(unidadesMadurasEntero(1234.6)).toBe(1235);
+  });
+
+  it("una venta esperada absurda (1e18) deja la tienda sin cifra con cifra_excesiva, sin unidades maduras ni propuestas fuera de rango, y el resto del cálculo sigue", () => {
+    const s = calcularProyeccion(entrada({ tiendasExtra: { T4: { venta_esperada: 1e18 } } }));
+    const t = s.tiendas.find((x) => x.tienda_id === "T4" && x.anio === Y + 1)!;
+    expect(t.propuesto).toBeNull();
+    expect(t.unidades_maduras).toBeNull();
+    expect(t.avisos).toContain("cifra_excesiva");
+    for (const f of s.filas) for (const r of f.registros) {
+      for (const v of [r.propuesto, r.vigente, r.referencia_alternativa, r.referencia_tres_meses]) if (v !== null) expect(Number.isInteger(v) && v <= MAX_TOTAL).toBe(true);
+    }
+    // El resto de las filas no se afecta.
+    expect(reg(s, clave("denim", AM.rec), Y).propuesto).toBe(1800);
   });
 });
 

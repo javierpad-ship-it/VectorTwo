@@ -6,6 +6,7 @@ import {
   actualizarTiendaProyeccion,
   cambiarEstadoProyeccion,
   leerAniosPorIds,
+  leerProyeccionDb,
   leerFilasConAnios,
   leerIdentidadFila,
   leerTiendasProyeccion,
@@ -15,7 +16,7 @@ import {
 import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, fraccionDeTienda, recalcularBaseSiguiente, registroDe, unidadesMadurasDeTienda, type ContextoModelo } from "./decision";
 import { conteosResumen } from "./resumen";
 import { explicar, textoCurva } from "./explicar";
-import { anioMaduroSoles, mesesCompletos } from "./tiendas-nuevas";
+import { anioMaduroSoles, mesesCompletos, unidadesMadurasEntero } from "./tiendas-nuevas";
 import { aAnioApi, aFilaModelo, aRegistro, payloadAnioDecision, comoJson, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
 import { motivoRechazoAplicarCurva, motivoRechazoDecision, motivoRechazoEdicion } from "./reglas";
 import {
@@ -94,7 +95,12 @@ export async function refrescarResumen(d: Db, p: ProyeccionDb): Promise<void> {
     filas.data.map((f) => ({ clave: f.clave, tienda_id: f.tienda_id, registros: f.proyeccion_fila_anios.filter((a) => a.activo).map((a) => aRegistro(a, null, k, Y)) })),
     Y
   );
-  const nuevo: ResumenProyeccion = { ...resumen, ...conteos };
+  // El `p` de quien llama pudo quedar viejo (otro `calcular` o decisión corrió mientras se leían las filas): se relee el `resumen` justo
+  // antes de escribir y SOLO se pisan las claves de conteo, nunca el resto (huella, curvas usadas, versión del método…).
+  const fresco = await leerProyeccionDb(d, p.id);
+  const actual = fresco.data?.resumen as unknown as ResumenProyeccion | null | undefined;
+  if (fresco.error || !fresco.data || fresco.data.estado !== "en_trabajo" || !actual || typeof actual !== "object") return;
+  const nuevo: ResumenProyeccion = { ...actual, ...conteos };
   await cambiarEstadoProyeccion(d, p.id, "en_trabajo", { resumen: comoJson(nuevo) }, { sinCalculoDesde: limiteCalculoVivo(sello()) });
 }
 
@@ -268,7 +274,7 @@ async function propagarTienda(
     const esEste = t.anio === anio;
     const cambio: Parameters<typeof actualizarTiendaProyeccion>[2] = { vendido, propuesto };
     if (decision?.rampa) cambio.rampa = [...decision.rampa];
-    if (maduras && t.bloque === "nuevas") cambio.unidades_maduras = maduras.total === null ? null : Math.round(maduras.total);
+    if (maduras && t.bloque === "nuevas") cambio.unidades_maduras = unidadesMadurasEntero(maduras.total);
     if (esEste && decision) {
       const D2 = r.tienda;
       cambio.decidido = D2.decidido;

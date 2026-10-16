@@ -255,7 +255,7 @@ describe("avisos", () => {
     const todos: AvisoFila[] = [
       "sin_curva", "curva_incompleta", "curva_cambio", "propuesta_cambio", "avance_bajo", "plan_anterior", "sin_venta_anio", "sin_base", "sin_factor", "objetivo_atipico", "temporadas_mezcladas", "mes_negativo", "quiebre",
       "cola_larga", "nivel_cambiado", "bloque_cambiado", "sin_venta_esperada", "sin_referente", "referente_sin_historia", "fijadas_exceden", "cierre_no_proyectado", "apertura_dudosa", "cierre_dudoso",
-      "revision_cola_larga", "cola_larga_con_quiebres", "sin_stock_historico", "apertura_tardia",
+      "revision_cola_larga", "cola_larga_con_quiebres", "sin_stock_historico", "apertura_tardia", "cifra_excesiva",
     ];
     for (const a of todos) {
       expect(TEXTO_AVISO[a].texto.length).toBeGreaterThan(10);

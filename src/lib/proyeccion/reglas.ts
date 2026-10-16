@@ -132,11 +132,26 @@ export function motivoRechazoCerrar(args: {
   desactualizada: boolean;
   forzar: boolean;
   umbralColaLarga?: number;
+  /**
+   * `true` si la proyección se calculó con un método anterior (`resumen.version_metodo` falta o es menor que `VERSION_METODO`): sus
+   * cifras no son las del método vigente y NO se cierra, ni siquiera con `forzar` (que solo salta datos nuevos).
+   */
+  metodoViejo?: boolean;
 }): ResultadoCerrar {
   if (args.estado === "cerrada") return { ok: false, rechazo: { status: 409, codigo: "ya_cerrada", mensaje: "La proyección ya está cerrada." } };
   if (args.estado === "archivada") return { ok: false, rechazo: { status: 409, codigo: "archivada", mensaje: MENSAJE_ARCHIVADA } };
   if (calculoEnCurso(args.calculandoDesde, args.ahora)) {
     return { ok: false, rechazo: { status: 409, codigo: "calculo_en_curso", mensaje: MENSAJE_CALCULO_EN_CURSO_PROYECCION } };
+  }
+  if (args.metodoViejo) {
+    return {
+      ok: false,
+      rechazo: {
+        status: 409,
+        codigo: "version_metodo",
+        mensaje: "La proyección se calculó con una versión anterior del método: recalcúlala antes de cerrar (esto no se puede forzar).",
+      },
+    };
   }
   const umbral = args.umbralColaLarga ?? UMBRAL_COLA_LARGA;
 
