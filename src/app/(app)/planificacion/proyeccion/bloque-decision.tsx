@@ -8,6 +8,7 @@ import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
 import { textoPropuestaCambio } from "./celda-decision";
 import { Avisos, NUM } from "./comunes";
+import { ayudaCrecimientoFila, textosDetalleBruto } from "./crecimientos-vista";
 import { ETIQUETA_METODO, formatearAvance, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida, nombreMes, textoFactoresMes, unidades } from "./vista";
 
 /** Reparto guardado y reparto con la curva vigente, uno junto al otro (I8). */
@@ -63,7 +64,6 @@ export function BloqueDecision({
   anioEnCurso,
   bloqueada,
   ocupado,
-  crecimientoDefecto,
   factoresMes,
   onDecidir,
   onAplicarCurva,
@@ -73,7 +73,6 @@ export function BloqueDecision({
   anioEnCurso: number;
   bloqueada: boolean;
   ocupado: boolean;
-  crecimientoDefecto: number;
   factoresMes: readonly number[] | null | undefined;
   onDecidir: (d: DecisionFila) => Promise<boolean>;
   onAplicarCurva: (registroId: string) => Promise<boolean>;
@@ -91,6 +90,7 @@ export function BloqueDecision({
   const cambio = textoPropuestaCambio(registro);
   const normal = textoFactoresMes(factoresMes);
   const paraRevision = registro.avisos.includes("revision_cola_larga");
+  const detalleBruto = textosDetalleBruto(registro, anio, anioEnCurso);
   const hayCurvaNueva = registro.meses_propuestos !== null && registro.meses_propuestos !== undefined;
 
   async function guardar() {
@@ -174,10 +174,17 @@ export function BloqueDecision({
       )}
       {paraRevision && !esActual && (
         <p className="rounded-md border border-alerta/30 bg-alerta-suave px-3 py-2 text-sm text-alerta">
-          Para revisión: la propuesta es la base de {anioEnCurso} normalizada por el Niño × (1 + crecimiento), y esa base sale de la demanda corregida de {anioEnCurso}. Decide primero {anioEnCurso}; esta fila también hay que decidirla para poder cerrar.
+          Para revisión: la propuesta es la base de {anioEnCurso} de las mismas tiendas × (1 + crecimiento bruto), y esa base sale de la demanda corregida de {anioEnCurso}. Decide primero {anioEnCurso}; esta fila también hay que decidirla para poder cerrar.
         </p>
       )}
       {registro.explicacion && <p className="rounded-md bg-fondo px-3 py-2 text-sm leading-relaxed text-tinta">{registro.explicacion}</p>}
+      {!esActual && detalleBruto.length > 0 && (
+        <ul className="space-y-0.5 text-sm text-tinta-suave">
+          {detalleBruto.map((t) => (
+            <li key={t}>{t}</li>
+          ))}
+        </ul>
+      )}
       {normal && (
         <p className="text-xs text-tinta-suave">
           Factor del Niño por mes en {anio}: <span className="font-mono">{normal}</span>.
@@ -222,7 +229,7 @@ export function BloqueDecision({
               />
             </Field>
             {!esActual && (
-              <Field label="Crecimiento (%)" hint={`Vacío = el de la proyección (${crecimientoDefecto} %)`}>
+              <Field label="Crecimiento (%)" hint={ayudaCrecimientoFila(registro.crecimiento_efectivo, anio, anioEnCurso)}>
                 <Input
                   inputMode="decimal"
                   value={crec}

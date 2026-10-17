@@ -15,15 +15,16 @@ import {
   upsertAnios,
   type ProyeccionDb,
 } from "./consultas";
-import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, fraccionDeTienda, moverTotalTienda, recalcularBaseSiguiente, registroDe, unidadesMadurasDeTienda, type ContextoModelo, type ResultadoDecisionTienda, type TotalesOtrosAnios } from "./decision";
+import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, crecimientoDeTienda, fraccionDeTienda, moverTotalTienda, recalcularBaseSiguiente, registroDe, unidadesMadurasDeTienda, type ContextoModelo, type ResultadoDecisionTienda, type TotalesOtrosAnios } from "./decision";
 import { notaMoverTotal, totalTiendaTrasMover } from "./apertura-linea";
 import { conteosResumen } from "./resumen";
 import { explicar, textoCurva } from "./explicar";
-import { anioMaduroSoles, mesesCompletos, unidadesMadurasEntero } from "./tiendas-nuevas";
-import { aAnioApi, aFilaModelo, aRegistro, payloadAnioDecision, comoJson, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
+import { anioMaduroSoles, mesesCompletos, unidadesMadurasEntero, ventaAnioApertura } from "./tiendas-nuevas";
+import { aAnioApi, aFilaModelo, aRegistro, conCamposBrutos, payloadAnioDecision, comoJson, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
 import { motivoRechazoAplicarCurva, motivoRechazoDecision, motivoRechazoEdicion, motivoRechazoTotalTienda } from "./reglas";
 import {
   aTiendaApi,
+  cargarMatriz,
   contextoModelo,
   falla,
   fallaDb,
@@ -180,7 +181,9 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
   const tiendasRows = await leerTiendasProyeccion(d, id);
   if (tiendasRows.error) return fallaDb(tiendasRows.error, "proyección: leer tiendas");
   const parametros = parametrosDe(p.parametros);
-  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, modelos);
+  const matriz = await cargarMatriz(d, id);
+  if (matriz.respuesta) return falla(matriz.respuesta);
+  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, modelos, matriz.data);
 
   const tiendasDeLaFila = modelos.filter((f) => f.tienda_id !== null);
   const nuevo = aplicarDecision(
@@ -206,7 +209,7 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
     if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
     await refrescarResumen(d, p);
     const r = registroDe(nuevo, anio) as NonNullable<ReturnType<typeof registroDe>>;
-    return listo(aAnioApi(r));
+    return listo(conCamposBrutos(aAnioApi(r), nuevo, Y, ctx.crecimientoDe));
   }
 
   // Una fila de tienda: se guarda su cifra y, si la tienda ya tiene total decidido, ese total se mueve en lo que cambió la fila.
@@ -452,7 +455,9 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
   const parametros = parametrosDe(p.parametros);
   const filas = await leerFilasConAnios(d, id, { columnas: "completas", tiendaId });
   if (filas.error) return fallaDb(filas.error, "proyección: leer las filas de la tienda");
-  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, filas.data.map((f) => aFilaModelo(f, k, Y)));
+  const matriz = await cargarMatriz(d, id);
+  if (matriz.respuesta) return falla(matriz.respuesta);
+  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, filas.data.map((f) => aFilaModelo(f, k, Y)), matriz.data);
 
   const resultado = await propagarTienda(d, p, parametros, cat.data.catalogo, tiendasRows.data, ctx, tiendaId, anio, actor, ahora, {
     decidido,
@@ -474,8 +479,11 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
         .filter((x): x is string => x !== null)
     ),
   ];
-  // `F` y `K = E ÷ F` con la rampa nueva (la frase de una apertura los nombra).
-  const fraccion = t.bloque === "nuevas" ? fraccionDeTienda(filas.data.map((f) => aFilaModelo(f, k, Y)), ctx.tiendas.get(tiendaId), t.rampa) : null;
+  // `F`, `S = 12 V` y `E = 12 V F` con la rampa nueva (la frase de una apertura los nombra).
+  const modelosTienda = filas.data.map((f) => aFilaModelo(f, k, Y));
+  const fraccion = t.bloque === "nuevas" ? fraccionDeTienda(modelosTienda, ctx.tiendas.get(tiendaId), t.rampa) : null;
+  // El % (bruto) de una tienda `maduro_propio`: el efectivo de sus combinaciones, no el de la proyección.
+  const crec = t.bloque === "nuevas" && t.metodo === "maduro_propio" ? crecimientoDeTienda(modelosTienda, anio, ctx.tiendas.get(tiendaId), t.rampa, ctx) : null;
   const frase = explicar({
     metodo: t.metodo,
     anio,
@@ -496,8 +504,10 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
     referenciaAlternativa: t.referencia_alternativa,
     referenciaTresMeses: t.referencia_tres_meses,
     fraccionAnioApertura: fraccion,
-    anioMaduroSoles: fraccion !== null && t.venta_esperada !== null ? anioMaduroSoles(t.venta_esperada, fraccion) : null,
-    crecimiento: parametros.crecimiento_pct_defecto,
+    anioMaduroSoles: t.bloque === "nuevas" && t.venta_esperada !== null ? anioMaduroSoles(t.venta_esperada) : null,
+    ventaAnioApertura: fraccion !== null && t.venta_esperada !== null ? ventaAnioApertura(t.venta_esperada, fraccion) : null,
+    crecimiento: crec?.pct ?? parametros.crecimiento_pct_defecto,
+    ...(crec ? { crecimientoOrigen: { origen: crec.origen, celda: crec.celda }, crecimientoPonderado: crec.ponderado } : {}),
   });
   const fila2 = (await leerTiendasProyeccion(d, id)).data.find((x) => x.tienda_id === tiendaId && x.anio === anio);
   if (fila2) {

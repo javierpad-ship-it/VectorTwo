@@ -201,7 +201,6 @@ export function DetalleFila({
                   anioEnCurso={y}
                   bloqueada={bloqueada}
                   ocupado={accion.ocupado}
-                  crecimientoDefecto={proyeccion.parametros.crecimiento_pct_defecto}
                   factoresMes={d.factores_mes?.[y]}
                   onDecidir={(c) => decidir(y, c)}
                   onAplicarCurva={aplicarCurva}
@@ -216,7 +215,6 @@ export function DetalleFila({
                   anioEnCurso={y}
                   bloqueada={bloqueada}
                   ocupado={accion.ocupado}
-                  crecimientoDefecto={proyeccion.parametros.crecimiento_pct_defecto}
                   factoresMes={d.factores_mes?.[y + 1]}
                   onDecidir={(c) => decidir(y + 1, c)}
                   onAplicarCurva={aplicarCurva}

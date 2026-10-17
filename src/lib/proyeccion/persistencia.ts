@@ -1,5 +1,6 @@
 import type { Json, Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { avanceAcumulado } from "./cierre";
+import type { CrecimientoDeFila } from "./crecimientos";
 import type { FilaPlana } from "./matriz";
 import { leerParticipaciones } from "./participaciones";
 import {
@@ -19,6 +20,7 @@ import {
   type PreviasCalculo,
   type RegistroModelo,
   type Subbloque,
+  claveBaseDe,
   type TiendaModelo,
 } from "./tipos";
 
@@ -44,6 +46,7 @@ const AVISOS_CONOCIDOS: readonly AvisoFila[] = [
   "objetivo_atipico", "temporadas_mezcladas", "mes_negativo", "quiebre", "cola_larga", "nivel_cambiado", "bloque_cambiado", "sin_venta_esperada",
   "sin_referente", "referente_sin_historia", "fijadas_exceden", "cierre_no_proyectado", "apertura_dudosa", "cierre_dudoso",
   "cola_larga_con_quiebres", "revision_cola_larga", "sin_stock_historico", "apertura_tardia", "cifra_excesiva",
+  "apertura_y_cierre", "venta_esperada_fuera_de_rango",
 ];
 
 const METODOS: readonly Metodo[] = ["avance", "plan_anterior", "crecimiento", "apertura", "avance_propio", "maduro_propio", "cierre", "sin_propuesta"];
@@ -71,6 +74,9 @@ export function aRegistro(a: AnioDb, curva: readonly number[] | null, k: number,
     referencia_tres_meses: a.referencia_tres_meses,
     explicacion: a.explicacion,
     crecimiento_pct: num(a.crecimiento_pct),
+    // `0.10.8`: `B` y `B''` (solo las filas base de `Y+1`); una lectura que no los pidió los deja en `null`.
+    base_siguiente: a.base_siguiente ?? null,
+    base_normalizada: num(a.base_normalizada ?? null),
     decidido,
     origen: origenDe(a.origen),
     propuesta_al_decidir: a.propuesta_al_decidir,
@@ -156,6 +162,9 @@ export function payloadAnioCalculo(filaId: string, r: RegistroModelo, avisosExtr
     referencia_alternativa: r.referencia_alternativa,
     referencia_tres_meses: r.referencia_tres_meses,
     explicacion: r.explicacion,
+    // `0.10.8` (07c): `B` y `B''` los escribe el cálculo y cada recálculo en el acto de una fila base de `Y+1` (nulos sin base o sin curva).
+    base_siguiente: r.base_siguiente ?? null,
+    base_normalizada: r.base_normalizada ?? null,
     meses: r.meses,
     origen_meses: r.origen_meses,
     curva_origen_usada: comoJson(r.curva_origen_usada),
@@ -311,15 +320,43 @@ export const aAnioApi = (r: RegistroModelo): AnioFilaApi => {
   return api;
 };
 
+/** El % efectivo de una fila base de `Y+1` (fila > celda > Resto): lo arma el servicio con la matriz guardada y el catálogo. */
+export type CrecimientoDeApi = (claveBase: string, pctFila: number | null) => CrecimientoDeFila;
+
+/**
+ * `0.10.8` (07c): en el registro de `Y+1` de una fila base añade `crecimiento_efectivo`, `pct_bruto` (`vigente ÷ B − 1`) y
+ * `pct_sobre_normalizada` (`vigente ÷ B'' − 1`). El resto de los registros queda igual.
+ */
+export function conCamposBrutos(api: AnioFilaApi, fila: Pick<FilaModelo, "tienda_id" | "clave">, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi): AnioFilaApi {
+  if (fila.tienda_id !== null || api.anio !== anioEnCurso + 1 || api.bloque !== "mismas") return api;
+  const e = crecimientoDe ? crecimientoDe(claveBaseDe(fila.clave), api.crecimiento_pct) : null;
+  const b = api.base_siguiente ?? null;
+  const bn = api.base_normalizada ?? null;
+  const v = api.vigente;
+  return {
+    ...api,
+    crecimiento_efectivo: e ? { pct: e.pct, origen: e.origen, celda: e.celda } : null,
+    pct_bruto: b !== null && b > 0 && v !== null ? (v / b - 1) * 100 : null,
+    pct_sobre_normalizada: bn !== null && bn > 0 && v !== null ? (v / bn - 1) * 100 : null,
+  };
+}
+
 /**
  * Los registros de una fila a la API. `cola_larga` (la validación de disponibilidad, que vive en `historico`) solo se pone en el
  * registro de `Y` de una fila base; en el resto `null`.
  */
-export function aAniosApi(modelo: FilaModelo, anioEnCurso: number): AnioFilaApi[] {
-  return modelo.registros.map((r) => ({
-    ...aAnioApi(r),
-    cola_larga: modelo.tienda_id === null && r.anio === anioEnCurso ? (modelo.historico?.cola_larga ?? null) : null,
-  }));
+export function aAniosApi(modelo: FilaModelo, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi): AnioFilaApi[] {
+  return modelo.registros.map((r) =>
+    conCamposBrutos(
+      {
+        ...aAnioApi(r),
+        cola_larga: modelo.tienda_id === null && r.anio === anioEnCurso ? (modelo.historico?.cola_larga ?? null) : null,
+      },
+      modelo,
+      anioEnCurso,
+      crecimientoDe
+    )
+  );
 }
 
 /** Posición de la agrupación de marca en el catálogo (las que no están, al final). */
@@ -381,7 +418,7 @@ export function aFilaPlana(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso:
 }
 
 /** Fila de la API con sus años (`historico_anual` solo si se pide con `historico`). */
-export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: number): FilaApi | null {
+export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi): FilaApi | null {
   const n = nombresDe(f, c);
   if (!n) return null;
   const modelo = aFilaModelo(f, k, anioEnCurso);
@@ -405,7 +442,7 @@ export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: n
       completo: a.anio < anioEnCurso || k === 12,
       tiendas: a.tiendas.length,
     })),
-    anios: aAniosApi(modelo, anioEnCurso).filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false),
+    anios: aAniosApi(modelo, anioEnCurso, crecimientoDe).filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false),
     avisos: modelo.avisos,
     activo: f.activo,
   };

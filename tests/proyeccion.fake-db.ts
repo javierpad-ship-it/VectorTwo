@@ -12,8 +12,9 @@ export type ErrorFalso = { code: string; message: string; details: null; hint: n
 const COLUMNAS: Record<string, string[]> = {
   proyecciones: ["id", "anio_en_curso", "nombre", "estado", "hasta_periodo", "parametros", "resumen", "calculando_desde", "calculado_at", "cerrada_at", "cerrada_por_id", "cerrada_por_nombre", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
   proyeccion_filas: ["id", "proyeccion_id", "tienda_id", "gml_id", "equivalencia_id", "agrupacion_marca_id", "clave", "nivel_proyectado", "agrupacion_estacionalidad_id", "temporada", "curva", "curva_origen", "factores_mes", "historico", "participaciones", "composicion", "avisos", "activo", "created_at", "updated_at"],
-  proyeccion_fila_anios: ["id", "fila_id", "anio", "bloque", "subbloque", "vendido", "propuesto", "metodo", "referencia_alternativa", "referencia_tres_meses", "explicacion", "crecimiento_pct", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "meses", "origen_meses", "curva_origen_usada", "meses_propuestos", "curva_origen_propuesta", "avisos", "activo", "created_at", "updated_at"],
+  proyeccion_fila_anios: ["id", "fila_id", "anio", "bloque", "subbloque", "vendido", "propuesto", "metodo", "referencia_alternativa", "referencia_tres_meses", "explicacion", "crecimiento_pct", "base_siguiente", "base_normalizada", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "meses", "origen_meses", "curva_origen_usada", "meses_propuestos", "curva_origen_propuesta", "avisos", "activo", "created_at", "updated_at"],
   proyeccion_tiendas: ["id", "proyeccion_id", "tienda_id", "anio", "bloque", "subbloque", "fecha_usada", "venta_esperada_usada", "referente_id_usado", "origen_composicion", "rampa", "unidades_maduras", "vendido", "propuesto", "metodo", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "explicacion", "referencia_alternativa", "referencia_tres_meses", "avisos", "activo", "created_at", "updated_at"],
+  proyeccion_crecimientos: ["id", "proyeccion_id", "genero_id", "mundo_id", "pct", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
   factores_volumen_atipico: ["id", "anio", "temporada", "ratio_calculado", "ratio_aplicado", "huella_cargas", "calculado_at", "tiendas_comunes", "meses_comparados", "parcial", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
 };
 
@@ -22,6 +23,7 @@ const DEFECTOS: Record<string, Fila> = {
   proyeccion_filas: { curva_origen: [], avisos: [], activo: true },
   proyeccion_fila_anios: { vendido: 0, metodo: "sin_propuesta", explicacion: "", curva_origen_usada: [], avisos: [], activo: true },
   proyeccion_tiendas: { rampa: [1, 1, 1], vendido: 0, metodo: "sin_propuesta", explicacion: "", avisos: [], activo: true },
+  proyeccion_crecimientos: { activo: true },
   factores_volumen_atipico: { parcial: false, activo: true },
 };
 
@@ -29,6 +31,7 @@ const ONCONFLICT: Record<string, string[]> = {
   proyeccion_filas: ["proyeccion_id", "clave"],
   proyeccion_fila_anios: ["fila_id", "anio"],
   proyeccion_tiendas: ["proyeccion_id", "tienda_id", "anio"],
+  proyeccion_crecimientos: ["proyeccion_id", "genero_id", "mundo_id"],
   factores_volumen_atipico: ["anio", "temporada"],
 };
 
@@ -55,6 +58,7 @@ export type EstadoFalso = {
 export const estado: EstadoFalso = { tablas: {}, siguienteId: 1, venta: () => ({}), llamadasVenta: 0, errorVenta: null, falloDeEscritura: null, alOperar: null };
 
 export function reiniciar() {
+  reloj = 0;
   estado.tablas = {};
   estado.siguienteId = 1;
   estado.llamadasVenta = 0;
@@ -64,7 +68,12 @@ export function reiniciar() {
 }
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const ahora = () => "2026-10-15T15:00:00.000Z";
+/**
+ * Reloj de la base falsa: cada escritura avanza un segundo, como el trigger `tg_set_updated_at` real mueve `updated_at` en cada UPDATE
+ * (así una escritura condicional por `updated_at` detecta de verdad que la fila cambió entre la lectura y la escritura).
+ */
+let reloj = 0;
+const ahora = () => new Date(Date.UTC(2026, 9, 15, 15, 0, 0) + reloj++ * 1000).toISOString();
 
 const err = (code: string, message: string): ErrorFalso => ({ code, message, details: null, hint: null });
 
@@ -216,13 +225,23 @@ class Consulta implements PromiseLike<Resultado> {
       if (!nulo(fila.propuesto) && (fila.propuesto as number) < 0) return err("23514", 'violates check constraint "proyeccion_fila_anios_propuesto_check"');
       if (!nulo(fila.decidido) && (fila.decidido as number) < 0) return err("23514", 'violates check constraint "proyeccion_fila_anios_decidido_check"');
       if (!nulo(fila.subbloque) && fila.bloque !== "nuevas") return err("23514", 'violates check constraint "proyeccion_fila_anios_subbloque_bloque_check"');
-      for (const c of ["decidido", "propuesto", "vendido", "referencia_alternativa", "referencia_tres_meses", "propuesta_al_decidir"]) {
+      for (const c of ["decidido", "propuesto", "vendido", "referencia_alternativa", "referencia_tres_meses", "propuesta_al_decidir", "base_siguiente"]) {
         const v = fila[c];
         if (!nulo(v) && !Number.isInteger(v)) return err("22P02", `invalid input syntax for type integer: "${String(v)}" (${c})`);
       }
+      if (!nulo(fila.base_siguiente) && (fila.base_siguiente as number) < 0) return err("23514", 'violates check constraint "proyeccion_fila_anios_base_siguiente_check"');
+      if (!nulo(fila.base_normalizada) && (fila.base_normalizada as number) < 0) return err("23514", 'violates check constraint "proyeccion_fila_anios_base_normalizada_check"');
       for (const c of ["meses", "meses_propuestos"]) {
         const v = fila[c];
         if (Array.isArray(v) && v.some((x) => !Number.isInteger(x))) return err("22P02", `invalid input syntax for type integer (${c})`);
+      }
+    }
+    if (t === "proyeccion_crecimientos") {
+      const pct = Number(fila.pct);
+      if (nulo(fila.pct) || !(pct >= -95 && pct <= 500)) return err("23514", 'new row for relation "proyeccion_crecimientos" violates check constraint "proyeccion_crecimientos_pct_check"');
+      if (!nulo(fila.nota) && String(fila.nota).length > 300) return err("23514", 'violates check constraint "proyeccion_crecimientos_nota_len_check"');
+      if (filas.some((f) => f !== previa && f !== fila && f.proyeccion_id === fila.proyeccion_id && f.genero_id === fila.genero_id && f.mundo_id === fila.mundo_id)) {
+        return err("23505", 'duplicate key value violates unique constraint "proyeccion_crecimientos_celda_key"');
       }
     }
     if (t === "proyeccion_tiendas") {
@@ -266,6 +285,7 @@ class Consulta implements PromiseLike<Resultado> {
       this.cascada("proyeccion_filas", filas.map((f) => f.id as string));
       estado.tablas.proyeccion_filas = (estado.tablas.proyeccion_filas ?? []).filter((f) => !ids.includes(f.proyeccion_id as string));
       estado.tablas.proyeccion_tiendas = (estado.tablas.proyeccion_tiendas ?? []).filter((f) => !ids.includes(f.proyeccion_id as string));
+      estado.tablas.proyeccion_crecimientos = (estado.tablas.proyeccion_crecimientos ?? []).filter((f) => !ids.includes(f.proyeccion_id as string));
     }
     if (tabla === "proyeccion_filas") {
       estado.tablas.proyeccion_fila_anios = (estado.tablas.proyeccion_fila_anios ?? []).filter((a) => !ids.includes(a.fila_id as string));

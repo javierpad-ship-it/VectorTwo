@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { AlertaError } from "./comunes";
 import { rutaProyeccion, useAccion } from "./use-proyeccion";
-import { lineasDeCierre, listaSinDecidir, listaTiendasSinDecidir, MAX_SIN_DECIDIR, textoMotivoDesactualizada, type GrupoSinDecidir } from "./vista";
+import { cierreExigeRecalcular, lineasDeCierre, listaSinDecidir, listaTiendasSinDecidir, MAX_SIN_DECIDIR, textoMotivoDesactualizada, type GrupoSinDecidir } from "./vista";
 import { formatearNumero } from "@/lib/formato";
 
 /** Una lista de filas sin decidir (hasta `MAX_SIN_DECIDIR`, con el total y una pista de dónde decidirlas). */
@@ -45,6 +45,8 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
   const accion = useAccion();
   const lineas = lineasDeCierre(proyeccion);
   const desactualizada = proyeccion.desactualizada.length > 0;
+  // El método viejo y los crecimientos sin aplicar no se saltan con «cerrar de todos modos»: hay que recalcular.
+  const exigeRecalcular = cierreExigeRecalcular(proyeccion);
   const sinDecidir = listaSinDecidir(accion.error?.detalle);
   const tiendasSinDecidir = listaTiendasSinDecidir(accion.error?.detalle, proyeccion.bloques);
 
@@ -67,7 +69,7 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
           <Button variante="fantasma" disabled={accion.ocupado} onClick={onCerrar}>
             Cancelar
           </Button>
-          <Button disabled={accion.ocupado || (desactualizada && !forzar)} onClick={() => void cerrar()}>
+          <Button disabled={accion.ocupado || exigeRecalcular || (desactualizada && !forzar)} onClick={() => void cerrar()}>
             {accion.ocupado ? "Cerrando…" : "Cerrar proyección"}
           </Button>
         </>
@@ -111,10 +113,19 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
         {desactualizada && (
           <Alert tono="alerta">
             <span className="block">La proyección está desactualizada: {proyeccion.desactualizada.map(textoMotivoDesactualizada).join("; ")}. Lo recomendable es recalcular antes de cerrar.</span>
-            <label className="mt-2 flex items-center gap-2 text-sm">
-              <Checkbox checked={forzar} onChange={setForzar} label="Cerrar de todos modos" />
-              Cerrar de todos modos, con los datos con que se calculó
-            </label>
+            {exigeRecalcular ? (
+              <span className="mt-2 block text-sm">
+                Hay que recalcular antes de cerrar: este motivo no se puede saltar.{" "}
+                <button type="button" onClick={onRecalcular} disabled={accion.ocupado} className="font-medium underline underline-offset-2 disabled:opacity-50">
+                  Recalcular ahora
+                </button>
+              </span>
+            ) : (
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <Checkbox checked={forzar} onChange={setForzar} label="Cerrar de todos modos" />
+                Cerrar de todos modos, con los datos con que se calculó
+              </label>
+            )}
           </Alert>
         )}
         <Field label="Nota (opcional)" hint="Hasta 500 caracteres. Queda guardada con la proyección cerrada.">

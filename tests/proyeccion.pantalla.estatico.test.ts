@@ -97,18 +97,25 @@ describe("estructura de la pantalla /planificacion/proyeccion", () => {
     }
   });
 
-  it("el importador de tiendas no mapea solo una columna de venta mensual o promedio como venta del año de apertura", () => {
+  it("el importador de tiendas acepta solo alias de venta MENSUAL como venta esperada (07d): no mapea solo una columna anual", () => {
     const c = fuente("src/app/(app)/maestros/tiendas/importar-tiendas.tsx");
-    expect(c).not.toMatch(/alias:\s*\[[^\]]*VENTA_MENSUAL/);
+    const alias = /campo: "venta_esperada"[\s\S]*?alias:\s*\[([^\]]*)\]/.exec(c)?.[1] ?? "";
+    expect(alias).toContain('"VENTA_MENSUAL"');
+    expect(alias).toContain('"VENTA_PROMEDIO_MENSUAL"');
+    expect(alias).toContain('"VENTA_ESPERADA"');
+    expect(alias).toContain('"VENTA_ESPERADA_PROMEDIO"');
+    expect(alias).not.toContain("VENTA_ESPERADA_ANIO_APERTURA");
+    expect(alias).not.toContain("VENTA_APERTURA");
     expect(c).not.toMatch(/alias:\s*\[[^\]]*VENTA_PROM"/);
+    expect(c).toContain("Venta mensual promedio esperada");
   });
 
   it("los textos de la pantalla no prometen una versión concreta para los cierres de tienda", () => {
     for (const f of archivos) expect(fuente(`${DIR}${f}`), f).not.toMatch(/llega en la 0\.10\.1/);
   });
 
-  it("la versión vigente es 0.10.7 · M7", () => {
-    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.7 · M7"');
+  it("la versión vigente es 0.10.8 · M7", () => {
+    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.10.8 · M7"');
   });
 });
 

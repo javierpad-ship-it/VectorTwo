@@ -6,9 +6,11 @@ import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi, AvisoFila, FilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import { CeldaCrecimiento, CeldaDecision, type DecisionFila } from "./celda-decision";
 import { Avisos, BotonEnlace, NUM } from "./comunes";
+import { textoPieCrecimientoLinea } from "./crecimientos-vista";
 import {
   aniosHistoricos,
   avisosDeFila,
+  formatearPct,
   formatearAvance,
   historicoDe,
   nombreMes,
@@ -73,7 +75,6 @@ export function TablaFilas({
   lineas,
   secciones,
   anioEnCurso,
-  crecimientoDefecto,
   bloqueada,
   ocupado,
   filaSeleccionada,
@@ -86,7 +87,6 @@ export function TablaFilas({
   lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio" | "filas_tienda">;
   secciones: readonly SeccionApertura[];
   anioEnCurso: number;
-  crecimientoDefecto: number;
   bloqueada: boolean;
   ocupado: boolean;
   filaSeleccionada: string | null;
@@ -103,6 +103,12 @@ export function TablaFilas({
   const tS = totalesDeLinea(lineas, y + 1);
   const hayApertura = secciones.length > 0;
   const todasAbiertas = base.length > 0 && base.every((f) => abiertas.has(f.id));
+  // 0.10.8 (07c): el crecimiento bruto de la línea en mismas tiendas = vigente de Y+1 ÷ Σ B − 1 (B = base de las mismas tiendas de Y+1).
+  // El numerador es el vigente de las filas CON base (`vigente_con_base`), no el de toda la línea: así coincide con «Crec. mismas tiendas» de la Matriz.
+  const totalSiguiente = lineas.totales_por_anio.find((x) => x.anio === y + 1);
+  const vigenteConBase = totalSiguiente?.vigente_con_base ?? tS.vigente;
+  const baseSiguiente = totalSiguiente?.base_siguiente;
+  const pieCrecimiento = textoPieCrecimientoLinea(vigenteConBase, baseSiguiente, y + 1, y);
 
   const alternar = (id: string) =>
     setAbiertas((prev) => {
@@ -136,7 +142,9 @@ export function TablaFilas({
               <th className={`${TH} text-right`}>Avance</th>
               <th className={`${TH} text-right`}>{y} propuesto</th>
               <th className={`${TH} text-right`}>{y} decidido</th>
-              <th className={`${TH} text-right`}>Crec.</th>
+              <th className={`${TH} text-right`} title={`Crecimiento bruto ${y + 1} ÷ ${y} de la fila, sin corregir por el Niño. Vacío = el de la combinación género · mundo (o el Resto).`}>
+                Crec.
+              </th>
               <th className={`${TH} text-right`}>{y + 1} propuesto</th>
               <th className={`${TH} text-right`}>{y + 1} decidido</th>
             </tr>
@@ -200,7 +208,8 @@ export function TablaFilas({
                       <CeldaCrecimiento
                         key={`${f.id}-g-${rS?.crecimiento_pct}`}
                         registro={rS}
-                        porDefecto={crecimientoDefecto}
+                        anio={y + 1}
+                        anioEnCurso={y}
                         bloqueada={bloqueada}
                         ocupado={ocupado}
                         etiqueta={`${nombre}, crecimiento ${y + 1}`}
@@ -331,7 +340,9 @@ export function TablaFilas({
                       vigente · {tY.decididas} de {tY.filas}
                     </span>
                   </td>
-                  <td className="px-3 py-2" />
+                  <td className={`px-3 py-2 ${NUM}`} title={pieCrecimiento ?? undefined}>
+                    {pieCrecimiento ? formatearPct((vigenteConBase / (baseSiguiente ?? 1) - 1) * 100) : ""}
+                  </td>
                   <td className={`px-3 py-2 ${NUM}`}>{unidades(tS.propuesto)}</td>
                   <td className={`px-3 py-2 ${NUM}`}>
                     {unidades(tS.vigente)}
@@ -363,6 +374,11 @@ export function TablaFilas({
           )}
         </table>
       </div>
+      {base.length > 0 && pieCrecimiento && (
+        <p className="text-xs text-tinta-suave">
+          Línea (mismas) {y + 1}: {pieCrecimiento}.
+        </p>
+      )}
     </div>
   );
 }

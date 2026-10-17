@@ -3,17 +3,21 @@ import { repartirEntero } from "./reparto";
 import { MAX_TOTAL, MESES_MIN_AVANCE, RAMPA_MAX, type AvisoFila, type Metodo, type Subbloque } from "./tipos-api";
 
 /**
- * Tiendas nuevas (ficha 07, paso 4 y reglas 19 a 23). Puro.
+ * Tiendas nuevas (ficha 07, paso 4 y reglas 19 a 23; venta esperada de la ficha 07d, método 4 de la 0.10.8). Puro.
  *
- * El año de una tienda nueva sale de tres insumos: su venta esperada `E` (`0.10.1`, decisión 22: soles, sin IGV, del AÑO DE
- * APERTURA; ni mensual ni de tienda madura), la composición del referente (`s_f`, `p_f`) y la rampa de maduración `r_m`, todo
- * repartido con la curva de la unidad:
+ * El año de una tienda nueva sale de tres insumos: su venta esperada `V` (`0.10.8`, 07d: la venta MENSUAL promedio, en régimen y sin
+ * IGV; el sistema nunca convierte IGV), la composición del referente (`s_f`, `p_f`) y la rampa de maduración `r_m`, todo repartido con la
+ * curva de la unidad:
  *
- *   A_f  = Σ_{m ∈ Z_0} c_m r_m φ_m      fracción del año de apertura `Z_0` que la fila alcanza a vender (con `φ` de unos es la de la ficha)
- *   F    = Σ_f s_f A_f                   la misma fracción, ponderada por la composición en soles
- *   K    = E ÷ F                         soles de un año maduro completo
- *   Md_f = E × s_f ÷ (p_f × F)           unidades maduras por fila
- *   P_f  = round(Md_f × A_f)             propuesta del año de apertura: Σ_f P_f × p_f ≈ E
+ *   S    = 12 × V                         año maduro en soles (se lee, ya no se deduce)
+ *   s̃_f  = s_f ÷ Σ_{f con curva} s_f      composición renormalizada a las filas con curva
+ *   A_f  = Σ_{m ∈ Z_0} c_m r_m φ_m       fracción del año de apertura `Z_0` que la fila alcanza a vender (con `φ` de unos es la de la ficha)
+ *   F    = Σ_f s̃_f A_f                   fracción de un año maduro que la tienda vende en su año de apertura (solo se muestra y avisa)
+ *   Md_f = S × s̃_f ÷ p_f                 unidades maduras por año de la fila
+ *   P_f  = round(Md_f × A_f)             propuesta del año de apertura: Σ_f P_f × p_f ≈ 12 V F (± Σ p_f ÷ 2)
+ *
+ * La rampa multiplica la venta en régimen y SÍ mueve el total del año de apertura (con el método 3 no lo movía). `φ_{Z_0}` está dentro de
+ * `A_f` y por eso mueve el nivel de una apertura; en mismas tiendas el % es bruto y `φ_{Y+1}` solo da forma (07c §2.4).
  */
 
 /** Una fila de la composición con lo que hace falta para `F`: su `s_f`, su curva y el `φ` de `Z_0`. */
@@ -24,16 +28,31 @@ export function fraccionDeFila(curva: readonly number[], r: readonly number[], p
   return sumaCurva(curva, r, phi, 0, 12);
 }
 
-/** `F = Σ_f s_f × A_f` sobre las filas con curva (una fila sin curva no tiene `A_f`: no entra). */
+/** `Σ s_f` de las filas con curva: el denominador de `s̃_f` (una fila sin curva no se puede estacionalizar y queda fuera). */
+export function sumaSConCurva(filas: readonly { s: number; curva: readonly number[] | null }[]): number {
+  let suma = 0;
+  for (const x of filas) if (x.curva !== null) suma += x.s;
+  return suma;
+}
+
+/**
+ * `F = Σ_f s̃_f × A_f` sobre las filas con curva, con `s̃_f = s_f ÷ Σ s_f(con curva)` (idempotente: acepta `s` o `s̃`). Sin ninguna fila con
+ * composición, 0. Ya no divide nada: solo se muestra y alimenta el aviso `apertura_tardia`.
+ */
 export function fraccionAnioApertura(filas: readonly FilaParaFraccion[], r: readonly number[]): number {
+  const suma = sumaSConCurva(filas);
+  if (!(suma > 0)) return 0;
   let f = 0;
-  for (const x of filas) if (x.curva !== null) f += x.s * fraccionDeFila(x.curva, r, x.phi);
+  for (const x of filas) if (x.curva !== null) f += (x.s / suma) * fraccionDeFila(x.curva, r, x.phi);
   return f;
 }
 
-/** `Md_f = E × s_f ÷ (p_f × F)`; 0 si no hay precio o `F` (nada que repartir). */
-export function unidadesMadurasDeFila(args: { E: number; s: number; p: number; F: number }): number {
-  return args.p > 0 && args.F > 0 ? (args.E * args.s) / (args.p * args.F) : 0;
+/**
+ * `Md_f = 12 V s_f ÷ (p_f × Σ s_f con curva)` = `S × s̃_f ÷ p_f`: las unidades maduras por año de la fila. 0 si no hay precio o suma
+ * (nada que repartir). `s` es el `s_f` sin renormalizar; `sumaSConCurva` la suma de las filas con curva.
+ */
+export function unidadesMadurasDeFila(args: { V: number; s: number; sumaSConCurva: number; p: number }): number {
+  return args.p > 0 && args.sumaSConCurva > 0 ? (12 * args.V * args.s) / (args.p * args.sumaSConCurva) : 0;
 }
 
 /** Las unidades maduras de una tienda como entero para la base: `null` si no hay o no caben (`> MAX_TOTAL`, no finitas). */
@@ -41,9 +60,14 @@ export function unidadesMadurasEntero(x: number | null): number | null {
   return x === null || !Number.isFinite(x) || x > MAX_TOTAL ? null : Math.round(x);
 }
 
-/** `K = E ÷ F`: lo que vendería la tienda en un año completo y madura; `null` sin `F`. */
-export function anioMaduroSoles(E: number, F: number): number | null {
-  return F > 0 ? E / F : null;
+/** `S = 12 × V`: el año maduro en soles de una tienda con venta mensual promedio `V` (en régimen, sin IGV). */
+export function anioMaduroSoles(V: number): number {
+  return 12 * V;
+}
+
+/** `E = 12 V F`: los soles del año de apertura (solo para mostrar); `null` sin `F`. */
+export function ventaAnioApertura(V: number, F: number | null): number | null {
+  return F === null ? null : 12 * V * F;
 }
 
 // ─── Rampa ───
@@ -177,7 +201,7 @@ export type EntradaFilaTienda = {
   phi: readonly number[];
   /** `Md_f`: unidades maduras por fila (`null` sin venta esperada). */
   maduras: number | null;
-  /** `A_{t,f}` implícito del año `Y` (solo año siguiente de una tienda que abrió en `Y`); `null` si no hay. */
+  /** `A^b_{t,f}` bruto implícito del año `Y` (`maduroDeVigente`; solo año siguiente de una tienda que abrió en `Y`); `null` si no hay. */
   maduroPrevio: number | null;
   /** `g_f` en porcentaje. */
   crecimiento: number;
@@ -237,7 +261,8 @@ function proponerFilaTiendaSinCota(e: EntradaFilaTienda): ResultadoFilaTienda {
 
   if (!e.esAnioEnCurso) {
     if (e.subbloque === "nuevas_anterior" && e.maduroPrevio !== null) {
-      const propuesto = redondear(e.maduroPrevio * (1 + e.crecimiento / 100) * anioCompleto);
+      // Método 4: el % es bruto y `φ_{Y+1}` solo da forma al reparto: `P = round(A^b × (1 + g) × Σ_{Y+1} c r)`.
+      const propuesto = redondear(e.maduroPrevio * (1 + e.crecimiento / 100) * sumaCurva(curva, e.rampa, null, 0, 12));
       return { vendido, propuesto, metodo: "maduro_propio", referencia_alternativa: porEsperada, referencia_tres_meses: null, maduro_propio: e.maduroPrevio, vendido_normalizado: null, denominador: null, avisos: [] };
     }
     const avisos: AvisoFila[] = e.maduras === null ? ["sin_venta_esperada"] : [];
@@ -269,8 +294,10 @@ function proponerFilaTiendaSinCota(e: EntradaFilaTienda): ResultadoFilaTienda {
 }
 
 /**
- * Regla 22, la cuenta inversa: `A_{t,f} = vigente_{t,f,Y} ÷ Σ_{m∈Y} c_m r_m φ_m` (el total maduro implícito en lo
- * vigente de `Y`). Con `φ` de unos es la fórmula de la ficha.
+ * Regla 22, la cuenta inversa (método 4): `A^b_{t,f} = (vigente_{t,f,Y} ÷ Σ_{m∈Y} c_m r_m φ_{Y,m}) × Σ_{m=1..12} c_m φ_{Y,m}`: el total
+ * maduro anualizado de la fila con el Niño de `Y` repartido en los doce meses. NO es `vigente ÷ Σ c r`: esa fórmula anualiza solo con los
+ * meses abiertos y, si esos meses tienen Niño, pesan de más (la apertura de mayo con invierno a `φ = 0,66` saldría deprimida entera).
+ * Con `φ` de unos coincide con `vigente ÷ Σ c r`.
  */
 export function maduroDeVigente(args: {
   vigente: number | null;
@@ -280,18 +307,18 @@ export function maduroDeVigente(args: {
 }): number | null {
   if (args.vigente === null || args.curva === null) return null;
   const den = sumaCurva(args.curva, args.rampa, args.phi, 0, 12);
-  return den > 0 ? args.vigente / den : null;
+  if (!(den > 0)) return null;
+  return (args.vigente / den) * sumaCurva(args.curva, RAMPA_PLANA, args.phi, 0, 12);
 }
 
-/** Regla 22. `maduroSiguiente` = `A_{t,f} × (1 + g) × Σ_m c_m r_m φ_{Y+1,m}`. */
+/** Regla 22 (método 4). `maduroSiguiente` = `A^b_{t,f} × (1 + g) × Σ_m c_m r_m` del año siguiente (bruto: sin `φ_{Y+1}`). */
 export function maduroSiguiente(args: {
   maduro: number;
   crecimiento: number;
   curva: readonly number[];
   rampa: readonly number[];
-  phi: readonly number[];
 }): number {
-  return redondear(args.maduro * (1 + args.crecimiento / 100) * sumaCurva(args.curva, args.rampa, args.phi, 0, 12));
+  return redondear(args.maduro * (1 + args.crecimiento / 100) * sumaCurva(args.curva, args.rampa, null, 0, 12));
 }
 
 // ─── Decisión por tienda ───

@@ -9,6 +9,7 @@ import type { FactorProy } from "./nino";
 import type { DetalleW12 } from "./participaciones";
 import type { FilaDisponibilidad } from "./cola-larga";
 import type { TiendaProy } from "./bloques";
+import type { MatrizCrecimientos } from "./crecimientos";
 import type {
   AnioFilaApi,
   AvisoFila,
@@ -156,6 +157,8 @@ export type EntradaCalculo = {
   /** Para `participaciones` (claveFlujo); sin ella las participaciones quedan en `null`. */
   configFlujo: ConfigFlujo | null;
   previas?: PreviasCalculo;
+  /** `0.10.8` (07c): la matriz de crecimientos por género × mundo (solo las celdas de HOMBRE y MUJER). Sin ella, todo sigue el Resto. */
+  crecimientos?: MatrizCrecimientos;
 };
 
 export type RegistroModelo = AnioFilaApi & {

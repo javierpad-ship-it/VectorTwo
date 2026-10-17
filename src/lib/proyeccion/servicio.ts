@@ -21,6 +21,8 @@ import {
   guardarResultadoCalculo,
   insertarProyeccionDb,
   leerCalculosActivos,
+  leerCrecimientos,
+  leerCrecimientosDeProyecciones,
   leerProyeccionDb,
   leerCerradaDeAnio,
   leerFactoresDb,
@@ -34,11 +36,15 @@ import {
   soltarCalculo,
   tomarCalculo,
   upsertAnios,
+  upsertCrecimientos,
   upsertFactores,
   upsertFilas,
   upsertTiendasProyeccion,
+  type CrecimientoDb,
   type ProyeccionDb,
 } from "./consultas";
+import { claveGM, matrizDeCeldas } from "./crecimientos";
+import { huellaDeMatriz } from "./huellas-crecimientos";
 import {
   cargarCatalogo,
   cargarContextoCalculo,
@@ -137,7 +143,7 @@ const db = (): Db => supabaseAdmin();
  * (`niveles_gml`, una foto de unos cientos de nodos): así listar proyecciones no recorre las filas de ninguna. Solo una
  * proyección anterior a esa foto lee los niveles de la base, y únicamente si se pide (`leerNiveles`, en el detalle).
  */
-async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, o: { leerNiveles?: boolean } = {}): Promise<Salida<Motivo[]>> {
+export async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, o: { leerNiveles?: boolean; celdas?: readonly CrecimientoDb[] } = {}): Promise<Salida<Motivo[]>> {
   if (p.estado !== "en_trabajo") return listo([]);
   const resumen = p.resumen as unknown as Partial<ResumenProyeccion> | null;
   let niveles: { gml_id: string; nivel_proyectado: string }[] = [];
@@ -150,16 +156,29 @@ async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, o:
   }
   const actuales = new Map(ctx.nodos.map((n) => [n.gml_id, n.nivel as string]));
   const parametros = parametrosDe(p.parametros);
+  // 0.10.8 (07c): la matriz de crecimientos de hoy (celdas + Resto) y el GM vigente de cada nodo, para `crecimientos_cambiados`.
+  let celdas = o.celdas;
+  if (celdas === undefined) {
+    const leidas = await leerCrecimientos(d, p.id);
+    if (leidas.error) return fallaDb(leidas.error, "proyección: matriz de crecimientos");
+    celdas = leidas.data;
+  }
+  const matriz = matrizDeCeldas(celdas.map((c) => ({ genero_id: c.genero_id, mundo_id: c.mundo_id, pct: Number(c.pct) })), ctx.generosMatriz);
   return listo(
     motivosDesactualizada(
       {
         calculado_at: p.calculado_at,
         hasta_periodo: p.hasta_periodo,
         recalculo_pendiente: parametros.recalculo_pendiente,
-        resumen: resumen ? { curvas_usadas: resumen.curvas_usadas ?? [], version_metodo: resumen.version_metodo } : null,
+        resumen: resumen
+          ? { curvas_usadas: resumen.curvas_usadas ?? [], version_metodo: resumen.version_metodo, huella_crecimientos: resumen.huella_crecimientos, gm_gml: resumen.gm_gml }
+          : null,
         parametros: { factores_usados: parametros.factores_usados, bloques: parametros.bloques },
       },
-      estadoActualDe(ctx, nivelesCambiados(niveles, actuales))
+      estadoActualDe(ctx, nivelesCambiados(niveles, actuales), {
+        huella: huellaDeMatriz(matriz, parametros.crecimiento_pct_defecto),
+        gm_por_nodo: new Map(ctx.nodos.map((n) => [n.gml_id, claveGM(n.genero_id, n.mundo_id)])),
+      })
     )
   );
 }
@@ -201,8 +220,11 @@ export async function leerEstadoInicial(): Promise<Salida<RespuestaProyeccionApi
   const bloques: BloquesApi = { [anio]: bloquesDeAnio(ctx.tiendas, anio, claves), [anio + 1]: bloquesDeAnio(ctx.tiendas, anio + 1, claves) };
   const ahora = sello();
   const proyecciones: ProyeccionApi[] = [];
+  // Las celdas de todas las proyecciones en trabajo en una sola lectura (no una por proyección).
+  const celdasTodas = await leerCrecimientosDeProyecciones(d, lista.data.filter((p) => p.estado === "en_trabajo").map((p) => p.id));
+  if (celdasTodas.error) return fallaDb(celdasTodas.error, "proyección: matrices de crecimientos");
   for (const p of lista.data) {
-    const des = await desactualizadaDe(d, p, ctx);
+    const des = await desactualizadaDe(d, p, ctx, { celdas: celdasTodas.data.filter((c) => c.proyeccion_id === p.id) });
     if (des.respuesta) return falla(des.respuesta);
     proyecciones.push(aProyeccionApi(p, des.data, ahora));
   }
@@ -309,6 +331,12 @@ export async function crearProyeccion(cuerpo: CrearProyeccionCuerpo, actor: Acto
 
   const base = parametrosDe({});
   const parametros: ParametrosProyeccion = { ...base, ...(cuerpo.parametros ?? {}) };
+  // 0.10.8 (07c): con `copiar_de` manda el cuerpo para el Resto (`crecimiento_pct_defecto`, como todo `parametros`) y la copia trae del origen
+  // las celdas (más abajo) y el objetivo global.
+  if (origen) {
+    const objetivoOrigen = parametrosDe(origen.parametros).crecimiento_objetivo_pct;
+    if (objetivoOrigen !== undefined) parametros.crecimiento_objetivo_pct = objetivoOrigen;
+  }
   const nueva: TablesInsert<"proyecciones"> = {
     anio_en_curso: anio,
     nombre: cuerpo.nombre,
@@ -320,6 +348,31 @@ export async function crearProyeccion(cuerpo: CrearProyeccionCuerpo, actor: Acto
   };
   const ins = await insertarProyeccionDb(d, nueva);
   if (ins.error) return fallaDb(ins.error, "proyección: crear");
+
+  if (origen) {
+    // La copia empieza con las celdas del origen (con su nota y su quién): el cálculo ya las aplica.
+    const celdasOrigen = await leerCrecimientos(d, origen.id);
+    if (celdasOrigen.error) {
+      await eliminarProyeccionDb(d, ins.data.id);
+      return fallaDb(celdasOrigen.error, "proyección: leer la matriz de la proyección de origen");
+    }
+    const copia = await upsertCrecimientos(
+      d,
+      celdasOrigen.data.map((c) => ({
+        proyeccion_id: ins.data.id,
+        genero_id: c.genero_id,
+        mundo_id: c.mundo_id,
+        pct: c.pct,
+        nota: c.nota,
+        perfil_id: c.perfil_id,
+        usuario_nombre: c.usuario_nombre,
+      }))
+    );
+    if (copia.error) {
+      await eliminarProyeccionDb(d, ins.data.id);
+      return fallaDb(copia.error, "proyección: copiar la matriz de crecimientos");
+    }
+  }
 
   const calculada = await ejecutarCalculo(d, ins.data, ctx, { previasDe: origen });
   if (calculada.respuesta) {
@@ -342,6 +395,15 @@ export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerp
   const p = pR.data;
   const rechazo = motivoRechazoEdicion({ estado: p.estado === "cerrada" ? "cerrada" : p.estado === "archivada" ? "archivada" : "en_trabajo", calculandoDesde: p.calculando_desde, ahora: sello() });
   if (rechazo) return fallaRegla(rechazo);
+
+  // 0.10.8 (07c): el crecimiento por defecto es el «Resto» de la matriz y se escribe solo desde ella (una sola pregunta de choque).
+  if (cuerpo.parametros?.crecimiento_pct_defecto !== undefined && cuerpo.parametros.crecimiento_pct_defecto !== parametrosDe(p.parametros).crecimiento_pct_defecto) {
+    return fallaMensaje(
+      "El crecimiento por defecto ahora es el «Resto» de la pestaña Crecimientos: cámbialo allí con «Guardar y recalcular».",
+      400,
+      "usar_crecimientos"
+    );
+  }
 
   const cambio: Parameters<typeof cambiarEstadoProyeccion>[3] = {};
   if (cuerpo.nombre !== undefined) {
@@ -399,8 +461,9 @@ export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerp
   if (recalcular) parametros.recalculo_pendiente = true;
   if (cuerpo.parametros || recalcular) cambio.parametros = parametros as unknown as TablesInsert<"proyecciones">["parametros"];
 
-  // Condicional: solo si sigue en trabajo y sin cálculo vivo (otra persona pudo cerrarla o calcularla mientras tanto).
-  const r = await cambiarEstadoProyeccion(d, id, "en_trabajo", cambio, { sinCalculoDesde: limiteCalculoVivo(sello()) });
+  // Condicional: solo si sigue en trabajo, sin cálculo vivo y con el mismo `updated_at` que se leyó (otra persona pudo cerrarla, calcularla o
+  // guardar la matriz mientras tanto: el `jsonb` `parametros` se escribe completo y una escritura no debe borrar la de la otra).
+  const r = await cambiarEstadoProyeccion(d, id, "en_trabajo", cambio, { sinCalculoDesde: limiteCalculoVivo(sello()), updatedAt: p.updated_at });
   if (r.error) return fallaDb(r.error, "proyección: editar");
   if (!r.data) return fallaMensaje("La proyección cambió mientras se editaba (se cerró o empezó a calcularse). Vuelve a cargar.", 409, "estado_cambiado");
   return leerProyeccion(id);
@@ -500,7 +563,12 @@ async function leerPlanAnterior(d: Db, anio: number): Promise<Salida<PlanAnterio
   return listo({ nombre: cerrada.data.nombre, totales });
 }
 
-type OpcionesCalculo = { previasDe: ProyeccionDb | null };
+/**
+ * `previasDe`: proyección de la que se copian las decisiones (al crear con `copiar_de`). `candado` (`0.10.8`, `PUT …/crecimientos`): el
+ * `calculando_desde` que quien llama YA tomó; `ejecutarCalculo` no vuelve a tomarlo, lo usa para guardar y lo libera al terminar (también si
+ * falla antes de empezar).
+ */
+type OpcionesCalculo = { previasDe: ProyeccionDb | null; candado?: string };
 
 /**
  * Solo un cálculo pesado a la vez en todo el sistema. Dos barreras: un semáforo de proceso (`calculoLocal`, la barrera exacta
@@ -508,7 +576,7 @@ type OpcionesCalculo = { previasDe: ProyeccionDb | null };
  */
 let calculoLocal = false;
 
-async function rechazoCalculoSimultaneo(d: Db, exceptoId: string | null): Promise<Salida<null>> {
+export async function rechazoCalculoSimultaneo(d: Db, exceptoId: string | null): Promise<Salida<null>> {
   if (calculoLocal) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_SISTEMA, 409, "calculo_en_curso");
   const otros = await leerCalculosActivos(d, exceptoId, limiteCalculoVivo(sello()));
   if (otros.error) return fallaDb(otros.error, "proyección: cálculos en curso");
@@ -521,25 +589,33 @@ async function rechazoCalculoSimultaneo(d: Db, exceptoId: string | null): Promis
  * y libera. Si algo falla libera el candado y responde con el motivo; nada de lo escrito se deshace (sin transacción: repetir
  * el cálculo lo repara). Si dos instancias toman el candado a la vez, sigue la más antigua y la otra se retira (409).
  */
-async function ejecutarCalculo(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo, o: OpcionesCalculo): Promise<Salida<ProyeccionApi>> {
+export async function ejecutarCalculo(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo, o: OpcionesCalculo): Promise<Salida<ProyeccionApi>> {
   const ahora = sello();
-  if (calculoEnCurso(proy.calculando_desde, ahora)) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
-  if (calculoLocal) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_SISTEMA, 409, "calculo_en_curso");
+  // Con `candado` el que llama ya lo tomó (y la proyección que pasa lo trae vivo): solo hay que liberarlo si ni siquiera se empieza.
+  if (!o.candado && calculoEnCurso(proy.calculando_desde, ahora)) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
+  if (calculoLocal) {
+    if (o.candado) await soltarCalculo(d, proy.id, o.candado);
+    return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_SISTEMA, 409, "calculo_en_curso");
+  }
   calculoLocal = true;
-  let valorTomado: string | null = null;
+  let valorTomado: string | null = o.candado ?? null;
+  let tomado: { data: ProyeccionDb } | null = o.candado ? { data: proy } : null;
   try {
-    const tomado = await tomarCalculo(d, proy.id, proy.calculando_desde, ahora);
-    if (tomado.error) return fallaDb(tomado.error, "proyección: iniciar cálculo");
-    if (!tomado.data) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
-    valorTomado = tomado.data.calculando_desde ?? ahora;
+    if (!tomado) {
+      const t = await tomarCalculo(d, proy.id, proy.calculando_desde, ahora);
+      if (t.error) return fallaDb(t.error, "proyección: iniciar cálculo");
+      if (!t.data) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
+      tomado = { data: t.data };
+      valorTomado = t.data.calculando_desde ?? ahora;
+    }
 
     const otros = await leerCalculosActivos(d, proy.id, limiteCalculoVivo(ahora));
     if (otros.error) return fallaDb(otros.error, "proyección: cálculos en curso");
-    const miInicio = Date.parse(valorTomado);
+    const miInicio = Date.parse(valorTomado ?? ahora);
     const pasanAntes = otros.data.some((x) => Date.parse(x.calculando_desde) < miInicio || (Date.parse(x.calculando_desde) === miInicio && x.id < proy.id));
     if (pasanAntes) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_SISTEMA, 409, "calculo_en_curso");
 
-    return await calcularYGuardar(d, tomado.data, ctx, o, ahora, valorTomado);
+    return await calcularYGuardar(d, tomado.data, ctx, o, ahora, valorTomado ?? ahora);
   } finally {
     // Suelta el candado solo si sigue siendo el que se tomó.
     if (valorTomado !== null) await soltarCalculo(d, proy.id, valorTomado);
@@ -613,6 +689,9 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   }
   const plan = await leerPlanAnterior(d, Y);
   if (plan.respuesta) return falla(plan.respuesta);
+  // 0.10.8 (07c): la matriz de crecimientos guardada (siempre la guardada: las recalculaciones en el acto no usan ningún borrador).
+  const celdas = await leerCrecimientos(d, proy.id);
+  if (celdas.error) return fallaDb(celdas.error, "proyección: leer la matriz de crecimientos");
 
   const salida = calcularProyeccion({
     anio: Y,
@@ -636,6 +715,7 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
     planAnterior: plan.data,
     configFlujo: ctx.configFlujo,
     previas,
+    crecimientos: matrizDeCeldas(celdas.data.map((c) => ({ genero_id: c.genero_id, mundo_id: c.mundo_id, pct: Number(c.pct) })), ctx.generosMatriz),
   });
 
   // ── Guardar: filas, registros por año y tiendas; nunca las decisiones ──
@@ -761,6 +841,8 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     forzar,
     umbralColaLarga: parametros.umbral_cola_larga,
     metodoViejo: !esMetodoVigente(p.resumen),
+    // 0.10.8 (07c): como `metodoViejo`, no se puede saltar con `forzar`.
+    crecimientosCambiados: des.data.some((m) => m.codigo === "crecimientos_cambiados"),
   });
   if (!resultado.ok) {
     let filasLegibles: Record<string, unknown>[] | undefined;

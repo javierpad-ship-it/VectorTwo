@@ -169,7 +169,7 @@ describe("propuesta de una fila de tienda (reglas 20 a 22)", () => {
     const rY1 = rampaMensual("2026-07-01", [1, 1, 1], 2027);
     const A = maduroDeVigente({ vigente: 240, curva: CURVA_PLANA, rampa: rY, phi: UNOS }) as number;
     expect(A).toBeCloseTo(480, 8);
-    expect(maduroSiguiente({ maduro: A, crecimiento: 5, curva: CURVA_PLANA, rampa: rY1, phi: UNOS })).toBe(504);
+    expect(maduroSiguiente({ maduro: A, crecimiento: 5, curva: CURVA_PLANA, rampa: rY1 })).toBe(504);
     const A2 = maduroDeVigente({ vigente: 300, curva: CURVA_PLANA, rampa: rY, phi: UNOS }) as number;
     expect(A2).toBeCloseTo(600, 8);
     const p = proponerFilaTienda({ ...base, subbloque: "nuevas_anterior", rampa: rY1, maduras: null, maduroPrevio: A2 });

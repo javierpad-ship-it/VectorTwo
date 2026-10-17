@@ -1,7 +1,8 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-15 (0019 M12 y 0020 M13) contra `generate_typescript_types` del proyecto
+ * Verificados el 2026-10-16 (0023 M7 07c: `proyeccion_crecimientos`, `proyeccion_fila_anios.base_siguiente`
+ * y `.base_normalizada`) contra `generate_typescript_types` del proyecto
  * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, vistas, funciones,
  * columnas, obligatoriedad y claves foráneas. Se actualizan a mano (estilo de este archivo)
  * después de cada migración y se comparan con el generador.
@@ -1015,11 +1016,84 @@ export type Database = {
         };
         Relationships: [];
       };
+      proyeccion_crecimientos: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          genero_id: string;
+          id: string;
+          mundo_id: string;
+          nota: string | null;
+          pct: number;
+          perfil_id: string | null;
+          proyeccion_id: string;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          genero_id: string;
+          id?: string;
+          mundo_id: string;
+          nota?: string | null;
+          pct: number;
+          perfil_id?: string | null;
+          proyeccion_id: string;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          genero_id?: string;
+          id?: string;
+          mundo_id?: string;
+          nota?: string | null;
+          pct?: number;
+          perfil_id?: string | null;
+          proyeccion_id?: string;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proyeccion_crecimientos_genero_id_fkey";
+            columns: ["genero_id"];
+            isOneToOne: false;
+            referencedRelation: "generos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_crecimientos_mundo_id_fkey";
+            columns: ["mundo_id"];
+            isOneToOne: false;
+            referencedRelation: "mundos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_crecimientos_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_crecimientos_proyeccion_id_fkey";
+            columns: ["proyeccion_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       proyeccion_fila_anios: {
         Row: {
           activo: boolean;
           anio: number;
           avisos: Json;
+          base_normalizada: number | null;
+          base_siguiente: number | null;
           bloque: string;
           created_at: string;
           crecimiento_pct: number | null;
@@ -1050,6 +1124,8 @@ export type Database = {
           activo?: boolean;
           anio: number;
           avisos?: Json;
+          base_normalizada?: number | null;
+          base_siguiente?: number | null;
           bloque: string;
           created_at?: string;
           crecimiento_pct?: number | null;
@@ -1080,6 +1156,8 @@ export type Database = {
           activo?: boolean;
           anio?: number;
           avisos?: Json;
+          base_normalizada?: number | null;
+          base_siguiente?: number | null;
           bloque?: string;
           created_at?: string;
           crecimiento_pct?: number | null;

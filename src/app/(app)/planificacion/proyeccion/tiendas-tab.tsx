@@ -77,7 +77,7 @@ export function TiendasTab({
   return (
     <div className="space-y-4">
       <p className="text-sm text-tinta-suave">
-        Una tarjeta por tienda nueva y año: cómo se calculó su cifra, las referencias al lado y tu decisión del total de la tienda. Las fechas, la venta esperada del año de apertura (S/, sin IGV) y la tienda de referencia
+        Una tarjeta por tienda nueva y año: cómo se calculó su cifra, las referencias al lado y tu decisión del total de la tienda. Las fechas, la venta mensual promedio esperada (S/, sin IGV) y la tienda de referencia
         son de Tiendas (M4): se corrigen con «Cambiar en Tiendas» y se recalcula la proyección.
       </p>
       {lectura.error && <AlertaError error={lectura.error} onCerrar={() => lectura.setError(null)} onRecargar={() => void lectura.recargar()} />}

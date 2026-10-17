@@ -43,14 +43,14 @@ export function AlertaError({
 }
 
 /** Avisos de una fila, tienda o registro: los de alerta con `Badge` de alerta y el texto completo al pasar el cursor. */
-export function Avisos({ avisos, detalle = false }: { avisos: readonly AvisoFila[]; detalle?: boolean }) {
+export function Avisos({ avisos, detalle = false, textos }: { avisos: readonly AvisoFila[]; detalle?: boolean; textos?: Partial<Record<AvisoFila, string>> }) {
   if (avisos.length === 0) return null;
   if (detalle) {
     return (
       <ul className="space-y-1.5">
         {avisos.map((a) => (
           <li key={a}>
-            <Alert tono={tonoAviso(a) === "alerta" ? "alerta" : "info"}>{textoAviso(a)}</Alert>
+            <Alert tono={tonoAviso(a) === "alerta" ? "alerta" : "info"}>{textos?.[a] ?? textoAviso(a)}</Alert>
           </li>
         ))}
       </ul>

@@ -28,6 +28,7 @@ import {
   claveGenero,
   claveMundo,
   type FiltroVista,
+  textoColumnasVariacion,
 } from "./vista";
 
 const TH = "px-2 py-2 text-right font-medium";
@@ -188,6 +189,7 @@ export function TablaMatriz({
   onIrATiendas: () => void;
 }) {
   const y = proyeccion.anio_en_curso;
+  const titulos = textoColumnasVariacion(y);
   const visibles = datos.nodos.filter((n) => nodoVisible(n, plegados));
   const conCierresY = hayCierres(datos.nodos, "en_curso");
   const conCierresS = hayCierres(datos.nodos, "siguiente");
@@ -206,7 +208,7 @@ export function TablaMatriz({
                     <th colSpan={5 + (conCierresY ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
                       {y}
                     </th>
-                    <th colSpan={5 + (conCierresS ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
+                    <th colSpan={6 + (conCierresS ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
                       {y + 1}
                     </th>
                     <th rowSpan={2} className="px-3 py-2 text-left font-medium">
@@ -235,13 +237,18 @@ export function TablaMatriz({
                     </th>
                     {conCierresS && <th className={TH}>Cierres</th>}
                     <th className={TH}>Total {y + 1}</th>
-                    <th className={TH}>Var.</th>
+                    <th className={TH} title={titulos.var}>
+                      Var.
+                    </th>
+                    <th className={TH} title={titulos.crec}>
+                      Crec. mismas tiendas
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borde">
                   {visibles.length === 0 && (
                     <tr>
-                      <td colSpan={12 + (conCierresY ? 1 : 0) + (conCierresS ? 1 : 0)} className="px-3 py-6 text-center text-tinta-suave">
+                      <td colSpan={13 + (conCierresY ? 1 : 0) + (conCierresS ? 1 : 0)} className="px-3 py-6 text-center text-tinta-suave">
                         Ninguna línea coincide con los filtros.
                       </td>
                     </tr>
@@ -281,6 +288,9 @@ export function TablaMatriz({
                         {conCierresS && <td className={`px-2 py-2 ${NUM}`}>{unidades(n.siguiente.cierres)}</td>}
                         <td className={`px-2 py-2 ${NUM} font-semibold`}>{unidades(n.siguiente.total)}</td>
                         <td className={`px-2 py-2 ${NUM}`}>{formatearPct(n.variacion_pct)}</td>
+                        <td className={`px-2 py-2 ${NUM}`} title={titulos.crec}>
+                          {formatearPct(n.siguiente.crec_mismas_pct)}
+                        </td>
                         <td className="px-3 py-2">
                           <span className="inline-flex flex-wrap items-center gap-1.5">
                             <BadgeEstadoLinea estado={n.estado} />
@@ -297,6 +307,7 @@ export function TablaMatriz({
                 </tbody>
               </table>
             </div>
+            <p className="mt-2 text-xs text-tinta-suave">{titulos.nota}</p>
     </>
   );
 }

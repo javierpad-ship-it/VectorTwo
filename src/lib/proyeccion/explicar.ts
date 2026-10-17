@@ -10,12 +10,26 @@ import type { Metodo, OrigenComposicion } from "./tipos-api";
 const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"] as const;
 
 const u = (n: number) => formatearNumero(Math.round(n));
+const MES_LARGO = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"] as const;
+/** «15 de marzo» de `aaaa-mm-dd`; «su fecha de apertura» si no hay fecha. */
+const fechaCorta = (fecha: string | null | undefined): string => {
+  const m = fecha ? /^\d{4}-(\d{2})-(\d{2})/.exec(fecha) : null;
+  return m ? `el ${Number(m[2])} de ${MES_LARGO[Number(m[1]) - 1]}` : "en su fecha de apertura";
+};
 const pct = (fraccion: number) => `${formatearDecimal(fraccion * 100, 1)} %`;
 
 /** "ene–set" para los primeros `k` meses; "ene" si `k = 1`. */
 export function rangoMeses(desde: number, hasta: number): string {
   if (hasta < desde) return "";
   return desde === hasta ? MES_CORTO[desde - 1] : `${MES_CORTO[desde - 1]}–${MES_CORTO[hasta - 1]}`;
+}
+
+/**
+ * El % de crecimiento tal como se lee en una explicación: un decimal como mínimo y dos como máximo (7.5, 7.25). Se muestra el % y no el
+ * factor redondeado para que la cuenta de la frase se reproduzca: «1,860 × (1 + 7.5 %)» da 2,000, y «× 1.08» (de 1.075) daría 2,009.
+ */
+function textoPctCrecimiento(g: number): string {
+  return g.toLocaleString("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 }
 
 /** Los meses con `φ ≠ 1` agrupados en tramos consecutivos del mismo valor: "set ÷ 1.24" o "oct–dic × 1.24". */
@@ -69,8 +83,18 @@ export type EntradaExplicar = {
   referenciaTresMeses?: number | null;
   // Año siguiente (método `crecimiento`).
   baseVigente?: number | null;
+  /** `B`: base de las mismas tiendas de `Y+1`, sin normalizar. */
   baseTotal?: number | null;
+  /** `B''`: lo que vendería con 0 % si `Y` hubiera sido normal (solo referencia). */
   baseNormalizada?: number | null;
+  /** Temporada de la unidad («invierno», «verano»…) para decir en qué temporada fue Niño. */
+  temporada?: string | null;
+  /** Cuántas tiendas son las mismas de `Y+1` («de las 10 tiendas de 2027»). */
+  tiendasSiguiente?: number;
+  /** `0.10.8` (07c): el % (bruto) que se aplicó, de dónde sale y, si es de una celda, su nombre. */
+  crecimientoOrigen?: { origen: "fila" | "celda" | "resto"; celda: string | null };
+  /** `0.10.8`: el % de una tienda `maduro_propio` es el ponderado de sus combinaciones (no un único % con origen). */
+  crecimientoPonderado?: boolean;
   crecimiento?: number;
   aportes?: readonly { tienda: string; total: number; signo: 1 | -1 }[];
   // Tiendas.
@@ -87,10 +111,12 @@ export type EntradaExplicar = {
   totalMaduro?: number | null;
   /** `V'`: lo vendido de `1..k` llevado a nivel normal por el Niño (`avance_propio`). */
   vendidoNormalizado?: number | null;
-  /** `F`: la fracción de un año maduro que la tienda alcanza en su año de apertura (`apertura`, `0.10.1`). */
+  /** `F`: la fracción de un año maduro que la tienda alcanza en su año de apertura (`apertura`). */
   fraccionAnioApertura?: number | null;
-  /** `K = E ÷ F`: el año maduro deducido, en soles (`apertura`, `0.10.1`). */
+  /** `S = 12 V`: el año maduro en soles (`apertura`, `0.10.8`). */
   anioMaduroSoles?: number | null;
+  /** `E = 12 V F`: los soles del año de apertura (`apertura`, `0.10.8`). */
+  ventaAnioApertura?: number | null;
   /**
    * Fila de cola larga PARA REVISIÓN (`avance`, `0.10.1`): la propuesta es la demanda corregida por disponibilidad y la cifra de
    * avance normal (`referenciaAlternativa`) va al lado.
@@ -165,37 +191,52 @@ export function explicar(e: EntradaExplicar): string {
     }
     case "crecimiento": {
       const aportes = (e.aportes ?? []).map((a) => `${a.signo > 0 ? "+" : "−"} ${a.tienda} ${u(a.total)}`).join(" ");
-      const nino = e.phi && tramosNino(e.phi, 1, 12).length > 0 ? ` Normalizada por el Niño de ${e.anioEnCurso}: ${u(e.baseTotal ?? 0)} → ${u(e.baseNormalizada ?? 0)}.` : "";
+      const g = e.crecimiento ?? 0;
+      const gTexto = textoPctCrecimiento(g);
       const objetivo =
-        e.phiObjetivo && tramosNino(e.phiObjetivo, 1, 12).length > 0 ? ` ${e.anio} se espera atípico: la curva se pondera por el factor del Niño.` : "";
+        e.phiObjetivo && tramosNino(e.phiObjetivo, 1, 12).length > 0
+          ? ` ${e.anio} marcado como Niño: tu % es bruto y debe incluirlo; el reparto usa el factor.`
+          : "";
       const corregida =
         e.baseColaLarga !== null && e.baseColaLarga !== undefined
           ? ` La cifra de ${e.anioEnCurso} de esta fila es la venta corregida por quiebres de stock (${u(e.baseColaLarga)}), no el avance normal.`
           : "";
+      // Una fila con meses del Niño en `Y`: a 0 % sobre la base normalizada serían `B''`; el % bruto equivale a otro sobre esa base.
+      const bn = e.baseNormalizada;
+      const conNino = e.phi && tramosNino(e.phi, 1, 12).length > 0 && bn !== null && bn !== undefined && bn > 0 && e.baseTotal !== null && e.baseTotal !== undefined && Math.round(bn) !== Math.round(e.baseTotal);
+      const nino = conNino
+        ? ` ${e.anioEnCurso} fue Niño${e.temporada === "invierno" || e.temporada === "verano" ? ` en ${e.temporada}` : ""}: a 0 % sobre la base normalizada serían ${u(bn as number)}; tu ${gTexto} % bruto equivale a ${e.propuesto === null ? "—" : `${formatearDecimal(((e.propuesto as number) / (bn as number) - 1) * 100, 1)} %`} sobre esa base.`
+        : "";
+      const origen = e.crecimientoOrigen
+        ? e.crecimientoOrigen.origen === "celda" && e.crecimientoOrigen.celda
+          ? `crecimiento bruto de ${e.crecimientoOrigen.celda}`
+          : e.crecimientoOrigen.origen === "fila"
+            ? "crecimiento bruto propio de la fila"
+            : "crecimiento bruto del Resto"
+        : "crecimiento bruto";
+      const tiendas = e.tiendasSiguiente !== undefined ? `de las ${formatearNumero(e.tiendasSiguiente)} tiendas de ${e.anio}` : `de las mismas tiendas de ${e.anio}`;
       return (
-        `${e.anio} → base = vigente ${e.anioEnCurso} de las mismas tiendas ${e.baseVigente === null || e.baseVigente === undefined ? "—" : u(e.baseVigente)}` +
-        `${aportes ? ` ${aportes}` : ""} = ${e.baseTotal === null || e.baseTotal === undefined ? "—" : u(e.baseTotal)}.${nino}` +
-        ` × (1 + ${formatearDecimal(e.crecimiento ?? 0, 1)} %) = ${e.propuesto === null ? "sin cifra" : u(e.propuesto)}, repartido con ${curva}.${objetivo}${corregida}`
+        `${e.anio} → base ${e.anioEnCurso} ${tiendas} = ${e.baseTotal === null || e.baseTotal === undefined ? "—" : u(e.baseTotal)}` +
+        ` (vigente ${e.baseVigente === null || e.baseVigente === undefined ? "—" : u(e.baseVigente)}${aportes ? ` ${aportes}` : ""})` +
+        ` × (1 + ${gTexto} % ${origen}, sin corregir por el Niño) = ${e.propuesto === null ? "sin cifra" : u(e.propuesto)}, repartido con ${curva}.${nino}${objetivo}${corregida}`
       );
     }
     case "apertura": {
       const tienda = e.tienda ? `${e.tienda.codigo} ${e.tienda.nombre}` : "La tienda";
-      const anioApertura = e.apertura ? e.apertura.slice(0, 4) : String(e.anio);
       const fraccion =
         e.fraccionAnioApertura !== null && e.fraccionAnioApertura !== undefined
-          ? ` · la tienda alcanza el ${pct(e.fraccionAnioApertura)} de un año maduro` +
-            `${e.anioMaduroSoles !== null && e.anioMaduroSoles !== undefined ? ` → año maduro S/ ${u(e.anioMaduroSoles)}` : ""}`
+          ? `; abre ${fechaCorta(e.apertura)}: en ${e.anio} vende el ${pct(e.fraccionAnioApertura)} de un año` +
+            `${e.ventaAnioApertura !== null && e.ventaAnioApertura !== undefined ? ` (S/ ${u(e.ventaAnioApertura)})` : ""}`
           : "";
       const esperada =
         e.ventaEsperada === null || e.ventaEsperada === undefined
           ? "sin venta esperada"
-          : `venta esperada S/ ${u(e.ventaEsperada)} en ${anioApertura}, su año de apertura (sin IGV)${fraccion}`;
+          : `venta esperada S/ ${u(e.ventaEsperada)} al mes en régimen (sin IGV) × 12 = año maduro S/ ${u(e.anioMaduroSoles ?? 12 * e.ventaEsperada)}${fraccion}`;
       const rampa = e.rampa && e.rampa.some((r) => r !== 1) ? `rampa ${e.rampa.map((r) => formatearDecimal(r, 2)).join(" · ")}` : "sin rampa";
-      const abre = e.apertura ? ` abre ${e.apertura}` : "";
       const real = e.k > 0 && e.vendido > 0 ? ` Vendido ${rangoMeses(1, e.k)} ${u(e.vendido)}; menos de tres meses completos: el resto va por venta esperada.` : "";
       const alt = e.referenciaAlternativa !== null && e.referenciaAlternativa !== undefined ? ` Por avance propio saldrían ${u(e.referenciaAlternativa)}.` : "";
       return (
-        `${tienda}${abre}: ${esperada}, ${textoOrigen(e.origenComposicion, e.referente)}, ${rampa} (${curva}) → ` +
+        `${tienda}: ${esperada}, ${textoOrigen(e.origenComposicion, e.referente)}, ${rampa} (${curva}) → ` +
         `${e.unidadesMaduras === null || e.unidadesMaduras === undefined ? "sin año maduro" : `año maduro ${u(e.unidadesMaduras)} u`} → ${e.propuesto === null ? "sin cifra" : `${u(e.propuesto)} u en ${e.anio}`}.${real}${alt}`
       );
     }
@@ -213,8 +254,21 @@ export function explicar(e: EntradaExplicar): string {
       const tienda = e.tienda ? `${e.tienda.codigo} ${e.tienda.nombre}` : "La tienda";
       const alt = e.referenciaAlternativa !== null && e.referenciaAlternativa !== undefined ? ` Por venta esperada saldrían ${u(e.referenciaAlternativa)}.` : "";
       const maduro = e.totalMaduro === null || e.totalMaduro === undefined ? "su total maduro" : `su total maduro ${u(e.totalMaduro)}`;
+      const g = textoPctCrecimiento(e.crecimiento ?? 0);
+      const o = e.crecimientoOrigen;
+      const crecimiento = e.crecimientoPonderado
+        ? `× (1 + crecimiento de sus combinaciones, ponderado ${g} %)`
+        : o?.origen === "celda" && o.celda
+          ? `× (1 + ${g} % crecimiento bruto de ${o.celda})`
+          : o?.origen === "celda"
+            ? `× (1 + ${g} % crecimiento bruto de sus celdas)`
+            : o?.origen === "fila"
+              ? `× (1 + ${g} % crecimiento bruto propio)`
+              : o?.origen === "resto"
+                ? `× (1 + ${g} % crecimiento bruto del Resto)`
+                : `× (1 + ${g} %)`;
       return (
-        `${tienda}: abrió en ${e.anioEnCurso}; ${maduro} × (1 + ${formatearDecimal(e.crecimiento ?? 0, 1)} %) ` +
+        `${tienda}: abrió en ${e.anioEnCurso}; ${maduro} ${crecimiento} ` +
         `repartido con ${curva} → ${e.propuesto === null ? "sin cifra" : `${u(e.propuesto)} u en ${e.anio}`}.${alt}`
       );
     }

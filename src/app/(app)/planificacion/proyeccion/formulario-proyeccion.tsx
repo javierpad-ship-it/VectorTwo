@@ -8,10 +8,10 @@ import { Field, Input, Select } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import type { BloquesApi, ProyeccionApi, RespuestaProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { RAMPA_MADURACION, UMBRAL_COLA_LARGA, UMBRAL_DISPONIBILIDAD } from "@/lib/proyeccion/tipos-api";
-import { AlertaError } from "./comunes";
+import { AlertaError, BotonEnlace } from "./comunes";
 import { ComposicionBloques } from "./composicion-bloques";
 import { useAccion } from "./use-proyeccion";
-import { leerEntero, leerPorcentaje, leerRampa, leerUmbralDisponibilidad, mesAaaaMm, mesesElegibles, nombrePorDefecto, textoPerfilApertura, textoTendencia, textoRampa } from "./vista";
+import { leerEntero, leerPorcentaje, leerRampa, formatearPct, leerUmbralDisponibilidad, mesAaaaMm, mesesElegibles, nombrePorDefecto, textoPerfilApertura, textoTendencia, textoRampa } from "./vista";
 
 const ID_FORM = "form-proyeccion";
 
@@ -51,6 +51,7 @@ export function FormularioProyeccion({
   copiarDeInicial,
   onCerrar,
   onGuardada,
+  onIrACrecimientos,
 }: {
   estado: RespuestaProyeccionApi;
   /** Con proyección, se editan sus parámetros; sin ella, se crea una nueva. */
@@ -61,13 +62,20 @@ export function FormularioProyeccion({
   copiarDeInicial?: string;
   onCerrar: () => void;
   onGuardada: (p: ProyeccionApi) => Promise<void> | void;
+  /** Al editar, el crecimiento (el Resto) ya no se escribe aquí: se va a la pestaña Crecimientos. */
+  onIrACrecimientos?: () => void;
 }) {
   const editando = proyeccion !== undefined;
   const ultimo = estado.datos.ultimo_mes_cerrado;
   const anioBase = editando ? proyeccion.anio_en_curso : Number((ultimo ?? estado.datos.hasta ?? "0000").slice(0, 4));
   const [nombre, setNombre] = useState(editando ? proyeccion.nombre : nombrePorDefecto(anioBase));
   const [hasta, setHasta] = useState(editando ? mesAaaaMm(proyeccion.hasta_periodo) : ultimo ? mesAaaaMm(ultimo) : "");
-  const [crecimiento, setCrecimiento] = useState(String(editando ? proyeccion.parametros.crecimiento_pct_defecto : 0));
+  // 0.10.8 (07c): este campo es el Resto de la matriz de crecimientos (bruto). Al copiar, arranca con el del origen.
+  const [crecimiento, setCrecimiento] = useState(() => {
+    if (editando) return String(proyeccion.parametros.crecimiento_pct_defecto);
+    const origen = copiarDeInicial ? estado.proyecciones.find((p) => p.id === copiarDeInicial) : undefined;
+    return String(origen ? origen.parametros.crecimiento_pct_defecto : 0);
+  });
   const [rampa, setRampa] = useState<string[]>(casillasDeRampa(editando ? proyeccion.parametros.rampa_maduracion : RAMPA_MADURACION));
   const [cola, setCola] = useState(String(editando ? proyeccion.parametros.umbral_cola_larga : UMBRAL_COLA_LARGA));
   const [disponibilidad, setDisponibilidad] = useState(String(editando ? (proyeccion.parametros.umbral_disponibilidad ?? UMBRAL_DISPONIBILIDAD) : UMBRAL_DISPONIBILIDAD));
@@ -99,7 +107,7 @@ export function FormularioProyeccion({
       // Al editar solo se manda lo que cambió: un parámetro igual no debe dejar la proyección «pendiente de recalcular».
       const p0 = proyeccion.parametros;
       const cambiados: Record<string, unknown> = {};
-      if (parametros.crecimiento_pct_defecto !== p0.crecimiento_pct_defecto) cambiados.crecimiento_pct_defecto = parametros.crecimiento_pct_defecto;
+      // El crecimiento (Resto) no se manda: cambiarlo es de «Guardar y recalcular» en Crecimientos (el PATCH respondería `usar_crecimientos`).
       if (parametros.umbral_cola_larga !== p0.umbral_cola_larga) cambiados.umbral_cola_larga = parametros.umbral_cola_larga;
       if (parametros.umbral_disponibilidad !== (p0.umbral_disponibilidad ?? UMBRAL_DISPONIBILIDAD)) cambiados.umbral_disponibilidad = parametros.umbral_disponibilidad;
       if (textoRampa(parametros.rampa_maduracion) !== textoRampa(p0.rampa_maduracion)) cambiados.rampa_maduracion = parametros.rampa_maduracion;
@@ -166,9 +174,32 @@ export function FormularioProyeccion({
               {mesesHasta.length === 0 && <option value="">—</option>}
             </Select>
           </Field>
-          <Field label="Crecimiento por defecto del año siguiente (%)" hint={`Cada fila puede tener el suyo. Alimenta solo la propuesta del año siguiente.${tendencia ? ` ${tendencia}` : ""}`}>
-            <Input inputMode="decimal" value={crecimiento} disabled={accion.ocupado} onChange={(e) => setCrecimiento(e.target.value)} className="font-mono" />
-          </Field>
+          {editando ? (
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Crecimiento bruto del año siguiente (Resto): <span className="font-mono">{formatearPct(proyeccion.parametros.crecimiento_pct_defecto)}</span></p>
+              <p className="text-xs text-tinta-suave">
+                Se edita en la pestaña Crecimientos, junto a la matriz por género · mundo.{" "}
+                {onIrACrecimientos && (
+                  <BotonEnlace
+                    onClick={() => {
+                      onCerrar();
+                      onIrACrecimientos();
+                    }}
+                    disabled={accion.ocupado}
+                  >
+                    Ir a Crecimientos
+                  </BotonEnlace>
+                )}
+              </p>
+            </div>
+          ) : (
+            <Field
+              label="Crecimiento bruto del año siguiente (Resto) (%)"
+              hint={`Variación bruta del año siguiente frente al vigente de las mismas tiendas, sin corregir por el Niño. Es el crecimiento de todo lo que no tenga celda en la matriz de Crecimientos.${tendencia ? ` ${tendencia}` : ""}`}
+            >
+              <Input inputMode="decimal" value={crecimiento} disabled={accion.ocupado} onChange={(e) => setCrecimiento(e.target.value)} className="font-mono" />
+            </Field>
+          )}
           <Field label="Umbral de cola larga (unidades)" hint="Una fila con propuesta menor se puede cerrar sin decidir: toma la propuesta.">
             <Input inputMode="numeric" value={cola} disabled={accion.ocupado} onChange={(e) => setCola(e.target.value)} className="font-mono" />
           </Field>
@@ -194,8 +225,17 @@ export function FormularioProyeccion({
         </div>
 
         {!editando && (
-          <Field label="Copiar decisiones de" hint={mismoAnio.length === 0 ? `No hay otra proyección de ${anioBase}.` : "Trae las decisiones de otra proyección del mismo año; lo que ya no exista se ignora."}>
-            <Select value={copiarDe} disabled={accion.ocupado || mismoAnio.length === 0} onChange={(e) => setCopiarDe(e.target.value)}>
+          <Field label="Copiar decisiones de" hint={mismoAnio.length === 0 ? `No hay otra proyección de ${anioBase}.` : "Trae las decisiones y la matriz de crecimientos de otra proyección del mismo año; lo que ya no exista se ignora."}>
+            <Select
+              value={copiarDe}
+              disabled={accion.ocupado || mismoAnio.length === 0}
+              onChange={(e) => {
+                setCopiarDe(e.target.value);
+                // Al elegir de dónde copiar, el Resto arranca con el del origen (la copia trae también sus celdas y su objetivo).
+                const origen = mismoAnio.find((p) => p.id === e.target.value);
+                if (origen) setCrecimiento(String(origen.parametros.crecimiento_pct_defecto));
+              }}
+            >
               <option value="">No copiar</option>
               {mismoAnio.map((p) => (
                 <option key={p.id} value={p.id}>

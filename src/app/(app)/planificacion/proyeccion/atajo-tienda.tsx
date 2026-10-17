@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { cambiosDeEdicion, camposDeTienda, motivoNoGuardar, type Campos } from "../../maestros/tiendas/formulario-tienda";
+import { AYUDA_VENTA_MENSUAL } from "../../maestros/tiendas/venta-esperada";
 import { AlertaError } from "./comunes";
 import { useAccion } from "./use-proyeccion";
 
@@ -80,7 +81,7 @@ export function AtajoTienda({
         <Field label="Fecha de cierre" hint="Último día con venta (inclusive). Vacía si la tienda sigue abierta.">
           <Input type="date" value={campos.fecha_cierre} min={campos.fecha_apertura || undefined} disabled={!campos.fecha_apertura} onChange={(e) => setCampos({ ...campos, fecha_cierre: e.target.value })} />
         </Field>
-        <Field label="Venta esperada del año de apertura (S/, sin IGV)" hint="Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura.">
+        <Field label="Venta mensual promedio esperada (S/, sin IGV)" hint={AYUDA_VENTA_MENSUAL}>
           <Input type="number" step="0.01" min="0" value={campos.venta} onChange={(e) => setCampos({ ...campos, venta: e.target.value })} placeholder="850000" />
         </Field>
         <Field label="Tienda de referencia" hint="Aquella a cuya composición de venta debe parecerse. Sin referente, el promedio de las mismas tiendas.">

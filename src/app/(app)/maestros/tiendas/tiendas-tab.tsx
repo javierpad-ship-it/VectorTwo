@@ -215,7 +215,7 @@ export function TiendasTab({
     { clave: "cierre", titulo: "Cierre", render: (t) => <Celda valor={t.fecha_cierre ? formatearFecha(t.fecha_cierre) : null} mono /> },
     {
       clave: "venta",
-      titulo: "Venta esp.",
+      titulo: "Venta esp./mes",
       className: "text-right",
       render: (t) => <Celda valor={t.venta_esperada_promedio === null ? null : formatearMonto(t.venta_esperada_promedio)} mono />,
     },

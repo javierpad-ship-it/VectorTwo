@@ -372,7 +372,7 @@ describe("la explicación de una fila para revisión", () => {
     const sig = reg(s, CV, Y + 1);
     expect(sig.explicacion).not.toContain("La propuesta es la venta corregida");
     expect(sig.explicacion).not.toContain("saldrían");
-    expect(sig.explicacion).toContain("× (1 + 5.0 %)");
+    expect(sig.explicacion).toContain("× (1 + 5.0 % crecimiento bruto del Resto, sin corregir por el Niño)");
     expect(sig.explicacion).toContain("La cifra de 2026 de esta fila es la venta corregida por quiebres de stock (144), no el avance normal");
   });
 
@@ -507,8 +507,8 @@ describe("version_metodo: la proyección calculada con un método anterior queda
   };
   const codigos = (v: number | undefined) => motivosDesactualizada(p(v), actual).map((m) => m.codigo);
 
-  it("version_metodo 2 → motivo version_metodo; la actual (3) → nada", () => {
-    expect(salida.resumen.version_metodo).toBe(3);
+  it("version_metodo 2 → motivo version_metodo; la actual (4) → nada", () => {
+    expect(salida.resumen.version_metodo).toBe(4);
     expect(codigos(2)).toEqual(["version_metodo"]);
     expect(codigos(salida.resumen.version_metodo)).toEqual([]);
     expect(codigos(undefined)).toEqual([]);

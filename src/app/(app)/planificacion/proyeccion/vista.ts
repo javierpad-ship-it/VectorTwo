@@ -38,12 +38,14 @@ import {
 
 // ─── Pestañas y estado en la URL ───
 
-export type Pestana = "factores" | "tiendas" | "linea" | "matriz" | "mensual";
+export type Pestana = "factores" | "tiendas" | "crecimientos" | "linea" | "matriz" | "mensual";
 
 /** En el orden de trabajo de la ficha: primero los factores, después las tiendas (alimentan la base de cada línea). */
 export const PESTANAS: readonly { id: Pestana; etiqueta: string }[] = [
   { id: "factores", etiqueta: "Factores del Niño" },
   { id: "tiendas", etiqueta: "Tiendas nuevas y cierres" },
+  // 0.10.8 (07c): los crecimientos por género × mundo van entre las tiendas (mueven la base B) y las líneas (que ellos alimentan).
+  { id: "crecimientos", etiqueta: "Crecimientos" },
   { id: "linea", etiqueta: "Por línea" },
   { id: "matriz", etiqueta: "Matriz" },
   { id: "mensual", etiqueta: "Mensual" },
@@ -197,7 +199,7 @@ export const TEXTO_AVISO: Record<AvisoFila, { texto: string; tono: TonoAviso }> 
   sin_venta_anio: { texto: "Sin venta en el año en curso, aunque hubo venta el año anterior.", tono: "alerta" },
   sin_base: { texto: "Sin total vigente en el año en curso: no hay base para el año siguiente.", tono: "alerta" },
   sin_factor: { texto: "Hay meses del Niño sin factor calculado: se usó 1. Revisa la pestaña Factores del Niño.", tono: "alerta" },
-  objetivo_atipico: { texto: "El año siguiente está marcado atípico en M6: la curva se repondera con el factor del Niño.", tono: "info" },
+  objetivo_atipico: { texto: "El año siguiente está marcado como Niño en M6: tu % es bruto y debe incluirlo; el reparto usa el factor.", tono: "info" },
   temporadas_mezcladas: { texto: "El GML mezcla temporadas: el factor del Niño se pondera mes a mes.", tono: "info" },
   mes_negativo: { texto: "Un mes tenía venta neta negativa; se truncó a 0.", tono: "info" },
   quiebre: { texto: "Hay meses con quiebre de stock: la venta pudo quedar por debajo de la demanda.", tono: "info" },
@@ -212,8 +214,10 @@ export const TEXTO_AVISO: Record<AvisoFila, { texto: string; tono: TonoAviso }> 
   revision_cola_larga: { texto: "Cola larga con quiebres de stock: la venta pudo quedar muy por debajo de la demanda. La propuesta es la demanda corregida por disponibilidad (el avance normal va al lado) y hay que decidirla para poder cerrar.", tono: "alerta" },
   cola_larga_con_quiebres: { texto: "Cola larga con quiebres de stock, pero la demanda corregida no supera el umbral: se cierra con la propuesta.", tono: "info" },
   sin_stock_historico: { texto: "No hay stock cargado de esta fila en los últimos doce meses: no se pudo medir la disponibilidad y se trata como cola larga normal.", tono: "info" },
-  apertura_tardia: { texto: "La venta esperada cubre menos de un cuarto de un año maduro (la tienda abre tarde en el año o tiene una rampa muy baja): revisa la cifra.", tono: "info" },
-  cifra_excesiva: { texto: "Una cifra del método salió fuera de rango (por ejemplo, una venta esperada que cubre casi nada del año): no se propone nada; escribe el total o revisa la venta esperada y la fecha de apertura en Tiendas.", tono: "alerta" },
+  apertura_tardia: { texto: "Abre tarde (o tiene una rampa muy baja): en su primer año vende menos de un cuarto de un año maduro. La cifra es baja porque la tienda vende pocos meses; revisa la fecha de apertura si no es lo esperado.", tono: "info" },
+  cifra_excesiva: { texto: "Una cifra del método salió fuera de rango (por ejemplo, una venta mensual esperada desproporcionada): no se propone nada; escribe el total o revisa la venta mensual promedio esperada y la fecha de apertura en Tiendas.", tono: "alerta" },
+  apertura_y_cierre: { texto: "Abre y cierra en el año siguiente: no se proyecta y un total que escribas no llega a la Matriz ni a Flujo. Si es real, avísalo para especificarlo.", tono: "alerta" },
+  venta_esperada_fuera_de_rango: { texto: "La venta mensual esperada, por 12, queda fuera de entre 0,3 y 3 veces la venta anual media de una tienda de la red: revisa que sea mensual y sin IGV.", tono: "info" },
   apertura_dudosa: { texto: "La tienda no vendió en un mes en que debía estar abierta: si abrió después, corrige la fecha de apertura en Tiendas.", tono: "alerta" },
   cierre_dudoso: { texto: "La tienda vendió después de su fecha de cierre o dejó de vender antes: revisa la fecha de cierre en Tiendas.", tono: "alerta" },
 };
@@ -244,7 +248,14 @@ export function accionParaCodigo(codigo: string | null): AccionError {
   switch (codigo) {
     case "datos_cambiaron":
       return "recalcular";
+    case "crecimientos_cambiados":
+    case "version_metodo":
+      return "recalcular";
     case "calculo_en_curso":
+    case "conflicto":
+    case "celdas_incompletas":
+    case "estado_cambiado":
+    case "archivada":
     case "cerrada":
     case "ya_cerrada":
     case "fila_inactiva":
@@ -420,6 +431,19 @@ export function motivoCifraInvalida(texto: string, minimo: number): string | nul
   return null;
 }
 
+// ─── Matriz: «Var.» y «Crec. mismas tiendas» (07c) ───
+
+/**
+ * Los títulos de las dos columnas de variación de la Matriz. `Var.` compara los totales (con tiendas nuevas, aperturas y cierres);
+ * `Crec. mismas tiendas` es lo que se escribe en Crecimientos: el año siguiente de las mismas tiendas frente a su año en curso.
+ */
+export function textoColumnasVariacion(anioEnCurso: number): { var: string; crec: string; nota: string } {
+  const s = anioEnCurso + 1;
+  const v = `Var. = Total ${s} ÷ Total ${anioEnCurso} (incluye tiendas nuevas, aperturas y cierres).`;
+  const c = `Crec. mismas tiendas = ${s} de las mismas tiendas ÷ su ${anioEnCurso}: es lo que escribes en Crecimientos.`;
+  return { var: v, crec: c, nota: `${v} ${c}` };
+}
+
 // ─── Cerrar ───
 
 /** Lo que resume el diálogo de cierre: filas decididas y sin decidir por año, cola larga, cambios pendientes y motivos. */
@@ -445,6 +469,14 @@ export function lineasDeCierre(p: Pick<ProyeccionApi, "anio_en_curso" | "resumen
   return lineas;
 }
 
+/** Los motivos de «desactualizada» que `cerrar?forzar=1` NO salta: el método viejo y los crecimientos sin aplicar (0.10.8). */
+export const MOTIVOS_NO_FORZABLES: readonly string[] = ["version_metodo", "crecimientos_cambiados"];
+
+/** ¿Hay un motivo de desactualización que obliga a recalcular antes de cerrar (no se puede forzar)? */
+export function cierreExigeRecalcular(p: Pick<ProyeccionApi, "desactualizada">): boolean {
+  return p.desactualizada.some((m) => MOTIVOS_NO_FORZABLES.includes(m.codigo));
+}
+
 /** Máximo de filas sin decidir que lista el diálogo de cierre (el resto se cuenta). */
 export const MAX_SIN_DECIDIR = 50;
 
@@ -455,10 +487,48 @@ export function textoParaRevision(n: number): string {
   return plural(n, "fila para revisión", "filas para revisión");
 }
 
+/** `0.10.8` (07c): los crecimientos guardados no son los que aplicó el último cálculo. No se puede forzar al cerrar. */
+export const TEXTO_CRECIMIENTOS_CAMBIADOS = "Los crecimientos guardados no están aplicados (falló el recálculo o un nodo cambió de mundo): recalcula. No se puede cerrar hasta entonces.";
+
 /** Motivo de «desactualizada» en palabras: el del método nuevo se explica aparte; el resto, tal como lo dice el servidor. */
 export function textoMotivoDesactualizada(m: { codigo: string; mensaje: string }): string {
   if (m.codigo === "version_metodo") return "El método de cálculo cambió (método nuevo): recalcula para aplicarlo. Tus decisiones se conservan.";
+  if (m.codigo === "crecimientos_cambiados") return TEXTO_CRECIMIENTOS_CAMBIADOS;
   return m.mensaje;
+}
+
+// ─── Venta esperada de una tienda nueva (07d) ───
+
+/** «15-mar» desde `2027-03-15`. */
+export function diaMesCorto(fecha: string): string {
+  return `${Number(fecha.slice(8, 10))}-${nombreMes(Number(fecha.slice(5, 7)))}`;
+}
+
+/**
+ * La venta esperada de la tarjeta de una tienda nueva. `principal`: «S/ 85,000 al mes (sin IGV, en régimen) · año maduro S/ 1,020,000»;
+ * `escala`: sin meses reales, «en 2027 abre el 15-mar y vende el 83.7 % del año → S/ 853,597»; con meses reales es solo una referencia
+ * («la propuesta sale de lo vendido»). `null` en `escala` si la API no la entrega (cierres, proyección anterior al método 4).
+ */
+export function textoVentaEsperadaTienda(t: Pick<TiendaProyeccionApi, "venta_esperada" | "escala" | "fecha_usada" | "anio">): { principal: string; escala: string | null } | null {
+  if (t.venta_esperada === null) return null;
+  const e = t.escala;
+  const principal = `S/ ${formatearNumero(t.venta_esperada)} al mes (sin IGV, en régimen)${e ? ` · año maduro S/ ${formatearNumero(Math.round(e.anio_maduro))}` : ""}`;
+  if (!e || e.fraccion === null || e.venta_anio_apertura === null) return { principal, escala: null };
+  const parte = `${formatearAvance(e.fraccion)} del año → S/ ${formatearNumero(Math.round(e.venta_anio_apertura))}`;
+  return {
+    principal,
+    escala: e.con_meses_reales ? `referencia: con la venta esperada vendería el ${parte}; la propuesta sale de lo vendido` : `en ${t.anio} abre el ${diaMesCorto(t.fecha_usada)} y vende el ${parte}`,
+  };
+}
+
+/**
+ * El aviso `apertura_tardia` con las cifras de la tienda: «Abre tarde: en 2027 vende el 12.9 % de un año maduro (S/ 131,240 de
+ * S/ 1,020,000). En 2028 pasará a nueva del año anterior.» `null` si la API no trae la `escala`.
+ */
+export function textoAperturaTardia(t: Pick<TiendaProyeccionApi, "escala" | "anio">): string | null {
+  const e = t.escala;
+  if (!e || e.fraccion === null || e.venta_anio_apertura === null) return null;
+  return `Abre tarde: en ${t.anio} vende el ${formatearAvance(e.fraccion)} de un año maduro (S/ ${formatearNumero(Math.round(e.venta_anio_apertura))} de S/ ${formatearNumero(Math.round(e.anio_maduro))}). En ${t.anio + 1} pasará a nueva del año anterior.`;
 }
 
 /** Nombre legible de una fila sin decidir: el que mande el servidor o, si solo hay `clave`, una forma corta para no dejar la fila anónima. */

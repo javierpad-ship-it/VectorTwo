@@ -29,8 +29,9 @@ export type TiendaFila = {
   /** ISO `aaaa-mm-dd` o `null`; último día con venta (inclusive). */
   fecha_cierre: string | null;
   /**
-   * Soles, sin IGV, que la tienda venderá en su año de apertura (desde que abre hasta el 31 de diciembre de ese año); solo en tipo
-   * Tienda. No es venta mensual ni de tienda madura (`0.10.1`).
+   * Venta MENSUAL promedio esperada de la tienda, ya en régimen y en soles SIN IGV (nunca incluye IGV; el sistema no convierte); solo en tipo
+   * Tienda. M7 la multiplica por 12 y la reparte con la estacionalidad y la rampa en los meses en que la tienda esté abierta (`0.10.8`;
+   * entre `0.10.1` y `0.10.7` se leía como los soles del año de apertura).
    */
   venta_esperada_promedio: number | null;
   /**

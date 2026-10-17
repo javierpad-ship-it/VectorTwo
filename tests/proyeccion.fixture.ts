@@ -138,7 +138,7 @@ export const tiendas = (extra: Record<string, Partial<TiendaProy>> = {}): Tienda
     tienda("T6", "2025-01-01"),
     tienda("T2", "2025-11-20", null, { nombre: "Tienda nueva A" }),
     tienda("T3", "2026-07-01"),
-    tienda("T4", "2027-03-15", null, { zona: "Norte", venta_esperada: 850000, referente_id: "T1", nombre: "Tienda nueva B" }),
+    tienda("T4", "2027-03-15", null, { zona: "Norte", venta_esperada: 85000, referente_id: "T1", nombre: "Tienda nueva B" }),
     tienda("T5", "2019-01-01", "2027-06-30"),
     tienda("T7", "2019-01-01", "2026-06-30"),
     tienda("T8", "2019-01-01", "2025-12-31"),

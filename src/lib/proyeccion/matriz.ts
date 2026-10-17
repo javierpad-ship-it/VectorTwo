@@ -82,7 +82,26 @@ type Cifras = NodoMatrizApi["en_curso"];
 type CifrasSig = NodoMatrizApi["siguiente"];
 const cero = (): Cifras => ({ venta_a_la_fecha: 0, mismas: 0, nuevas_anterior: 0, aperturas: 0, cierres: 0, total: 0, decididas: 0, filas: 0 });
 
-function sumarCifras(destino: Cifras | CifrasSig, origen: Cifras | CifrasSig) {
+/**
+ * `0.10.8` (07c): `Σ B` (`base_siguiente`) de las filas base de un año y `Σ vigente` de esas mismas filas con base (el numerador del
+ * «Crec. mismas tiendas» = vigente de `Y+1` ÷ `B` − 1; una fila sin `B` no cuenta en ninguno de los dos).
+ */
+export function baseDeAnio(filas: readonly FilaPlana[], anio: number): { base: number; vigente: number } {
+  let base = 0;
+  let vigente = 0;
+  for (const f of filas) {
+    if (f.tienda_id !== null) continue;
+    const r = registro(f, anio);
+    if (!r || r.base_siguiente === null || r.base_siguiente === undefined) continue;
+    base += r.base_siguiente;
+    vigente += vigenteDe(r);
+  }
+  return { base, vigente };
+}
+
+const crecMismas = (base: number, vigente: number): number | null => (base > 0 ? (vigente / base - 1) * 100 : null);
+
+function sumarCifras(destino: Cifras | Omit<CifrasSig, "base_siguiente" | "crec_mismas_pct">, origen: Cifras | Omit<CifrasSig, "base_siguiente" | "crec_mismas_pct">) {
   destino.mismas += origen.mismas;
   destino.nuevas_anterior += origen.nuevas_anterior;
   destino.aperturas += origen.aperturas;
@@ -103,6 +122,8 @@ type Linea = {
   siguiente: CifrasSig;
   estado: EstadoLinea;
   avisos: AvisoFila[];
+  /** `Σ vigente` de `Y+1` de las filas base con `B` (para el «Crec. mismas tiendas» de los nodos que agrupan líneas). */
+  vigenteConBase: number;
   conTiendasNuevas: boolean;
   colaLarga: boolean;
   paraRevision: boolean;
@@ -186,6 +207,7 @@ function resumirLinea(filas: readonly FilaPlana[], anio: number, umbral: number)
   const primera = filas[0];
   const en = cifrasDeAnio(filas, anio, true);
   const sg = cifrasDeAnio(filas, anio + 1, false);
+  const bs = baseDeAnio(filas, anio + 1);
   const avisos = [...new Set(filas.flatMap((f) => [...f.avisos, ...f.anios.flatMap((a) => a.avisos)]))];
   return {
     gml_id: primera.gml_id,
@@ -195,7 +217,8 @@ function resumirLinea(filas: readonly FilaPlana[], anio: number, umbral: number)
     linea: primera.linea,
     agrupacion_marca: null,
     en_curso: en,
-    siguiente: { mismas: sg.mismas, nuevas_anterior: sg.nuevas_anterior, aperturas: sg.aperturas, cierres: sg.cierres, total: sg.total, decididas: sg.decididas, filas: sg.filas },
+    siguiente: { mismas: sg.mismas, nuevas_anterior: sg.nuevas_anterior, aperturas: sg.aperturas, cierres: sg.cierres, total: sg.total, decididas: sg.decididas, filas: sg.filas, base_siguiente: bs.base, crec_mismas_pct: crecMismas(bs.base, bs.vigente) },
+    vigenteConBase: bs.vigente,
     estado: estadoLinea(filas, anio, umbral),
     avisos,
     conTiendasNuevas: filas.some((f) => f.anios.some((a) => a.bloque === "nuevas" && vigenteDe(a) > 0)),
@@ -254,17 +277,21 @@ function estadoDeHijos(hijos: readonly EstadoLinea[]): EstadoLinea {
 function nodoDe(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMatrizApi["ids"], hijos: readonly Linea[]): NodoMatrizApi {
   const en = cero();
   const sg = cero();
+  let baseSig = 0;
+  let vigenteConBase = 0;
   for (const h of hijos) {
     en.venta_a_la_fecha += h.en_curso.venta_a_la_fecha;
     sumarCifras(en, h.en_curso);
     sumarCifras(sg, h.siguiente);
+    baseSig += h.siguiente.base_siguiente;
+    vigenteConBase += h.vigenteConBase;
   }
   return {
     nivel,
     ids,
     nombre,
     en_curso: en,
-    siguiente: { mismas: sg.mismas, nuevas_anterior: sg.nuevas_anterior, aperturas: sg.aperturas, cierres: sg.cierres, total: sg.total, decididas: sg.decididas, filas: sg.filas },
+    siguiente: { mismas: sg.mismas, nuevas_anterior: sg.nuevas_anterior, aperturas: sg.aperturas, cierres: sg.cierres, total: sg.total, decididas: sg.decididas, filas: sg.filas, base_siguiente: baseSig, crec_mismas_pct: crecMismas(baseSig, vigenteConBase) },
     variacion_pct: en.total > 0 ? (sg.total / en.total - 1) * 100 : null,
     estado: estadoDeHijos(hijos.map((h) => h.estado)),
     avisos: [...new Set(hijos.flatMap((h) => h.avisos))].sort(),

@@ -111,10 +111,35 @@ describe("celdas de decisión", () => {
     expect(s).toContain("No hay propuesta que aceptar");
   });
 
-  it("el crecimiento por fila trae el de la proyección de sombra", () => {
-    const s = html(createElement(CeldaCrecimiento, { registro: registro(2027, { crecimiento_pct: 8 }), porDefecto: 0, bloqueada: false, ocupado: false, onDecidir: sinAsync, etiqueta: "crecimiento" }));
+  it("el crecimiento por fila trae el efectivo (celda o Resto) de sombra y su origen", () => {
+    const s = html(
+      createElement(CeldaCrecimiento, {
+        registro: registro(2027, { crecimiento_pct: 8, crecimiento_efectivo: { pct: 8, origen: "fila", celda: null } }),
+        anio: 2027,
+        anioEnCurso: 2026,
+        bloqueada: false,
+        ocupado: false,
+        onDecidir: sinAsync,
+        etiqueta: "crecimiento",
+      })
+    );
     expect(s).toContain('value="8"');
-    expect(s).toContain('placeholder="0"');
+    expect(s).toContain('placeholder="8"');
+    expect(s).toContain("8 % · esta fila");
+    const sinPropio = html(
+      createElement(CeldaCrecimiento, {
+        registro: registro(2027, { crecimiento_efectivo: { pct: 20, origen: "celda", celda: "HOMBRE · URBANO" } }),
+        anio: 2027,
+        anioEnCurso: 2026,
+        bloqueada: false,
+        ocupado: false,
+        onDecidir: sinAsync,
+        etiqueta: "crecimiento",
+      })
+    );
+    expect(sinPropio).toContain('placeholder="20"');
+    expect(sinPropio).toContain("20 % · HOMBRE · URBANO");
+    expect(sinPropio).toContain("Vacío = el de la combinación (20 %).");
   });
 });
 
@@ -127,7 +152,6 @@ describe("tabla de filas de la línea", () => {
       lineas: datos,
       secciones,
       anioEnCurso: Y,
-      crecimientoDefecto: 0,
       bloqueada: false,
       ocupado: false,
       filaSeleccionada: null,
@@ -157,21 +181,21 @@ describe("tabla de filas de la línea", () => {
   it("ofrece Ver meses y CSV, y una fila sin filas avisa", () => {
     expect(salida).toContain("Ver meses");
     expect(salida).toContain("CSV");
-    const vacia = html(createElement(TablaFilas, { filas: [], lineas: respuestaLineas({ filas: [] }), secciones: [], anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    const vacia = html(createElement(TablaFilas, { filas: [], lineas: respuestaLineas({ filas: [] }), secciones: [], anioEnCurso: Y, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
     expect(vacia).toContain("no tiene filas con venta");
   });
 
   it("la fila con la curva nueva lleva su aviso", () => {
     const f = filasDenim();
     f[0].avisos = ["curva_cambio"];
-    const s = html(createElement(TablaFilas, { filas: f, lineas: datos, secciones, anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: "f1", onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    const s = html(createElement(TablaFilas, { filas: f, lineas: datos, secciones, anioEnCurso: Y, bloqueada: false, ocupado: false, filaSeleccionada: "f1", onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
     expect(s).toContain("curva cambio");
     expect(s).toContain('aria-pressed="true"');
   });
 });
 
 describe("bloque «Tu decisión»", () => {
-  const base = { anioEnCurso: 2026, bloqueada: false, ocupado: false, crecimientoDefecto: 0, factoresMes: null, onDecidir: sinAsync, onAplicarCurva: sinAsync };
+  const base = { anioEnCurso: 2026, bloqueada: false, ocupado: false, factoresMes: null, onDecidir: sinAsync, onAplicarCurva: sinAsync };
 
   it("2026: explicación delante, mínimo lo vendido, aceptar y guardar", () => {
     const s = html(createElement(BloqueDecision, { ...base, anio: 2026, registro: registro(2026) }));
@@ -226,11 +250,12 @@ describe("tarjeta de tienda nueva", () => {
     const s = html(createElement(TarjetaTienda, { ...props, t: tiendaProyeccion() }));
     expect(s).toContain("2027 · T12 · Tienda nueva B");
     expect(s).toContain("Apertura en 2027");
-    expect(s).toContain("venta esperada del año de apertura");
-    expect(s).toContain("S/ 85,000 <span");
-    expect(s).toContain("sin IGV, desde que abre hasta el 31 de diciembre");
-    expect(s).not.toContain("/ mes");
-    expect(s).not.toContain("tienda madura)");
+    expect(s).toContain("venta mensual promedio esperada");
+    expect(s).not.toContain("año de apertura");
+    expect(s).toContain("S/ 85,000 al mes (sin IGV, en régimen)");
+    expect(s).toContain("año maduro S/ 1,020,000");
+    expect(s).toContain("en 2027 abre el 15-mar y vende el 83.7 % del año → S/ 853,597");
+    expect(s).not.toContain("desde que abre hasta el 31 de diciembre");
     expect(s).toContain("T03 · Tienda 3");
     expect(s).toContain("Composición de T03");
     expect(s).toContain("año maduro completo: <span class=\"font-mono\">9,850</span> u");
@@ -241,7 +266,7 @@ describe("tarjeta de tienda nueva", () => {
     expect(s).toContain("Rampa de maduración de la tienda");
     expect(s).toContain("1 · 1 · 1");
     expect(s).toContain("(sin rampa)");
-    expect(s).toContain("La venta esperada cubre menos de un cuarto de un año maduro");
+    expect(s).toContain("Abre tarde: en 2027 vende el 83.7 % de un año maduro (S/ 853,597 de S/ 1,020,000). En 2028 pasará a nueva del año anterior.");
     expect(s).not.toMatch(/restar venta|canibaliz/i);
     expect(s).toContain("Filas de T12");
   });
@@ -558,9 +583,10 @@ describe("línea, filtros, formulario y cierre", () => {
     const s = html(createElement(AtajoTienda, { tienda: m4, tiendas: [m4, otra], onCerrar: noop, onGuardado: noop }));
     expect(s).toContain("T12 · TIENDA NUEVA B");
     expect(s).toContain('value="2027-03-15"');
-    expect(s).toContain("Venta esperada del año de apertura (S/, sin IGV)");
+    expect(s).toContain("Venta mensual promedio esperada (S/, sin IGV)");
     expect(s).toContain('placeholder="850000"');
-    expect(s).toContain("Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura.");
+    expect(s).toContain("Soles que la tienda venderá en un mes promedio, ya en régimen y sin IGV. M7 la multiplica por 12");
+    expect(s).not.toContain("año de apertura");
     expect(s).not.toContain("S/ por mes");
     expect(s).toContain("Tienda de referencia");
     expect(s).toContain("T03 · TIENDA 3");
@@ -586,10 +612,11 @@ describe("errores de la API", () => {
 describe("Tiendas (M4): tienda de referencia y ayuda de la venta esperada", () => {
   const m4: TiendaFila = { id: "t1", codigo: "T01", nombre: "TIENDA 1", tipo: "Tienda", zona: null, razon_social: null, fecha_apertura: "2020-01-10", fecha_cierre: null, venta_esperada_promedio: null, activo: true, created_at: "", updated_at: "", estado: "Activa" };
 
-  it("el formulario trae el selector de referente y la ayuda «soles del año de apertura, sin IGV»", () => {
+  it("el formulario trae el selector de referente y la ayuda «venta mensual promedio, sin IGV»", () => {
     const s = html(createElement(CamposTienda, { valor: FORM_VACIO, onCambio: noop, idLista: "x", tiendasReferencia: [m4, { ...m4, id: "t2", codigo: "T02", nombre: "TIENDA 2" }], idActual: "t1" }));
-    expect(s).toContain("Venta esperada del año de apertura (S/, sin IGV)");
-    expect(s).toContain("Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura");
+    expect(s).toContain("Venta mensual promedio esperada (S/, sin IGV)");
+    expect(s).toContain("Soles que la tienda venderá en un mes promedio, ya en régimen y sin IGV. M7 la multiplica por 12 y la reparte con la estacionalidad en los meses en que la tienda esté abierta: si abre en marzo, en ese año solo cuentan de marzo a diciembre.");
+    expect(s).not.toContain("año de apertura");
     expect(s).toContain("Tienda de referencia");
     expect(s).toContain("Sin referente (promedio de la red)");
     expect(s).toContain("T02 · TIENDA 2");
@@ -613,7 +640,7 @@ describe("Tiendas (M4): tienda de referencia y ayuda de la venta esperada", () =
 });
 
 describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => {
-  const base = { anioEnCurso: 2026, bloqueada: false, ocupado: false, crecimientoDefecto: 0, factoresMes: null, onDecidir: sinAsync, onAplicarCurva: sinAsync };
+  const base = { anioEnCurso: 2026, bloqueada: false, ocupado: false, factoresMes: null, onDecidir: sinAsync, onAplicarCurva: sinAsync };
 
   it("el detalle de la fila muestra disponibilidad, tienda-meses, ritmo, meses sin stock, venta corregida, veredicto y la advertencia", () => {
     const s = html(createElement(ColaLargaDetalle, { cola: colaLarga() }));
@@ -642,7 +669,7 @@ describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => 
 
   it("la tabla marca la fila para revisión con su disponibilidad y venta corregida", () => {
     const datos = respuestaLineas({ filas: [filaRevision()] });
-    const s = html(createElement(TablaFilas, { filas: datos.filas, lineas: datos, secciones: [], anioEnCurso: Y, crecimientoDefecto: 0, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    const s = html(createElement(TablaFilas, { filas: datos.filas, lineas: datos, secciones: [], anioEnCurso: Y, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
     expect(s).toContain("Para revisión · disponibilidad 62.0 % · corregida 181");
     expect(s).toContain("revision cola larga");
   });
@@ -657,10 +684,11 @@ describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => 
     expect(s).toContain("Aceptar la propuesta");
   });
 
-  it("«Tu decisión» de Y+1 en una fila para revisión no repite la frase de Y: usa la base de Y normalizada × (1 + crecimiento)", () => {
+  it("«Tu decisión» de Y+1 en una fila para revisión no repite la frase de Y: usa la base de Y × (1 + crecimiento bruto)", () => {
     const f = filaRevision();
     const s = html(createElement(BloqueDecision, { ...base, anio: 2027, registro: f.anios[1] }));
-    expect(s).toContain("la propuesta es la base de 2026 normalizada por el Niño × (1 + crecimiento)");
+    expect(s).toContain("la propuesta es la base de 2026 de las mismas tiendas × (1 + crecimiento bruto)");
+    expect(s).not.toContain("normalizada por el Niño");
     expect(s).not.toContain("la propuesta es la demanda corregida por disponibilidad");
     expect(s).not.toContain("el avance normal (—)");
     expect(s).not.toContain("Con el avance normal saldrían");

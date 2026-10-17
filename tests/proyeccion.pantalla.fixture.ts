@@ -303,8 +303,8 @@ export function respuestaLineas(extra: Partial<RespuestaLineasApi> = {}): Respue
     filtro: { genero_id: "g-h", mundo_id: "m-u", linea_id: "l-denim", q: null },
     filas: filasDenim(),
     totales_por_anio: [
-      { anio: 2026, vigente: 45204, propuesto: 44854, decididas: 2, filas: 5 },
-      { anio: 2027, vigente: 52724, propuesto: 52724, decididas: 1, filas: 5 },
+      { anio: 2026, vigente: 45204, propuesto: 44854, decididas: 2, filas: 5, base_siguiente: 0, vigente_con_base: 0 },
+      { anio: 2027, vigente: 52724, propuesto: 52724, decididas: 1, filas: 5, base_siguiente: 48000, vigente_con_base: 52724 },
     ],
     historico_linea: [
       { anio: 2023, unidades: 34100, clase: "atipico", tiendas: 8 },
@@ -376,6 +376,7 @@ export function tiendaProyeccion(extra: Partial<TiendaProyeccionApi> = {}): Tien
     pasa_a_mismas: false,
     suma_filas: 7840,
     filas_fijadas: 0,
+    escala: { venta_mensual: 85000, anio_maduro: 1020000, fraccion: 0.83686, venta_anio_apertura: 853597, con_meses_reales: false },
     filas: [
       fila({ nombre: "RECONOCIDO", id: "tf1", hist: [0, 0, 0], vendido: 0, p26: 0, p27: 5681 }, { tienda_id: "tienda-12" }),
     ].map((f) => ({ ...f, anios: f.anios.map((a) => ({ ...a, anio: 2027, bloque: "nuevas" as const, subbloque: "aperturas" as const, vigente: 5681, propuesto: 5681 })) })),
@@ -390,7 +391,7 @@ export function nodo(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMat
     nombre,
     ids,
     en_curso: { venta_a_la_fecha: 35400, mismas: 45204, nuevas_anterior: 4797, aperturas: 0, cierres: 0, total: 50001, decididas: 2, filas: 5 },
-    siguiente: { mismas: 52724, nuevas_anterior: 0, aperturas: 484, cierres: 0, total: 53208, decididas: 1, filas: 5 },
+    siguiente: { mismas: 52724, nuevas_anterior: 0, aperturas: 484, cierres: 0, total: 53208, decididas: 1, filas: 5, base_siguiente: 48000, crec_mismas_pct: 9.8 },
     variacion_pct: 6.4,
     estado: "parcial",
     avisos: [],

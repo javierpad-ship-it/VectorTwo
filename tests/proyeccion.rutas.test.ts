@@ -159,7 +159,7 @@ describe("crear y calcular", () => {
     expect(p).toMatchObject({ anio_en_curso: 2026, anio_siguiente: 2027, estado: "en_trabajo", hasta_periodo: "2026-09", calculando: false });
     expect(p.parametros.crecimiento_pct_defecto).toBe(5);
     expect(p.bloques[2026].nuevas.map((t) => t.codigo).sort()).toEqual(["T2", "T3", "T9"]);
-    expect(p.resumen?.version_metodo).toBe(3);
+    expect(p.resumen?.version_metodo).toBe(4);
     expect(p.resumen?.duracion_ms).not.toBeNull();
     expect(p.desactualizada).toEqual([]);
     expect(proyecciones()[0].calculando_desde).toBeNull();
@@ -340,7 +340,7 @@ describe("decisiones (PUT) y B2", () => {
     expect((await decidirTienda(enviar("PUT", "/x", { decidido: 5, origen: "manual" }), ctx(id as string, { tiendaId: "T8", anio: "2026" }))).status).toBe(404);
   });
 
-  it("cambiar la rampa de una apertura rehace su propuesta; con la venta esperada del año de apertura (0.10.1) el total en soles sigue siendo E y cambia el reparto por meses", async () => {
+  it("cambiar la rampa de una apertura rehace su propuesta; con la venta mensual (0.10.8) la rampa SÍ mueve el total del año de apertura y las unidades maduras no cambian", async () => {
     const { id } = await nueva();
     const total = (await leer<RespuestaTiendasApi>(await tiendas(get("/t", "?anio=2027&bloque=nuevas"), ctx(id as string)))).data.tiendas.find((t) => t.codigo === "T4") as TiendaProyeccionApi;
     expect(total.rampa).toEqual([1, 1, 1]);
@@ -348,15 +348,16 @@ describe("decisiones (PUT) y B2", () => {
     expect(r.status).toBe(200);
     const nuevo = (await leer<TiendaProyeccionApi>(r)).data;
     expect(nuevo.rampa).toEqual([0.7, 0.85, 1]);
-    // `F` se rehace con la rampa: ninguna rampa cambia lo que la tienda vende en su año de apertura (E), solo cómo se reparte.
-    expect(Math.abs((nuevo.propuesto as number) - (total.propuesto as number))).toBeLessThanOrEqual(5);
-    expect(nuevo.explicacion).toContain("año de apertura");
-    expect(nuevo.explicacion).toContain("de un año maduro");
+    // `Md_f = 12 V s̃_f ÷ p_f` no depende de la rampa, pero `A_f` sí: con una rampa menor que 1 el total del año de apertura baja (método 3: no se movía).
+    expect(nuevo.propuesto as number).toBeLessThan(total.propuesto as number);
+    expect(nuevo.explicacion).toContain("venta esperada S/ 85,000 al mes en régimen (sin IGV) × 12 = año maduro S/ 1,020,000");
+    expect(nuevo.explicacion).not.toContain("año de apertura");
+    expect(nuevo.explicacion).toContain("vende el");
     expect(nuevo.explicacion).toContain("rampa 0.70 · 0.85 · 1.00");
-    // Las unidades maduras de la tarjeta se rehacen con la rampa efectiva (F cambia): coinciden con las de un cálculo completo.
+    // Las unidades maduras de la tarjeta (y de cada fila) coinciden con las de un cálculo completo y no cambian con la rampa.
     const dbT4 = () => filasDe("proyeccion_tiendas").find((t) => t.tienda_id === "T4" && t.anio === 2027) as Fila;
     const compT4 = () => filasDe("proyeccion_filas").filter((f) => f.tienda_id === "T4").map((f) => [f.clave, (f.composicion as { unidades_maduras: number }).unidades_maduras] as const).sort();
-    expect(nuevo.unidades_maduras).not.toBe(total.unidades_maduras);
+    expect(nuevo.unidades_maduras).toBe(total.unidades_maduras);
     expect(dbT4().unidades_maduras).toBe(nuevo.unidades_maduras);
     const md = (nuevo.unidades_maduras as number) / 1; // Σ Md_f
     expect(compT4().reduce((a, [, u]) => a + u, 0)).toBeCloseTo(md, 0);
@@ -525,7 +526,7 @@ describe("cierre: carrera, método viejo y auditoría (0.10.3)", () => {
     const r = (proyecciones().find((x) => x.id === id) as Fila).resumen as Record<string, unknown>;
     expect(r.huella_cargas).toBe("huella-nueva");
     expect(r.duracion_ms).toBe(4321);
-    expect(r.version_metodo).toBe(3);
+    expect(r.version_metodo).toBe(4);
     expect((r.decididas as Record<string, number>)[2026]).toBe(0);
     // Una proyección que ya no está en trabajo no se toca.
     actual.estado = "archivada";
@@ -588,7 +589,7 @@ describe("umbral de disponibilidad (0.10.1)", () => {
     expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
     const nueva_ = (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data;
     expect(nueva_.desactualizada).toEqual([]);
-    expect(nueva_.resumen?.version_metodo).toBe(3);
+    expect(nueva_.resumen?.version_metodo).toBe(4);
     expect(filasDe("proyeccion_fila_anios").find((a) => a.fila_id === idFila(DENIM_REC) && a.anio === 2026)).toMatchObject({ decidido: 1900 });
   });
 });
@@ -808,7 +809,7 @@ describe("cerrar, archivar y el contrato de M8 (casos 14 y 17)", () => {
 describe("editar parámetros y «datos hasta»", () => {
   it("PATCH marca recalculo_pendiente; recalcular lo limpia; hasta_periodo fuera del año o sin publicar se rechaza", async () => {
     const { id } = await nueva();
-    const r = await editar(enviar("PATCH", "/x", { parametros: { crecimiento_pct_defecto: 8 }, nota: "probando" }), ctx(id as string));
+    const r = await editar(enviar("PATCH", "/x", { parametros: { umbral_cola_larga: 150 }, nota: "probando" }), ctx(id as string));
     expect(r.status).toBe(200);
     const p = (await leer<ProyeccionApi>(r)).data;
     expect(p.nota).toBe("probando");
@@ -816,9 +817,9 @@ describe("editar parámetros y «datos hasta»", () => {
     expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
     const q = (await leer<ProyeccionApi>(await leerUna(get("/x"), ctx(id as string)))).data;
     expect(q.desactualizada).toEqual([]);
-    expect(q.parametros.crecimiento_pct_defecto).toBe(8);
-    // Con 8 %: la propuesta de 2027 pasa de 1 953 a 2 009 (1 860 × 1,08).
-    expect((filasDe("proyeccion_fila_anios").find((x) => x.fila_id === idFila(DENIM_REC) && x.anio === 2027) as Fila).propuesto).toBe(2009);
+    expect(q.parametros.umbral_cola_larga).toBe(150);
+    // 0.10.8: el crecimiento por defecto es el «Resto» de la matriz y se cambia con `PUT …/crecimientos`; el mismo valor sí pasa.
+    expect((await editar(enviar("PATCH", "/x", { parametros: { crecimiento_pct_defecto: 5 } }), ctx(id as string))).status).toBe(200);
     expect((await editar(enviar("PATCH", "/x", { hasta_periodo: "2025-12" }), ctx(id as string))).status).toBe(400);
     expect((await editar(enviar("PATCH", "/x", { hasta_periodo: "2026-10" }), ctx(id as string))).status).toBe(400);
     expect((await editar(enviar("PATCH", "/x", {}), ctx(id as string))).status).toBe(400);

@@ -5,6 +5,7 @@ import { motivoRechazoTienda } from "@/lib/tiendas/reglas";
 import { TIPOS_TIENDA_API, type EditarTiendaCuerpo, type TiendaFila, type TipoTienda } from "@/lib/tiendas/tipos-api";
 import { Field, Input, Select } from "@/components/ui/form";
 import { leerMontoInput } from "./comunes";
+import { AYUDA_VENTA_MENSUAL } from "./venta-esperada";
 
 /** Lo que el usuario escribe (fechas ISO del `type="date"`, venta como texto). */
 export type Campos = {
@@ -191,11 +192,11 @@ export function CamposTienda({
         />
       </Field>
       <Field
-        label="Venta esperada del año de apertura (S/, sin IGV)"
+        label="Venta mensual promedio esperada (S/, sin IGV)"
         hint={
           esCd
             ? "Un centro de distribución no vende."
-            : "Soles que la tienda venderá desde que abre hasta el 31 de diciembre de ese año, sin IGV. No es venta mensual ni de tienda madura: M7 deduce el año maduro con la curva y la fracción del año."
+            : AYUDA_VENTA_MENSUAL
         }
         className="md:col-span-2"
       >

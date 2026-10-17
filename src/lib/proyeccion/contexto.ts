@@ -28,6 +28,7 @@ import { leerTiendas } from "@/lib/tiendas/consultas";
 import { hoyLima } from "@/lib/tiendas/estado";
 import { ultimoMesCerrado } from "@/lib/ventas/periodo";
 import type { TiendaProy } from "./bloques";
+import { generosDeMatriz } from "./crecimientos";
 import type { Catalogo, NombresNodo } from "./persistencia";
 import type { AgrupacionProy, CurvaVigenteProy } from "./curva-fila";
 import {
@@ -55,7 +56,9 @@ const falla = (respuesta: NextResponse): Leido<never> => ({ data: null, respuest
 // ─── Catálogo de nombres ───
 
 /** Géneros, mundos, líneas, equivalencias y agrupaciones con sus nombres (todo, activo o no: son para mostrar). */
-export async function cargarCatalogo(db: Db): Promise<Leido<{ catalogo: Catalogo; equivalencias: Tables<"equivalencias">[]; nodosDb: Tables<"genero_mundo_linea">[] }>> {
+export async function cargarCatalogo(
+  db: Db
+): Promise<Leido<{ catalogo: Catalogo; equivalencias: Tables<"equivalencias">[]; nodosDb: Tables<"genero_mundo_linea">[]; generos: { id: string; nombre: string; activo: boolean }[] }>> {
   const [nivel, equivalencias, marcas, estacionalidad] = await Promise.all([
     cargarEstadoNivel(db),
     leerEquivalencias(db),
@@ -95,6 +98,7 @@ export async function cargarCatalogo(db: Db): Promise<Leido<{ catalogo: Catalogo
     },
     equivalencias: equivalencias.data,
     nodosDb: e.nodos as unknown as Tables<"genero_mundo_linea">[],
+    generos: e.generos.map((g) => ({ id: g.id, nombre: g.nombre, activo: g.activo })),
   });
 }
 
@@ -179,6 +183,8 @@ export type ContextoCalculo = {
   factoresDb: FactorDb[];
   factores: FactorProy[];
   configFlujo: ConfigFlujo;
+  /** `0.10.8` (07c): ids de los géneros que son columna de la matriz de crecimientos (HOMBRE, MUJER), según el catálogo. */
+  generosMatriz: string[];
   hoy: string;
   ultimoCerrado: string | null;
   hastaDefecto: string | null;
@@ -248,6 +254,7 @@ export async function cargarContextoCalculo(db: Db, opciones: { conEat?: boolean
     factoresDb: factores.data,
     factores: factores.data.map(aFactorProy),
     configFlujo,
+    generosMatriz: generosDeMatriz(cat.data.generos).map((g) => g.id),
     hoy,
     ultimoCerrado: publicados.length > 0 ? ultimoMesCerrado(hoy) : null,
     hastaDefecto: hastaPorDefecto(publicados, hoy),
@@ -255,9 +262,10 @@ export async function cargarContextoCalculo(db: Db, opciones: { conEat?: boolean
 }
 
 /** `EstadoActual` para `motivosDesactualizada`, con lo ya leído. */
-export function estadoActualDe(ctx: ContextoCalculo, nivelesCambiados: number): EstadoActual {
+export function estadoActualDe(ctx: ContextoCalculo, nivelesCambiados: number, crecimientos?: EstadoActual["crecimientos"]): EstadoActual {
   const periodosUpdated = ctx.periodos.map((p) => p.updated_at).sort();
   return {
+    ...(crecimientos ? { crecimientos } : {}),
     cargas_publicadas: ctx.cargasLista.map((c) => ({ periodo: c.periodo, publicada_at: c.publicada_at })),
     ultimo_mes_cerrado: ctx.ultimoCerrado,
     curvas_vigentes: ctx.vigentes.map((v) => ({ agrupacion_id: v.agrupacion_id, curva_id: v.curva_id })),

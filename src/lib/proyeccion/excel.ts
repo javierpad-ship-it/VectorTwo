@@ -85,6 +85,8 @@ export function hojasMatriz(args: {
     `CIERRES ${y + 1}`,
     `TOTAL ${y + 1}`,
     "VARIACIÓN %",
+    // 0.10.8 (07c): `Σ vigente de Y+1 de las filas base ÷ Σ B − 1` (lo que se escribe en Crecimientos), aparte de la variación del total.
+    "CREC. MISMAS TIENDAS %",
     "ESTADO",
   ];
   const filas: Hoja = [cabecera];
@@ -104,6 +106,7 @@ export function hojasMatriz(args: {
       n.siguiente.cierres,
       n.siguiente.total,
       n.variacion_pct === null ? null : Math.round(n.variacion_pct * 10) / 10,
+      n.siguiente.crec_mismas_pct === null ? null : Math.round(n.siguiente.crec_mismas_pct * 10) / 10,
       n.estado,
     ]);
   }

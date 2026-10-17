@@ -84,8 +84,8 @@ import { bloques, colaLarga, detalleFila, filaRevision, filaMensual, filasDenim,
 const params = (q: string) => new URLSearchParams(q);
 
 describe("estado en la URL", () => {
-  it("las pestañas van en el orden de trabajo: factores, tiendas, por línea, matriz, mensual", () => {
-    expect(PESTANAS.map((p) => p.id)).toEqual(["factores", "tiendas", "linea", "matriz", "mensual"]);
+  it("las pestañas van en el orden de trabajo: factores, tiendas, crecimientos, por línea, matriz, mensual", () => {
+    expect(PESTANAS.map((p) => p.id)).toEqual(["factores", "tiendas", "crecimientos", "linea", "matriz", "mensual"]);
     expect(esPestana("matriz")).toBe(true);
     expect(esPestana("otra")).toBe(false);
     expect(esPestana(null)).toBe(false);
@@ -256,6 +256,7 @@ describe("avisos", () => {
       "sin_curva", "curva_incompleta", "curva_cambio", "propuesta_cambio", "avance_bajo", "plan_anterior", "sin_venta_anio", "sin_base", "sin_factor", "objetivo_atipico", "temporadas_mezcladas", "mes_negativo", "quiebre",
       "cola_larga", "nivel_cambiado", "bloque_cambiado", "sin_venta_esperada", "sin_referente", "referente_sin_historia", "fijadas_exceden", "cierre_no_proyectado", "apertura_dudosa", "cierre_dudoso",
       "revision_cola_larga", "cola_larga_con_quiebres", "sin_stock_historico", "apertura_tardia", "cifra_excesiva",
+      "apertura_y_cierre", "venta_esperada_fuera_de_rango",
     ];
     for (const a of todos) {
       expect(TEXTO_AVISO[a].texto.length).toBeGreaterThan(10);

@@ -3,13 +3,18 @@ import { repartirEntero } from "./reparto";
 import type { AvisoFila, Metodo } from "./tipos-api";
 
 /**
- * Año siguiente de una fila base (ficha 07, paso 2 y reglas 12 a 14). Puro.
+ * Año siguiente de una fila base (ficha 07, paso 2 y reglas 12 a 14; método 4 de la 0.10.8, ficha 07c §2.4). Puro.
  *
- *   B  = vigente de Y de la fila base
- *        + Σ vigente de Y de las tiendas nuevas de Y que pasan a M(Y+1)
- *        − Σ aporte de Y de las tiendas de M(Y) que no están en M(Y+1)
- *   B' = B normalizado por el Niño de Y (B ÷ φ si φ es constante; mes a mes si no)
- *   P  = round(Σ_m B' × (1 + g) × c_m × φ_{Y+1,m})
+ *   B   = vigente de Y de la fila base
+ *         + Σ vigente de Y de las tiendas nuevas de Y que pasan a M(Y+1)
+ *         − Σ aporte de Y de las tiendas de M(Y) que no están en M(Y+1)      (sin normalizar por el Niño)
+ *   P   = round(B × (1 + g))                                                  % BRUTO: no depende de φ_Y ni de φ_{Y+1}
+ *   P_m = P repartido con c_m × φ_{Y+1,m}                                     φ_{Y+1} solo da forma al reparto
+ *   B'  = B normalizado por el Niño de Y (B ÷ φ si φ es constante; mes a mes si no)
+ *   B'' = B' × Σ_m c_m φ_{Y+1,m}                                              lo que vendería con 0 % si Y hubiera sido normal
+ *
+ * `B''` solo es una referencia (rebote del Niño): no entra en la propuesta. Con el método 3 se calculaba
+ * `P = round(B' × (1 + g) × Σ c φ_{Y+1})` y el % no era el de la variación bruta.
  *
  * Cualquier cambio de un sumando recalcula `P` en el acto, sin releer venta (B2).
  */
@@ -39,9 +44,11 @@ export type EntradaSiguiente = {
 };
 
 export type ResultadoSiguiente = {
-  /** `B`: base del año siguiente (suma de sumandos). */
+  /** `B`: base del año siguiente (suma de sumandos), sin normalizar. */
   base: number | null;
-  /** `B'`: la base normalizada por el Niño de `Y`. */
+  /** `B'`: la base normalizada por el Niño de `Y` (a nivel de `Y`). */
+  base_nino: number | null;
+  /** `B'' = B' × Σ c φ_{Y+1}`: lo que la fila vendería en `Y+1` con 0 % si `Y` hubiera sido un año normal. Solo referencia. */
   base_normalizada: number | null;
   propuesto: number | null;
   metodo: Metodo;
@@ -63,14 +70,14 @@ function mesesDeBase(e: EntradaSiguiente): number[] | null {
 
 export function proponerSiguiente(e: EntradaSiguiente): ResultadoSiguiente {
   if (e.baseVigente === null) {
-    return { base: null, base_normalizada: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_base"] };
+    return { base: null, base_nino: null, base_normalizada: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_base"] };
   }
   let base = e.baseVigente;
   for (const a of e.aportesTiendas) if (a.total !== null) base += a.signo * a.total;
   base = Math.max(0, base);
 
   if (e.curva === null) {
-    return { base, base_normalizada: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_curva"] };
+    return { base, base_nino: null, base_normalizada: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_curva"] };
   }
 
   // B' = Σ b_m ÷ φ_m; con φ constante se cancela y B' = B ÷ φ (sin pasar por los meses enteros).
@@ -92,13 +99,13 @@ export function proponerSiguiente(e: EntradaSiguiente): ResultadoSiguiente {
     }
   }
 
-  const factor = 1 + e.crecimiento / 100;
+  // Método 4: el % es bruto sobre `B`; `φ_{Y+1}` solo pondera el reparto mensual.
   const pesos = e.curva.map((c, i) => c * (e.factoresMesObjetivo[i] ?? 1));
-  const bruto = pesos.reduce((s, p) => s + baseNormalizada * factor * p, 0);
-  const propuesto = Math.max(0, Math.round(bruto));
+  const propuesto = Math.max(0, Math.round(base * (1 + e.crecimiento / 100)));
   return {
     base,
-    base_normalizada: baseNormalizada,
+    base_nino: baseNormalizada,
+    base_normalizada: baseNormalizada * pesos.reduce((a, b) => a + b, 0),
     propuesto,
     metodo: "crecimiento",
     meses: repartirEntero(propuesto, pesos),

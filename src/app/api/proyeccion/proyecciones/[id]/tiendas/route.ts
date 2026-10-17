@@ -10,7 +10,8 @@ type Params = { params: Promise<{ id: string }> };
 /**
  * Tiendas nuevas y cierres por año (`requirePlanner`, solo lectura). `?anio&bloque`. Cada tienda trae su composición, su
  * propuesta, las referencias (últimos tres meses, venta esperada), su decisión y sus filas; y el perfil de las aperturas
- * históricas como referencia de la rampa.
+ * históricas como referencia de la rampa. `0.10.8`: `venta_esperada` es la venta MENSUAL promedio en régimen (sin IGV) y `escala` dice
+ * qué hace M7 con ella (año maduro `12 V`, fracción `F` del año de apertura y `12 V F`); es `null` sin venta esperada o en un cierre.
  */
 export async function GET(request: NextRequest, { params }: Params) {
   const { response } = await requirePlanner();

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
 import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
+import { ayudaCrecimientoFila, marcadorCrecimiento } from "./crecimientos-vista";
 import { filaFijada, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida } from "./vista";
 
 /** Lo que se envía a `PUT …/filas/[filaId]/anios/[anio]` (la `decisionSchema` de la ficha). */
@@ -158,19 +159,22 @@ export function CeldaDecision({
 }
 
 /**
- * Crecimiento por fila (solo alimenta la propuesta del año siguiente): vacío = el de la proyección. Enter guarda el
- * porcentaje; vaciarlo y Enter vuelve al de la proyección.
+ * Crecimiento bruto por fila (solo alimenta la propuesta del año siguiente): vacío = el de la combinación género · mundo o, si no
+ * tiene celda, el Resto (0.10.8, ficha 07c). Debajo del campo va el % efectivo con su origen («20 % · HOMBRE · URBANO»). Enter guarda
+ * el porcentaje; vaciarlo y Enter vuelve al de la combinación.
  */
 export function CeldaCrecimiento({
   registro,
-  porDefecto,
+  anio,
+  anioEnCurso,
   bloqueada,
   ocupado,
   onDecidir,
   etiqueta,
 }: {
   registro: AnioFilaApi | undefined;
-  porDefecto: number;
+  anio: number;
+  anioEnCurso: number;
   bloqueada: boolean;
   ocupado: boolean;
   onDecidir: (d: DecisionFila) => Promise<boolean>;
@@ -179,6 +183,9 @@ export function CeldaCrecimiento({
   const [texto, setTexto] = useState(registro?.crecimiento_pct === null || registro?.crecimiento_pct === undefined ? "" : String(registro.crecimiento_pct));
   const [motivo, setMotivo] = useState<string | null>(null);
   if (!registro) return <span className="text-tinta-suave">—</span>;
+  const efectivo = registro.crecimiento_efectivo;
+  const ayuda = ayudaCrecimientoFila(efectivo, anio, anioEnCurso);
+  const marcador = marcadorCrecimiento(registro);
 
   async function enviar() {
     if (!registro) return;
@@ -204,10 +211,10 @@ export function CeldaCrecimiento({
           inputMode="decimal"
           value={texto}
           disabled={bloqueada || ocupado}
-          placeholder={String(porDefecto)}
+          placeholder={efectivo ? String(efectivo.pct) : "—"}
           aria-label={etiqueta}
           aria-invalid={motivo !== null}
-          title={motivo ?? "Vacío = el crecimiento de la proyección"}
+          title={motivo ?? ayuda}
           onChange={(e) => {
             setTexto(e.target.value);
             setMotivo(null);
@@ -223,6 +230,11 @@ export function CeldaCrecimiento({
         <span className="text-xs text-tinta-suave">%</span>
       </div>
       {motivo && <span className="max-w-40 text-right text-xs text-alerta">{motivo}</span>}
+      {!motivo && marcador && (
+        <span className="max-w-32 text-right text-[11px] leading-tight text-tinta-suave" title={ayuda}>
+          {marcador}
+        </span>
+      )}
     </div>
   );
 }

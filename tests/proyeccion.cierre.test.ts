@@ -90,15 +90,37 @@ describe("año siguiente (reglas 12 a 14)", () => {
     ...extra,
   });
 
-  it("caso 4: B' = 1 000 ÷ 0,66 y × 1,03 → 1 561 (el redondeo es solo al final)", () => {
+  it("caso 4 (método 4): % bruto → P = round(B × 1,03) = 1 030 aunque Y fuera Niño (φ = 0,66); B' = 1 515 y B'' = B' × Σ c φ_{Y+1} = 1 515 solo son referencia", () => {
     const r = proponerSiguiente(entrada());
+    expect(r.base).toBe(1000);
+    expect(r.base_nino).toBeCloseTo(1515.1515, 3);
     expect(r.base_normalizada).toBeCloseTo(1515.1515, 3);
-    expect(r.propuesto).toBe(1561);
-    expect(r.meses?.reduce((a, b) => a + b, 0)).toBe(1561);
+    expect(r.propuesto).toBe(1030);
+    expect(r.meses?.reduce((a, b) => a + b, 0)).toBe(1030);
+  });
+
+  it("propiedad: P no depende de φ_Y (0,5, 0,66, 1,24; constante o por meses), solo cambia B'' (regla 2)", () => {
+    const propuestas = [0.5, 0.66, 1.24].map((f) => proponerSiguiente(entrada({ factoresMesEnCurso: Array(12).fill(f) })));
+    expect(propuestas.map((r) => r.propuesto)).toEqual([1030, 1030, 1030]);
+    expect(propuestas.map((r) => Math.round(r.base_normalizada as number))).toEqual([2000, 1515, 806]);
+    const porMeses = proponerSiguiente(entrada({ factoresMesEnCurso: [...Array(8).fill(1), 1.24, 1.24, 1.24, 1.24], mesesBase: [140, 120, 80, 40, 30, 20, 20, 30, 124, 148, 174, 223] }));
+    expect(porMeses.propuesto).toBe(1030);
+  });
+
+  it("propiedad: con φ_{Y+1} ≠ 1, P no cambia y solo cambia el reparto (c'_m ∝ c_m φ_{Y+1,m})", () => {
+    const objetivo = [...Array(8).fill(1), 0.5, 0.5, 0.5, 0.5];
+    const a = proponerSiguiente(entrada({ factoresMesEnCurso: UNOS }));
+    const b = proponerSiguiente(entrada({ factoresMesEnCurso: UNOS, factoresMesObjetivo: objetivo }));
+    expect(b.propuesto).toBe(a.propuesto);
+    expect(b.meses?.reduce((x, y) => x + y, 0)).toBe(b.propuesto);
+    expect(b.meses).not.toEqual(a.meses);
+    // B'' = B' × Σ c φ_{Y+1} baja con el factor del año siguiente.
+    expect(b.base_normalizada as number).toBeLessThan(a.base_normalizada as number);
   });
 
   it("sin factor (φ de unos): B' = 1 000 y la propuesta es 1 030", () => {
     const r = proponerSiguiente(entrada({ factoresMesEnCurso: UNOS }));
+    expect(r.base_nino).toBe(1000);
     expect(r.base_normalizada).toBe(1000);
     expect(r.propuesto).toBe(1030);
   });
@@ -123,8 +145,8 @@ describe("año siguiente (reglas 12 a 14)", () => {
   it("φ no constante en Y: la base se normaliza mes a mes; sin base → null y sin_base; sin curva → sin_curva", () => {
     const phi = [...Array(8).fill(1), 1.24, 1.24, 1.24, 1.24];
     const r = proponerSiguiente(entrada({ curva: CURVA_VERANO, factoresMesEnCurso: phi, mesesBase: [140, 120, 80, 40, 30, 20, 20, 30, 124, 148, 174, 223] }));
-    expect(r.base_normalizada).toBeGreaterThan(0);
-    expect(r.base_normalizada).toBeLessThan(r.base as number);
+    expect(r.base_nino).toBeGreaterThan(0);
+    expect(r.base_nino).toBeLessThan(r.base as number);
     expect(proponerSiguiente(entrada({ baseVigente: null }))).toMatchObject({ propuesto: null, avisos: ["sin_base"] });
     expect(proponerSiguiente(entrada({ curva: null })).avisos).toContain("sin_curva");
   });
@@ -132,7 +154,9 @@ describe("año siguiente (reglas 12 a 14)", () => {
   it("φ del año objetivo no trivial pondera la curva del reparto", () => {
     const objetivo = [...Array(8).fill(1), 0.5, 0.5, 0.5, 0.5];
     const r = proponerSiguiente(entrada({ factoresMesEnCurso: UNOS, curva: CURVA_VERANO, factoresMesObjetivo: objetivo, crecimiento: 0 }));
-    // Σ c φ = 1 − 0,5 × (0,08 + 0,12 + 0,14 + 0,18) = 0,74
-    expect(r.propuesto).toBe(740);
+    // Σ c φ = 1 − 0,5 × (0,08 + 0,12 + 0,14 + 0,18) = 0,74: con el método 4 mueve B'' (referencia) y el reparto, no la propuesta bruta.
+    expect(r.propuesto).toBe(1000);
+    expect(r.base_normalizada).toBeCloseTo(740, 6);
+    expect(r.meses?.reduce((a, b) => a + b, 0)).toBe(1000);
   });
 });

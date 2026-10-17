@@ -4,9 +4,10 @@ import type { Database } from "@/lib/supabase/database.types";
 import { error } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { errorConCodigo } from "@/lib/curvas/lectura";
-import { leerProyeccionDb, type ProyeccionDb } from "./consultas";
+import { crearCrecimientoDe, generosDeMatriz, matrizDeCeldas, type MatrizCrecimientos } from "./crecimientos";
+import { leerCrecimientos, leerGenerosMundos, leerProyeccionDb, type ProyeccionDb } from "./consultas";
 import type { InfoTienda, ContextoModelo } from "./decision";
-import { aAnioApi, aFilaApi, aFilaModelo, aTiendaModelo, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
+import { aAnioApi, aFilaApi, aFilaModelo, aTiendaModelo, type Catalogo, type CrecimientoDeApi, type FilaConAnios, type TiendaPyDb } from "./persistencia";
 import { CALCULO_CADUCA_MS, calculoEnCurso, type RechazoRegla } from "./reglas";
 import {
   RAMPA_MADURACION,
@@ -74,16 +75,24 @@ export function parametrosDe(json: unknown): ParametrosProyeccion {
     bloques: o.bloques && typeof o.bloques === "object" ? (o.bloques as BloquesApi) : {},
     ...(Array.isArray(o.ediciones) && o.ediciones.length > 0 ? { ediciones: o.ediciones } : {}),
     ...(o.recalculo_pendiente ? { recalculo_pendiente: true } : {}),
+    // 0.10.8 (07c): quién fijó el Resto y el objetivo global; las dos claves son opcionales y viajan en el mismo `jsonb`.
+    ...(o.crecimiento_resto_meta && typeof o.crecimiento_resto_meta === "object" ? { crecimiento_resto_meta: o.crecimiento_resto_meta } : {}),
+    ...(typeof o.crecimiento_objetivo_pct === "number" || o.crecimiento_objetivo_pct === null ? { crecimiento_objetivo_pct: o.crecimiento_objetivo_pct } : {}),
   };
 }
 
 /** Último mes cerrado `k` (1 a 12) de la proyección. */
 export const kDe = (p: Pick<ProyeccionDb, "hasta_periodo">): number => Number(p.hasta_periodo.slice(5, 7));
 
-/** El `resumen` sin la foto interna de niveles (pesa lo que un nodo por cada GML y el frontend no la usa). */
+/**
+ * El `resumen` sin las fotos internas: `niveles_gml` (pesa lo que un nodo por cada GML) y, desde la 0.10.8, `huella_crecimientos` y
+ * `gm_gml` (el GM de cada nodo). El frontend no las usa.
+ */
 function sinFotoInterna(r: ResumenProyeccion): ResumenProyeccion {
-  const { niveles_gml: _foto, ...resto } = r;
+  const { niveles_gml: _foto, gm_gml: _gm, huella_crecimientos: _huella, ...resto } = r;
   void _foto;
+  void _gm;
+  void _huella;
   return resto;
 }
 
@@ -148,7 +157,9 @@ export function contextoModelo(
   parametros: ParametrosProyeccion,
   catalogo: Catalogo,
   tiendasRows: readonly TiendaPyDb[],
-  filas: readonly FilaModelo[]
+  filas: readonly FilaModelo[],
+  /** `0.10.8` (07c): la matriz de crecimientos guardada (solo las celdas de HOMBRE y MUJER). */
+  matriz: MatrizCrecimientos
 ): ContextoModelo {
   const Y = p.anio_en_curso;
   const todas = new Map<string, { codigo: string; nombre: string; fecha_apertura: string | null; fecha_cierre: string | null; venta_esperada: number | null; referente_id: string | null }>();
@@ -199,8 +210,38 @@ export function contextoModelo(
     nombresCurva: new Map([...catalogo.agrupacionesEstacionalidad].map(([id, a]) => [id, a.nombre])),
     mismasSiguiente: new Set((parametros.bloques[Y + 1]?.mismas ?? []).map((t) => t.tienda_id)),
     tiendas: info,
-    crecimientoDe: (cb) => crecimientos.get(cb) ?? parametros.crecimiento_pct_defecto,
+    // 0.10.8 (07c): fila con % propio > celda GM > Resto, todo bruto. El nodo (vigente, del catálogo) da el paso de la clave base al GM.
+    crecimientoDe: crearCrecimientoDe({
+      matriz,
+      resto: parametros.crecimiento_pct_defecto,
+      gmDe: (gml) => {
+        const n = catalogo.nodos.get(gml);
+        return n ? { genero_id: n.genero_id, mundo_id: n.mundo_id, nombre: `${n.genero} · ${n.mundo}` } : undefined;
+      },
+      pctFilaDe: (cb) => crecimientos.get(cb),
+    }),
   };
+}
+
+/** `crecimientoDe` para las respuestas de lectura: el % efectivo de una fila base de `Y+1` con la matriz guardada y el árbol vigente. */
+export function crecimientoParaApi(matriz: MatrizCrecimientos, resto: number, catalogo: Catalogo): CrecimientoDeApi {
+  const f = crearCrecimientoDe({
+    matriz,
+    resto,
+    gmDe: (gml) => {
+      const n = catalogo.nodos.get(gml);
+      return n ? { genero_id: n.genero_id, mundo_id: n.mundo_id, nombre: `${n.genero} · ${n.mundo}` } : undefined;
+    },
+  });
+  return (claveBase, pctFila) => f(claveBase, pctFila);
+}
+
+/** La matriz de crecimientos guardada de una proyección, lista para el método: las celdas de los géneros de la matriz (HOMBRE, MUJER). */
+export async function cargarMatriz(db: Db, proyeccionId: string): Promise<Salida<MatrizCrecimientos>> {
+  const [celdas, catalogo] = await Promise.all([leerCrecimientos(db, proyeccionId), leerGenerosMundos(db)]);
+  if (celdas.error) return fallaDb(celdas.error, "proyección: leer la matriz de crecimientos");
+  if (catalogo.error) return fallaDb(catalogo.error, "proyección: leer géneros y mundos");
+  return listo(matrizDeCeldas(celdas.data.map((c) => ({ genero_id: c.genero_id, mundo_id: c.mundo_id, pct: Number(c.pct) })), generosDeMatriz(catalogo.generos).map((g) => g.id)));
 }
 
 /** Clave base de una fila (misma GML-AM, sin tienda). */
@@ -219,7 +260,9 @@ export function aTiendaApi(
   parametros: ParametrosProyeccion,
   p: ProyeccionDb,
   /** `0.10.7`: suma del vigente de las filas de la tienda en el año y cuántas están fijadas a mano (de `resumenFilasDeTienda`). */
-  resumenFilas: { suma_filas: number | null; filas_fijadas: number } = { suma_filas: null, filas_fijadas: 0 }
+  resumenFilas: { suma_filas: number | null; filas_fijadas: number } = { suma_filas: null, filas_fijadas: 0 },
+  /** `0.10.8` (07d): `F` de la tienda (solo aperturas con venta esperada) para `escala`; `undefined` = no se pudo medir. */
+  fraccion?: number | null
 ): TiendaProyeccionApi {
   const t = aTiendaModelo(row);
   const todas = new Map<string, { codigo: string; nombre: string }>();
@@ -259,6 +302,24 @@ export function aTiendaApi(
     avisos,
     suma_filas: resumenFilas.suma_filas,
     filas_fijadas: resumenFilas.filas_fijadas,
+    escala: escalaDe(t, p, fraccion ?? null),
+  };
+}
+
+/**
+ * `0.10.8` (07d §4): la escala de la venta esperada de una tienda nueva (solo aperturas con `V`). `con_meses_reales`: el año de la tarjeta es `Y` y la
+ * tienda ya abrió en un mes cerrado (`fecha_apertura` hasta el último mes cerrado): la cifra por venta esperada es solo referencia.
+ */
+export function escalaDe(t: Pick<ReturnType<typeof aTiendaModelo>, "bloque" | "subbloque" | "anio" | "venta_esperada_usada" | "fecha_usada">, p: Pick<ProyeccionDb, "anio_en_curso" | "hasta_periodo">, fraccion: number | null): TiendaProyeccionApi["escala"] {
+  const V = t.venta_esperada_usada;
+  // Solo las aperturas (la tienda abre en el año de la tarjeta): una tienda que ya abrió el año anterior no se explica con la fracción del año de apertura.
+  if (t.bloque !== "nuevas" || t.subbloque !== "aperturas" || V === null) return null;
+  return {
+    venta_mensual: V,
+    anio_maduro: 12 * V,
+    fraccion,
+    venta_anio_apertura: fraccion === null ? null : 12 * V * fraccion,
+    con_meses_reales: t.anio === p.anio_en_curso && t.fecha_usada.slice(0, 7) <= p.hasta_periodo.slice(0, 7),
   };
 }
 

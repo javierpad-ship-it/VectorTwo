@@ -16,8 +16,10 @@ export const MAX_TOTAL = 100_000_000;
  * stock al cierre del mes ÷ tienda-meses totales; ficha 07, «Cambios 0.10.1», punto 2).
  */
 export const UMBRAL_DISPONIBILIDAD = 0.75;
-/** `0.10.1`: con `F < UMBRAL_APERTURA_TARDIA` la venta esperada cubre pocos meses del año de apertura (aviso `apertura_tardia`). */
+/** `0.10.1`: con `F < UMBRAL_APERTURA_TARDIA` la tienda vende menos del 25 % de un año maduro en su año de apertura (aviso `apertura_tardia`, informativo). */
 export const UMBRAL_APERTURA_TARDIA = 0.25;
+/** `0.10.8` (07d): aviso informativo `venta_esperada_fuera_de_rango` si `12·V` cae fuera de estos múltiplos de la venta anual media de una tienda de la red. */
+export const VENTA_ESPERADA_RANGO = { min: 0.3, max: 3 } as const;
 export const RAMPA_MADURACION: readonly number[] = [1, 1, 1];
 export const RAMPA_MAX = 5;
 export const MESES_MIN_AVANCE = 3;
@@ -33,9 +35,21 @@ export const RATIO_MAX = 3;
 /**
  * Entra en `resumen` para detectar fórmulas cambiadas (como `VERSION_MODELO` de M6). `2`: revisión del avance propio, el factor por
  * mes y el poco avance. `3` (`0.10.1`): venta esperada del año de apertura, cola larga con disponibilidad y participaciones con
- * periodo y eje por marca; una proyección en trabajo con `version_metodo < 3` queda desactualizada hasta recalcular.
+ * periodo y eje por marca; una proyección en trabajo con `version_metodo < 3` queda desactualizada hasta recalcular. `4` (`0.10.8`,
+ * fichas 07c y 07d): el % de crecimiento del año siguiente es BRUTO (`P = round(B × (1 + g))` con `B` = vigente de `Y` de las mismas
+ * tiendas de `Y+1`, sin normalizar por el Niño; vale para la fila, la celda género × mundo y el Resto) y la venta esperada de una
+ * tienda nueva es la venta MENSUAL promedio en régimen (año maduro `S = 12 × V`, estacionalizado en los meses abiertos).
  */
-export const VERSION_METODO = 3;
+export const VERSION_METODO = 4;
+/**
+ * `0.10.8` (07d §7): versión mínima del método con que debe estar calculada una proyección cerrada para que M8 la use sin avisar
+ * (`cerrada_metodo_anterior`). Constante FIJA (no `VERSION_METODO`): una subida futura del método no invalida en M8 cerradas válidas.
+ */
+export const VERSION_METODO_MIN_M8 = 4;
+/** `0.10.8` (07c §2.5): géneros que son columna de la matriz de crecimientos, en este orden (se resuelven por `upper(trim(nombre))`). */
+export const GENEROS_MATRIZ: readonly string[] = ["HOMBRE", "MUJER"];
+/** `0.10.8` (07c): un % fuera de ±50 es «extremo» (la pantalla avisa, no bloquea). */
+export const CRECIMIENTO_EXTREMO_PCT = 50;
 
 // ─── Enumeraciones ───
 
@@ -54,7 +68,12 @@ export type MotivoDesactualizada =
   | "periodos_cambiados"
   | "recalculo_pendiente"
   /** `0.10.1`: la proyección se calculó con una versión anterior del método (`resumen.version_metodo < VERSION_METODO`). */
-  | "version_metodo";
+  | "version_metodo"
+  /**
+   * `0.10.8` (07c): la matriz de crecimientos guardada no es la que aplicó el último cálculo (`resumen.huella_crecimientos`), o un nodo con
+   * filas base cambió de mundo (`resumen.gm_gml` ≠ catálogo). No se puede saltar con `forzar` al cerrar.
+   */
+  | "crecimientos_cambiados";
 
 export type MotivoBloqueo = "sin_meses" | "meses_faltantes" | "tienda_sin_apertura_con_venta" | "sin_mismas_tiendas";
 
@@ -95,7 +114,11 @@ export type AvisoFila =
   /** Tienda cuya venta esperada cubre menos del 25 % de un año maduro (abre tarde o rampa muy baja): informativo. */
   | "apertura_tardia"
   /** Una cifra del método (unidades maduras, propuesta de una tienda nueva) no es finita o pasa de `MAX_TOTAL`: no se propone (queda sin cifra). */
-  | "cifra_excesiva";
+  | "cifra_excesiva"
+  /** `0.10.8` (07d), de tienda: abre y cierra dentro de `Y+1`; no se proyecta y un total que se escriba no llega a la Matriz ni a M8. */
+  | "apertura_y_cierre"
+  /** `0.10.8` (07d), de tienda e informativo: `12·V` cae fuera de `[0,3, 3]` veces la venta anual media de una tienda de la red. */
+  | "venta_esperada_fuera_de_rango";
 
 export type Metodo =
   | "avance"
@@ -123,6 +146,7 @@ export type TiendaBloqueApi = {
   motivo: string;
   clave: string;
   subbloque?: Subbloque;
+  /** Venta MENSUAL promedio esperada (S/ sin IGV, en régimen; `0.10.8`). Antes de `version_metodo = 4` era la del año de apertura. */
   venta_esperada?: number | null;
   referente_id?: string | null;
   rampa?: number[];
@@ -162,7 +186,205 @@ export type ParametrosProyeccion = {
   ediciones?: EdicionParametros[];
   /** Cambiaste parámetros o «datos hasta» después de calcular: hay que recalcular (`PATCH` lo marca, `calcular` lo limpia). */
   recalculo_pendiente?: boolean;
+  /**
+   * `0.10.8` (07c §2.2): `crecimiento_pct_defecto` ES el «Resto» de la matriz de crecimientos (bruto). Quién lo fijó y su nota; se escribe
+   * solo con `PUT …/crecimientos`.
+   */
+  crecimiento_resto_meta?: { nota: string | null; por_nombre: string | null; at: string };
+  /** `0.10.8` (07c §2.6): meta informativa de crecimiento bruto de mismas tiendas (`-95..500`) o `null`. No se aplica a ninguna fila. */
+  crecimiento_objetivo_pct?: number | null;
 };
+
+// ─── 0.10.8 · 07c: crecimientos por género × mundo ───
+
+/** De dónde sale el % que aplica a una fila base de `Y+1`: su % propio, la celda género × mundo o el Resto (`crecimiento_pct_defecto`). */
+export type OrigenCrecimiento = "fila" | "celda" | "resto";
+
+/** `crecimiento_efectivo` de una fila base de `Y+1`. `celda` es el nombre del GM («HOMBRE · FORMAL») si el origen es `celda` (o el GM al que pertenece la fila). */
+export type CrecimientoEfectivoApi = { pct: number; origen: OrigenCrecimiento; celda: string | null };
+
+/** Agregado sobre las filas base activas de `Y+1` de una celda o del Resto. */
+export type AgregadoCrecimientoApi = {
+  filas: number;
+  filas_sin_base: number;
+  /** `Σ B`: unidades de `Y` de las mismas tiendas de `Y+1` = peso del conjunto. */
+  base: number;
+  /** `Σ B` de las filas que siguen la celda (sin % propio y sin total de `Y+1` decidido). */
+  base_libre: number;
+  /** `siguiente = Σ round(B × (1 + g_fila))`. */
+  pct_propio: { filas: number; base: number; siguiente: number };
+  /** `siguiente = Σ decidido de Y+1` (una decidida con % propio cuenta aquí). */
+  decididas: { filas: number; base: number; siguiente: number };
+  /** `Σ B''` de las filas con base. */
+  base_normalizada: number;
+  /** `Σ B'' ÷ Σ B − 1` en %; `null` sin filas con meses del Niño (o con `Σ B = 0`). Solo referencia. */
+  rebote_nino_pct: number | null;
+  /** `Σ vigente` de `Y+1` hoy. */
+  siguiente_vigente: number;
+};
+
+export type CeldaCrecimientoApi = {
+  genero_id: string;
+  mundo_id: string;
+  /** `null` = sin definir: sigue al Resto. */
+  pct: number | null;
+  nota: string | null;
+  actualizado_por: string | null;
+  actualizado_at: string | null;
+  /** Ese género no tiene filas base activas de `Y+1` en ese mundo: se ve «—», no se edita y no es obligatoria. */
+  sin_filas: boolean;
+  agregado: AgregadoCrecimientoApi;
+};
+
+export type RespuestaCrecimientosApi = {
+  /** `false` si la proyección está cerrada, archivada o calculándose. */
+  editable: boolean;
+  anio_en_curso: number;
+  anio_siguiente: number;
+  /** Bloqueo optimista: se devuelve tal cual en el `PUT`. */
+  huella: string;
+  /** `false` = `crecimientos_cambiados` o `version_metodo` (la cabecera pide recalcular). */
+  al_dia: boolean;
+  /** `true` si falta `version_metodo` (proyección de antes de `0.10.8`): `agregado.base = 0` y «Calcular promedio» no sirve. */
+  metodo_viejo: boolean;
+  /** HOMBRE y MUJER (los que se encontraron en el catálogo), en ese orden. */
+  generos: { id: string; nombre: string }[];
+  /** Géneros de `GENEROS_MATRIZ` que no se encontraron (la pantalla lo avisa: «sus filas siguen el Resto»). */
+  generos_faltantes: string[];
+  mundos: { id: string; nombre: string; orden: number | null }[];
+  /** Una por género × mundo mostrado, también las vacías y las «sin filas». */
+  celdas: CeldaCrecimientoApi[];
+  resto: {
+    pct: number;
+    nota: string | null;
+    actualizado_por: string | null;
+    actualizado_at: string | null;
+    agregado: AgregadoCrecimientoApi;
+    por_genero: { genero: string; base: number }[];
+  };
+  objetivo_pct: number | null;
+  /** Para el puente al Total de `Y+1`, sacado de `resumen.totales` (todo en unidades). */
+  puente: {
+    total_en_curso: number;
+    nuevas_anterior: number;
+    aperturas: number;
+    /** Vigente de `Y+1` de las tiendas que cierran en `Y+1`: SUMA (su `Y` ya salió de `B`). */
+    cierres: number;
+    /** Tiendas que cierran en `Y+1` sin total decidido (hoy proponen 0). */
+    cierres_sin_decidir: number;
+  };
+};
+
+/** Una celda como entra a `calcularPromedio` (lo que el usuario tiene escrito en pantalla). */
+export type CeldaParaPromedio = {
+  genero: string;
+  mundo: string;
+  /** Lo que escribió (`null` = vacía). */
+  pct: number | null;
+  sin_filas: boolean;
+  agregado: AgregadoCrecimientoApi;
+};
+
+export type FilaResultadoPromedio = {
+  /** Vacíos en el Resto. */
+  genero: string | null;
+  mundo: string | null;
+  base: number;
+  pct_escrito: number;
+  /** `S_c = pct_propio.siguiente + decididas.siguiente + base_libre × (1 + g_c)`. */
+  siguiente: number;
+  /** `S_c ÷ B_c − 1` en %; `null` si `B_c = 0`. */
+  pct_resultante: number | null;
+};
+
+export type ResultadoPromedio = {
+  /** `ḡ = Σ B_c g_c ÷ Σ B_c` (ponderado de lo que escribió) en %; `null` si `Σ B = 0`. */
+  ponderado_escrito_pct: number | null;
+  /** Una por celda con filas, más el Resto al final (`genero = null`). */
+  filas: FilaResultadoPromedio[];
+  base_total: number;
+  /** `Σ S` (mismas tiendas de `Y+1`, con las filas fijadas). */
+  siguiente_total: number;
+  /** `Σ S ÷ Σ B − 1` en %; `null` si `Σ B = 0`. */
+  resultante_pct: number | null;
+  filas_con_pct_propio: number;
+  filas_decididas: number;
+  /** Comparación con el objetivo global; `null` sin objetivo. */
+  objetivo: null | {
+    pct: number;
+    /** pp que faltan para el objetivo con lo escrito (`objetivo − ḡ`); `null` sin base. */
+    faltan_pp_escrito: number | null;
+    /** pp que faltan con el resultado (`objetivo − resultante`). */
+    faltan_pp_resultado: number | null;
+    /** Unidades que faltan: `Σ B × (1 + objetivo) − Σ S`. */
+    faltan_unidades: number | null;
+  };
+  /** Puente al Total de `Y+1` de la Matriz: `total = mismas + nuevas_anterior + aperturas + cierres` (los cierres SUMAN). */
+  puente: {
+    base: number;
+    mismas_siguiente: number;
+    nuevas_anterior: number;
+    aperturas: number;
+    cierres: number;
+    cierres_sin_decidir: number;
+    total_siguiente: number;
+    total_en_curso: number;
+    /** `Total Y+1 ÷ Total Y − 1` en %. */
+    var_pct: number | null;
+  };
+  /** `Σ B = 0`: «sin base: recalcula la proyección». */
+  sin_base: boolean;
+};
+
+
+/** Cuerpo del `PUT …/crecimientos` (reemplazo completo; lo que no viene se borra). */
+export type GuardarCrecimientosCuerpoApi = {
+  huella: string;
+  resto: { pct: number; nota?: string | null };
+  objetivo_pct: number | null;
+  celdas: { genero_id: string; mundo_id: string; pct: number; nota?: string | null }[];
+  /** Solo con la respuesta de Javier al `409 filas_manuales`; exige `huella_choque`. */
+  resolucion?: "pisar" | "conservar";
+  /** Solo con `resolucion = "pisar"`. */
+  incluir_decididas?: boolean;
+  huella_choque?: string;
+};
+
+export type ResultadoGuardarCrecimientosApi = {
+  pisadas: { fila_id: string; pct_anterior: number | null; decidido_anterior: number | null }[];
+  conservadas: number;
+  /** `fila_id` pisados que, al releer tras el recálculo, volvieron a tener % propio o total (decisión concurrente). */
+  revertidas: string[];
+  /**
+   * Celdas que había guardadas y que este guardado borró porque ya no son editables (típicamente, su mundo se desactivó: la pantalla
+   * no las mostraba). Vacío si no se perdió ninguna.
+   */
+  celdas_descartadas: { genero: string; mundo: string; pct: number }[];
+  recalculo: { ok: true } | { ok: false; codigo: string; mensaje: string };
+};
+
+/** `data` de la respuesta `200` del `PUT …/crecimientos`: el `GET` recalculado más el resultado del guardado. */
+export type RespuestaGuardarCrecimientosApi = RespuestaCrecimientosApi & ResultadoGuardarCrecimientosApi;
+
+type FilaChoqueBaseApi = { fila_id: string; genero: string; mundo: string; linea: string; equivalencia: string | null; agrupacion_marca: string };
+
+/**
+ * Cuerpo (más allá de `{ error, codigo }`) del `409` con `codigo = "filas_manuales"` del `PUT …/crecimientos`. No se escribió nada.
+ * `huella_choque` identifica TODAS las filas en choque (no solo las mostradas, ≤ 200 por lista).
+ */
+export type ConflictoFilasManualesApi = {
+  error: string;
+  codigo: "filas_manuales";
+  huella_choque: string;
+  pct_propio: { total: number; filas: (FilaChoqueBaseApi & { pct_fila: number; pct_nuevo: number })[] };
+  decididas: { total: number; filas: (FilaChoqueBaseApi & { decidido: number; propuesta_nueva_estimada: number | null })[] };
+};
+
+/** Cuerpo del `400` con `codigo = "celdas_incompletas"`. */
+export type CeldasIncompletasApi = { error: string; codigo: "celdas_incompletas"; faltan: { genero: string; mundo: string }[] };
+
+/** Cuerpo del `400` con `codigo = "usar_crecimientos"` (un `PATCH` de parámetros intentó cambiar `crecimiento_pct_defecto`). */
+export type UsarCrecimientosApi = { error: string; codigo: "usar_crecimientos" };
 
 // ─── Filas y años ───
 
@@ -222,6 +444,19 @@ export type AnioFilaApi = {
   cola_larga?: ColaLargaApi | null;
   /** Id del registro (`proyeccion_fila_anios.id`); lo pone la lectura, no el método. */
   id?: string;
+  /**
+   * `0.10.8` (07c), solo en las filas base de `Y+1`: el % que se aplicó (fila > celda GM > Resto). Siempre bruto. `null`/ausente en el
+   * resto (año en curso, aperturas, cierres, filas de tienda).
+   */
+  crecimiento_efectivo?: CrecimientoEfectivoApi | null;
+  /** `0.10.8`, solo filas base de `Y+1`: `B` = vigente de `Y` de las mismas tiendas de `Y+1`, sin normalizar (B2 incluido). `null` sin base o sin curva. */
+  base_siguiente?: number | null;
+  /** `0.10.8`: `B''` = lo que la fila vendería en `Y+1` con 0 % si `Y` hubiera sido normal. Solo referencia (rebote del Niño). */
+  base_normalizada?: number | null;
+  /** `0.10.8`: `vigente ÷ B − 1` en %; `null` sin `B` o sin vigente. */
+  pct_bruto?: number | null;
+  /** `0.10.8`: `vigente ÷ B'' − 1` en %; `null` sin `B''` (0 o nulo) o sin vigente. */
+  pct_sobre_normalizada?: number | null;
 };
 
 export type FilaApi = {
@@ -316,6 +551,7 @@ export type TiendaProyeccionApi = {
   subbloque: Subbloque | null;
   anio: number;
   fecha_usada: string;
+  /** `venta_esperada_usada` tal cual: desde `version_metodo = 4` es la venta MENSUAL promedio en régimen (S/ sin IGV); antes, la del año de apertura. */
   venta_esperada: number | null;
   referente: { id: string; codigo: string; nombre: string } | null;
   origen_composicion: OrigenComposicion;
@@ -338,6 +574,12 @@ export type TiendaProyeccionApi = {
   /** `0.10.7`: suma del `vigente` de las filas de la tienda en `anio` (`null` si la tienda no tiene filas) y cuántas están fijadas a mano. */
   suma_filas: number | null;
   filas_fijadas: number;
+  /**
+   * `0.10.8` (07d §4): solo aperturas con venta esperada `V`; `null` en el resto. `venta_mensual = V`, `anio_maduro = 12 V`,
+   * `fraccion = F` (qué parte de un año maduro vende en su año de apertura; `null` sin `F`), `venta_anio_apertura = 12 V F`.
+   * `con_meses_reales`: el año de la tarjeta es `Y` y la tienda ya tiene meses cerrados (`fecha_apertura ≤ hasta_periodo`): la cifra es solo referencia.
+   */
+  escala: { venta_mensual: number; anio_maduro: number; fraccion: number | null; venta_anio_apertura: number | null; con_meses_reales: boolean } | null;
 };
 
 export type NodoMatrizApi = {
@@ -362,6 +604,10 @@ export type NodoMatrizApi = {
     total: number;
     decididas: number;
     filas: number;
+    /** `0.10.8` (07c): `Σ B` de las filas base de `Y+1` del nodo (la base 2026 de las mismas tiendas de 2027). */
+    base_siguiente: number;
+    /** `0.10.8`: `Σ vigente de Y+1 de las filas base ÷ Σ B − 1` en %; `null` si `Σ B = 0`. */
+    crec_mismas_pct: number | null;
   };
   variacion_pct: number | null;
   estado: EstadoLinea;
@@ -417,6 +663,10 @@ export type ResumenProyeccion = {
    * la entrega: `aProyeccionApi` la quita.
    */
   niveles_gml?: Record<string, string>;
+  /** `0.10.8` (07c): sha de la matriz de crecimientos y el Resto con que se calculó. La API no la entrega. */
+  huella_crecimientos?: string;
+  /** `0.10.8`: `gml_id → "genero_id|mundo_id"` de los nodos con filas base al calcular. La API no lo entrega. */
+  gm_gml?: Record<string, string>;
 };
 
 export type ProyeccionApi = {
@@ -519,7 +769,12 @@ export type MarcasDeFilaApi = {
 export type RespuestaLineasApi = {
   filtro: { genero_id: string | null; mundo_id: string | null; linea_id: string | null; q: string | null };
   filas: FilaApi[];
-  totales_por_anio: { anio: number; vigente: number; propuesto: number; decididas: number; filas: number }[];
+  /**
+   * `base_siguiente` (`0.10.8`): `Σ B` de las filas base de la línea en `Y+1` (0 en los demás años). `vigente_con_base`: el vigente de
+   * ESAS mismas filas (las que tienen `B`), el numerador del «Crec. mismas tiendas» (= `vigente_con_base ÷ base_siguiente − 1`), igual que
+   * en la Matriz. `vigente` es el de todas las filas (el total de la línea) y no sirve para ese %.
+   */
+  totales_por_anio: { anio: number; vigente: number; propuesto: number; decididas: number; filas: number; base_siguiente: number; vigente_con_base: number }[];
   historico_linea: { anio: number; unidades: number; clase: ClaseAnioFila; tiendas: number }[];
   tiendas_linea: TiendaLineaApi[];
   /** `0.10.7`: filas de apertura (bloque `nuevas`, activas), por año, código de tienda, equivalencia y orden de agrupación de marca. */

@@ -18,7 +18,7 @@ import type { BloquesAnioApi, Bloque, Subbloque, TiendaBloqueApi } from "./tipos
 /** Lo que el método necesita de una tienda: las fechas de M4 más venta esperada, referente, zona y rampa propia. */
 export type TiendaProy = TiendaMaestro & {
   zona: string | null;
-  /** Soles, sin IGV, de su año de apertura (`0.10.1`; no es mensual ni de tienda madura). */
+  /** `0.10.8` (07d): venta MENSUAL promedio esperada en régimen, en soles sin IGV (M7 la multiplica por 12 y la estacionaliza en los meses abiertos). */
   venta_esperada: number | null;
   referente_id: string | null;
   /** Rampa propia de la tienda (si no, manda la de la proyección). */

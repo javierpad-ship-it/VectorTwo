@@ -135,6 +135,36 @@ export const aplicarCurvaSchema = z
     }
   });
 
+// ─── 0.10.8 · 07c: matriz de crecimientos ───
+
+export const MAX_NOTA_CRECIMIENTO = 300;
+/** Máximo de celdas de un guardado: HOMBRE y MUJER × los mundos del catálogo, con holgura. */
+export const MAX_CELDAS_CRECIMIENTO = 200;
+
+/** `pct` de `numeric(6,2)`: se redondea a dos decimales para que lo guardado y lo comparado sean la misma cifra. */
+const pctCrecimiento = crecimiento.transform((v) => Math.round(v * 100) / 100);
+
+const celdaCrecimiento = z.object({
+  genero_id: z.uuid("El género de una celda no es válido."),
+  mundo_id: z.uuid("El mundo de una celda no es válido."),
+  pct: pctCrecimiento,
+  nota: notaOpcional(MAX_NOTA_CRECIMIENTO),
+});
+
+/**
+ * `PUT …/crecimientos` (reemplazo completo e idempotente: lo que no viene se borra). `huella` es la del `GET` (bloqueo optimista);
+ * `resolucion` solo responde a un `409 filas_manuales` y exige su `huella_choque` (esas dos reglas las comprueba el servicio con su código).
+ */
+export const guardarCrecimientosSchema = z.object({
+  huella: z.string("Falta la huella de lo que leíste: recarga la pantalla.").min(1, "Falta la huella de lo que leíste: recarga la pantalla."),
+  resto: z.object({ pct: pctCrecimiento, nota: notaOpcional(MAX_NOTA_CRECIMIENTO) }),
+  objetivo_pct: pctCrecimiento.nullable(),
+  celdas: z.array(celdaCrecimiento, "celdas debe ser una lista.").max(MAX_CELDAS_CRECIMIENTO, "Son demasiadas celdas."),
+  resolucion: z.enum(["pisar", "conservar"], "La resolución debe ser pisar o conservar.").optional(),
+  incluir_decididas: z.boolean("incluir_decididas debe ser verdadero o falso.").optional(),
+  huella_choque: z.string().min(1, "La huella del choque no es válida.").optional(),
+});
+
 export const cerrarSchema = z.object({ nota: notaOpcional(MAX_NOTA_PROYECCION) });
 
 /** `POST archivar`: el cuerpo es opcional; `confirmar_sin_cerrada` confirma archivar la única cerrada del año. */
@@ -217,3 +247,4 @@ export type CrearProyeccionCuerpo = z.infer<typeof crearSchema>;
 export type EditarProyeccionCuerpo = z.infer<typeof editarSchema>;
 export type DecisionCuerpo = z.infer<typeof decisionSchema>;
 export type DecisionTiendaCuerpo = z.infer<typeof decisionTiendaSchema>;
+export type GuardarCrecimientosCuerpo = z.infer<typeof guardarCrecimientosSchema>;

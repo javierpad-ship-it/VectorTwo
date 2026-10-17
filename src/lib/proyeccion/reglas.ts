@@ -155,6 +155,11 @@ export function motivoRechazoCerrar(args: {
    * cifras no son las del método vigente y NO se cierra, ni siquiera con `forzar` (que solo salta datos nuevos).
    */
   metodoViejo?: boolean;
+  /**
+   * `0.10.8` (07c): la matriz de crecimientos guardada no es la que aplicó el último cálculo, o un nodo cambió de mundo
+   * (`crecimientos_cambiados`). Como `metodoViejo`, NO se puede saltar con `forzar`.
+   */
+  crecimientosCambiados?: boolean;
 }): ResultadoCerrar {
   if (args.estado === "cerrada") return { ok: false, rechazo: { status: 409, codigo: "ya_cerrada", mensaje: "La proyección ya está cerrada." } };
   if (args.estado === "archivada") return { ok: false, rechazo: { status: 409, codigo: "archivada", mensaje: MENSAJE_ARCHIVADA } };
@@ -168,6 +173,16 @@ export function motivoRechazoCerrar(args: {
         status: 409,
         codigo: "version_metodo",
         mensaje: "La proyección se calculó con una versión anterior del método: recalcúlala antes de cerrar (esto no se puede forzar).",
+      },
+    };
+  }
+  if (args.crecimientosCambiados) {
+    return {
+      ok: false,
+      rechazo: {
+        status: 409,
+        codigo: "crecimientos_cambiados",
+        mensaje: "Cambiaron los crecimientos por género · mundo o el mundo de un nodo: recalcula antes de cerrar (no se puede forzar).",
       },
     };
   }

@@ -113,14 +113,18 @@ describe("cierre y año siguiente (casos 3 a 7)", () => {
     expect(fila(s, DENIM_REC).curva_origen).toEqual([{ agrupacion_id: AG.denim, curva_id: "c-denim-v1", version: 1, peso: 1 }]);
   });
 
-  it("caso 4: Niño de invierno en ABRIGO — el cierre no cambia (1 000), la base de 2027 se normaliza (1 561); sin factor, 1 000 y sin_factor", () => {
+  it("caso 4 (método 4): Niño de invierno en ABRIGO — el cierre no cambia (1 000) y el % es bruto: 2027 = 1 000 × 1,03 = 1 030 (ya no 1 561); B'' = 1 515 queda de referencia", () => {
     const e = entrada({ parametros: { crecimiento_pct_defecto: 3, umbral_avance: 0.3, umbral_cobertura: 0.25, umbral_cola_larga: 100, umbral_disponibilidad: 0.75, rampa_maduracion: [1, 1, 1] } });
     const s = calcularProyeccion(e);
     const c = clave("abrigo", AM.rec, EQ.parka);
     expect(reg(s, c, Y)).toMatchObject({ vendido: 940, propuesto: 1000 });
     expect(reg(s, c, Y).meses?.slice(9)).toEqual([20, 20, 20]);
-    expect(reg(s, c, Y + 1).propuesto).toBe(1561);
+    expect(reg(s, c, Y + 1).propuesto).toBe(1030);
+    // `B` = 1 000 sin normalizar; `B''` = 1 000 ÷ 0,66 = 1 515,15 (solo referencia: no entra en la propuesta).
+    expect(reg(s, c, Y + 1).base_siguiente).toBe(1000);
+    expect(reg(s, c, Y + 1).base_normalizada).toBeCloseTo(1515.15, 2);
     expect(reg(s, c, Y + 1).explicacion).toContain("Niño");
+    expect(reg(s, c, Y + 1).explicacion).toContain("sin corregir por el Niño");
 
     const sin = calcularProyeccion({ ...e, factores: [] });
     expect(reg(sin, c, Y).propuesto).toBe(1000);
@@ -246,62 +250,65 @@ describe("tiendas nuevas por venta esperada (caso 9)", () => {
   ];
   const T4 = (extra: Record<string, unknown> = {}) => ({ T4: { rampa: [0.7, 0.85, 1], ...extra } });
 
-  it("con rampa explícita [0,7; 0,85; 1] (E = 850 000 del año de apertura): DENIM 5 651 + ABRIGO 1 424 = 7 075; en soles ≈ E", () => {
+  it("con rampa explícita [0,7; 0,85; 1] (V = 85 000 al mes): DENIM 5 494 + ABRIGO 1 385 = 6 879; en soles ≈ E = 826 355", () => {
     const s = calcularProyeccion(entrada({ hechos: hechosT1(), tiendasExtra: T4() }));
     const d = reg(s, claveTienda("T4", "denim", AM.rec), Y + 1);
     const ab = reg(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka), Y + 1);
-    expect(fila(s, claveTienda("T4", "denim", AM.rec)).composicion?.unidades_maduras).toBeCloseTo(7344.3, 1);
-    expect(fila(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka)).composicion?.unidades_maduras).toBeCloseTo(1573.8, 1);
-    expect([d.propuesto, ab.propuesto]).toEqual([5651, 1424]);
+    // Md_f = 12 V s̃_f ÷ p_f: 12 × 85 000 × 0,7 ÷ 100 = 7 140 y 12 × 85 000 × 0,3 ÷ 200 = 1 530; no dependen de la rampa.
+    expect(fila(s, claveTienda("T4", "denim", AM.rec)).composicion?.unidades_maduras).toBeCloseTo(7140, 1);
+    expect(fila(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka)).composicion?.unidades_maduras).toBeCloseTo(1530, 1);
+    expect([d.propuesto, ab.propuesto]).toEqual([5494, 1385]);
     const t = s.tiendas.find((x) => x.tienda_id === "T4" && x.anio === Y + 1)!;
-    expect(t).toMatchObject({ propuesto: 7075, metodo: "apertura", origen_composicion: "referente", unidades_maduras: 8918 });
+    expect(t).toMatchObject({ propuesto: 6879, metodo: "apertura", origen_composicion: "referente", unidades_maduras: 8670 });
     expect(t.rampa).toEqual([0.7, 0.85, 1]);
-    // Propiedad de la regla 20: Σ_f P_f × p_f = E ± Σ_f p_f ÷ 2 (aquí p = 100 y 200).
+    // Propiedad: Σ_f P_f × p_f = 12 V F ± Σ_f p_f ÷ 2 (aquí p = 100 y 200); E = 826 355.
     const soles = (d.propuesto as number) * 100 + (ab.propuesto as number) * 200;
-    expect(soles).toBe(849900);
-    expect(Math.abs(soles - 850000)).toBeLessThanOrEqual((100 + 200) / 2);
-    // La explicación dice «su año de apertura», la fracción F y el año maduro K = E ÷ F.
-    expect(t.explicacion).toContain("en 2027, su año de apertura (sin IGV)");
-    expect(t.explicacion).toContain("81.0 %");
-    expect(t.explicacion).toContain("año maduro S/ 1,049,186");
+    expect(Math.abs(soles - 826355)).toBeLessThanOrEqual((100 + 200) / 2);
+    // La explicación dice la venta mensual, el año maduro S = 12 V, la fracción del año y los soles del año de apertura.
+    expect(t.explicacion).toContain("venta esperada S/ 85,000 al mes en régimen (sin IGV) × 12 = año maduro S/ 1,020,000");
+    expect(t.explicacion).toContain("abre el 15 de marzo: en 2027 vende el 81.0 % de un año (S/ 826,355)");
+    expect(t.explicacion).toContain("año maduro 8,670 u");
+    expect(t.explicacion).toContain("rampa 0.70 · 0.85 · 1.00");
+    expect(t.explicacion).not.toContain("su año de apertura");
     // Ya no hay aviso de canibalización aunque T4 comparte zona con T1 (regla 45): la zona es solo una etiqueta.
     expect(t.avisos).not.toContain("canibalizacion" as never);
     expect(t.avisos).not.toContain("apertura_tardia");
   });
 
-  it("con la rampa por defecto [1, 1, 1]: F = 0,83686, K = 1 015 701; DENIM 5 657 + ABRIGO 1 421 = 7 078", () => {
+  it("con la rampa por defecto [1, 1, 1] (07d §5): F = 0,83686, S = 1 020 000; DENIM 5 681 + ABRIGO 1 427 = 7 108 (el método 3 daba 708 con la misma cifra)", () => {
     const s = calcularProyeccion(entrada({ hechos: hechosT1() }));
     const t = s.tiendas.find((x) => x.tienda_id === "T4" && x.anio === Y + 1)!;
-    expect(fila(s, claveTienda("T4", "denim", AM.rec)).composicion?.unidades_maduras).toBeCloseTo(7109.9, 1);
-    expect(fila(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka)).composicion?.unidades_maduras).toBeCloseTo(1523.6, 1);
-    expect(reg(s, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto).toBe(5657);
-    expect(reg(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka), Y + 1).propuesto).toBe(1421);
-    expect(t.propuesto).toBe(7078);
+    expect(fila(s, claveTienda("T4", "denim", AM.rec)).composicion?.unidades_maduras).toBeCloseTo(7140, 1);
+    expect(fila(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka)).composicion?.unidades_maduras).toBeCloseTo(1530, 1);
+    expect(reg(s, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto).toBe(5681);
+    expect(reg(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka), Y + 1).propuesto).toBe(1427);
+    expect(t.propuesto).toBe(7108);
     expect(t.explicacion).toContain("83.7 %");
-    expect(t.explicacion).toContain("año maduro S/ 1,015,701");
+    expect(t.explicacion).toContain("año maduro S/ 1,020,000");
+    expect(t.explicacion).toContain("(S/ 853,597)");
     // Σ de las filas = propuesta de la tienda; la explicación nombra al referente y la rampa.
     expect(t.explicacion).toContain("T1");
     expect(t.explicacion).toContain("sin rampa");
   });
 
-  it("regla 20: abre el 1 de enero sin rampa → F = 1 y Md_f = E × s_f ÷ p_f (su año de apertura es un año maduro)", () => {
-    const s = calcularProyeccion(entrada({ hechos: hechosT1(), tiendasExtra: { T4: { fecha_apertura: "2027-01-01", venta_esperada: 850000 } } }));
-    // E = 850 000, 70 % a S/ 100 → 5 950 u; 30 % a S/ 200 → 1 275 u (curva de cada fila × rampa 1 = 1 en el año completo).
-    expect(fila(s, claveTienda("T4", "denim", AM.rec)).composicion?.unidades_maduras).toBeCloseTo(5950, 1);
-    expect(fila(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka)).composicion?.unidades_maduras).toBeCloseTo(1275, 1);
-    expect(reg(s, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto).toBe(5950);
-    expect(reg(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka), Y + 1).propuesto).toBe(1275);
+  it("regla 4 (07d): abre el 1 de enero sin rampa → F = 1 y P_f = round(12 V s̃_f ÷ p_f)", () => {
+    const s = calcularProyeccion(entrada({ hechos: hechosT1(), tiendasExtra: { T4: { fecha_apertura: "2027-01-01", venta_esperada: 85000 } } }));
+    // 12 × 85 000 × 0,7 ÷ 100 = 7 140 u; 12 × 85 000 × 0,3 ÷ 200 = 1 530 u (año completo: A_f = 1).
+    expect(reg(s, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto).toBe(7140);
+    expect(reg(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka), Y + 1).propuesto).toBe(1530);
   });
 
-  it("regla 20: abre el 2027-11-01 (F < 0,25) → aviso apertura_tardia, informativo", () => {
+  it("regla 6 (07d): abre el 2027-11-01 (F < 0,25) → aviso apertura_tardia, informativo; 1 251 u con E = 131 240 (el método 3 daba 811, más que abriendo en marzo)", () => {
     const s = calcularProyeccion(entrada({ hechos: hechosT1(), tiendasExtra: { T4: { fecha_apertura: "2027-11-01" } } }));
     const t = s.tiendas.find((x) => x.tienda_id === "T4" && x.anio === Y + 1)!;
     expect(t.avisos).toContain("apertura_tardia");
-    // El año maduro deducido es grande: K = E ÷ F con F ≈ 0,17.
-    expect(t.explicacion).toMatch(/año maduro S\/ [\d,]{9,}/);
-    // El total en soles sigue siendo ≈ E.
+    expect(reg(s, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto).toBe(1190);
+    expect(reg(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka), Y + 1).propuesto).toBe(61);
+    expect(t.propuesto).toBe(1251);
+    // E = 12 V F = 131 240 (a ± Σ p ÷ 2 de las filas).
     const soles = (reg(s, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto as number) * 100 + (reg(s, claveTienda("T4", "abrigo", AM.rec, EQ.parka), Y + 1).propuesto as number) * 200;
-    expect(Math.abs(soles - 850000)).toBeLessThanOrEqual(150);
+    expect(Math.abs(soles - 131240)).toBeLessThanOrEqual(150);
+    expect(t.explicacion).toContain("(S/ 131,240)");
   });
 
   it("sin referente: composición promedio de las mismas tiendas de 2027 (origen red, igual peso por tienda)", () => {
@@ -335,12 +342,12 @@ describe("tiendas nuevas por venta esperada (caso 9)", () => {
     const cd = claveTienda("T4", "denim", AM.rec);
     const ca = claveTienda("T4", "abrigo", AM.rec, EQ.parka);
     const e = (filas: [string, DecisionPrevia][] = []) =>
-      entrada({ hechos: hechosT1(), previas: previas(filas, [[`T4#${Y + 1}`, decisionTienda({ decidido: 6000, origen: "manual", propuesta_al_decidir: 7078 })]]) });
+      entrada({ hechos: hechosT1(), previas: previas(filas, [[`T4#${Y + 1}`, decisionTienda({ decidido: 6000, origen: "manual", propuesta_al_decidir: 7108 })]]) });
     const s = calcularProyeccion(e());
     expect(reg(s, cd, Y + 1).vigente! + reg(s, ca, Y + 1).vigente!).toBe(6000);
     const t = s.tiendas.find((x) => x.tienda_id === "T4" && x.anio === Y + 1)!;
-    expect(t).toMatchObject({ decidido: 6000, propuesto: 7078, propuesta_al_decidir: 7078 });
-    const fijada = calcularProyeccion(e([[`${cd}#${Y + 1}`, decision({ decidido: 5000, origen: "manual", propuesta_al_decidir: 5657 })]]));
+    expect(t).toMatchObject({ decidido: 6000, propuesto: 7108, propuesta_al_decidir: 7108 });
+    const fijada = calcularProyeccion(e([[`${cd}#${Y + 1}`, decision({ decidido: 5000, origen: "manual", propuesta_al_decidir: 5681 })]]));
     expect([reg(fijada, cd, Y + 1).vigente, reg(fijada, ca, Y + 1).vigente]).toEqual([5000, 1000]);
     expect(reg(fijada, cd, Y + 1).origen).toBe("manual");
     expect(reg(fijada, ca, Y + 1).origen).toBe("escalada");
@@ -510,7 +517,7 @@ describe("resumen y señales", () => {
   const s = calcularProyeccion(entrada());
 
   it("cuenta filas y decididas por año, totales por bloque y versión del método", () => {
-    expect(s.resumen.version_metodo).toBe(3);
+    expect(s.resumen.version_metodo).toBe(4);
     expect(s.resumen.totales[Y].total).toBe(s.resumen.totales[Y].mismas + s.resumen.totales[Y].nuevas_anterior + s.resumen.totales[Y].aperturas + s.resumen.totales[Y].cierres);
     expect(s.resumen.decididas).toEqual({ [Y]: 0, [Y + 1]: 0 });
     expect(s.resumen.huella_cargas).toMatch(/^[0-9a-f]{32}$/);

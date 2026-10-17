@@ -78,9 +78,11 @@ export async function eliminarProyeccionDb(db: Db, id: string) {
  * Toma el candado de cálculo (`calculando_desde`) de forma CONDICIONAL al valor que se leyó: si otro `calcular` lo tomó entre
  * la lectura y esta escritura no se toca nada y `data` es `null` (el handler responde `409 calculo_en_curso`).
  */
-export async function tomarCalculo(db: Db, id: string, valorLeido: string | null, ahora: string) {
-  let consulta = db.from("proyecciones").update({ calculando_desde: ahora }).eq("id", id);
+export async function tomarCalculo(db: Db, id: string, valorLeido: string | null, ahora: string, updatedAtLeido?: string) {
+  let consulta = db.from("proyecciones").update({ calculando_desde: ahora }).eq("id", id).eq("estado", "en_trabajo");
   consulta = valorLeido === null ? consulta.is("calculando_desde", null) : consulta.eq("calculando_desde", valorLeido);
+  // `0.10.8` (07c): con `updatedAtLeido` la proyección tampoco debe haber cambiado entre la lectura y el candado (`PUT …/crecimientos`).
+  if (updatedAtLeido !== undefined) consulta = consulta.eq("updated_at", updatedAtLeido);
   const { data, error } = await consulta.select("*").maybeSingle();
   return { data, error };
 }
@@ -97,6 +99,22 @@ export async function leerCalculosActivos(db: Db, exceptoId: string | null, limi
   if (exceptoId !== null) c = c.neq("id", exceptoId);
   const { data, error } = await c;
   return { data: (data ?? []) as { id: string; calculando_desde: string }[], error };
+}
+
+/**
+ * `0.10.8` (07c): escribe `parametros` (la matriz: Resto, nota y objetivo) SOLO si la proyección sigue con el candado tomado; `data` es `null`
+ * si el candado ya no es el que se tomó (no se escribe nada).
+ */
+export async function escribirParametrosConCandado(db: Db, id: string, valorTomado: string, parametros: Json) {
+  const { data, error } = await db
+    .from("proyecciones")
+    .update({ parametros })
+    .eq("id", id)
+    .eq("estado", "en_trabajo")
+    .eq("calculando_desde", valorTomado)
+    .select("*")
+    .maybeSingle();
+  return { data, error };
 }
 
 /** El guardado final del cálculo: solo si la proyección sigue `en_trabajo` y con el mismo candado; si no, `data` es `null` y no escribe. */
@@ -124,10 +142,11 @@ export async function cambiarEstadoProyeccion(
   id: string,
   desde: "en_trabajo" | "cerrada" | "archivada",
   cambio: TablesUpdate<"proyecciones">,
-  opciones: { sinCalculoDesde?: string } = {}
+  opciones: { sinCalculoDesde?: string; /** `0.10.8`: solo si `updated_at` sigue siendo el que se leyó (bloqueo optimista del `PATCH`). */ updatedAt?: string } = {}
 ) {
   let c = db.from("proyecciones").update(cambio).eq("id", id).eq("estado", desde);
   if (opciones.sinCalculoDesde) c = c.or(sinCalculoVivo(opciones.sinCalculoDesde));
+  if (opciones.updatedAt !== undefined) c = c.eq("updated_at", opciones.updatedAt);
   const { data, error } = await c.select("*").maybeSingle();
   return { data, error };
 }
@@ -146,7 +165,7 @@ export type ColumnasFilas = "ligeras" | "cerrada" | "previas" | "completas";
 export const COLUMNAS_FILA_LIGERA =
   "id, clave, tienda_id, gml_id, equivalencia_id, agrupacion_marca_id, nivel_proyectado, agrupacion_estacionalidad_id, temporada, avisos, activo";
 export const COLUMNAS_ANIO_LIGERA =
-  "id, fila_id, anio, bloque, subbloque, vendido, propuesto, metodo, decidido, origen, propuesta_al_decidir, crecimiento_pct, meses, origen_meses, avisos, activo";
+  "id, fila_id, anio, bloque, subbloque, vendido, propuesto, metodo, decidido, origen, propuesta_al_decidir, crecimiento_pct, base_siguiente, base_normalizada, meses, origen_meses, avisos, activo";
 const COLUMNAS_FILA: Record<ColumnasFilas, string> = {
   ligeras: COLUMNAS_FILA_LIGERA,
   cerrada: `${COLUMNAS_FILA_LIGERA}, participaciones`,
@@ -438,4 +457,95 @@ export async function leerNombresMarcas(db: Db, ids: readonly string[]): Promise
     for (const m of data ?? []) nombres.set(m.id, m.nombre);
   }
   return { data: nombres, error: null };
+}
+
+// ─── Matriz de crecimientos por género × mundo (07c) ───
+
+export type CrecimientoDb = Tables<"proyeccion_crecimientos">;
+
+/** Las celdas guardadas de una proyección, en un orden estable. */
+export function leerCrecimientos(db: Db, proyeccionId: string) {
+  return leerTodo<CrecimientoDb>((d, h) =>
+    db.from("proyeccion_crecimientos").select("*").eq("proyeccion_id", proyeccionId).order("genero_id").order("mundo_id").order("id").range(d, h)
+  );
+}
+
+/** Las celdas de varias proyecciones (para la lista, que decide `crecimientos_cambiados` de cada una sin una lectura por proyección). */
+export async function leerCrecimientosDeProyecciones(db: Db, proyeccionIds: readonly string[]): Promise<Resultado<CrecimientoDb[]>> {
+  const salida: CrecimientoDb[] = [];
+  for (const tanda of enTandas([...proyeccionIds], TANDA_IN)) {
+    const r = await leerTodo<CrecimientoDb>((d, h) => db.from("proyeccion_crecimientos").select("*").in("proyeccion_id", tanda).order("id").range(d, h));
+    if (r.error) return { data: salida, error: r.error };
+    salida.push(...r.data);
+  }
+  return { data: salida, error: null };
+}
+
+/** `upsert` de celdas (`onConflict: proyeccion_id,genero_id,mundo_id`) en tandas. */
+export async function upsertCrecimientos(db: Db, filas: readonly TablesInsert<"proyeccion_crecimientos">[]): Promise<{ error: PostgrestError | null }> {
+  for (const grupo of agruparPorColumnas(filas)) {
+    for (const tanda of enTandas(grupo, TANDA_UPSERT)) {
+      const { error } = await db.from("proyeccion_crecimientos").upsert(tanda, { onConflict: "proyeccion_id,genero_id,mundo_id" });
+      if (error) return { error };
+    }
+  }
+  return { error: null };
+}
+
+/** Borra celdas por id (las que el reemplazo completo ya no trae). */
+export async function borrarCrecimientos(db: Db, ids: readonly string[]): Promise<{ error: PostgrestError | null }> {
+  for (const tanda of enTandas([...ids], TANDA_IN)) {
+    const { error } = await db.from("proyeccion_crecimientos").delete().in("id", tanda);
+    if (error) return { error };
+  }
+  return { error: null };
+}
+
+/** Géneros y mundos del catálogo con su `orden` y si están activos (las filas y columnas de la matriz). */
+export async function leerGenerosMundos(db: Db) {
+  const [generos, mundos] = await Promise.all([
+    db.from("generos").select("id, nombre, orden, activo").order("orden").order("nombre").order("id"),
+    db.from("mundos").select("id, nombre, orden, activo").order("orden").order("nombre").order("id"),
+  ]);
+  return {
+    generos: (generos.data ?? []) as { id: string; nombre: string; orden: number | null; activo: boolean }[],
+    mundos: (mundos.data ?? []) as { id: string; nombre: string; orden: number | null; activo: boolean }[],
+    error: generos.error ?? mundos.error,
+  };
+}
+
+/**
+ * «Pisar» (07c): `crecimiento_pct = null` en el registro de `anio` de las filas dadas (`proyeccion_filas.id`), en tandas. Con
+ * `incluirDecididas` además `decidido`, `origen`, `propuesta_al_decidir`, `nota` y `decidido_*` a `null` en las filas de `decididas`
+ * (vuelven a la propuesta). El registro se reescribe después con el recálculo encadenado.
+ */
+export async function pisarRegistros(
+  db: Db,
+  anio: number,
+  filas: { conPctPropio: readonly string[]; decididas: readonly string[] }
+): Promise<{ error: PostgrestError | null }> {
+  for (const tanda of enTandas([...filas.conPctPropio], TANDA_IN)) {
+    const { error } = await db.from("proyeccion_fila_anios").update({ crecimiento_pct: null }).in("fila_id", tanda).eq("anio", anio);
+    if (error) return { error };
+  }
+  for (const tanda of enTandas([...filas.decididas], TANDA_IN)) {
+    const { error } = await db
+      .from("proyeccion_fila_anios")
+      .update({ decidido: null, origen: null, propuesta_al_decidir: null, nota: null, decidido_at: null, decidido_por_id: null, decidido_por_nombre: null })
+      .in("fila_id", tanda)
+      .eq("anio", anio);
+    if (error) return { error };
+  }
+  return { error: null };
+}
+
+/** `crecimiento_pct` y `decidido` actuales de unas filas en `anio` (el paso 8 del `PUT`: detecta lo que volvió a tener valor). */
+export async function leerDecisionesDeFilas(db: Db, anio: number, filaIds: readonly string[]) {
+  const salida: { fila_id: string; crecimiento_pct: number | null; decidido: number | null }[] = [];
+  for (const tanda of enTandas([...filaIds], TANDA_IN)) {
+    const { data, error } = await db.from("proyeccion_fila_anios").select("fila_id, crecimiento_pct, decidido").in("fila_id", tanda).eq("anio", anio);
+    if (error) return { data: salida, error };
+    for (const f of data ?? []) salida.push({ fila_id: f.fila_id, crecimiento_pct: f.crecimiento_pct === null ? null : Number(f.crecimiento_pct), decidido: f.decidido });
+  }
+  return { data: salida, error: null as PostgrestError | null };
 }

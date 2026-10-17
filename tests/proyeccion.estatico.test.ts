@@ -29,7 +29,7 @@ const TIPOS_DB = "src/lib/supabase/database.types.ts";
 const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && f.ruta.endsWith("route.ts"));
 /** Lógica pura: ni base ni HTTP ni pantalla. */
 const PURAS = [
-  "apertura-linea", "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
+  "apertura-linea", "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "crecimientos", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
   "explicar", "cola-larga", "resumen", "matriz", "mensual", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
 ];
 
@@ -41,7 +41,7 @@ describe("M7 regla 44: la lectura de venta y las tablas", () => {
   });
 
   it("solo consultas.ts lee o escribe las tablas de M7", () => {
-    for (const tabla of ["proyecciones", "proyeccion_filas", "proyeccion_fila_anios", "proyeccion_tiendas", "factores_volumen_atipico"]) {
+    for (const tabla of ["proyecciones", "proyeccion_filas", "proyeccion_fila_anios", "proyeccion_tiendas", "proyeccion_crecimientos", "factores_volumen_atipico"]) {
       const usan = src.filter((f) => new RegExp(`from\\(\\s*["'\`]${tabla}["'\`]`).test(f.texto) && f.ruta !== CONSULTAS).map((f) => f.ruta);
       expect(usan, tabla).toEqual([]);
     }
@@ -140,6 +140,7 @@ describe("M7: rutas", () => {
       [`${B}proyecciones/[id]/tiendas/[tiendaId]/anios/[anio]/route.ts`]: ["PUT"],
       [`${B}proyecciones/[id]/tiendas/[tiendaId]/filas/route.ts`]: ["GET"],
       [`${B}proyecciones/[id]/matriz/route.ts`]: ["GET"],
+      [`${B}proyecciones/[id]/crecimientos/route.ts`]: ["GET", "PUT"],
       [`${B}proyecciones/[id]/mensual/route.ts`]: ["GET"],
       [`${B}proyecciones/[id]/cerrar/route.ts`]: ["POST"],
       [`${B}proyecciones/[id]/archivar/route.ts`]: ["POST"],

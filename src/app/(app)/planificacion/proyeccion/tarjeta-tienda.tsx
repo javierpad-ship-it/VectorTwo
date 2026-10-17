@@ -20,11 +20,13 @@ import {
   nombreMes,
   ofreceUsarSumaFilas,
   sumaFilasYaDecidida,
+  textoAperturaTardia,
   textoComposicion,
   textoFilasFijadas,
   textoPerfilApertura,
   textoRampa,
   textoTotalTiendaTras,
+  textoVentaEsperadaTienda,
   unidades,
 } from "./vista";
 
@@ -376,6 +378,9 @@ export function TarjetaTienda({
   const esNueva = t.bloque === "nuevas";
   const decidida = t.decidido !== null;
   const sinDecidirQueAlimenta = esNueva && t.pasa_a_mismas && t.anio === y && !decidida;
+  const ventaEsperada = textoVentaEsperadaTienda(t);
+  const tardia = textoAperturaTardia(t);
+  const textosAvisoTienda = tardia ? { apertura_tardia: tardia } : undefined;
 
   async function enviar(cuerpo: Record<string, unknown>, exito?: (r: TiendaProyeccionApi & { filas_base_recalculadas?: number }) => string | null): Promise<boolean> {
     setAviso(null);
@@ -414,12 +419,13 @@ export function TarjetaTienda({
         <div className="space-y-3 px-4 py-4">
           <p className="text-sm text-tinta-suave">
             {t.bloque === "cierres" ? "Cierra" : "Abre"} el <span className="font-mono text-tinta">{t.fecha_usada}</span>
-            {" · "}venta esperada del año de apertura{" "}
-            {t.venta_esperada === null ? (
+            {" · "}venta mensual promedio esperada{" "}
+            {ventaEsperada === null ? (
               <span className="text-alerta">sin cargar</span>
             ) : (
               <span className="text-tinta">
-                S/ {formatearNumero(t.venta_esperada)} <span className="text-tinta-suave">(sin IGV, desde que abre hasta el 31 de diciembre)</span>
+                {ventaEsperada.principal}
+                {ventaEsperada.escala && <span className="text-tinta-suave"> · {ventaEsperada.escala}</span>}
               </span>
             )}
             {" · "}referente: <span className="text-tinta">{t.referente ? `${t.referente.codigo} · ${t.referente.nombre}` : "ninguno (promedio de las mismas tiendas)"}</span>
@@ -481,7 +487,7 @@ export function TarjetaTienda({
                 <dd className={`${NUM} font-semibold`}>{unidades(t.vigente)}</dd>
               </div>
             </dl>
-            <Avisos avisos={t.avisos} detalle />
+            <Avisos avisos={t.avisos} detalle textos={textosAvisoTienda} />
           </div>
 
           {esNueva ? (

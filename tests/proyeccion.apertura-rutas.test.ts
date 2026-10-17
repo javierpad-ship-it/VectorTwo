@@ -114,15 +114,15 @@ describe("GET /lineas (07b): filas de apertura, tiendas ampliadas y marcas", () 
     expect(t4.map((f) => f.agrupacion_marca_id).sort()).toEqual([AM.pre, AM.rec]);
     expect(t4.every((f) => f.composicion_s !== null && f.composicion_s > 0)).toBe(true);
     // Cada fila lleva sus cifras (la pantalla edita con el mismo campo + ✓).
-    expect(t4.find((f) => f.agrupacion_marca_id === AM.rec)?.anios[0]).toMatchObject({ anio: 2027, bloque: "nuevas", subbloque: "aperturas", vigente: 1481 });
+    expect(t4.find((f) => f.agrupacion_marca_id === AM.rec)?.anios[0]).toMatchObject({ anio: 2027, bloque: "nuevas", subbloque: "aperturas", vigente: 1556 });
   });
 
   it("tiendas_linea: fecha de apertura, composición, referente y el total de TODA la tienda (no solo de esta línea)", async () => {
     const id = await nueva();
     const l = await lineaDenim(id);
     const t4 = l.tiendas_linea.find((t) => t.tienda === "T4" && t.anio === 2027);
-    expect(t4).toMatchObject({ tienda_id: "T4", bloque: "nuevas", fecha_apertura: "2027-03-15", origen_composicion: "referente", referente: "T1", total_tienda: { propuesto: 6909, decidido: null } });
-    expect(t4?.vigente).toBeLessThan(6909); // la línea tiene solo una parte
+    expect(t4).toMatchObject({ tienda_id: "T4", bloque: "nuevas", fecha_apertura: "2027-03-15", origen_composicion: "referente", referente: "T1", total_tienda: { propuesto: 7259, decidido: null } });
+    expect(t4?.vigente).toBeLessThan(7259); // la línea tiene solo una parte
     expect(l.tiendas_linea.find((t) => t.tienda === "T9" && t.anio === 2026)).toMatchObject({ origen_composicion: "red", referente: null });
     expect(l.tiendas_linea.find((t) => t.tienda === "T7")).toMatchObject({ bloque: "cierres", fecha_apertura: null });
     // Con el total decidido, `total_tienda.decidido` lo dice.
@@ -208,16 +208,16 @@ describe("PUT de una fila de tienda (07b): aceptar la propuesta la fija (D1)", (
     const r = await put(id, clave, 2027, { origen: "propuesta" });
     expect(r.status).toBe(200);
     const a = (await leer<RespuestaDecidirFilaApi>(r)).data;
-    expect(a).toMatchObject({ anio: 2027, decidido: 1481, propuesto: 1481, origen: "manual", vigente: 1481, decidido_por_nombre: "Javier" });
-    expect(registro(clave, 2027)).toMatchObject({ decidido: 1481, origen: "manual" });
+    expect(a).toMatchObject({ anio: 2027, decidido: 1556, propuesto: 1556, origen: "manual", vigente: 1556, decidido_por_nombre: "Javier" });
+    expect(registro(clave, 2027)).toMatchObject({ decidido: 1556, origen: "manual" });
     // `suma_filas` es de TODA la tienda (todas sus líneas), no solo de esta.
-    expect(a.tienda).toEqual({ anio: 2027, decidido: null, suma_filas: 6909 });
+    expect(a.tienda).toEqual({ anio: 2027, decidido: null, suma_filas: 7259 });
     expect(tiendaDb("T4", 2027).decidido).toBeNull();
 
     expect((await calcular(enviar("POST", "/x"), ctx(id))).status).toBe(201);
-    expect(registro(clave, 2027)).toMatchObject({ decidido: 1481, origen: "manual" });
+    expect(registro(clave, 2027)).toMatchObject({ decidido: 1556, origen: "manual" });
     // La tarjeta de la tienda cuenta la fila fijada.
-    expect((await tiendasDe(id)).find((t) => t.codigo === "T4")).toMatchObject({ suma_filas: 6909, filas_fijadas: 1, decidido: null });
+    expect((await tiendasDe(id)).find((t) => t.codigo === "T4")).toMatchObject({ suma_filas: 7259, filas_fijadas: 1, decidido: null });
   });
 
   it("en una fila base `propuesta` sigue siendo `propuesta` y la respuesta no trae `tienda`", async () => {

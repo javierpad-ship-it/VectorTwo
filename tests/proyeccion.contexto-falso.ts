@@ -1,7 +1,7 @@
 import type { ContextoCalculo } from "@/lib/proyeccion/contexto";
 import type { Catalogo } from "@/lib/proyeccion/persistencia";
-import type { NodoProy } from "@/lib/proyeccion/tipos";
-import { AM, agrupaciones, configFlujo, factores, hechosBase, meses, nodos, periodos, tiendas, vigentes, type Hecho } from "./proyeccion.fixture";
+import type { NodoProy, TiendaProy } from "@/lib/proyeccion/tipos";
+import { AM, GEN, MUN, agrupaciones, configFlujo, factores, hechosBase, meses, nodos, periodos, tiendas, vigentes, type Hecho } from "./proyeccion.fixture";
 
 /**
  * El contexto que `servicio.ts` lee de M1 a M6, fabricado con el fixture sintético. Es mutable para que cada caso cambie lo que
@@ -19,6 +19,10 @@ export const contexto = {
   obsoletas: 0,
   /** Lo que devuelve `calcularEfectoNino` (`null` = sin datos). */
   efectoNino: null as unknown,
+  /** `gml_id → mundo_id` vigente en el árbol (un nodo que cambió de mundo después de calcular); vacío = el del fixture. */
+  nodoMundo: {} as Record<string, string>,
+  /** Cambios sobre las tiendas del fixture (por id), p. ej. la venta esperada de una tienda que ya abrió. */
+  tiendasExtra: {} as Record<string, Partial<TiendaProy>>,
 };
 
 export function reiniciarContexto() {
@@ -30,6 +34,8 @@ export function reiniciarContexto() {
   contexto.mesesPublicados = meses("2023-01", "2026-09");
   contexto.obsoletas = 0;
   contexto.efectoNino = efectoNinoFalso();
+  contexto.nodoMundo = {};
+  contexto.tiendasExtra = {};
 }
 
 /** El efecto del Niño por temporada y año, con las cifras del fixture (invierno 0,66 / verano 1,24 en 2026; 0,63 / 0,73 en 2023). */
@@ -66,8 +72,12 @@ reiniciarContexto();
 
 const NOMBRE_AM: Record<string, string> = { [AM.rec]: "RECONOCIDO", [AM.pre]: "PREMIUM", [AM.val]: "VALOR" };
 
+const NOMBRE_MUNDO: Record<string, string> = { [MUN.urbano]: "URBANO", [MUN.casual]: "CASUAL" };
+/** Los nodos del fixture con el mundo vigente de `contexto.nodoMundo` aplicado (el árbol de hoy). */
+const nodosVigentes = (): NodoProy[] => nodos().map((n) => (contexto.nodoMundo[n.gml_id] ? { ...n, mundo_id: contexto.nodoMundo[n.gml_id], mundo: NOMBRE_MUNDO[contexto.nodoMundo[n.gml_id]] ?? n.mundo } : n));
+
 export function catalogoFalso(): Catalogo {
-  const todos = nodos();
+  const todos = nodosVigentes();
   return {
     nodos: new Map(
       todos.map((n) => [
@@ -82,7 +92,7 @@ export function catalogoFalso(): Catalogo {
 
 export function contextoFalso(): ContextoCalculo {
   const nodosCalc: NodoProy[] = [
-    ...nodos(),
+    ...nodosVigentes(),
     ...Array.from({ length: contexto.nodosExtra }, (_, i): NodoProy => ({
       gml_id: `relleno-${i}`,
       nivel: "GML",
@@ -99,7 +109,7 @@ export function contextoFalso(): ContextoCalculo {
   const periodosApi = periodos().map((p) => ({ ...p, descripcion: null, temporadas: p.temporadas ?? [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-09-01T00:00:00.000Z" }));
   return {
     tiendasDb: [],
-    tiendas: tiendas(),
+    tiendas: tiendas(contexto.tiendasExtra),
     cargas: Object.fromEntries(publicados.map((m) => [m, `carga-${m}`])),
     cargasLista: publicados.map((m) => ({ id: `carga-${m}`, periodo: m, publicada_at: contexto.publicadaAt })),
     publicados,
@@ -130,6 +140,7 @@ export function contextoFalso(): ContextoCalculo {
     })),
     factores: contexto.factores,
     configFlujo: configFlujo(),
+    generosMatriz: [GEN.hombre, GEN.mujer],
     hoy: "2026-10-15",
     ultimoCerrado: "2026-09",
     hastaDefecto: publicados[publicados.length - 1] ?? null,

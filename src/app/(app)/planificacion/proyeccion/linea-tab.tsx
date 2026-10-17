@@ -243,7 +243,6 @@ export function LineaTab({
                     secciones={secciones}
                     onVerTienda={onIrATienda}
                     anioEnCurso={y}
-                    crecimientoDefecto={proyeccion.parametros.crecimiento_pct_defecto}
                     bloqueada={bloqueada}
                     ocupado={accion.ocupado}
                     filaSeleccionada={filaId}

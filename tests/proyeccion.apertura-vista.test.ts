@@ -339,7 +339,6 @@ describe("render de la apertura en la línea", () => {
         lineas: datos,
         secciones: extra.secciones ?? secciones,
         anioEnCurso: Y,
-        crecimientoDefecto: 0,
         bloqueada: extra.bloqueada ?? false,
         ocupado: false,
         filaSeleccionada: null,

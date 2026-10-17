@@ -370,7 +370,8 @@ describe("explicaciones (regla 27)", () => {
     const abrigo = s.filas.find((f) => f.clave === clave("abrigo", AM.rec, EQ.parka))!.registros;
     expect(abrigo[0].explicacion).toContain("HO INVIERNO v1");
     expect(abrigo[0].explicacion).toContain("se cancela");
-    expect(abrigo[1].explicacion).toContain("Normalizada por el Niño");
+    expect(abrigo[1].explicacion).toContain("a 0 % sobre la base normalizada serían");
+    expect(abrigo[1].explicacion).toContain("sin corregir por el Niño");
     const san = s.filas.find((f) => f.clave === clave("sandalia", AM.val))!.registros[0].explicacion;
     expect(san).toContain("set ÷ 1.24");
     expect(san).toContain("oct–dic × 1.24");

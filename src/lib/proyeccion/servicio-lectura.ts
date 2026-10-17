@@ -3,10 +3,12 @@ import { eatM6DeLinea } from "./calculo";
 import { cargarCatalogo } from "./contexto";
 import { leerFilaCompleta, leerFilasConAnios, leerNombresMarcas, leerTiendasProyeccion } from "./consultas";
 import { claveTiendaAnio, filasTiendaDeLinea, marcasDeFilaApi, marcasQueNecesitanNombre, resumenFilasDeTienda } from "./apertura-linea";
-import { filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
+import { baseDeAnio, filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
 import { armarMensual } from "./mensual";
 import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, ordenMarcaDe, type Catalogo } from "./persistencia";
-import { aTiendaApi, falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
+import { aTiendaApi, cargarMatriz, crecimientoParaApi, falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
+import { fraccionDeTienda } from "./decision";
+import type { CrecimientoDeApi } from "./persistencia";
 import type { ProyeccionDb } from "./consultas";
 import type { FiltroMatrizApi, HistoricoFila, FilaDetalleApi, MarcasDeFilaApi, OrigenComposicion, RespuestaLineasApi, TiendaLineaApi, TiendaLineaBaseApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
 import { UMBRAL_COLA_LARGA } from "./tipos";
@@ -26,6 +28,13 @@ async function base(d: Db, id: string): Promise<Salida<Base>> {
   const cat = await cargarCatalogo(d);
   if (cat.respuesta) return falla(cat.respuesta);
   return listo({ p: p.data, catalogo: cat.data.catalogo, k: kDe(p.data), umbral: parametrosDe(p.data.parametros).umbral_cola_larga ?? UMBRAL_COLA_LARGA });
+}
+
+/** El % efectivo de las filas base de `Y+1` para las respuestas de lectura (matriz guardada + Resto + árbol vigente). */
+async function crecimientoDeLectura(d: Db, b: Base): Promise<Salida<CrecimientoDeApi>> {
+  const m = await cargarMatriz(d, b.p.id);
+  if (m.respuesta) return falla(m.respuesta);
+  return listo(crecimientoParaApi(m.data, parametrosDe(b.p.parametros).crecimiento_pct_defecto, b.catalogo));
 }
 
 async function planas(d: Db, b: Base, columnas: "ligeras" | "cerrada" = "ligeras"): Promise<Salida<FilaPlana[]>> {
@@ -83,7 +92,9 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
       propuesto += r.propuesto ?? 0;
       if (r.decidido !== null) decididas += 1;
     }
-    return { anio, vigente, propuesto, decididas, filas };
+    // Mismo criterio que la Matriz (`baseDeAnio`): `Σ B` y el vigente de las MISMAS filas, las que tienen `B`; una fila sin `B` no cuenta en ninguno.
+    const b = baseDeAnio(elegidas, anio);
+    return { anio, vigente, propuesto, decididas, filas, base_siguiente: b.base, vigente_con_base: b.vigente };
   });
 
   const vacia: RespuestaLineasApi = {
@@ -102,6 +113,8 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
 
   const completas = await leerFilasConAnios(d, id, { columnas: "completas", gmlIds: nodos, soloActivas: true });
   if (completas.error) return fallaDb(completas.error, "proyección: leer la línea");
+  const crec = await crecimientoDeLectura(d, b);
+  if (crec.respuesta) return falla(crec.respuesta);
   const tiendasRows = await leerTiendasProyeccion(d, id);
   if (tiendasRows.error) return fallaDb(tiendasRows.error, "proyección: leer tiendas");
 
@@ -115,7 +128,7 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
       (x.equivalencia_id ?? "").localeCompare(y.equivalencia_id ?? "") ||
       ordenMarcaDe(x.agrupacion_marca_id, b.catalogo) - ordenMarcaDe(y.agrupacion_marca_id, b.catalogo)
   );
-  const apis = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y));
+  const apis = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y, crec.data));
   const filasApi = apis.filter((x): x is NonNullable<typeof x> => x !== null);
   const modelos = base_.map((x) => aFilaModelo(x, b.k, Y));
 
@@ -249,7 +262,9 @@ export async function leerFilaDetalle(id: string, filaId: string): Promise<Salid
   const r = await leerFilaCompleta(d, id, filaId);
   if (r.error) return fallaDb(r.error, "proyección: leer fila");
   if (!r.data) return fallaMensaje("Fila no encontrada.", 404);
-  const api = aFilaApi(r.data, b.catalogo, b.k, b.p.anio_en_curso);
+  const crec = await crecimientoDeLectura(d, b);
+  if (crec.respuesta) return falla(crec.respuesta);
+  const api = aFilaApi(r.data, b.catalogo, b.k, b.p.anio_en_curso, crec.data);
   if (!api) return fallaMensaje("Fila no encontrada.", 404);
   const m = aFilaModelo(r.data, b.k, b.p.anio_en_curso);
   return listo({
@@ -259,7 +274,7 @@ export async function leerFilaDetalle(id: string, filaId: string): Promise<Salid
     curva_origen: m.curva_origen,
     factores_mes: m.factores_mes,
     participaciones: m.participaciones,
-    anios: aAniosApi(m, b.p.anio_en_curso),
+    anios: aAniosApi(m, b.p.anio_en_curso, crec.data),
   });
 }
 
@@ -338,9 +353,20 @@ export async function leerTiendasDeProyeccion(id: string, q: { anio?: number; bl
   const filasDeTiendas = await leerFilasConAnios(d, id, { columnas: "ligeras", soloTiendas: true, soloActivas: true });
   if (filasDeTiendas.error) return fallaDb(filasDeTiendas.error, "proyección: leer las filas de las tiendas");
   const resumenes = resumenFilasDeTienda(filasDeTiendas.data);
-  const salida = tiendas.data
-    .filter((t) => t.activo && (q.anio === undefined || t.anio === q.anio) && (q.bloque === undefined || t.bloque === q.bloque))
-    .map((t) => aTiendaApi(t, [], b.catalogo, parametros, b.p, resumenes.get(claveTiendaAnio(t.tienda_id, t.anio))))
+  const elegidas = tiendas.data.filter((t) => t.activo && (q.anio === undefined || t.anio === q.anio) && (q.bloque === undefined || t.bloque === q.bloque));
+  // `0.10.8` (07d): `escala` lleva `F`, que sale de la composición y las curvas de las filas de la tienda. Solo se leen las de las aperturas con `V`
+  // (columnas completas, pero sin `historico`: las filas de tienda no lo traen) y una sola vez por tienda.
+  const fracciones = new Map<string, number | null>();
+  for (const t of elegidas) {
+    if (t.bloque !== "nuevas" || t.subbloque !== "aperturas" || t.venta_esperada_usada === null || fracciones.has(t.tienda_id)) continue;
+    const delaTienda = await leerFilasConAnios(d, id, { columnas: "completas", tiendaId: t.tienda_id, soloActivas: true });
+    if (delaTienda.error) return fallaDb(delaTienda.error, "proyección: leer las filas de la tienda");
+    const info = { codigo: "", nombre: "", fecha_apertura: t.fecha_usada, fecha_cierre: null, venta_esperada: t.venta_esperada_usada, referente_codigo: null };
+    const rampa = Array.isArray(t.rampa) ? (t.rampa as unknown[]).map(Number) : parametros.rampa_maduracion;
+    fracciones.set(t.tienda_id, fraccionDeTienda(delaTienda.data.map((f) => aFilaModelo(f, b.k, b.p.anio_en_curso)), info, rampa));
+  }
+  const salida = elegidas
+    .map((t) => aTiendaApi(t, [], b.catalogo, parametros, b.p, resumenes.get(claveTiendaAnio(t.tienda_id, t.anio)), fracciones.get(t.tienda_id)))
     .sort((x, y) => x.anio - y.anio || x.codigo.localeCompare(y.codigo, "es"));
   const resumen = b.p.resumen as unknown as ResumenProyeccion | null;
   return listo({ tiendas: salida, perfiles_apertura: resumen?.perfiles_apertura ?? [] });

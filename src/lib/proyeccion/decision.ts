@@ -1,5 +1,6 @@
 import { partesDeFecha } from "./calendario";
 import { avisosColaLarga } from "./cola-larga";
+import type { CrecimientoDeFila } from "./crecimientos";
 import { curvaCambio, detalleCambioCurva } from "./curva-fila";
 import { explicar, textoCurva } from "./explicar";
 import { UNOS } from "./nino";
@@ -14,6 +15,7 @@ import {
   proponerFilaTienda,
   rampaMensual,
   sumaCurva,
+  sumaSConCurva,
   unidadesMadurasDeFila,
   type FilaEscalable,
 } from "./tiendas-nuevas";
@@ -58,8 +60,12 @@ export type ContextoModelo = {
   /** Tiendas en `M(Y+1)` (las nuevas de `Y` entre ellas pasan a la base del año siguiente). */
   mismasSiguiente: ReadonlySet<string>;
   tiendas: ReadonlyMap<string, InfoTienda>;
-  /** `g` efectivo de la fila base del año siguiente (por `claveBase`); sin esto, el de la proyección. */
-  crecimientoDe?: (claveBase: string) => number;
+  /**
+   * `0.10.8` (07c): el `g` efectivo (bruto) de la fila base del año siguiente por `claveBase`: % propio de la fila > celda GM > Resto. Con
+   * `pctFila` explícito (aunque sea `null`) usa ese % propio; sin él, el guardado en la fila. Sin esto, el Resto
+   * (`crecimiento_pct_defecto`). Lo arma `crearCrecimientoDe` (`crecimientos.ts`).
+   */
+  crecimientoDe?: (claveBase: string, pctFila?: number | null) => CrecimientoDeFila;
   /** Nombre de la proyección cerrada usada como plan anterior (para la explicación). */
   planAnteriorNombre?: string | null;
 };
@@ -105,7 +111,12 @@ export type BaseRegistro = Pick<
   | "explicacion"
   | "avance"
   | "avisos"
-> & { crecimiento_pct?: number | null };
+> & {
+  crecimiento_pct?: number | null;
+  /** `0.10.8` (07c): `B` y `B''` de una fila base de `Y+1` (nulos en el resto de los registros). */
+  base_siguiente?: number | null;
+  base_normalizada?: number | null;
+};
 
 const iguales = (a: readonly number[] | null, b: readonly number[] | null): boolean =>
   a !== null && b !== null && a.length === b.length && a.every((v, i) => v === b[i]);
@@ -163,6 +174,8 @@ export function armarRegistro(base: BaseRegistro, previa: DecisionPrevia | null 
     referencia_tres_meses: base.referencia_tres_meses,
     explicacion: base.explicacion,
     crecimiento_pct: previa?.crecimiento_pct ?? base.crecimiento_pct ?? null,
+    base_siguiente: base.base_siguiente ?? null,
+    base_normalizada: base.base_normalizada ?? null,
     decidido,
     origen: decidido === null ? null : (previa?.origen ?? "manual"),
     propuesta_al_decidir: decidido === null ? null : (previa?.propuesta_al_decidir ?? base.propuesto),
@@ -261,7 +274,11 @@ export function recalcularBaseSiguiente(
     if (total > 0) detalleAportes.push({ tienda: ctx.tiendas.get(s.tienda_id)?.codigo ?? s.tienda_id, total, signo: -1 });
   }
 
-  const g = anterior?.crecimiento_pct ?? ctx.crecimientoDe?.(claveBaseDe(base.clave)) ?? ctx.crecimiento_pct_defecto;
+  // Método 4: el % (fila > celda GM > Resto) es bruto sobre `B`.
+  const efectivo: CrecimientoDeFila = ctx.crecimientoDe
+    ? ctx.crecimientoDe(claveBaseDe(base.clave), anterior ? anterior.crecimiento_pct : undefined)
+    : { pct: anterior?.crecimiento_pct ?? ctx.crecimiento_pct_defecto, origen: anterior?.crecimiento_pct != null ? "fila" : "resto", gm: null, celda: null };
+  const g = efectivo.pct;
   const resultado = proponerSiguiente({
     baseVigente: regY.vigente,
     mesesBase: regY.meses,
@@ -290,6 +307,9 @@ export function recalcularBaseSiguiente(
     baseVigente: regY.vigente,
     baseTotal: resultado.base,
     baseNormalizada: resultado.base_normalizada,
+    temporada: base.temporada,
+    tiendasSiguiente: ctx.mismasSiguiente.size,
+    crecimientoOrigen: { origen: efectivo.origen, celda: efectivo.celda },
     crecimiento: g,
     aportes: detalleAportes,
     baseColaLarga: base.historico?.cola_larga?.veredicto === "revision" && regY.decidido === null ? (base.historico.cola_larga.demanda_corregida ?? null) : null,
@@ -309,6 +329,9 @@ export function recalcularBaseSiguiente(
       avance: null,
       avisos,
       crecimiento_pct: null,
+      // `null` sin base o sin curva (`propuesto = null`).
+      base_siguiente: resultado.propuesto === null || resultado.base === null ? null : Math.round(resultado.base),
+      base_normalizada: resultado.propuesto === null || resultado.base_normalizada === null ? null : Math.round(resultado.base_normalizada * 100) / 100,
     },
     anterior,
     {
@@ -435,25 +458,63 @@ export function fraccionDeTienda(filas: readonly FilaModelo[], info: InfoTienda 
 }
 
 /**
- * `Md_f = E × s_f ÷ (p_f × F)` de cada fila de UNA tienda con una rampa dada, y su suma (`unidades_maduras` de la tienda). `F` se
- * rehace con esa rampa: las unidades maduras guardadas pueden ser de otra. `null` sin venta esperada (`E`).
+ * `Md_f = 12 V s_f ÷ (p_f × Σ s_f con curva)` de cada fila de UNA tienda, y su suma (`unidades_maduras` de la tienda). `F` solo se muestra: la
+ * rampa mueve el total vía `A_f` y no vía `Md_f`. `null` sin venta esperada (`V`).
  */
 export function unidadesMadurasDeTienda(
   filas: readonly FilaModelo[],
   info: InfoTienda | undefined,
   rampa: readonly number[]
 ): { fraccion: number | null; total: number | null; porFila: Map<string, number> } {
-  const E = info?.venta_esperada ?? null;
+  const V = info?.venta_esperada ?? null;
   const fraccion = fraccionDeTienda(filas, info, rampa);
   const porFila = new Map<string, number>();
-  if (E === null) return { fraccion, total: null, porFila };
+  if (V === null) return { fraccion, total: null, porFila };
+  const suma = sumaSConCurva(filas.flatMap((f) => (f.composicion && f.curva ? [{ s: f.composicion.s, curva: f.curva }] : [])));
   let total = 0;
   for (const f of filas) {
-    const md = f.composicion && f.curva && fraccion !== null ? unidadesMadurasDeFila({ E, s: f.composicion.s, p: f.composicion.p, F: fraccion }) : 0;
+    const md = f.composicion && f.curva ? unidadesMadurasDeFila({ V, s: f.composicion.s, p: f.composicion.p, sumaSConCurva: suma }) : 0;
     porFila.set(f.clave, md);
     total += md;
   }
   return { fraccion, total, porFila };
+}
+
+/**
+ * `0.10.8` (07c §2.4): el % (bruto) con que se explica una tienda `maduro_propio` en `anio`. Si todas sus filas comparten el mismo % y
+ * origen, ese; si no, el ponderado `Σ w_f g_f ÷ Σ w_f` con `w_f = A^b_f × Σ_{Y+1} c r`. `null` si la tienda no tiene filas `maduro_propio`.
+ */
+export function crecimientoDeTienda(
+  filas: readonly FilaModelo[],
+  anio: number,
+  info: InfoTienda | undefined,
+  rampa: readonly number[] | null,
+  ctx: ContextoModelo
+): { pct: number; origen: CrecimientoDeFila["origen"]; celda: string | null; ponderado: boolean } | null {
+  const items: { w: number; e: CrecimientoDeFila }[] = [];
+  const rampaUsada = rampaDeTienda(info, rampa, ctx);
+  for (const f of filas) {
+    const r = registroDe(f, anio);
+    const regY = registroDe(f, ctx.anio);
+    if (!r || r.metodo !== "maduro_propio" || !regY || f.tienda_id === null || !f.curva) continue;
+    const e: CrecimientoDeFila = ctx.crecimientoDe
+      ? ctx.crecimientoDe(claveBaseDe(f.clave))
+      : { pct: ctx.crecimiento_pct_defecto, origen: "resto", gm: null, celda: null };
+    const ab = maduroDeVigente({ vigente: regY.vigente, curva: f.curva, rampa: pesosDeTienda(info, "nuevas", rampaUsada, ctx.anio), phi: f.factores_mes?.[ctx.anio] ?? UNOS });
+    const w = (ab ?? 0) * sumaCurva(f.curva, pesosDeTienda(info, "nuevas", rampaUsada, anio), null, 0, 12);
+    items.push({ w, e });
+  }
+  if (items.length === 0) return null;
+  const suma = items.reduce((a, x) => a + x.w, 0);
+  // Una fila sin peso (su total maduro es 0) no mueve la cifra: no cuenta para decidir si todas comparten el mismo %.
+  const con = suma > 0 ? items.filter((x) => x.w > 0) : items;
+  const primero = con[0].e;
+  if (con.every((x) => x.e.pct === primero.pct && x.e.origen === primero.origen)) {
+    // El mismo % y el mismo origen; si vienen de celdas distintas, ninguna celda en particular.
+    return { pct: primero.pct, origen: primero.origen, celda: con.every((x) => x.e.celda === primero.celda) ? primero.celda : null, ponderado: false };
+  }
+  const pct = suma > 0 ? items.reduce((a, x) => a + x.w * x.e.pct, 0) / suma : items.reduce((a, x) => a + x.e.pct, 0) / items.length;
+  return { pct, origen: "celda", celda: null, ponderado: true };
 }
 
 /**
@@ -467,18 +528,19 @@ export function recalcularFilasTienda(
   rampa: readonly number[] | null,
   ctx: ContextoModelo
 ): FilaModelo[] {
-  // `F` depende de la rampa: se rehace con la rampa efectiva de la tienda (las unidades maduras guardadas pueden ser de otra rampa).
-  const fraccionPorTienda = new Map<string, number | null>();
+  // `0.10.8`: `Md_f` ya no depende de `F` (ni de la rampa): solo del `s_f` normalizado a las filas con curva de la tienda.
+  const sumaPorTienda = new Map<string, number>();
   return filas.map((fila) => {
     const registro = registroDe(fila, anio);
     if (!registro || fila.tienda_id === null || registro.bloque === "cierres") return fila;
     const info = ctx.tiendas.get(fila.tienda_id);
     const rampaUsada = rampaDeTienda(info, rampa, ctx);
     const tiendaId = fila.tienda_id;
-    if (!fraccionPorTienda.has(tiendaId)) fraccionPorTienda.set(tiendaId, fraccionDeTienda(filas.filter((x) => x.tienda_id === tiendaId), info, rampaUsada));
-    const F = fraccionPorTienda.get(tiendaId) ?? null;
-    const E = info?.venta_esperada ?? null;
-    const maduras = E === null ? null : fila.composicion && fila.curva && F !== null ? unidadesMadurasDeFila({ E, s: fila.composicion.s, p: fila.composicion.p, F }) : 0;
+    if (!sumaPorTienda.has(tiendaId)) {
+      sumaPorTienda.set(tiendaId, sumaSConCurva(filas.filter((x) => x.tienda_id === tiendaId).flatMap((x) => (x.composicion && x.curva ? [{ s: x.composicion.s, curva: x.curva }] : []))));
+    }
+    const V = info?.venta_esperada ?? null;
+    const maduras = V === null ? null : fila.composicion && fila.curva ? unidadesMadurasDeFila({ V, s: fila.composicion.s, p: fila.composicion.p, sumaSConCurva: sumaPorTienda.get(tiendaId) ?? 0 }) : 0;
     const r = pesosDeTienda(info, "nuevas", rampaUsada, anio);
     const phi = fila.factores_mes?.[anio] ?? UNOS;
     const esY = anio === ctx.anio;
@@ -490,7 +552,7 @@ export function recalcularFilasTienda(
       const rY = pesosDeTienda(info, "nuevas", rampaUsada, ctx.anio);
       maduroPrevio = maduroDeVigente({ vigente: regY.vigente, curva: fila.curva, rampa: rY, phi: fila.factores_mes?.[ctx.anio] ?? UNOS });
     }
-    const g = ctx.crecimientoDe?.(claveBaseDe(fila.clave)) ?? ctx.crecimiento_pct_defecto;
+    const g = ctx.crecimientoDe?.(claveBaseDe(fila.clave)).pct ?? ctx.crecimiento_pct_defecto;
     const resultado = proponerFilaTienda({
       esAnioEnCurso: esY,
       k: esY ? ctx.k : 0,

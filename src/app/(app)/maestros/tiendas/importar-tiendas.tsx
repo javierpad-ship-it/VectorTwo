@@ -21,6 +21,7 @@ import { BotonesImportar, PasoMapeo } from "@/components/importador/paso-mapeo";
 import { Muestra, TablaDuplicadas, TablaErrores, Tarjeta, descripcionTotales, separarOmitidas } from "@/components/importador/reporte";
 import { formatearNumero, plural } from "@/lib/formato";
 import { causaSinCreaciones } from "@/lib/tiendas/mensajes";
+import { AYUDA_VENTA_MENSUAL } from "./venta-esperada";
 
 type Campo = keyof FilaImportacionTienda;
 
@@ -43,11 +44,11 @@ const CAMPOS: CampoImportador<Campo>[] = [
   { campo: "fecha_cierre", etiqueta: "Fecha de cierre", alias: ["FECHA_CIERRE", "CIERRE", "FECHA_FIN", "FIN"], opcional: true, hint: NOTA_OPCIONAL },
   {
     campo: "venta_esperada",
-    etiqueta: "Venta esperada del año de apertura",
-    // Sin alias de venta mensual o promedio (VENTA_MENSUAL, VENTA_PROM): un Excel mensual se cargaría en silencio como venta anual.
-    alias: ["VENTA_ESPERADA", "VENTA_ESPERADA_PROMEDIO", "VENTA_ESPERADA_ANIO_APERTURA", "VENTA_APERTURA"],
+    etiqueta: "Venta mensual promedio esperada",
+    // Solo alias de venta MENSUAL: un Excel con una columna de venta anual se cargaría 12 veces de más.
+    alias: ["VENTA_ESPERADA", "VENTA_ESPERADA_PROMEDIO", "VENTA_MENSUAL", "VENTA_PROMEDIO_MENSUAL"],
     opcional: true,
-    hint: `S/ sin IGV que la tienda venderá desde que abre hasta el 31 de diciembre de ese año (no es mensual ni de tienda madura). ${NOTA_OPCIONAL}`,
+    hint: `${AYUDA_VENTA_MENSUAL} ${NOTA_OPCIONAL}`,
   },
   {
     campo: "tienda_referencia",
@@ -82,7 +83,7 @@ const COLUMNAS_FILA: ColumnaOmitida<FilaOmitidaTienda>[] = [
   { clave: "razon_social", titulo: "Razón social", valor: (f) => f.razon_social },
   { clave: "fecha_apertura", titulo: "Apertura", valor: (f) => f.fecha_apertura },
   { clave: "fecha_cierre", titulo: "Cierre", valor: (f) => f.fecha_cierre },
-  { clave: "venta_esperada", titulo: "Venta esperada", valor: (f) => f.venta_esperada },
+  { clave: "venta_esperada", titulo: "Venta mensual esperada", valor: (f) => f.venta_esperada },
   { clave: "tienda_referencia", titulo: "Referente", valor: (f) => f.tienda_referencia ?? "" },
 ];
 

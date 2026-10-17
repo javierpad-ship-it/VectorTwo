@@ -5,11 +5,14 @@ import { indiceMes, partesDeFecha } from "./calendario";
 import { proponerCierre, pruebaPorAvance } from "./cierre";
 import { proponerCierreTienda } from "./cierres-tienda";
 import { composicionPromedio, composicionTienda, tieneHistoria, type ComposicionTienda, type HechoTiendaFila } from "./composicion";
+import { claveGM, crearCrecimientoDe, MATRIZ_SIN_CELDAS } from "./crecimientos";
+import { huellaDeMatriz } from "./huellas-crecimientos";
 import { aColaLargaApi, avisosColaLarga, disponibilidadFila, proponerPorDemandaCorregida, type FilaDisponibilidad } from "./cola-larga";
 import { curvaFila, type ResultadoCurvaFila } from "./curva-fila";
 import {
   aplicarDecisionTienda,
   armarRegistro,
+  crecimientoDeTienda,
   pesosDeTienda,
   recalcularBaseSiguiente,
   registroDe,
@@ -28,14 +31,17 @@ import {
   mesesCompletos,
   perfilApertura,
   proponerFilaTienda,
+  sumaSConCurva,
   unidadesMadurasDeFila,
   unidadesMadurasEntero,
+  ventaAnioApertura,
 } from "./tiendas-nuevas";
 import {
   claveBaseDe,
   claveFila,
   SIN_PREVIAS,
   UMBRAL_APERTURA_TARDIA,
+  VENTA_ESPERADA_RANGO,
   VERSION_METODO,
   type AvisoFila,
   type ColaLargaApi,
@@ -158,6 +164,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
   const umbralCola = e.parametros.umbral_cola_larga;
   const umbralDisponibilidad = e.parametros.umbral_disponibilidad;
   const gDefecto = e.parametros.crecimiento_pct_defecto;
+  const matriz = e.crecimientos ?? MATRIZ_SIN_CELDAS;
 
   // ── 0. Bloques de tiendas ──
   const claves = clavesPertenencia(e.tiendas, Y);
@@ -315,7 +322,16 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     nombresCurva,
     mismasSiguiente,
     tiendas: infoTiendas,
-    crecimientoDe: (cb) => previas.filas.get(`${cb}#${Y1}`)?.crecimiento_pct ?? gDefecto,
+    // 0.10.8 (07c): fila con % propio > celda género × mundo > Resto (`crecimiento_pct_defecto`), todo bruto.
+    crecimientoDe: crearCrecimientoDe({
+      matriz,
+      resto: gDefecto,
+      gmDe: (gml) => {
+        const n = nodos.get(gml);
+        return n ? { genero_id: n.genero_id, mundo_id: n.mundo_id, nombre: `${n.genero} · ${n.mundo}` } : undefined;
+      },
+      pctFilaDe: (cb) => previas.filas.get(`${cb}#${Y1}`)?.crecimiento_pct,
+    }),
     planAnteriorNombre: planNombre,
   };
 
@@ -433,7 +449,19 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
   };
 
   // Estado por (tienda, año): filas y método.
-  const estadoTienda = new Map<string, { filas: FilaModelo[]; metodo: Metodo; plan: PlanTienda | null; unidadesMaduras: number | null; avisos: Set<AvisoFila>; maduro: number | null; vendidoNormalizado: number | null; fraccion: number | null; anioMaduro: number | null }>();
+  const estadoTienda = new Map<string, { filas: FilaModelo[]; metodo: Metodo; plan: PlanTienda | null; unidadesMaduras: number | null; avisos: Set<AvisoFila>; maduro: number | null; vendidoNormalizado: number | null; fraccion: number | null; anioMaduro: number | null; ventaApertura: number | null }>();
+
+  /** Venta anual media en soles de una tienda de la red (media de `total_S` de las composiciones `W12` de las mismas tiendas de `Y`), o `null`. */
+  let ventaAnualRed: number | null | undefined;
+  const ventaAnualMediaRed = (): number | null => {
+    if (ventaAnualRed !== undefined) return ventaAnualRed;
+    const totales = e.tiendas
+      .filter((t) => esMisma(t, Y) && porTienda.has(t.id))
+      .map((t) => composicionCacheada(t.id).total_S)
+      .filter((x) => x > 0);
+    ventaAnualRed = totales.length > 0 ? totales.reduce((a, b) => a + b, 0) / totales.length : null;
+    return ventaAnualRed;
+  };
 
   const procesarTienda = (t: TiendaProy, z: number) => {
     const c = clasificarTienda(t, z);
@@ -444,11 +472,12 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     const comp = plan ? (plan.comp.get(z) ?? null) : null;
     const info = infoTiendas.get(t.id) as InfoTienda;
     const rampa = plan?.rampa ?? [...e.parametros.rampa_maduracion];
-    const E = t.venta_esperada;
+    // `V`: venta MENSUAL promedio esperada, en régimen y sin IGV (07d, método 4).
+    const V = t.venta_esperada;
     const avisosT = new Set<AvisoFila>(plan?.avisos ?? []);
     const filasDeEstaTienda: FilaModelo[] = [];
     let metodoTienda: Metodo = "sin_propuesta";
-    let unidadesMaduras: number | null = E === null ? null : 0;
+    let unidadesMaduras: number | null = V === null ? null : 0;
     // Total maduro `A` de la tienda (suma de sus filas) y el `V'` normalizado del que sale, para la frase (regla 27).
     let maduroTienda: number | null = null;
     let vendidoNormTienda: number | null = null;
@@ -464,11 +493,14 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       });
       if (hayVenta) claves.add(clave);
     }
-    // `0.10.1` (decisión 22): `E` son los soles del AÑO de apertura. `F = Σ_f s_f A_f` con `A_f = Σ_{m∈Z_0} c_m r_m φ_m` (solo filas con curva).
+    // `0.10.8` (07d): `S = 12 V` se estacionaliza en los meses abiertos. `s̃_f = s_f ÷ Σ s con curva`, `A_f = Σ_{m∈Z_0} c_m r_m φ_m` y
+    // `F = Σ_f s̃_f A_f` (solo se muestra y avisa). Una fila sin curva no se puede estacionalizar: queda sin propuesta y fuera de `s̃`.
     let fraccion: number | null = null;
     let anioMaduro: number | null = null;
+    let ventaApertura: number | null = null;
+    let sumaS = 0;
     const conCurva = new Set<string>();
-    if (E !== null && comp && c.bloque === "nuevas" && t.fecha_apertura) {
+    if (V !== null && comp && c.bloque === "nuevas" && t.fecha_apertura) {
       const z0 = partesDeFecha(t.fecha_apertura).anio;
       const rZ0 = pesosDeTienda(info, "nuevas", rampa, z0);
       const filasF: { s: number; curva: number[]; phi: readonly number[] }[] = [];
@@ -480,14 +512,19 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
         filasF.push({ s: cf.s, curva: u.curva, phi: phiDe(u, z0) });
       }
       fraccion = fraccionAnioApertura(filasF, rZ0);
-      anioMaduro = anioMaduroSoles(E, fraccion);
+      sumaS = sumaSConCurva(filasF);
+      anioMaduro = anioMaduroSoles(V);
+      ventaApertura = ventaAnioApertura(V, fraccion);
       if (filasF.length > 0 && fraccion < UMBRAL_APERTURA_TARDIA) avisosT.add("apertura_tardia");
+      // Informativo: `12 V` fuera de `[0,3, 3]` veces la venta anual media de una tienda de la red.
+      const media = V > 0 ? ventaAnualMediaRed() : null;
+      if (media !== null && (anioMaduro < VENTA_ESPERADA_RANGO.min * media || anioMaduro > VENTA_ESPERADA_RANGO.max * media)) avisosT.add("venta_esperada_fuera_de_rango");
     }
     const maduras = (f: { fila: string; s: number; p: number } | undefined): number | null => {
-      if (E === null) return null;
-      return f && fraccion !== null && conCurva.has(f.fila) ? unidadesMadurasDeFila({ E, s: f.s, p: f.p, F: fraccion }) : 0;
+      if (V === null) return null;
+      return f && conCurva.has(f.fila) ? unidadesMadurasDeFila({ V, s: f.s, p: f.p, sumaSConCurva: sumaS }) : 0;
     };
-    if (E !== null && comp) unidadesMaduras = comp.filas.reduce((s, f) => s + (maduras(f) ?? 0), 0);
+    if (V !== null && comp) unidadesMaduras = comp.filas.reduce((s, f) => s + (maduras(f) ?? 0), 0);
 
     for (const clave of [...claves].sort()) {
       const a = bases.get(clave);
@@ -532,7 +569,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
         if (!esY && c.subbloque === "nuevas_anterior" && regY) {
           maduroPrevio = maduroDeVigente({ vigente: regY.vigente, curva: u.curva, rampa: pesosDeTienda(info, "nuevas", rampa, Y), phi: phiDe(u, Y) });
         }
-        const g = ctxModelo.crecimientoDe?.(clave) ?? gDefecto;
+        const g = ctxModelo.crecimientoDe?.(clave).pct ?? gDefecto;
         const res = proponerFilaTienda({
           esAnioEnCurso: esY,
           k: esY ? k : 0,
@@ -581,7 +618,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       registrar(fila, reg);
       filasDeEstaTienda.push(fila);
     }
-    estadoTienda.set(`${t.id}#${z}`, { filas: filasDeEstaTienda, metodo: metodoTienda, plan, unidadesMaduras, avisos: avisosT, maduro: maduroTienda, vendidoNormalizado: vendidoNormTienda, fraccion, anioMaduro });
+    estadoTienda.set(`${t.id}#${z}`, { filas: filasDeEstaTienda, metodo: metodoTienda, plan, unidadesMaduras, avisos: avisosT, maduro: maduroTienda, vendidoNormalizado: vendidoNormTienda, fraccion, anioMaduro, ventaApertura });
   };
 
   const tiendasConBloque = e.tiendas.filter((t) => ["nuevas", "cierres"].includes(clasificarTienda(t, Y).bloque) || ["nuevas", "cierres"].includes(clasificarTienda(t, Y1).bloque));
@@ -597,6 +634,8 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     let origen: "propuesta" | "manual" | null = null;
     const avisos = new Set<AvisoFila>(st.avisos);
     if (st.unidadesMaduras !== null && unidadesMadurasEntero(st.unidadesMaduras) === null) avisos.add("cifra_excesiva");
+    // 07d: abre y cierra dentro de `Y+1`: no se proyecta (sin filas) y un total que se escriba no llega a la Matriz ni a M8.
+    if (c.bloque === "cierres" && z === Y1 && t.fecha_apertura && partesDeFecha(t.fecha_apertura).anio === Y1) avisos.add("apertura_y_cierre");
     if (previa && previa.decidido !== null) {
       const r = aplicarDecisionTienda({
         filas: st.filas,
@@ -623,6 +662,8 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     const curvasDeLaTienda = [...new Set(filas.map((f) => textoCurvaDe(unidadDe(f.gml_id, f.equivalencia_id) as CtxUnidad)).filter((x): x is string => x !== null))];
     const info = infoTiendas.get(t.id) as InfoTienda;
     const metodo = c.bloque === "cierres" ? "cierre" : st.metodo;
+    // El % (bruto) con que se explica una tienda `maduro_propio`: el efectivo de sus combinaciones, no el de la proyección.
+    const crecTienda = c.bloque === "nuevas" && metodo === "maduro_propio" ? crecimientoDeTienda(filas, z, info, st.plan?.rampa ?? null, ctxModelo) : null;
     const explicacion = explicar({
       metodo,
       anio: z,
@@ -646,7 +687,9 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       vendidoNormalizado: c.bloque === "nuevas" ? st.vendidoNormalizado : null,
       fraccionAnioApertura: c.bloque === "nuevas" ? st.fraccion : null,
       anioMaduroSoles: c.bloque === "nuevas" ? st.anioMaduro : null,
-      crecimiento: gDefecto,
+      ventaAnioApertura: c.bloque === "nuevas" ? st.ventaApertura : null,
+      crecimiento: crecTienda?.pct ?? gDefecto,
+      ...(crecTienda ? { crecimientoOrigen: { origen: crecTienda.origen, celda: crecTienda.celda }, crecimientoPonderado: crecTienda.ponderado } : {}),
     });
     tiendasModelo.push({
       tienda_id: t.id,
@@ -929,6 +972,14 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     perfiles,
     fueraBloque,
   });
+  // 07c: con qué matriz se calculó y a qué GM pertenecía cada nodo con filas base (para detectar `crecimientos_cambiados` sin leer filas).
+  resumen.huella_crecimientos = huellaDeMatriz(matriz, gDefecto);
+  const gm_gml: Record<string, string> = {};
+  for (const f of filasBaseFinal) {
+    const n = nodos.get(f.gml_id);
+    if (n) gm_gml[f.gml_id] = claveGM(n.genero_id, n.mundo_id);
+  }
+  resumen.gm_gml = gm_gml;
 
   return {
     bloques,

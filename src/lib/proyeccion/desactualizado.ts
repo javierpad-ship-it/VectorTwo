@@ -30,7 +30,7 @@ export type ProyeccionParaEstado = {
   hasta_periodo: string;
   recalculo_pendiente?: boolean;
   /** `version_metodo` ausente = no se sabe: no se marca. */
-  resumen: (Pick<ResumenProyeccion, "curvas_usadas"> & Partial<Pick<ResumenProyeccion, "version_metodo">>) | null;
+  resumen: (Pick<ResumenProyeccion, "curvas_usadas"> & Partial<Pick<ResumenProyeccion, "version_metodo" | "huella_crecimientos" | "gm_gml">>) | null;
   parametros: Pick<ParametrosProyeccion, "factores_usados" | "bloques">;
 };
 
@@ -44,7 +44,26 @@ export type EstadoActual = {
   factores: FactorProy[];
   /** Último `updated_at` de los periodos atípicos activos. */
   periodos_updated_at: string | null;
+  /** `0.10.8` (07c): la huella de la matriz de crecimientos de hoy y el GM (`genero_id|mundo_id`) vigente de cada nodo. Sin él no se comprueba. */
+  crecimientos?: CrecimientosActuales;
 };
+
+export type CrecimientosActuales = { huella: string; gm_por_nodo: ReadonlyMap<string, string> };
+
+/**
+ * `0.10.8` (07c): ¿la matriz de crecimientos guardada (celdas y Resto) ya no es la que aplicó el cálculo (`huella_crecimientos`), o algún nodo
+ * con filas base cambió de mundo (`gm_gml` ≠ catálogo vigente)? Una proyección sin `huella_crecimientos` (del método anterior) no se marca
+ * aquí: la cubre `version_metodo`.
+ */
+export function crecimientosCambiados(resumen: { huella_crecimientos?: string; gm_gml?: Record<string, string> } | null, actual: CrecimientosActuales | undefined): boolean {
+  if (!resumen || actual === undefined || typeof resumen.huella_crecimientos !== "string") return false;
+  if (resumen.huella_crecimientos !== actual.huella) return true;
+  for (const [gml, gm] of Object.entries(resumen.gm_gml ?? {})) {
+    const hoy = actual.gm_por_nodo.get(gml);
+    if (hoy !== undefined && hoy !== gm) return true;
+  }
+  return false;
+}
 
 
 /** `a` es posterior a `b` (instantes ISO; la base devuelve `+00:00` y el cálculo guarda `Z`, así que no se comparan como texto). */
@@ -132,6 +151,10 @@ export function motivosDesactualizada(p: ProyeccionParaEstado, actual: EstadoAct
   const version = p.resumen?.version_metodo;
   if (typeof version === "number" && version < VERSION_METODO) {
     motivos.push({ codigo: "version_metodo", mensaje: "Se calculó con una versión anterior del método: recalcula para aplicar el método nuevo (las decisiones se conservan)." });
+  }
+  // `0.10.8`: la matriz de crecimientos cambió sin recalcular (falló el recálculo encadenado) o un nodo cambió de mundo. No se puede forzar al cerrar.
+  if (crecimientosCambiados(p.resumen, actual.crecimientos)) {
+    motivos.push({ codigo: "crecimientos_cambiados", mensaje: "Cambiaron los crecimientos por género · mundo o el mundo de un nodo después de calcular: recalcula para aplicarlos." });
   }
   if (p.recalculo_pendiente) motivos.push({ codigo: "recalculo_pendiente", mensaje: "Cambiaste los parámetros: recalcula para verlos aplicados." });
   return motivos;
