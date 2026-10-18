@@ -78,6 +78,8 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["proyeccion_fila_anios_fila_anio_key", "Ese año ya existe en la fila; vuelve a cargar."],
   ["proyeccion_tiendas_proyeccion_tienda_anio_key", "Esa tienda ya está en la proyección para ese año; vuelve a cargar."],
   ["factores_volumen_atipico_anio_temporada_key", "Ya existe un factor para ese año y temporada."],
+  // M13 (0020). La API lo anticipa con la regla que choca; esto es la red de seguridad (carrera entre dos planners).
+  ["intercompany_reglas_clave_uniq", "Ya hay una regla de esa clave desde ese mes: edítala."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -108,6 +110,8 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["marcas_modalidad_sin_tratamiento", "La modalidad solo se guarda si la marca tiene tratamiento especial."],
   ["marcas_conjunto_no_propio", "Una marca no puede ser su propio conjunto."],
   ["marca_gml_especial_nota_len", "La nota no puede superar 200 caracteres."],
+  // M12 (0019). La API ya lo anticipa; esto es la red de seguridad.
+  ["marcas_resto_al_barrer_check", "La modalidad mixta exige tratamiento especial y modalidad por_gml."],
   // M6 paso 1. La API ya los valida con zod; esto es la red de seguridad.
   ["agrupaciones_estacionalidad_temporada", "La temporada debe ser invierno, verano o todo_el_ano."],
   ["periodos_atipicos_desde_dia1", "El mes inicial debe ser el primer día del mes."],
@@ -149,6 +153,12 @@ const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
   ["factores_volumen_atipico_ratio_aplicado", "El factor debe ser mayor que 0,05 y como máximo 3."],
   ["factores_volumen_atipico_nota_len", "La nota no puede superar 200 caracteres."],
   ["factores_volumen_atipico_", "El factor no cumple las reglas de la base."],
+  // M13 (0020). La API ya valida con zod; esto es la red de seguridad.
+  ["intercompany_reglas_vigente_desde", "La vigencia debe empezar el primer día de un mes."],
+  ["intercompany_reglas_cobertura_min", "El IMI mínimo no puede ser negativo."],
+  ["intercompany_reglas_cobertura_max", "El IMI máximo no puede ser negativo."],
+  ["intercompany_reglas_pct_directo", "El porcentaje directo debe estar entre 0 y 100."],
+  ["intercompany_reglas_nota_len", "La nota no puede superar 200 caracteres."],
   // Genéricos: cubren `*_codigo_len_check` y `*_nombre_len_check` de todas las tablas, incluidas tiendas.
   ["_codigo_len", "El código debe tener entre 1 y 40 caracteres."],
   ["_nombre_len", "El nombre debe tener entre 1 y 120 caracteres."],
@@ -350,6 +360,29 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     {
       eliminar: "No se puede eliminar la agrupación de estacionalidad: está en una proyección. Desactívala.",
       asignar: { status: 404, mensaje: "Agrupación de estacionalidad no encontrada." },
+    },
+  ],
+  // M13. La marca, el nodo y la equivalencia con reglas de intercompany no se eliminan (`restrict`); los handlers de catálogo no
+  // cuentan estas reglas, así que esta FK es lo que lo impide. Al guardar, un id que ya no existe responde 404.
+  [
+    "intercompany_reglas_marca_id_fkey",
+    {
+      eliminar: "No se puede eliminar la marca: tiene reglas de intercompany. Elimina esas reglas o desactívala.",
+      asignar: { status: 404, mensaje: "Marca no encontrada." },
+    },
+  ],
+  [
+    "intercompany_reglas_gml_id_fkey",
+    {
+      eliminar: "No se puede eliminar el nodo: tiene reglas de intercompany. Elimina esas reglas o desactívalo.",
+      asignar: { status: 404, mensaje: "Nodo género-mundo-línea no encontrado." },
+    },
+  ],
+  [
+    "intercompany_reglas_equivalencia_id_fkey",
+    {
+      eliminar: "No se puede eliminar la equivalencia: tiene reglas de intercompany. Elimina esas reglas o desactívala.",
+      asignar: { status: 404, mensaje: "Equivalencia no encontrada." },
     },
   ],
   // Las cargas nunca se eliminan (cambian de estado); la FK es la red de seguridad.

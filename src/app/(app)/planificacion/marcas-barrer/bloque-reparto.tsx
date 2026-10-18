@@ -312,7 +312,7 @@ export function BloqueReparto({
                 </>
               )}
             </p>
-            {analisis.obsoleto.length > 0 && <p className="mt-1 text-alerta">Está obsoleto porque {textoObsoleto(analisis.obsoleto)}. No se recalcula solo: apruébalo de nuevo cuando quieras.</p>}
+            {analisis.obsoleto.length > 0 && <p className="mt-1 text-alerta">Está obsoleto porque {textoObsoleto(analisis.obsoleto, v.diferencia_pp)}. No se recalcula solo: apruébalo de nuevo cuando quieras.</p>}
           </div>
         ) : (
           <p className="text-sm text-alerta">Esta marca todavía no tiene reparto aprobado: sus lotes quedarán con aviso «sin reparto» en el flujo.</p>

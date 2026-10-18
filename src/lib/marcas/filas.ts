@@ -88,11 +88,15 @@ export function armarFilasMarcas(
  * Lo de 02b es configuración de planificación: el comprador (que no edita
  * maestros) no lo ve (pregunta 9 de la ficha). Se devuelve con valores neutros
  * para no romper el contrato de `MarcaFila`: modalidad, conjunto y GML quedan
- * como si la marca no los tuviera, y la unidad es ella misma.
+ * como si la marca no los tuviera, y la unidad es ella misma. `tratamiento_especial` y `nota_tratamiento` también son configuración
+ * de planificación (si la marca se trata aparte y por qué): el comprador los recibe en `false` y `null`. Ninguna pantalla del
+ * comprador los lee (las de marcas son de Maestros, solo planificación).
  */
 export function sinConfiguracionDePlanificacion(fila: MarcaFila): MarcaFila {
   return {
     ...fila,
+    tratamiento_especial: false,
+    nota_tratamiento: null,
     modalidad_tratamiento: null,
     modalidad_efectiva: null,
     gml_asignados: 0,

@@ -30,6 +30,7 @@ import {
   leerColaLargaDeFilas,
   leerNivelesProyectados,
   leerNombresDeAnio,
+  leerParticipacionesBase,
   leerTiendasProyeccion,
   leerVentaTanda,
   listarProyeccionesDb,
@@ -62,6 +63,7 @@ import {
   type DatosPrerrequisitos,
 } from "./desactualizado";
 import { armarFilasCerradas } from "./mensual";
+import { leerParticipaciones } from "./participaciones";
 import {
   aPrevias,
   payloadAnioCalculo,
@@ -122,6 +124,7 @@ import {
   type PlanAnterior,
   type PreviasCalculo,
   type ProyeccionApi,
+  type Participaciones,
   type RespuestaCerradaApi,
   type RespuestaProyeccionApi,
   type ResumenProyeccion,
@@ -1133,16 +1136,9 @@ export async function sincronizarFactores(actor: Actor): Promise<Salida<FactorAp
  */
 export async function leerProyeccionCerrada(anio: number): Promise<Salida<RespuestaCerradaApi>> {
   const d = db();
-  let cubre: "en_curso" | "siguiente" = "en_curso";
-  let r = await leerCerradaDeAnio(d, anio);
-  if (r.error) return fallaDb(r.error, "proyección: leer la cerrada");
-  if (!r.data) {
-    cubre = "siguiente";
-    r = await leerCerradaDeAnio(d, anio - 1);
-    if (r.error) return fallaDb(r.error, "proyección: leer la cerrada");
-  }
-  const cerrada = r.data;
-  if (!cerrada) return fallaMensaje(`No hay una proyección cerrada que cubra ${anio}.`, 404, "sin_cerrada");
+  const c = await buscarCerrada(d, anio);
+  if (c.respuesta) return falla(c.respuesta);
+  const { cerrada, cubre } = c.data;
 
   const catalogo = await cargarContextoCatalogo(d);
   if (catalogo.respuesta) return falla(catalogo.respuesta);
@@ -1160,6 +1156,48 @@ export async function leerProyeccionCerrada(anio: number): Promise<Salida<Respue
     bloques: parametros.bloques,
     filas: armarFilasCerradas(planas, [anio]),
   });
+}
+
+/** La `cerrada` que cubre `anio` (la de ese año o, si no hay, la del anterior) y cómo lo cubre; `404 sin_cerrada` si ninguna. */
+async function buscarCerrada(d: Db, anio: number): Promise<Salida<{ cerrada: ProyeccionDb; cubre: "en_curso" | "siguiente" }>> {
+  let cubre: "en_curso" | "siguiente" = "en_curso";
+  let r = await leerCerradaDeAnio(d, anio);
+  if (r.error) return fallaDb(r.error, "proyección: leer la cerrada");
+  if (!r.data) {
+    cubre = "siguiente";
+    r = await leerCerradaDeAnio(d, anio - 1);
+    if (r.error) return fallaDb(r.error, "proyección: leer la cerrada");
+  }
+  if (!r.data) return fallaMensaje(`No hay una proyección cerrada que cubra ${anio}.`, 404, "sin_cerrada");
+  return listo({ cerrada: r.data, cubre });
+}
+
+/** Las participaciones de una fila base de la cerrada (lectura ligera de M13, sin armar la respuesta completa de M8). */
+export type ParticipacionesBaseCerrada = {
+  anio_pedido: number;
+  cubre: "en_curso" | "siguiente";
+  /** Una por fila base activa con `participaciones` y con algún registro activo del año pedido; NUNCA filas de tienda. */
+  filas: { gml_id: string; participaciones: Participaciones }[];
+};
+
+/**
+ * Lectura LIGERA de la cerrada para decidir `aplicable` en M13: misma cerrada y mismas filas base con participaciones que entrega
+ * `leerProyeccionCerrada` (mismo criterio: fila activa, de ese año, sin tienda), pero sin catálogo, sin años ni columnas de más,
+ * paginada de a 1 000 y sin filas de tienda. `404 sin_cerrada` si ninguna cubre el año. Solo lectura.
+ */
+export async function leerParticipacionesDeCerrada(anio: number): Promise<Salida<ParticipacionesBaseCerrada>> {
+  const d = db();
+  const c = await buscarCerrada(d, anio);
+  if (c.respuesta) return falla(c.respuesta);
+  const filas = await leerParticipacionesBase(d, c.data.cerrada.id);
+  if (filas.error) return fallaDb(filas.error, "proyección: leer las participaciones de la cerrada");
+  const salida: ParticipacionesBaseCerrada["filas"] = [];
+  for (const f of filas.data) {
+    if (!f.proyeccion_fila_anios.some((a) => a.activo && a.anio === anio)) continue;
+    const participaciones = leerParticipaciones(f.participaciones);
+    if (participaciones) salida.push({ gml_id: f.gml_id, participaciones });
+  }
+  return listo({ anio_pedido: anio, cubre: c.data.cubre, filas: salida });
 }
 
 async function cargarContextoCatalogo(d: Db) {

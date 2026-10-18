@@ -32,6 +32,7 @@ import {
   textoErrorReparto,
   textoEstadoReparto,
   textoGmlConVenta,
+  textoObsoleto,
   textoResumenLista,
   TONO_VEREDICTO_ERROR,
   type ClaveOrdenLista,
@@ -149,7 +150,13 @@ export function ListaMarcas({
       titulo: "Estado",
       render: (m) => {
         const e = textoEstadoReparto({ vigente: m.vigente !== null, obsoleto: m.obsoleto, diferenciaPp: m.diferencia_pp });
-        return <Badge tono={e.tono}>{e.texto}</Badge>;
+        return m.vigente !== null && m.obsoleto.length > 0 ? (
+          <span title={`${m.nombre}: ${textoObsoleto(m.obsoleto, m.diferencia_pp)}`}>
+            <Badge tono={e.tono}>{e.texto}</Badge>
+          </span>
+        ) : (
+          <Badge tono={e.tono}>{e.texto}</Badge>
+        );
       },
     },
     {

@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables } from "@/lib/supabase/database.types";
 import { leerEquivalencias } from "@/lib/arbol/consultas";
 import { compararNombre } from "@/lib/arbol/armar-arbol";
-import { traducirErrorDb } from "@/lib/api/errores-db";
+import { CODIGO_UNICO, traducirErrorDb } from "@/lib/api/errores-db";
 import { curvaFila } from "@/lib/proyeccion/curva-fila";
 import { factoresMes } from "@/lib/proyeccion/nino";
 import { cargarContextoCalculo, type ContextoCalculo } from "@/lib/proyeccion/contexto";
@@ -474,7 +474,7 @@ export async function aprobarReparto(d: Db, marcaId: string, cuerpo: AprobarRepa
     aprobada_at: new Date().toISOString(),
   });
   if (insertada.error || !insertada.data) {
-    if (insertada.error?.code === "23505") {
+    if (insertada.error?.code === CODIGO_UNICO) {
       return fallaMensaje("Otra persona aprobó un reparto de esta marca al mismo tiempo. Vuelve a cargar el análisis.", 409, "huella_cambiada");
     }
     return fallaDb(insertada.error as NonNullable<typeof insertada.error>, "marcas al barrer: guardar la versión");
@@ -502,11 +502,15 @@ export async function aprobarReparto(d: Db, marcaId: string, cuerpo: AprobarRepa
     }
   }
   let encendida = await fijarVigente(d, nueva.id, true);
-  if (encendida.error) encendida = await fijarVigente(d, nueva.id, true);
+  // Reintentar solo sirve con un fallo pasajero: con el único parcial (23505) otra persona ya dejó su versión como vigente.
+  if (encendida.error && encendida.error.code !== CODIGO_UNICO) encendida = await fijarVigente(d, nueva.id, true);
   if (encendida.error) {
-    // Se devuelve la anterior a vigente y se borra la nueva: el planner vuelve a intentarlo.
+    // Se devuelve la anterior a vigente (si otra persona no se adelantó) y se borra la nueva: el planner vuelve a intentarlo.
     if (previa) await fijarVigente(d, previa.id, true);
     await deshacer();
+    if (encendida.error.code === CODIGO_UNICO) {
+      return fallaMensaje("Otra persona aprobó un reparto de esta marca al mismo tiempo. Vuelve a cargar el análisis.", 409, "huella_cambiada");
+    }
     return fallaDb(encendida.error, "marcas al barrer: activar la versión nueva");
   }
 
@@ -643,7 +647,6 @@ export async function listarMarcasBarrer(d: Db, ventana: Ventana): Promise<Salid
   const huellaCargasActual = huellaCargasBarrer(resumen.data.cargas);
 
   const marcas: MarcaBarrerResumenApi[] = [];
-  const pendientesDeDiferencia: { fila: MarcaBarrerResumenApi; version: VersionLeida; datos: DatosMarca }[] = [];
   for (const u of resumen.data.unidades) {
     const marca = c.marcas.find((m) => m.id === u.unidad_marca_id);
     const efectiva = marca ? modalidadEfectiva(marca) : null;
@@ -706,9 +709,12 @@ export async function listarMarcasBarrer(d: Db, ventana: Ventana): Promise<Salid
       };
       const mismaVentana = vigente.ventana_meses === ventana;
       const cargasIguales = mismaVentana && vigente.huella_cargas === huellaCargasActual;
-      // Sin cargas nuevas la diferencia es 0; con cargas nuevas se calcula al abrir (aquí, solo la que haga falta).
+      // Sin cargas nuevas la diferencia es 0. Con cargas nuevas la LISTA no calcula la diferencia exacta (costaría una lectura de
+      // venta por marca y el rol de la base corta a los 8 s): las marca `cargas_nuevas` y deja `diferencia_pp` en `null`. El detalle
+      // de la marca calcula la diferencia y dice si en realidad está al día (menos de 5 pp).
       const r = motivosObsoleto({ huella_config: vigente.huella_config, huella_cargas: vigente.huella_cargas }, actual, cargasIguales ? 0 : null);
       motivos = r.motivos;
+      if (mismaVentana && !cargasIguales && !motivos.includes("cargas_nuevas")) motivos = [...motivos, "cargas_nuevas"];
       diferencia = cargasIguales ? 0 : null;
     }
 
@@ -747,30 +753,6 @@ export async function listarMarcasBarrer(d: Db, ventana: Ventana): Promise<Salid
       avisos,
     };
     marcas.push(fila);
-    // Con cargas nuevas y sin otro motivo, la diferencia decide si está obsoleta: se calcula para esa marca (una lectura por marca).
-    if (vigente && vigente.ventana_meses === ventana && vigente.huella_cargas !== huellaCargasActual && diferencia === null) {
-      pendientesDeDiferencia.push({ fila, version: vigente, datos });
-    }
-  }
-
-  // Diferencia de las marcas con cargas nuevas: el análisis con los parámetros de su versión vigente (sin cerrada: no hace falta).
-  for (const p of pendientesDeDiferencia) {
-    if (hasta === null) break;
-    const venta = await leerVentaMarcaGml(d, [p.fila.id], desdeDeVentana(hasta, p.version.ventana_meses), hasta);
-    if (venta.error) return fallaDb(venta.error, "marcas al barrer: leer la venta por GML");
-    const pv = parametrosDeVersion(p.version);
-    // La cerrada solo se lee si el reparto vigente se aprobó según ella.
-    let cerrada: FilaCerrada[] | null = null;
-    if (fuenteDe(p.version.fuente) === "cerrada") {
-      const r = await leerFilasCerrada(hasta);
-      if (r.respuesta) return falla(r.respuesta);
-      cerrada = r.data;
-    }
-    const hoy = analizarMarca(entradaAnalisis(c, p.datos, hasta, pv, venta.data, cerrada));
-    const ev = evaluarVigente(c, hoy, p.version, ventana);
-    p.fila.diferencia_pp = ev.diferencia_pp;
-    p.fila.obsoleto = ev.motivos;
-    p.fila.estado = estadoDeReparto(true, ev.motivos);
   }
 
   marcas.sort((a, b) => b.unidades_ventana - a.unidades_ventana || compararNombre(a.nombre, b.nombre) || (a.id < b.id ? -1 : 1));

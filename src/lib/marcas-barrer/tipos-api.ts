@@ -132,8 +132,9 @@ export type MarcaBarrerResumenApi = {
   error_reparto: { pp: number | null; veredicto: VeredictoError | null };
   vigente: VigenteResumenApi | null;
   estado: EstadoReparto;
+  /** Con cargas nuevas la LISTA no calcula la diferencia exacta: marca `cargas_nuevas` (conservador); el detalle de la marca dice si en realidad está al día. */
   obsoleto: MotivoObsoleto[];
-  /** Cuánto se movería hoy el reparto vigente, en pp; `null` si no se pudo calcular o no hay vigente. */
+  /** Cuánto se movería hoy el reparto vigente, en pp: `0` sin cargas nuevas; `null` con cargas nuevas (se calcula en el detalle) o sin vigente. */
   diferencia_pp: number | null;
   avisos: AvisoBarrer[];
 };

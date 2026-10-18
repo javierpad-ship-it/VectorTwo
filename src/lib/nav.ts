@@ -51,6 +51,8 @@ export const NAV_SECTIONS: NavSection[] = [
       // M11: revisión (solo lectura) de cómo quedó la agrupación por nivel GML/GMLE.
       { href: "/maestros/agrupacion-gmle", label: "Reporte agrupación GMLE", roles: PLANIFICACION },
       { href: "/maestros/tiendas", label: "Tiendas y aperturas", roles: PLANIFICACION },
+      // M13: reglas de intercompany (rango IMI y % directo por marca × GML). El comprador ve el efecto en el flujo (M8), no la tabla.
+      { href: "/maestros/intercompany", label: "Intercompany", roles: PLANIFICACION },
     ],
   },
   {

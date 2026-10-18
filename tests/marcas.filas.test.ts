@@ -62,9 +62,11 @@ describe("sinConfiguracionDePlanificacion (comprador)", () => {
   const todas = leidas();
   const filas = armarFilasMarcas(todas, todas, new Map([["m-alfa", { asignados: 3, vigentes: 3 }]]));
 
-  it("deja valores neutros (0, null, []) sin romper el contrato", () => {
+  it("deja valores neutros (0, null, [], false) sin romper el contrato", () => {
     for (const f of filas) {
       expect(sinConfiguracionDePlanificacion(f)).toMatchObject({
+        tratamiento_especial: false,
+        nota_tratamiento: null,
         modalidad_tratamiento: null,
         modalidad_efectiva: null,
         gml_asignados: 0,
@@ -77,11 +79,16 @@ describe("sinConfiguracionDePlanificacion (comprador)", () => {
       });
     }
   });
-  it("conserva lo de M2 (nombre, agrupación, tratamiento, nota) y no muta la fila original", () => {
+  it("neutraliza el tratamiento especial y su nota (H2 de la auditoría 0.11.0) aunque la marca los tenga", () => {
+    const alfa = filas.find((f) => f.id === "m-alfa")!;
+    expect(alfa).toMatchObject({ tratamiento_especial: true, nota_tratamiento: "Licencia de denim" });
+    expect(sinConfiguracionDePlanificacion(alfa)).toMatchObject({ tratamiento_especial: false, nota_tratamiento: null });
+  });
+  it("conserva lo de M2 (nombre, agrupación, vigencia) y no muta la fila original", () => {
     const alfa = filas.find((f) => f.id === "m-alfa")!;
     const copia = JSON.stringify(alfa);
     const n = sinConfiguracionDePlanificacion(alfa);
-    expect(n).toMatchObject({ nombre: "ALFA", tratamiento_especial: true, nota_tratamiento: "Licencia de denim", vigente: true });
+    expect(n).toMatchObject({ nombre: "ALFA", vigente: true });
     expect(n.agrupacion_marca).toEqual(alfa.agrupacion_marca);
     expect(JSON.stringify(alfa)).toBe(copia);
   });

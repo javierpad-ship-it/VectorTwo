@@ -411,6 +411,26 @@ describe("POST /api/marcas-barrer/[marcaId]/repartos: aprobar (casos 8 y 9)", ()
     expect(versionesDb().map((v) => [v.version, v.vigente])).toEqual([[1, true]]);
   });
 
+  it("H3: si encender la versión nueva choca con el único parcial de vigente (23505) → 409 huella_cambiada, sin reintentar, y la nueva se borra", async () => {
+    await aprobarBeta();
+    let intentos = 0;
+    bd.fallo = (tabla, modo, carga) => {
+      if (tabla === "repartos_marca_barrido" && modo === "update" && (carga as { vigente?: boolean }).vigente === true) {
+        intentos += 1;
+        return { code: "23505", message: 'duplicate key value violates unique constraint "repartos_marca_barrido_vigente_uniq"', details: null, hint: null };
+      }
+      return null;
+    };
+    const r = await aprobarBeta();
+    expect(r.r.status).toBe(409);
+    expect(r.cuerpo.codigo).toBe("huella_cambiada");
+    expect(r.cuerpo.error).toContain("al mismo tiempo");
+    // Un intento al encender la nueva (no se reintenta un 23505) y uno al devolver la anterior.
+    expect(intentos).toBe(2);
+    bd.fallo = null;
+    expect(versionesDb().map((v) => v.version)).toEqual([1]);
+  });
+
   it("dos aprobaciones a la vez (choque de versión) → 409 con el mensaje de volver a cargar", async () => {
     const { cuerpo: a } = await analizar(MARCA.beta);
     bd.fallo = (tabla, modo) => (tabla === "repartos_marca_barrido" && modo === "insert" ? { code: "23505", message: 'duplicate key value violates unique constraint "repartos_marca_barrido_marca_version_key"', details: null, hint: null } : null);
@@ -502,10 +522,10 @@ describe("regla 12 y casos 8 y 9: obsoleto no recalcula; solo se marca", () => {
     expect(a.vigente?.diferencia_pp).toBeLessThan(5);
     expect(a.vigente?.version).toBe(1);
     expect(foto()).toBe(antes);
-    // La ventana de 24 meses ya no es la misma (entró un mes) y las cargas cambiaron, pero el reparto casi no se movió: al día.
+    // H1 (auditoría 0.11.0): la LISTA no calcula la diferencia exacta con cargas nuevas: es conservadora y marca `cargas_nuevas`;
+    // el detalle (arriba) dice que en realidad está al día porque el reparto casi no se movió.
     const fila = (await leer<ListaBarrerApi>(await lista(get()))).data.marcas.find((m) => m.id === MARCA.beta)!;
-    expect(fila).toMatchObject({ estado: "al_dia", obsoleto: [] });
-    expect(fila.diferencia_pp).toBeCloseTo(a.vigente!.diferencia_pp!, 9);
+    expect(fila).toMatchObject({ estado: "obsoleto", obsoleto: ["cargas_nuevas"], diferencia_pp: null });
     // El POST con la huella vieja no sirve (los datos cambiaron aunque el reparto casi no): hay que volver a cargar el análisis.
     const r = await aprobar(post(`/${MARCA.beta}/repartos`, cuerpoBase(aprobada.analisis)), ctx(MARCA.beta));
     expect(r.status).toBe(409);
@@ -513,17 +533,25 @@ describe("regla 12 y casos 8 y 9: obsoleto no recalcula; solo se marca", () => {
     expect(foto()).toBe(antes);
   });
 
-  it("la lista y el análisis coinciden: con cargas nuevas y poca diferencia el estado es al día (con diferencia); con mucha, obsoleto por cargas_nuevas", async () => {
+  it("H1: con cargas nuevas la lista marca cargas_nuevas SIN calcular la diferencia (ni leer venta por marca ni la cerrada); el detalle sí la calcula", async () => {
     await aprobarBeta();
     esc.k = "2026-10";
     esc.hechos = [...esc.hechos, ...hechosOctubre(100)];
     esc.otros = [...esc.otros, ...otrosOctubre];
-    const fila = (await leer<ListaBarrerApi>(await lista(get()))).data.marcas.find((m) => m.id === MARCA.beta)!;
-    // Con el cálculo diferido por marca: la diferencia es la del análisis.
+    bd.llamadasRpc = [];
+    esc.llamadasCerrada = [];
+    const l = await leer<ListaBarrerApi>(await lista(get()));
+    const fila = l.data.marcas.find((m) => m.id === MARCA.beta)!;
+    expect(fila).toMatchObject({ estado: "obsoleto", obsoleto: ["cargas_nuevas"], diferencia_pp: null });
+    expect(l.data.resumen.obsoletas).toBe(1);
+    // Una sola llamada a la base (el resumen) y ninguna lectura de la cerrada, por muchas marcas que haya con cargas nuevas.
+    expect(bd.llamadasRpc.map((x) => x.nombre)).toEqual(["venta_marca_gml_resumen"]);
+    expect(esc.llamadasCerrada).toEqual([]);
+    // El cálculo exacto queda en el detalle de la marca.
     const a = (await analizar(MARCA.beta)).cuerpo.data;
-    expect(fila.diferencia_pp).toBeCloseTo(a.vigente!.diferencia_pp!, 9);
-    expect(fila.obsoleto).toEqual(a.obsoleto);
-    expect(fila.estado).toBe(a.obsoleto.length > 0 ? "obsoleto" : "al_dia");
+    expect(a.vigente?.diferencia_pp).not.toBeNull();
+    expect(a.vigente!.diferencia_pp!).toBeLessThan(5);
+    expect(a.obsoleto).toEqual([]);
   });
 
   it("publicar un mes que mueve mucho el p2 → cargas_nuevas, el vigente no cambia y el POST con la huella vieja → 409 huella_cambiada", async () => {
@@ -539,7 +567,7 @@ describe("regla 12 y casos 8 y 9: obsoleto no recalcula; solo se marca", () => {
     expect(a.vigente?.version).toBe(1);
     expect(foto()).toBe(antes); // no recalcula
     const fila = (await leer<ListaBarrerApi>(await lista(get()))).data.marcas.find((m) => m.id === MARCA.beta)!;
-    expect(fila).toMatchObject({ estado: "obsoleto", obsoleto: ["cargas_nuevas"] });
+    expect(fila).toMatchObject({ estado: "obsoleto", obsoleto: ["cargas_nuevas"], diferencia_pp: null });
     expect((await leer<ListaBarrerApi>(await lista(get()))).data.resumen.obsoletas).toBe(1);
     const r = await aprobar(post(`/${MARCA.beta}/repartos`, cuerpoBase(viejo)), ctx(MARCA.beta));
     expect(r.status).toBe(409);

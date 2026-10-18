@@ -136,17 +136,28 @@ export const TEXTO_MOTIVO_OBSOLETO: Record<MotivoObsoleto, string> = {
   ventana_distinta: "la ventana es distinta",
 };
 
-export function textoObsoleto(motivos: readonly MotivoObsoleto[]): string {
-  return motivos.map((m) => TEXTO_MOTIVO_OBSOLETO[m]).join("; ");
+/** La lista no calcula la diferencia exacta: con `cargas_nuevas` y `diferencia_pp` en `null` el motivo está por confirmar (el detalle sí la calcula). */
+const cargasSinConfirmar = (motivo: MotivoObsoleto, diferenciaPp: number | null | undefined): boolean => motivo === "cargas_nuevas" && diferenciaPp === null;
+
+export const TEXTO_CARGAS_SIN_CONFIRMAR = "hay cargas nuevas: abre la marca para ver cuánto mueven el reparto";
+
+/** El porqué de un reparto obsoleto. Sin `diferenciaPp` calculada (`null`, la lista) no afirma el umbral de las cargas nuevas. */
+export function textoObsoleto(motivos: readonly MotivoObsoleto[], diferenciaPp?: number | null): string {
+  return motivos.map((m) => (cargasSinConfirmar(m, diferenciaPp) ? TEXTO_CARGAS_SIN_CONFIRMAR : TEXTO_MOTIVO_OBSOLETO[m])).join("; ");
 }
 
-/** El estado de una marca en la lista y en la cabecera del reparto vigente. */
+/**
+ * El estado de una marca en la lista y en la cabecera del reparto vigente. En la lista las cargas nuevas llegan sin la diferencia
+ * calculada: eso no es un obsoleto confirmado, es «Revisar: cargas nuevas» (tono neutro). El filtro «Solo obsoletas» las sigue
+ * incluyendo (`estado === "obsoleto"`), porque son candidatas a revisar y esconderlas las dejaría sin ver.
+ */
 export function textoEstadoReparto(e: { vigente: boolean; obsoleto: readonly MotivoObsoleto[]; diferenciaPp: number | null }): { texto: string; tono: "exito" | "alerta" | "neutro" } {
   if (!e.vigente) return { texto: "Sin reparto", tono: "alerta" };
   if (e.obsoleto.length > 0) {
-    const m = e.obsoleto[0];
+    const confirmados = e.obsoleto.filter((m) => !cargasSinConfirmar(m, e.diferenciaPp));
+    if (confirmados.length === 0) return { texto: "Revisar: cargas nuevas", tono: "neutro" };
     const corto: Record<MotivoObsoleto, string> = { config_cambiada: "config. cambiada", cargas_nuevas: "cargas nuevas", nivel_cambiado: "nivel cambiado", ventana_distinta: "ventana distinta" };
-    return { texto: `Obsoleto: ${corto[m]}${e.obsoleto.length > 1 ? ` (+${e.obsoleto.length - 1})` : ""}`, tono: "alerta" };
+    return { texto: `Obsoleto: ${corto[confirmados[0]]}${e.obsoleto.length > 1 ? ` (+${e.obsoleto.length - 1})` : ""}`, tono: "alerta" };
   }
   return { texto: e.diferenciaPp !== null ? `Al día (difiere ${formatearPp(e.diferenciaPp, 1)})` : "Al día", tono: "exito" };
 }

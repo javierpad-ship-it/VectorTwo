@@ -18,6 +18,7 @@ import {
   textoAlcance,
   textoErrorReparto,
   textoEstadoReparto,
+  textoObsoleto,
   textoGmlConVenta,
   textoNino,
   textoResumenLista,
@@ -104,9 +105,23 @@ describe("formatos", () => {
   it("estado del reparto: sin reparto, obsoleto con motivo, al día con la diferencia", () => {
     expect(textoEstadoReparto({ vigente: false, obsoleto: [], diferenciaPp: null })).toEqual({ texto: "Sin reparto", tono: "alerta" });
     expect(textoEstadoReparto({ vigente: true, obsoleto: ["config_cambiada"], diferenciaPp: null })).toEqual({ texto: "Obsoleto: config. cambiada", tono: "alerta" });
-    expect(textoEstadoReparto({ vigente: true, obsoleto: ["cargas_nuevas", "ventana_distinta"], diferenciaPp: null }).texto).toBe("Obsoleto: cargas nuevas (+1)");
+    // Con la diferencia calculada (detalle) las cargas nuevas son un obsoleto confirmado.
+    expect(textoEstadoReparto({ vigente: true, obsoleto: ["cargas_nuevas"], diferenciaPp: 7.4 })).toEqual({ texto: "Obsoleto: cargas nuevas", tono: "alerta" });
+    expect(textoEstadoReparto({ vigente: true, obsoleto: ["cargas_nuevas", "ventana_distinta"], diferenciaPp: 7.4 }).texto).toBe("Obsoleto: cargas nuevas (+1)");
+    // Sin ella (lista) no es un obsoleto confirmado: se pide revisar; si hay otro motivo confirmado, manda ese.
+    expect(textoEstadoReparto({ vigente: true, obsoleto: ["cargas_nuevas"], diferenciaPp: null })).toEqual({ texto: "Revisar: cargas nuevas", tono: "neutro" });
+    expect(textoEstadoReparto({ vigente: true, obsoleto: ["cargas_nuevas", "ventana_distinta"], diferenciaPp: null }).texto).toBe("Obsoleto: ventana distinta (+1)");
     expect(textoEstadoReparto({ vigente: true, obsoleto: [], diferenciaPp: 1.2 })).toEqual({ texto: "Al día (difiere 1.2 pp)", tono: "exito" });
     expect(textoEstadoReparto({ vigente: true, obsoleto: [], diferenciaPp: null }).texto).toBe("Al día");
+  });
+
+  it("el texto del motivo no afirma el umbral de 5 pp mientras la diferencia no esté calculada", () => {
+    expect(textoObsoleto(["cargas_nuevas"], 7.4)).toBe("hay cargas nuevas que mueven el reparto más de 5 pp");
+    expect(textoObsoleto(["cargas_nuevas"])).toBe("hay cargas nuevas que mueven el reparto más de 5 pp");
+    const sinCalcular = textoObsoleto(["cargas_nuevas"], null);
+    expect(sinCalcular).toBe("hay cargas nuevas: abre la marca para ver cuánto mueven el reparto");
+    expect(sinCalcular).not.toContain("5 pp");
+    expect(textoObsoleto(["config_cambiada", "cargas_nuevas"], null)).toBe("cambió la configuración (modalidad, GML, conjunto o alcance); hay cargas nuevas: abre la marca para ver cuánto mueven el reparto");
   });
 
   it("alcance en palabras: todo, o los nombres elegidos", () => {
@@ -136,6 +151,12 @@ describe("lista de marcas", () => {
     expect(filtrarLista(marcas, { ...FILTROS_VACIOS, solo: ["inestables"] }).map((m) => m.nombre)).toEqual(["GAMMA"]);
     expect(filtrarLista(marcas, { ...FILTROS_VACIOS, solo: ["mixtas", "inestables"] }).map((m) => m.nombre)).toEqual(["GAMMA"]);
     expect(filtrarLista(marcas, { ...FILTROS_VACIOS, solo: ["mixtas", "sin_reparto"] })).toEqual([]);
+  });
+
+  it("«Solo obsoletas» sigue incluyendo las que solo tienen cargas nuevas por confirmar (la lista no calcula la diferencia)", () => {
+    const porRevisar = { ...marcas[0], estado: "obsoleto" as const, obsoleto: ["cargas_nuevas" as const], diferencia_pp: null };
+    expect(filtrarLista([...marcas, porRevisar], { ...FILTROS_VACIOS, solo: ["obsoletas"] }).map((m) => m.nombre)).toEqual(["GAMMA", porRevisar.nombre]);
+    expect(resumenLista([...marcas, porRevisar]).obsoletas).toBe(2);
   });
 
   it("el resumen del pie cuenta lo que se ve y el texto omite lo que vale 0", () => {

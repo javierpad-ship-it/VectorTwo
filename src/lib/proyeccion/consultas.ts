@@ -212,6 +212,34 @@ export function leerFilasConAnios(db: Db, proyeccionId: string, o: OpcionesFilas
   });
 }
 
+/** Lo mínimo de una fila base de la cerrada para decidir la aplicabilidad de M13: su nodo, sus `participaciones` y los años que tiene. */
+export type FilaParticipacionesDb = {
+  id: string;
+  gml_id: string;
+  participaciones: Json | null;
+  proyeccion_fila_anios: { anio: number; activo: boolean }[];
+};
+
+/**
+ * Solo las filas BASE activas de una proyección que traen `participaciones` (nunca las de tienda), con columnas mínimas (sin
+ * `historico` ni los registros por año completos: solo `anio` y `activo`), paginadas de a 1 000 con orden estable. Es la lectura
+ * ligera que usa M13 para `aplicable`; no sustituye a `leerFilasConAnios`.
+ */
+export function leerParticipacionesBase(db: Db, proyeccionId: string): Promise<Resultado<FilaParticipacionesDb[]>> {
+  return leerTodo<FilaParticipacionesDb>((d, h) =>
+    db
+      .from("proyeccion_filas")
+      .select("id, gml_id, participaciones, proyeccion_fila_anios(anio, activo)")
+      .eq("proyeccion_id", proyeccionId)
+      .is("tienda_id", null)
+      .eq("activo", true)
+      .not("participaciones", "is", null)
+      .order("clave")
+      .order("id")
+      .range(d, h) as unknown as PromiseLike<{ data: FilaParticipacionesDb[] | null; error: PostgrestError | null }>
+  );
+}
+
 /** Una fila con todo (incluido `historico`); `data` es `null` si no existe en esa proyección. */
 export async function leerFilaCompleta(db: Db, proyeccionId: string, filaId: string): Promise<Resultado<FilaConAnios | null>> {
   const { data, error } = await db

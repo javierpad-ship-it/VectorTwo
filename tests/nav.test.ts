@@ -81,10 +81,11 @@ describe("seccionesVisibles", () => {
     const maestros = seccionesVisibles("comprador").find((s) => s.title === "Maestros");
     expect(maestros?.links.map((l) => l.href)).toEqual(["/maestros/arbol", "/maestros/responsables"]);
   });
-  it("el planner y el admin ven los seis maestros, con los responsables justo después del árbol y el reporte GMLE tras la estacionalidad", () => {
+  it("el planner y el admin ven los siete maestros (el último, Intercompany, de M13), con los responsables justo después del árbol y el reporte GMLE tras la estacionalidad", () => {
     for (const rol of ["planner", "admin"] as const) {
       const maestros = seccionesVisibles(rol).find((s) => s.title === "Maestros");
-      expect(maestros?.links).toHaveLength(6);
+      expect(maestros?.links).toHaveLength(7);
+      expect(maestros?.links.map((l) => l.href)).toContain("/maestros/intercompany");
       const hrefs = maestros?.links.map((l) => l.href) ?? [];
       expect(hrefs.indexOf("/maestros/agrupacion-gmle")).toBe(hrefs.indexOf("/maestros/estacionalidad") + 1);
       expect(maestros?.links.slice(0, 2).map((l) => l.label)).toEqual(["Árbol de producto", "Responsables género-mundo"]);

@@ -82,6 +82,8 @@ describe('módulos con service role marcados con import "server-only"', () => {
     "src/lib/marcas/gml/estado.ts",
     "src/lib/marcas-barrer/consultas.ts",
     "src/lib/marcas-barrer/servicio.ts",
+    "src/lib/intercompany/consultas.ts",
+    "src/lib/intercompany/servicio.ts",
     "src/lib/estacionalidad/consultas.ts",
     "src/lib/reportes/consultas.ts",
     "src/lib/responsables/consultas.ts",
