@@ -17,15 +17,23 @@ const UUID = id(1);
 const uuids = (n: number) => Array.from({ length: n }, (_, i) => id(i + 1));
 
 describe("crearMarcaSchema y editarMarcaSchema aceptan la modalidad", () => {
-  it("modalidad ∈ {por_gml, barrido, null}; otra cosa → 400 con el mensaje de la ficha", () => {
-    for (const m of ["por_gml", "barrido"] as const) {
+  it("modalidad ∈ {por_gml, barrido, mixta, null}; otra cosa → 400 con el mensaje de la ficha", () => {
+    for (const m of ["por_gml", "barrido", "mixta"] as const) {
       expect(editarMarcaSchema.parse({ modalidad_tratamiento: m })).toEqual({ modalidad_tratamiento: m });
-      expect(crearMarcaSchema.parse({ nombre: "A", agrupacion_marca_id: UUID, tratamiento_especial: true, modalidad_tratamiento: m }).modalidad_tratamiento).toBe(m);
     }
+    for (const m of ["por_gml", "barrido"] as const) {
+      const c = crearMarcaSchema.parse({ nombre: "A", agrupacion_marca_id: UUID, tratamiento_especial: true, modalidad_tratamiento: m });
+      expect(c.modalidad_tratamiento).toBe(m);
+      expect(c.resto_al_barrer).toBe(false);
+    }
+    // M12: `mixta` se normaliza al par `por_gml` + `resto_al_barrer` al crear.
+    const mixta = crearMarcaSchema.parse({ nombre: "A", agrupacion_marca_id: UUID, tratamiento_especial: true, modalidad_tratamiento: "mixta" });
+    expect(mixta.modalidad_tratamiento).toBe("por_gml");
+    expect(mixta.resto_al_barrer).toBe(true);
     expect(editarMarcaSchema.parse({ modalidad_tratamiento: null })).toEqual({ modalidad_tratamiento: null });
     const r = editarMarcaSchema.safeParse({ modalidad_tratamiento: "otra" });
     expect(r.success).toBe(false);
-    expect(r.error?.issues[0].message).toBe("La modalidad debe ser por_gml o barrido.");
+    expect(r.error?.issues[0].message).toBe("La modalidad debe ser por_gml, barrido o mixta.");
   });
   it("crear con casilla y sin modalidad → barrido; sin casilla → null", () => {
     expect(crearMarcaSchema.parse({ nombre: "A", agrupacion_marca_id: UUID, tratamiento_especial: true }).modalidad_tratamiento).toBe("barrido");

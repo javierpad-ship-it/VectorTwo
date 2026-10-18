@@ -7,7 +7,7 @@ import { formatearNumero, mensajeError, plural } from "@/lib/formato";
 import { useArbol } from "@/lib/arbol/use-arbol";
 import type { AgrupacionMarcaFila } from "@/lib/marcas/tipos-api";
 import { useGmlEspecial } from "@/components/marcas/use-gml-especial";
-import { aplanarNodos, cambioMarcaDe, textoCambioMarca } from "@/components/marcas/comunes-m2b";
+import { aplanarNodos, cambioMarcaDe, ETIQUETA_DESTINO, marcasQueRequierenDestino, textoCambioMarca } from "@/components/marcas/comunes-m2b";
 import {
   ETIQUETA_MOTIVO_IGNORADA,
   ETIQUETA_MOTIVO_NO_PERMITIDO_GML,
@@ -16,6 +16,7 @@ import {
   type AsignarGmlRespuesta,
   type EstadoGmlEspecial,
   type MarcaConGml,
+  type ModalidadDestino,
 } from "@/components/marcas/tipos-m2b";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import { Chips, type ChipItem } from "@/components/ui/chips";
 import { GmlPorMarca } from "./gml-por-marca";
 import { GmlPorGml } from "./gml-por-gml";
 import { GmlSugerencias } from "./gml-sugerencias";
+import { DestinoModalidadDialogo } from "./destino-modalidad-dialogo";
 
 type Vista = "marca" | "gml" | "sugerencias";
 
@@ -77,6 +79,8 @@ export function GmlTab({
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultado, setResultado] = useState<{ tono: "exito" | "info"; contenido: React.ReactNode } | null>(null);
+  /** M12: la pregunta «¿Por GML o Mixta?» pendiente; `resolver(null)` la cancela. */
+  const [pregunta, setPregunta] = useState<{ marcas: MarcaConGml[]; resolver: (destino: ModalidadDestino | null) => void } | null>(null);
 
   const estado = gml.datos;
   const resumen = estado?.resumen;
@@ -101,13 +105,28 @@ export function GmlTab({
     }
   }
 
-  async function asignar(cuerpo: AsignarGmlCuerpo, marcasObjetivo: MarcaConGml[], opciones?: { siempreConfirmar?: boolean }): Promise<boolean> {
+  /** Pregunta a qué modalidad pasan las marcas al barrer al recibir su primer GML (I3); `null` si se cancela. */
+  function pedirDestino(marcasPreguntar: MarcaConGml[]): Promise<ModalidadDestino | null> {
+    return new Promise((resolver) => setPregunta({ marcas: marcasPreguntar, resolver }));
+  }
+
+  async function asignar(cuerpoInicial: AsignarGmlCuerpo, marcasObjetivo: MarcaConGml[], opciones?: { siempreConfirmar?: boolean }): Promise<boolean> {
+    let cuerpo = cuerpoInicial;
+    // M12 (I3): una marca al barrer no pasa a Por GML sin preguntar; la API lo exige con `modalidad_destino`.
+    const preguntar = cuerpo.accion === "asignar" ? marcasQueRequierenDestino(marcasObjetivo) : [];
+    if (preguntar.length > 0) {
+      const destino = await pedirDestino(preguntar);
+      if (destino === null) return false;
+      cuerpo = { ...cuerpo, modalidad_destino: destino };
+    }
+    const idsPreguntadas = new Set(preguntar.map((m) => m.id));
     const pares = cuerpo.forma === "cartesiano" ? cuerpo.marca_ids.length * cuerpo.nodo_ids.length : cuerpo.pares.length;
     const marcasPares = marcasObjetivo.length;
     if (cuerpo.accion === "asignar") {
+      // Las que ya se preguntaron (al barrer) no vuelven a pedir confirmación por el cambio de modalidad.
       const cambios = marcasObjetivo.flatMap((m) => {
         const de = cambioMarcaDe(m);
-        return de ? [textoCambioMarca(m.nombre, de)] : [];
+        return de && !idsPreguntadas.has(m.id) ? [textoCambioMarca(m.nombre, de)] : [];
       });
       if (pares > 1 || cambios.length > 0 || opciones?.siempreConfirmar) {
         const partes = [
@@ -140,7 +159,7 @@ export function GmlTab({
             <span>{partes.join(" · ")} (de {formatearNumero(r.pares)} pares).</span>
             {r.cambios_marca.length > 0 && (
               <span className="mt-1 block">
-                Cambios de marca: {r.cambios_marca.map((c) => `${c.marca} (${c.de === "sin_tratamiento" ? "se marcó" : c.de === "barrido" ? "de Al barrer" : "sin modalidad"} → Por GML)`).join("; ")}.
+                Cambios de marca: {r.cambios_marca.map((c) => `${c.marca} (${c.de === "sin_tratamiento" ? "se marcó" : c.de === "barrido" ? "de Al barrer" : "sin modalidad"} → ${ETIQUETA_DESTINO[c.a]})`).join("; ")}.
               </span>
             )}
             {r.no_permitidas.length > 0 && (
@@ -216,7 +235,7 @@ export function GmlTab({
 
       {resumen && (
         <p className="text-sm text-tinta-suave">
-          {plural(resumen.marcadas, "marca", "marcas")} con tratamiento ({resumen.por_gml} por GML · {resumen.barrido} al barrer
+          {plural(resumen.marcadas, "marca", "marcas")} con tratamiento ({resumen.por_gml} por GML · {resumen.mixta} mixtas · {resumen.barrido} al barrer
           {resumen.sin_modalidad > 0 ? ` · ${resumen.sin_modalidad} sin modalidad` : ""}) · {formatearNumero(resumen.asignaciones_vigentes)} GML relevantes vigentes
           {resumen.asignaciones_ignoradas > 0 ? ` y ${formatearNumero(resumen.asignaciones_ignoradas)} ignorados` : ""} en{" "}
           {plural(resumen.nodos_con_relevantes, "GML", "GML")}
@@ -244,6 +263,15 @@ export function GmlTab({
       )}
       {vista === "gml" && <GmlPorGml estado={estado} marcas={marcas} nodos={nodos} agrupaciones={agrupaciones} ops={ops} nodoInicial={foco.nodoId} />}
       {vista === "sugerencias" && <GmlSugerencias marcas={marcas} agrupaciones={agrupaciones} ops={ops} />}
+      {pregunta && (
+        <DestinoModalidadDialogo
+          marcas={pregunta.marcas}
+          onElegir={(destino) => {
+            pregunta.resolver(destino);
+            setPregunta(null);
+          }}
+        />
+      )}
     </div>
   );
 }

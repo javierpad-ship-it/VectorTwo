@@ -58,6 +58,8 @@ export async function POST(request: NextRequest) {
       tratamiento_especial: m.tratamiento_especial,
       // Regla 2 de 02b: toda escritura que enciende la casilla escribe modalidad. `ignoreDuplicates` no pisa las existentes.
       modalidad_tratamiento: m.modalidad_tratamiento,
+      // M12: `MIXTA` = `por_gml` + `resto_al_barrer`.
+      resto_al_barrer: m.resto_al_barrer ?? false,
     }));
     const { data, error: err } = await db
       .from("marcas")

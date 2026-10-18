@@ -58,13 +58,15 @@ export async function leerMarcaPorId(db: Db, id: string) {
 /**
  * 02b: deja marcadas en `por_gml` las marcas dadas (`tratamiento_especial = true`,
  * `modalidad_tratamiento = 'por_gml'`; la nota de tratamiento no se toca), por
- * tandas. Es lo que pasa al hacerlas relevantes en un GML.
+ * tandas. Es lo que pasa al hacerlas relevantes en un GML. M12: con `mixta` las deja
+ * `por_gml` + `resto_al_barrer = true` (el resto de su venta sigue yendo al barrer); sin
+ * ella escribe `resto_al_barrer = false`.
  */
-export async function marcarPorGml(db: Db, ids: readonly string[]): Promise<{ error: PostgrestError | null }> {
+export async function marcarPorGml(db: Db, ids: readonly string[], mixta = false): Promise<{ error: PostgrestError | null }> {
   for (const tanda of enTandas([...ids], TANDA_IN)) {
     const { error } = await db
       .from("marcas")
-      .update({ tratamiento_especial: true, modalidad_tratamiento: "por_gml" })
+      .update({ tratamiento_especial: true, modalidad_tratamiento: "por_gml", resto_al_barrer: mixta })
       .in("id", tanda);
     if (error) return { error };
   }

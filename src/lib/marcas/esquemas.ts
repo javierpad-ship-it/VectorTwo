@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { activo, codigo, codigoOpcional, codigoValido, derivarCodigo, nombre, nombreValido, uuid } from "@/lib/arbol/esquemas";
 import { celdaTexto } from "@/lib/api/celdas";
+import { normalizarModalidad } from "./modalidad";
 
 /**
  * Esquemas zod de M2 (docs/modulos/02-marcas.md, "Contratos de API" y regla
@@ -15,7 +16,7 @@ import { celdaTexto } from "@/lib/api/celdas";
 export const MAX_NOTA = 200;
 export const MENSAJE_NOTA_LARGA = `La nota no puede superar ${MAX_NOTA} caracteres.`;
 export const MENSAJE_NOTA_SIN_BANDERA = "La nota solo se guarda si la marca tiene tratamiento especial.";
-export const MENSAJE_MODALIDAD_INVALIDA = "La modalidad debe ser por_gml o barrido.";
+export const MENSAJE_MODALIDAD_INVALIDA = "La modalidad debe ser por_gml, barrido o mixta.";
 export const MENSAJE_MODALIDAD_SIN_TRATAMIENTO = "La modalidad solo se guarda si la marca tiene tratamiento especial.";
 
 const noVacio = { message: "No hay nada que actualizar." };
@@ -38,8 +39,11 @@ export const notaTratamiento = z
 
 const tratamientoEspecial = z.boolean("tratamiento_especial debe ser verdadero o falso.");
 
-/** 02b: `por_gml` (relevante en los GML asignados) o `barrido` (flujo propio sin detalle por GML). */
-export const modalidadTratamiento = z.enum(["por_gml", "barrido"], MENSAJE_MODALIDAD_INVALIDA);
+/**
+ * 02b: `por_gml` (relevante en los GML asignados) o `barrido` (flujo propio sin detalle por GML). M12: `mixta` (GML
+ * específicos más el resto al barrer), que los handlers escriben como `por_gml` + `resto_al_barrer` (`normalizarModalidad`).
+ */
+export const modalidadTratamiento = z.enum(["por_gml", "barrido", "mixta"], MENSAJE_MODALIDAD_INVALIDA);
 
 export const crearMarcaSchema = z
   .object({
@@ -53,10 +57,16 @@ export const crearMarcaSchema = z
   .transform(derivarCodigo)
   // 02b regla 2: con casilla y sin modalidad se guarda `barrido`; sin casilla la modalidad pedida se conserva
   // para que el `refine` la rechace (modalidad ⇒ casilla).
-  .transform((v) => ({
-    ...v,
-    modalidad_tratamiento: v.modalidad_tratamiento ?? (v.tratamiento_especial ? ("barrido" as const) : null),
-  }))
+  .transform((v) => {
+    const { modalidad_tratamiento: pedida, ...resto } = v;
+    // M12: `mixta` se escribe como `por_gml` + `resto_al_barrer`; sin casilla la modalidad pedida se conserva para el `refine`.
+    const par = pedida ? normalizarModalidad(pedida) : null;
+    return {
+      ...resto,
+      modalidad_tratamiento: par?.modalidad_tratamiento ?? (v.tratamiento_especial ? ("barrido" as const) : null),
+      resto_al_barrer: par?.resto_al_barrer ?? false,
+    };
+  })
   .pipe(
     z.object({
       nombre: nombreValido,
@@ -64,7 +74,8 @@ export const crearMarcaSchema = z
       agrupacion_marca_id: z.string(),
       tratamiento_especial: z.boolean(),
       nota_tratamiento: z.string().nullable(),
-      modalidad_tratamiento: modalidadTratamiento.nullable(),
+      modalidad_tratamiento: z.enum(["por_gml", "barrido"]).nullable(),
+      resto_al_barrer: z.boolean(),
     })
   )
   .refine((v) => v.nota_tratamiento === null || v.tratamiento_especial, {

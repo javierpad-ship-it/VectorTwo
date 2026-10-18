@@ -29,6 +29,11 @@ export type ProyeccionParaEstado = {
   /** `aaaa-mm` (o `aaaa-mm-dd`). */
   hasta_periodo: string;
   recalculo_pendiente?: boolean;
+  /**
+   * M12: `proyecciones.huella_flujo` con que se calculó. `null` = calculada antes de M12 (queda desactualizada); `undefined` = quien
+   * llama no la trae (no se compara).
+   */
+  huella_flujo?: string | null;
   /** `version_metodo` ausente = no se sabe: no se marca. */
   resumen: (Pick<ResumenProyeccion, "curvas_usadas"> & Partial<Pick<ResumenProyeccion, "version_metodo" | "huella_crecimientos" | "gm_gml">>) | null;
   parametros: Pick<ParametrosProyeccion, "factores_usados" | "bloques">;
@@ -40,6 +45,8 @@ export type EstadoActual = {
   curvas_vigentes: { agrupacion_id: string; curva_id: string }[];
   /** Nodos cuyo nivel de planificación ya no es el que tenía la fila (`nivel_proyectado`). */
   niveles_cambiados: number;
+  /** M12: `huella_flujo` de hoy (configuración de 02b: marcas relevantes, modalidades y conjuntos). Ausente = no se compara. */
+  huella_flujo?: string | null;
   tiendas: TiendaProy[];
   factores: FactorProy[];
   /** Último `updated_at` de los periodos atípicos activos. */
@@ -100,6 +107,12 @@ export function motivosDesactualizada(p: ProyeccionParaEstado, actual: EstadoAct
 
   if (actual.niveles_cambiados > 0) {
     motivos.push({ codigo: "nivel_cambiado", mensaje: "Cambió el nivel de planificación (GML o GMLE) de alguna línea." });
+  }
+
+  // M12: la configuración de 02b (marcas relevantes, modalidades, conjuntos) cambió después de calcular. Una calculada antes de M12
+  // (sin `huella_flujo`) también queda desactualizada. Una proyección sin calcular no tiene nada que comparar.
+  if (calculado && typeof actual.huella_flujo === "string" && p.huella_flujo !== undefined && p.huella_flujo !== actual.huella_flujo) {
+    motivos.push({ codigo: "config_cambiada", mensaje: "Cambió la configuración de marcas relevantes, modalidades o conjuntos después de calcular." });
   }
 
   // Tiendas: fechas, venta esperada o referente distintos de la foto (o una tienda nueva que no estaba).

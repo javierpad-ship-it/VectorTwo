@@ -32,10 +32,14 @@ const notaGmlObligatoria = z
   })
   .pipe(z.string().max(MAX_NOTA, MENSAJE_NOTA_GML_LARGA).nullable());
 
+/** M12: a qué pasa una marca al barrer cuando recibe su primer GML. Obligatorio solo si la marca es `barrido` (lo comprueba el handler). */
+export const modalidadDestino = z.enum(["por_gml", "mixta"], "La modalidad destino debe ser por_gml o mixta.");
+
 export const crearGmlEspecialSchema = z.object({
   marca_id: uuid,
   genero_mundo_linea_id: uuid,
   nota: notaGml,
+  modalidad_destino: modalidadDestino.optional(),
 });
 
 /** `PATCH`: la única clave editable es la nota; `null` o `""` la borra. */
@@ -63,6 +67,7 @@ export const asignarGmlSchema = z.discriminatedUnion(
           .min(1, "Elige al menos un GML.")
           .max(600, "Se admiten hasta 600 GML por bloque."),
         nota: notaGml,
+        modalidad_destino: modalidadDestino.optional(),
       })
       .refine((v) => v.marca_ids.length * v.nodo_ids.length <= MAX_PARES_BLOQUE, {
         message: "Se admiten hasta 5 000 pares por bloque.",
@@ -75,6 +80,7 @@ export const asignarGmlSchema = z.discriminatedUnion(
         .min(1, "Elige al menos un par.")
         .max(MAX_PARES_BLOQUE, "Se admiten hasta 5 000 pares por bloque."),
       nota: notaGml,
+      modalidad_destino: modalidadDestino.optional(),
     }),
   ],
   { error: "La forma debe ser cartesiano o pares." }
@@ -124,6 +130,8 @@ export const filaImportacionGmlSchema = z.object({
   linea: celdaTexto("linea"),
   /** La columna `NOTA` es opcional; el cliente manda "" si no la mapeó. */
   nota: celdaTexto("nota", MAX_CELDA_NOTA).default(""),
+  /** M12: columna opcional `MODALIDAD` (`POR_GML` o `MIXTA`); `""` si no se mapeó. */
+  modalidad: celdaTexto("modalidad").default(""),
 });
 
 export const importarGmlSchema = z.object({

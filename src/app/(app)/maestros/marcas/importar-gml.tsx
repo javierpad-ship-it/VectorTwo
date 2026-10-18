@@ -19,6 +19,7 @@ import {
   type MotivoOmisionGml,
   type ReporteImportacionGml,
 } from "@/components/marcas/tipos-m2b";
+import { ETIQUETA_DESTINO } from "@/components/marcas/comunes-m2b";
 import { formatearNumero, plural } from "@/lib/formato";
 
 type Campo = keyof FilaImportacionGml;
@@ -31,6 +32,13 @@ const CAMPOS: CampoImportador<Campo>[] = [
   { campo: "mundo", etiqueta: "Mundo", alias: ["MUNDO", "GRUPO_PRODUCTO"] },
   { campo: "linea", etiqueta: "Línea", alias: ["LINEA"] },
   { campo: "nota", etiqueta: "Nota", alias: ["NOTA", "OBSERVACION", "COMENTARIO"], opcional: true, hint: "Opcional, hasta 200 caracteres." },
+  {
+    campo: "modalidad",
+    etiqueta: "Modalidad",
+    alias: ["MODALIDAD", "MODALIDAD_DESTINO"],
+    opcional: true,
+    hint: "Opcional: POR_GML o MIXTA. Obligatoria en la fila de una marca que hoy está al barrer (a qué pasa al recibir su primer GML).",
+  },
 ];
 
 /** Todo se arregla en el archivo salvo la repetida. */
@@ -44,6 +52,7 @@ const COLUMNAS_FILA: ColumnaOmitida<FilaOmitidaGml>[] = [
   { clave: "mundo", titulo: "Mundo", valor: (f) => f.mundo },
   { clave: "linea", titulo: "Línea", valor: (f) => f.linea },
   { clave: "nota", titulo: "Nota", valor: (f) => f.nota },
+  { clave: "modalidad", titulo: "Modalidad", valor: (f) => f.modalidad ?? "" },
 ];
 
 const TEXTO_DE: Record<Cambio["de"], string> = { sin_tratamiento: "Sin tratamiento especial", barrido: "Al barrer", sin_modalidad: "Sin modalidad" };
@@ -51,7 +60,7 @@ const TEXTO_DE: Record<Cambio["de"], string> = { sin_tratamiento: "Sin tratamien
 function resumen(r: ReporteImportacionGml): string {
   const verbo = r.modo === "aplicar" ? "Creadas" : "Se crearán";
   const marcadas = r.cambios_marca.length;
-  return `${verbo} ${plural(r.crear.asignaciones, "asignación", "asignaciones")}${marcadas > 0 ? ` (${plural(marcadas, "marca se marca", "marcas se marcan")} o pasa${marcadas === 1 ? "" : "n"} a Por GML)` : ""}.`;
+  return `${verbo} ${plural(r.crear.asignaciones, "asignación", "asignaciones")}${marcadas > 0 ? ` (${plural(marcadas, "marca se marca", "marcas se marcan")} o pasa${marcadas === 1 ? "" : "n"} a Por GML o Mixta)` : ""}.`;
 }
 
 function mensajeConfirmarAplicar(nombre: string, reporte: ReporteImportacionGml): string {
@@ -59,8 +68,8 @@ function mensajeConfirmarAplicar(nombre: string, reporte: ReporteImportacionGml)
   const partes = [`¿Aplicar la importación de ${nombre}? ${resumen({ ...reporte, modo: "previsualizar" })}`];
   const cambios = reporte.cambios_marca;
   if (cambios.length > 0) {
-    partes.push("Estas marcas quedarán con tratamiento especial en Por GML:");
-    for (const c of cambios.slice(0, 15)) partes.push(`· ${c.marca} (${TEXTO_DE[c.de]} → Por GML)`);
+    partes.push("Estas marcas quedarán con tratamiento especial en la modalidad indicada:");
+    for (const c of cambios.slice(0, 15)) partes.push(`· ${c.marca} (${TEXTO_DE[c.de]} → ${ETIQUETA_DESTINO[c.a]})`);
     if (cambios.length > 15) partes.push(`· y ${cambios.length - 15} más`);
   }
   if (errores.length > 0) partes.push(`Quedarán fuera ${plural(errores.length, "fila con errores", "filas con errores")}: no se cargarán.`);
@@ -90,7 +99,7 @@ export function ImportarGml({ onAplicado }: { onAplicado: () => void }) {
       <PasoArchivo
         archivo={archivo}
         leyendo={imp.leyendo}
-        descripcion="CSV o Excel (.xlsx, .xls) con MARCA, GENERO, MUNDO y LINEA (y NOTA, opcional). Puede ser la segunda hoja del libro de marcas. Se lee en tu navegador; solo se envían las columnas mapeadas."
+        descripcion="CSV o Excel (.xlsx, .xls) con MARCA, GENERO, MUNDO y LINEA (y NOTA y MODALIDAD, opcionales). Puede ser la segunda hoja del libro de marcas. Se lee en tu navegador; solo se envían las columnas mapeadas."
         hintHoja="El libro tiene varias hojas; elige la que contiene las marcas relevantes por GML."
         onElegir={imp.elegirArchivo}
         onCambiarHoja={imp.cambiarHoja}
@@ -145,7 +154,7 @@ function Reporte({ titulo, reporte, nombreArchivo }: { titulo: string; reporte: 
   const columnasCambios: Columna<Cambio>[] = [
     { clave: "marca", titulo: "Marca", render: (c) => <span className="font-medium">{c.marca}</span> },
     { clave: "de", titulo: "Hoy", render: (c) => TEXTO_DE[c.de] ?? c.de },
-    { clave: "a", titulo: aplicado ? "Quedó" : "Pasará a", render: () => <Badge tono="exito">Por GML</Badge> },
+    { clave: "a", titulo: aplicado ? "Quedó" : "Pasará a", render: (c) => <Badge tono={c.a === "mixta" ? "marca" : "exito"}>{ETIQUETA_DESTINO[c.a]}</Badge> },
   ];
   const columnasDif: Columna<Diferencia>[] = [
     { clave: "fila", titulo: "Fila", render: (d) => <span className="font-mono text-xs">{d.fila}</span> },
@@ -164,7 +173,7 @@ function Reporte({ titulo, reporte, nombreArchivo }: { titulo: string; reporte: 
           <Tarjeta titulo={aplicado ? "Creadas" : "Se crearán"} tono="exito" filas={[["Asignaciones", reporte.crear.asignaciones]]} />
           <Tarjeta titulo="Ya existían" tono="neutro" filas={[["Asignaciones", reporte.existentes.asignaciones]]} />
           <Tarjeta
-            titulo={aplicado ? "Se marcaron / pasaron a Por GML" : "Se marcarán / pasarán a Por GML"}
+            titulo={aplicado ? "Se marcaron / cambiaron de modalidad" : "Se marcarán / cambiarán de modalidad"}
             tono={cambios.length > 0 ? "alerta" : "neutro"}
             filas={[["Marcas", cambios.length]]}
           />
@@ -182,8 +191,8 @@ function Reporte({ titulo, reporte, nombreArchivo }: { titulo: string; reporte: 
           <div className="space-y-2">
             <h3 className="text-sm font-semibold">{aplicado ? "Marcas que cambiaron" : "Marcas que cambiarán"} ({formatearNumero(cambios.length)})</h3>
             <Alert tono="info">
-              Hacer relevante a una marca la deja con tratamiento especial en Por GML: las marcas sin casilla se marcan y las que estaban al barrer pasan a
-              Por GML.
+              Hacer relevante a una marca la deja con tratamiento especial: las marcas sin casilla se marcan (Por GML) y las que estaban al barrer pasan a Por GML o a
+              Mixta, según la columna MODALIDAD del archivo (sin ella, esas filas se omiten).
             </Alert>
             <DataTable columnas={columnasCambios} filas={cambios} claveFila={(c) => c.marca_id} />
           </div>

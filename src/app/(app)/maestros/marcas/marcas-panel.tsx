@@ -64,8 +64,8 @@ export function MarcasPanel({
 
   const agrupacionesActivas = agrupaciones.datos.filter((a) => a.activo).length;
   const marcasActivas = marcas.datos.filter((m) => m.activo);
-  // Mismos criterios que el resumen de la pestaña de relevantes (miembros fuera; pendientes = sin GML).
-  const { marcadas: conTratamiento, porGml, barrido, sinModalidad, pendientes } = resumenTratamiento(marcasActivas);
+  // Miembros fuera; pendientes = por GML y mixtas sin GML (como la fila). La pestaña de relevantes usa `pendientes_sin_gml` de la API, que solo cuenta las por GML.
+  const { marcadas: conTratamiento, porGml, barrido, mixta, sinModalidad, pendientes } = resumenTratamiento(marcasActivas);
   const conjuntos = marcas.datos.filter((m) => m.miembros > 0).length;
   const marcasEnConjunto = marcas.datos.filter((m) => m.conjunto_marca_id).length;
   const cargandoResumen = agrupaciones.cargando || marcas.cargando;
@@ -76,7 +76,7 @@ export function MarcasPanel({
         <div>
           <h1 className="text-2xl font-semibold">Agrupaciones y marcas</h1>
           <p className="mt-1 text-sm text-tinta-suave">
-            Cada marca pertenece a una agrupación de marca y puede llevar tratamiento especial, por GML o al barrer. Varias marcas pueden formar un
+            Cada marca pertenece a una agrupación de marca y puede llevar tratamiento especial: por GML, al barrer o mixta (compras específicas en algunos GML y el resto al barrer). Varias marcas pueden formar un
             conjunto que el flujo ve como una sola. Las agrupaciones las mantiene el administrador; las marcas, planificación.
           </p>
         </div>
@@ -100,7 +100,7 @@ export function MarcasPanel({
       <p className="text-sm text-tinta-suave">
         {formatearNumero(agrupacionesActivas)} agrupaciones · {formatearNumero(marcasActivas.length)} marcas · {formatearNumero(conjuntos)}{" "}
         {conjuntos === 1 ? "conjunto" : "conjuntos"} ({formatearNumero(marcasEnConjunto)} marca{marcasEnConjunto === 1 ? "" : "s"}) ·{" "}
-        {formatearNumero(conTratamiento)} con tratamiento especial ({formatearNumero(porGml)} por GML · {formatearNumero(barrido)} al barrer
+        {formatearNumero(conTratamiento)} con tratamiento especial ({formatearNumero(porGml)} por GML · {formatearNumero(mixta)} mixtas · {formatearNumero(barrido)} al barrer
         {sinModalidad > 0 ? ` · ${formatearNumero(sinModalidad)} sin modalidad` : ""} · {formatearNumero(pendientes)} pendiente{pendientes === 1 ? "" : "s"})
         {cargandoResumen && <span className="ml-2 italic">Actualizando…</span>}
       </p>

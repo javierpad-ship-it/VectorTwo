@@ -47,11 +47,13 @@ describe("caso 1: vista base", () => {
       marcadas: 4,
       por_gml: 2,
       barrido: 1,
+      mixta: 0,
       sin_modalidad: 1,
       asignaciones: 4,
       asignaciones_vigentes: 3,
       asignaciones_ignoradas: 1,
       pendientes_sin_gml: 1,
+      pendientes_mixta_sin_gml: 0,
       nodos_con_relevantes: 3,
       nodos_con_mas_de_4_por_agrupacion: 0,
     });

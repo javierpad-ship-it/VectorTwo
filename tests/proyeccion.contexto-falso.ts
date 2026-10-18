@@ -23,6 +23,8 @@ export const contexto = {
   nodoMundo: {} as Record<string, string>,
   /** Cambios sobre las tiendas del fixture (por id), p. ej. la venta esperada de una tienda que ya abrió. */
   tiendasExtra: {} as Record<string, Partial<TiendaProy>>,
+  /** M12: `huella_flujo` de hoy (la configuración de 02b); un test la cambia para simular que se movió una marca relevante. `null` = sin configuración leída. */
+  huellaFlujo: "huella-flujo-de-prueba" as string | null,
 };
 
 export function reiniciarContexto() {
@@ -36,6 +38,7 @@ export function reiniciarContexto() {
   contexto.efectoNino = efectoNinoFalso();
   contexto.nodoMundo = {};
   contexto.tiendasExtra = {};
+  contexto.huellaFlujo = "huella-flujo-de-prueba";
 }
 
 /** El efecto del Niño por temporada y año, con las cifras del fixture (invierno 0,66 / verano 1,24 en 2026; 0,63 / 0,73 en 2023). */
@@ -140,6 +143,7 @@ export function contextoFalso(): ContextoCalculo {
     })),
     factores: contexto.factores,
     configFlujo: configFlujo(),
+    huellaFlujo: contexto.huellaFlujo,
     generosMatriz: [GEN.hombre, GEN.mujer],
     hoy: "2026-10-15",
     ultimoCerrado: "2026-09",

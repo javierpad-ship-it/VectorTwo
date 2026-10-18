@@ -5,7 +5,7 @@ import type {
   CambioMarcaBloque,
   NoPermitidaGml,
 } from "../tipos-api";
-import { cambioMarca, motivoRechazoAsignacion, type AsignacionGmlEntrada, type MarcaGml } from "./reglas";
+import { cambioMarca, motivoRechazoAsignacion, requiereModalidadDestino, type AsignacionGmlEntrada, type MarcaGml } from "./reglas";
 import { marcasPorId } from "../conjuntos/reglas";
 
 /**
@@ -30,8 +30,12 @@ export type PlanAsignacion = {
   insertar: { marca_id: string; genero_mundo_linea_id: string; nota: string | null }[];
   /** Ids de asignaciones que hay que borrar (`quitar`). */
   borrar_ids: string[];
-  /** Marcas que pasan a marcadas `por_gml` (las de `cambios_marca`). */
+  /** Marcas que pasan a marcadas `por_gml` (las de `cambios_marca`), mixtas incluidas. */
   marcar_ids: string[];
+  /** M12: de `marcar_ids`, las que pasan a `mixta` (`resto_al_barrer = true`). */
+  marcar_mixta_ids: string[];
+  /** M12: marcas al barrer que recibirían un GML sin `modalidad_destino`: el handler responde `409 modalidad_destino_requerida` sin escribir. */
+  requieren_destino: { marca_id: string; marca: string }[];
 };
 
 const clave = (marcaId: string, nodoId: string) => `${marcaId}|${nodoId}`;
@@ -121,9 +125,14 @@ export function planificarAsignacionBloque(cuerpo: CuerpoAsignacion, estado: Est
   }
 
   const cambios_marca: CambioMarcaBloque[] = [];
+  const requieren_destino: PlanAsignacion["requieren_destino"] = [];
   for (const marca of conAsignada.values()) {
-    const cambio = cambioMarca(marca);
-    if (cambio) cambios_marca.push({ marca_id: marca.id, marca: marca.nombre, de: cambio.de, a: cambio.a });
+    const cambio = cambioMarca(marca, cuerpo.modalidad_destino);
+    if (!cambio) continue;
+    cambios_marca.push({ marca_id: marca.id, marca: marca.nombre, de: cambio.de, a: cambio.a });
+    if (requiereModalidadDestino(cambio) && cuerpo.modalidad_destino === undefined) {
+      requieren_destino.push({ marca_id: marca.id, marca: marca.nombre });
+    }
   }
 
   return {
@@ -139,6 +148,8 @@ export function planificarAsignacionBloque(cuerpo: CuerpoAsignacion, estado: Est
     insertar,
     borrar_ids,
     marcar_ids: cambios_marca.map((c) => c.marca_id),
+    marcar_mixta_ids: cambios_marca.filter((c) => c.a === "mixta").map((c) => c.marca_id),
+    requieren_destino,
   };
 }
 
@@ -146,6 +157,7 @@ export function planificarAsignacionBloque(cuerpo: CuerpoAsignacion, estado: Est
 export function aplicarPlanAsignacion(estado: EstadoAsignacion, plan: PlanAsignacion): EstadoAsignacion {
   const borrar = new Set(plan.borrar_ids);
   const marcar = new Set(plan.marcar_ids);
+  const mixtas = new Set(plan.marcar_mixta_ids);
   const asignaciones = estado.asignaciones.filter((a) => !borrar.has(a.id));
   plan.insertar.forEach((p, i) => {
     asignaciones.push({
@@ -156,7 +168,7 @@ export function aplicarPlanAsignacion(estado: EstadoAsignacion, plan: PlanAsigna
     });
   });
   const marcas = estado.marcas.map((m) =>
-    marcar.has(m.id) ? { ...m, tratamiento_especial: true, modalidad_tratamiento: "por_gml" } : m
+    marcar.has(m.id) ? { ...m, tratamiento_especial: true, modalidad_tratamiento: "por_gml", resto_al_barrer: mixtas.has(m.id) } : m
   );
   return { ...estado, marcas, asignaciones };
 }

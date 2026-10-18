@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
@@ -92,7 +93,17 @@ export function CabeceraProyeccion({
           <span className="block font-medium">La proyección está desactualizada:</span>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {proyeccion.desactualizada.map((m, i) => (
-              <li key={`${m.codigo}-${i}`}>{textoMotivoDesactualizada(m)}</li>
+              <li key={`${m.codigo}-${i}`}>
+                {textoMotivoDesactualizada(m)}
+                {m.codigo === "config_cambiada" && (
+                  <>
+                    {" "}
+                    <Link href="/maestros/marcas" className="font-medium underline underline-offset-2">
+                      Ver las marcas
+                    </Link>
+                  </>
+                )}
+              </li>
             ))}
           </ul>
           <span className="mt-2 block text-xs">Recalcular rehace propuestas, bloques y curvas y conserva todas tus decisiones; las que cambien de propuesta o de curva quedan marcadas.</span>

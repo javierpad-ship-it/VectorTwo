@@ -14,6 +14,7 @@ import type {
   AsignacionGml,
   EstadoGmlEspecial,
   MarcaEstadoGml,
+  MixtaVigente,
   NodoEstadoGml,
   PendienteVigente,
   ResumenGmlEspecial,
@@ -203,11 +204,13 @@ export function armarVistaGml(estado: EstadoVistaGml, opciones: OpcionesVistaGml
     marcadas: 0,
     por_gml: 0,
     barrido: 0,
+    mixta: 0,
     sin_modalidad: 0,
     asignaciones: 0,
     asignaciones_vigentes: 0,
     asignaciones_ignoradas: 0,
     pendientes_sin_gml: 0,
+    pendientes_mixta_sin_gml: 0,
     nodos_con_relevantes: 0,
     nodos_con_mas_de_4_por_agrupacion: 0,
   };
@@ -215,14 +218,18 @@ export function armarVistaGml(estado: EstadoVistaGml, opciones: OpcionesVistaGml
     const e = f.entrada;
     if (f.marca.tratamiento_especial && !f.enConjunto) {
       resumen.marcadas += 1;
-      if (f.marca.modalidad_tratamiento === "por_gml") resumen.por_gml += 1;
-      else if (f.marca.modalidad_tratamiento === "barrido") resumen.barrido += 1;
-      else resumen.sin_modalidad += 1;
+      // M12: la modalidad que cuenta es la efectiva (una mixta es `por_gml` en la columna); `sin_modalidad` es la casilla con columna nula.
+      if (f.marca.modalidad_tratamiento === null) resumen.sin_modalidad += 1;
+      else if (modalidadEfectiva(f.marca) === "mixta") resumen.mixta += 1;
+      else if (f.marca.modalidad_tratamiento === "por_gml") resumen.por_gml += 1;
+      else resumen.barrido += 1;
     }
     resumen.asignaciones += e.gml.length;
     resumen.asignaciones_vigentes += e.gml.filter((g) => g.vigente).length;
     resumen.asignaciones_ignoradas += e.gml.filter((g) => !g.vigente).length;
+    // `pendientes_sin_gml` conserva su contrato (solo `sin_gml`); las mixtas sin GML se cuentan aparte.
     if (e.motivo_pendiente === "sin_gml") resumen.pendientes_sin_gml += 1;
+    else if (e.motivo_pendiente === "mixta_sin_gml") resumen.pendientes_mixta_sin_gml += 1;
   }
   resumen.asignaciones_ignoradas = resumen.asignaciones - resumen.asignaciones_vigentes;
 
@@ -288,7 +295,7 @@ export type UnidadFlujoEspecial = {
   genero_mundo_linea_id: string | null;
 };
 
-export type PendienteFlujo = { marca_id: string; marca: string; motivo: "sin_gml" | "sin_modalidad" };
+export type PendienteFlujo = { marca_id: string; marca: string; motivo: "sin_gml" | "sin_modalidad" | "mixta_sin_gml" };
 
 export type FlujoEspecial = { unidades: UnidadFlujoEspecial[]; pendientes: PendienteFlujo[] };
 
@@ -298,7 +305,9 @@ export type FlujoEspecial = { unidades: UnidadFlujoEspecial[]; pendientes: Pendi
  * unidad: cabezas y sueltas): la configuración propia de un miembro de un
  * conjunto efectivo nunca produce filas. Una marca `por_gml` sin pares vigentes
  * no produce ninguna y va a `pendientes`, igual que la marca marcada sin
- * modalidad (que además fluye como `barrido`).
+ * modalidad (que además fluye como `barrido`). M12: una `mixta` produce las DOS
+ * clases de fila (una de GML nulo, su resto al barrer, y una por GML vigente);
+ * sin GML vigentes solo la nula y va a `pendientes` como `mixta_sin_gml`.
  */
 export function unidadesFlujoEspecial(estado: EstadoVistaGml): FlujoEspecial {
   const ctx = contexto(estado);
@@ -313,14 +322,15 @@ export function unidadesFlujoEspecial(estado: EstadoVistaGml): FlujoEspecial {
 
     const efectiva = modalidadEfectiva(marca);
     let vigentes = 0;
-    if (efectiva === "barrido") {
+    if (efectiva === "barrido" || efectiva === "mixta") {
       unidades.push({
         marca_id: marca.id,
         agrupacion_marca_id: marca.agrupacion_marca_id,
         modalidad: "barrido",
         genero_mundo_linea_id: null,
       });
-    } else {
+    }
+    if (efectiva !== "barrido") {
       for (const a of ctx.asignacionesPorMarca.get(marca.id) ?? []) {
         const nodo = estado.nodos.get(a.genero_mundo_linea_id);
         if (!nodo?.vigente) continue;
@@ -334,7 +344,7 @@ export function unidadesFlujoEspecial(estado: EstadoVistaGml): FlujoEspecial {
       }
     }
     const pendiente = motivoPendiente(marca, agrupacion, vigentes);
-    if (pendiente === "sin_gml" || pendiente === "sin_modalidad") {
+    if (pendiente === "sin_gml" || pendiente === "sin_modalidad" || pendiente === "mixta_sin_gml") {
       pendientes.push({ marca_id: marca.id, marca: marca.nombre, motivo: pendiente });
     }
   }
@@ -392,22 +402,42 @@ export function armarVigentes(estado: EstadoVistaGml, calculadoAt: string): Vige
         })),
     }));
 
-  const barrido = flujo.unidades
-    .filter((u) => u.modalidad === "barrido")
-    .flatMap((u) => {
-      const marca = ctx.marcasPorId.get(u.marca_id);
-      return marca
-        ? [
-            {
+  const aBarrido = (u: UnidadFlujoEspecial) => {
+    const marca = ctx.marcasPorId.get(u.marca_id);
+    return marca
+      ? [
+          {
+            efectiva: modalidadEfectiva(marca),
+            fila: {
               marca_id: marca.id,
               marca: marca.nombre,
               agrupacion_marca_id: u.agrupacion_marca_id,
               agrupacion: agrupacionNombre(u.agrupacion_marca_id),
               miembros: miembrosEfectivos(marca.id),
             },
-          ]
-        : [];
-    })
+          },
+        ]
+      : [];
+  };
+  const filasBarrido = flujo.unidades.filter((u) => u.modalidad === "barrido").flatMap(aBarrido);
+  const barrido = filasBarrido.filter((b) => b.efectiva !== "mixta").map((b) => b.fila).sort((a, b) => compararNombre(a.marca, b.marca));
+  const nodosPorMixta = new Map<string, { genero_mundo_linea_id: string }[]>();
+  for (const u of flujo.unidades) {
+    if (u.modalidad !== "por_gml" || !u.genero_mundo_linea_id) continue;
+    const marca = ctx.marcasPorId.get(u.marca_id);
+    if (!marca || modalidadEfectiva(marca) !== "mixta") continue;
+    const lista = nodosPorMixta.get(u.marca_id) ?? [];
+    lista.push({ genero_mundo_linea_id: u.genero_mundo_linea_id });
+    nodosPorMixta.set(u.marca_id, lista);
+  }
+  const mixtas: MixtaVigente[] = filasBarrido
+    .filter((b) => b.efectiva === "mixta")
+    .map((b) => ({
+      ...b.fila,
+      gml_especificos: (nodosPorMixta.get(b.fila.marca_id) ?? []).sort((x, y) =>
+        x.genero_mundo_linea_id < y.genero_mundo_linea_id ? -1 : x.genero_mundo_linea_id > y.genero_mundo_linea_id ? 1 : 0
+      ),
+    }))
     .sort((a, b) => compararNombre(a.marca, b.marca));
 
   const unidades = estado.marcas
@@ -423,5 +453,5 @@ export function armarVigentes(estado: EstadoVistaGml, calculadoAt: string): Vige
 
   const nodos_gmle = [...estado.nodos.values()].filter((n) => n.vigente && n.nivel_planificacion === "GMLE").length;
 
-  return { gml, barrido, unidades, pendientes, nodos_gmle, calculado_at: calculadoAt };
+  return { gml, barrido, mixtas, unidades, pendientes, nodos_gmle, calculado_at: calculadoAt };
 }

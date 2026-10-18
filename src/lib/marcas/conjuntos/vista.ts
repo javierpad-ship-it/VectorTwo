@@ -8,7 +8,7 @@ import {
   type MarcaConjunto,
   type MiembroParaAvisos,
 } from "./reglas";
-import type { AvisoConjunto, ConjuntoFila, Modalidad, RespuestaConjuntos } from "../tipos-api";
+import type { AvisoConjunto, ConjuntoFila, ModalidadEfectiva, RespuestaConjuntos } from "../tipos-api";
 
 /**
  * Armado de `GET /api/marcas/conjuntos` (02b, regla 22): una fila por cabeza con
@@ -21,6 +21,8 @@ export type MarcaParaConjuntos = MarcaConjunto & {
   codigo: string;
   tratamiento_especial: boolean;
   modalidad_tratamiento: string | null;
+  /** M12: con `por_gml`, la marca es `mixta`. */
+  resto_al_barrer?: boolean | null;
 };
 
 export type AgrupacionParaConjuntos = { id: string; nombre: string };
@@ -44,7 +46,7 @@ export function armarVistaConjuntos(
     if (!cabeza) continue;
     const paraAvisos: MiembroParaAvisos[] = lista.map((m) => ({ ...m, gml_asignados: gml.get(m.id)?.asignados ?? 0 }));
     const avisos = avisosConjunto(cabeza, paraAvisos);
-    const modalidad: Modalidad | null = modalidadEfectiva(cabeza);
+    const modalidad: ModalidadEfectiva | null = modalidadEfectiva(cabeza);
     conjuntos.push({
       cabeza: {
         id: cabeza.id,

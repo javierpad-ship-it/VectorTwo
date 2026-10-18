@@ -45,7 +45,7 @@ export type MarcaEstado = Pick<
   Tables<"marcas">,
   "id" | "codigo" | "nombre" | "agrupacion_marca_id" | "tratamiento_especial" | "activo"
 > &
-  Partial<Pick<Tables<"marcas">, "conjunto_marca_id" | "modalidad_tratamiento">>;
+  Partial<Pick<Tables<"marcas">, "conjunto_marca_id" | "modalidad_tratamiento" | "resto_al_barrer">>;
 
 /** Ambas tablas completas (activas e inactivas), leídas planas de la base o fabricadas en los tests. */
 export type EstadoImportacionMarcas = {
@@ -58,8 +58,10 @@ export type MarcaNueva = {
   codigo: string;
   agrupacion_marca_id: string;
   tratamiento_especial: boolean;
-  /** Regla 2 de 02b: con casilla se escribe `barrido` (como `POST /api/marcas`); sin casilla, `null`. */
-  modalidad_tratamiento?: "barrido" | null;
+  /** Regla 2 de 02b: con casilla se escribe `barrido` (como `POST /api/marcas`); sin casilla, `null`. M12: `MIXTA` escribe `por_gml` + `resto_al_barrer`. */
+  modalidad_tratamiento?: "barrido" | "por_gml" | null;
+  /** M12: solo presente (y `true`) en una marca nueva `MIXTA`. */
+  resto_al_barrer?: boolean;
 };
 
 export type PlanImportacionMarcas = {
@@ -101,6 +103,16 @@ export function sinPrefijoNumerico(valor: string): string {
 }
 
 const siNo = (v: boolean) => (v ? "SI" : "NO");
+
+/**
+ * M12: la columna `TRATAMIENTO_ESPECIAL` admite además `MIXTA` (marca con tratamiento especial que será `mixta`: `por_gml` +
+ * `resto_al_barrer`; hasta que se le asignen GML queda pendiente `mixta_sin_gml`). Lo demás es `leerSiNo`.
+ */
+export function leerTratamientoMarca(valor: unknown): { marcada: boolean; mixta: boolean } | null {
+  if (normalizarNombre(valor) === "MIXTA") return { marcada: true, mixta: true };
+  const siNoLeido = leerSiNo(valor);
+  return siNoLeido === null ? null : { marcada: siNoLeido, mixta: false };
+}
 
 export function planificarImportacionMarcas(
   filas: FilaImportacionMarca[],
@@ -169,8 +181,9 @@ export function planificarImportacionMarcas(
     }
 
     // Tratamiento especial: columna sin mapear ("") → false.
-    const tratamiento = leerSiNo(tratamientoTxt);
-    if (tratamiento === null) return omitir("tratamiento_invalido", { detalle: tratamientoTxt.trim() });
+    const leido = leerTratamientoMarca(tratamientoTxt);
+    if (leido === null) return omitir("tratamiento_invalido", { detalle: tratamientoTxt.trim() });
+    const tratamiento = leido.marcada;
 
     // Duplicados por nombre de marca normalizado: manda la primera aparición.
     const vista = vistas.get(marcaTxt);
@@ -232,7 +245,8 @@ export function planificarImportacionMarcas(
       codigo,
       agrupacion_marca_id: agrupacion.id,
       tratamiento_especial: tratamiento,
-      modalidad_tratamiento: tratamiento ? "barrido" : null,
+      modalidad_tratamiento: tratamiento ? (leido.mixta ? "por_gml" : "barrido") : null,
+      ...(leido.mixta ? { resto_al_barrer: true } : {}),
     });
     crear.marcas += 1;
     if (tratamiento) crear.con_tratamiento_especial += 1;
@@ -326,6 +340,7 @@ export function aplicarPlanMarcas(estado: EstadoImportacionMarcas, plan: PlanImp
       agrupacion_marca_id: m.agrupacion_marca_id,
       tratamiento_especial: m.tratamiento_especial,
       modalidad_tratamiento: m.modalidad_tratamiento ?? null,
+      ...(m.resto_al_barrer ? { resto_al_barrer: true } : {}),
       activo: true,
       conjunto_marca_id: null,
     });

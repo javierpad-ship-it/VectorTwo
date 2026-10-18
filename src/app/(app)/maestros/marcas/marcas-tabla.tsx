@@ -14,14 +14,26 @@ import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Chips, type ChipItem } from "@/components/ui/chips";
 import { VistaPreviaNombre } from "@/components/catalogo/vista-previa-nombre";
-import { esMarcaGenerica, esMiembroEfectivo, estaPendiente, motivoPendienteMarca, ETIQUETA_MODALIDAD, TEXTO_PENDIENTE } from "@/components/marcas/comunes-m2b";
+import {
+  confirmacionCambioModalidad,
+  cuerpoModalidad,
+  esMarcaGenerica,
+  esMiembroEfectivo,
+  estaPendiente,
+  ETIQUETA_MODALIDAD,
+  MODALIDADES_ELEGIBLES,
+  motivoPendienteMarca,
+  sinModalidadGuardada,
+  textoConfirmarModalidad,
+  TEXTO_PENDIENTE,
+} from "@/components/marcas/comunes-m2b";
 import {
   ETIQUETA_AVISO_CONJUNTO,
   type AvisoConjunto,
   type CrearMarcaCuerpoM2b,
   type EditarMarcaCuerpoM2b,
   type MarcaConGml,
-  type Modalidad,
+  type ModalidadEfectiva,
 } from "@/components/marcas/tipos-m2b";
 import { EditarMarcaDialogo, MAX_NOTA } from "./editar-marca-dialogo";
 import { CrearConjuntoDialogo } from "./crear-conjunto-dialogo";
@@ -31,6 +43,7 @@ const FILTRO_TODAS = "todas";
 const FILTRO_TRATAMIENTO = "tratamiento";
 const FILTRO_POR_GML = "por_gml";
 const FILTRO_BARRIDO = "barrido";
+const FILTRO_MIXTA = "mixta";
 const FILTRO_PENDIENTES = "pendientes";
 const FILTRO_EN_CONJUNTO = "en_conjunto";
 const FILTRO_CABEZAS = "cabezas";
@@ -43,7 +56,7 @@ type Form = {
   codigoTocado: boolean;
   agrupacionId: string;
   tratamiento: boolean;
-  modalidad: Modalidad;
+  modalidad: ModalidadEfectiva;
   nota: string;
 };
 
@@ -73,7 +86,7 @@ function Casilla({
 }
 
 /** Marcada con esa modalidad y que cuenta por sí misma (un miembro de conjunto efectivo cuenta como su cabeza). */
-function enTratamiento(m: MarcaConGml, modalidad: Modalidad): boolean {
+function enTratamiento(m: MarcaConGml, modalidad: ModalidadEfectiva): boolean {
   return m.tratamiento_especial && !esMiembroEfectivo(m) && m.modalidad_efectiva === modalidad;
 }
 
@@ -143,12 +156,13 @@ export function MarcasTabla({
   // ─── Filtros en memoria ───
   const base = mostrarInactivos ? marcas : marcas.filter((m) => m.activo);
   const porAgrupacion = new Map<string, number>();
-  const conteo = { tratamiento: 0, porGml: 0, barrido: 0, pendientes: 0, enConjunto: 0, cabezas: 0 };
+  const conteo = { tratamiento: 0, porGml: 0, barrido: 0, mixta: 0, pendientes: 0, enConjunto: 0, cabezas: 0 };
   for (const m of base) {
     porAgrupacion.set(m.agrupacion_marca_id, (porAgrupacion.get(m.agrupacion_marca_id) ?? 0) + 1);
     if (m.tratamiento_especial) conteo.tratamiento++;
     if (enTratamiento(m, "por_gml")) conteo.porGml++;
     if (enTratamiento(m, "barrido")) conteo.barrido++;
+    if (enTratamiento(m, "mixta")) conteo.mixta++;
     if (estaPendiente(m)) conteo.pendientes++;
     if (m.conjunto_marca_id) conteo.enConjunto++;
     if (m.miembros > 0) conteo.cabezas++;
@@ -159,6 +173,7 @@ export function MarcasTabla({
     { id: FILTRO_TRATAMIENTO, label: "Con tratamiento especial", conteo: conteo.tratamiento },
     { id: FILTRO_POR_GML, label: "Por GML", conteo: conteo.porGml },
     { id: FILTRO_BARRIDO, label: "Al barrer", conteo: conteo.barrido },
+    { id: FILTRO_MIXTA, label: "Mixtas", conteo: conteo.mixta },
     { id: FILTRO_PENDIENTES, label: "Pendientes", conteo: conteo.pendientes },
     { id: FILTRO_EN_CONJUNTO, label: "En conjunto", conteo: conteo.enConjunto },
     { id: FILTRO_CABEZAS, label: "Cabezas", conteo: conteo.cabezas },
@@ -178,6 +193,8 @@ export function MarcasTabla({
         return enTratamiento(m, "por_gml");
       case FILTRO_BARRIDO:
         return enTratamiento(m, "barrido");
+      case FILTRO_MIXTA:
+        return enTratamiento(m, "mixta");
       case FILTRO_PENDIENTES:
         return estaPendiente(m);
       case FILTRO_EN_CONJUNTO:
@@ -218,8 +235,8 @@ export function MarcasTabla({
       codigo: codigoPropuesto,
       agrupacion_marca_id: form.agrupacionId,
       tratamiento_especial: form.tratamiento,
-      // Sin modalidad la API la deja al barrer; solo se manda cuando se pide por GML.
-      ...(form.tratamiento && form.modalidad === "por_gml" ? { modalidad_tratamiento: "por_gml" as const } : {}),
+      // Sin modalidad la API la deja al barrer; solo se manda cuando se pide por GML o mixta.
+      ...(form.tratamiento && form.modalidad !== "barrido" ? cuerpoModalidad(form.modalidad) : {}),
       ...(form.tratamiento && form.nota.trim() !== "" ? { nota_tratamiento: form.nota.trim() } : {}),
     };
     const ok = await ejecutar(() => api.post<MarcaFila>("/api/marcas", cuerpo));
@@ -271,12 +288,14 @@ export function MarcasTabla({
   }
 
   function cambiarModalidad(m: MarcaConGml, valor: string) {
-    if (valor !== "por_gml" && valor !== "barrido") return;
-    if (valor === m.modalidad_tratamiento) return;
-    if (valor === "barrido" && m.gml_asignados > 0) {
-      if (!confirm(`¿Pasar ${m.nombre} a Al barrer? Sus ${m.gml_asignados} GML quedarán ignorados (no se borran).`)) return;
-    }
-    void parchear(m, { modalidad_tratamiento: valor });
+    if (!MODALIDADES_ELEGIBLES.includes(valor as ModalidadEfectiva)) return;
+    const nueva = valor as ModalidadEfectiva;
+    if (nueva === m.modalidad_efectiva && !sinModalidadGuardada(m)) return;
+    // Cambia el estado de los GML (se ignoran o dejan de ignorarse) y el reparto/proyecciones vigentes: casi siempre se confirma.
+    const de = m.modalidad_efectiva ?? "barrido";
+    const { pide, gml } = confirmacionCambioModalidad(m, de, nueva);
+    if (pide && !confirm(textoConfirmarModalidad({ nombre: m.nombre, de, a: nueva, gml, tieneReparto: null }))) return;
+    void parchear(m, cuerpoModalidad(nueva));
   }
 
   function cambiarConjunto(m: MarcaConGml, valor: string) {
@@ -384,19 +403,22 @@ export function MarcasTabla({
               {m.tratamiento_especial && <Badge tono="marca">Tratamiento especial</Badge>}
               {puedeEditar && m.tratamiento_especial && (
                 <Select
-                  value={m.modalidad_tratamiento ?? ""}
+                  value={sinModalidadGuardada(m) ? "" : (m.modalidad_efectiva ?? "")}
                   onChange={(e) => cambiarModalidad(m, e.target.value)}
                   disabled={ocupado}
                   className="h-8 w-60"
                   aria-label={`Modalidad de ${m.nombre}`}
                 >
-                  {m.modalidad_tratamiento === null && (
+                  {sinModalidadGuardada(m) && (
                     <option value="" disabled>
                       Sin modalidad (al barrer)
                     </option>
                   )}
-                  <option value="por_gml">{ETIQUETA_MODALIDAD.por_gml}</option>
-                  <option value="barrido">{ETIQUETA_MODALIDAD.barrido}</option>
+                  {MODALIDADES_ELEGIBLES.map((o) => (
+                    <option key={o} value={o}>
+                      {ETIQUETA_MODALIDAD[o]}
+                    </option>
+                  ))}
                 </Select>
               )}
             </span>
@@ -414,9 +436,17 @@ export function MarcasTabla({
                 )}
                 {ignoradas > 0 && <Badge tono="neutro">{ignoradas === 1 ? "1 ignorada" : `${ignoradas} ignoradas`}</Badge>}
                 {pendiente && <Badge tono="alerta">{TEXTO_PENDIENTE[pendiente]}</Badge>}
-                {m.modalidad_efectiva === "barrido" && (
-                  <Badge tono="neutro">{m.modalidad_tratamiento === null ? "Sin modalidad (al barrer)" : "Al barrer"}</Badge>
+                {m.modalidad_efectiva === "mixta" && (
+                  <button
+                    type="button"
+                    onClick={() => onIrAGml(m.id)}
+                    title="Ver sus GML específicos"
+                    className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-marca"
+                  >
+                    <Badge tono="marca">Mixta · {m.gml_vigentes} específicos</Badge>
+                  </button>
                 )}
+                {m.modalidad_efectiva === "barrido" && <Badge tono="neutro">{sinModalidadGuardada(m) ? "Sin modalidad (al barrer)" : "Al barrer"}</Badge>}
                 {miembro && <span className="text-xs text-tinta-suave">cuenta como {m.conjunto?.nombre}</span>}
               </span>
             )}
@@ -576,10 +606,20 @@ export function MarcasTabla({
             </label>
             {form.tratamiento && (
               <>
-                <Field label="Modalidad" hint={form.modalidad === "por_gml" ? "Quedará pendiente hasta asignarle GML." : "Flujo propio, sin detalle por GML."}>
-                  <Select value={form.modalidad} onChange={(e) => setForm({ ...form, modalidad: e.target.value as Modalidad })}>
+                <Field
+                  label="Modalidad"
+                  hint={
+                    form.modalidad === "por_gml"
+                      ? "Quedará pendiente hasta asignarle GML."
+                      : form.modalidad === "mixta"
+                        ? "Compras específicas en algunos GML y el resto al barrer; sin GML se comporta como al barrer."
+                        : "Flujo propio, sin detalle por GML."
+                  }
+                >
+                  <Select value={form.modalidad} onChange={(e) => setForm({ ...form, modalidad: e.target.value as ModalidadEfectiva })}>
                     <option value="barrido">{ETIQUETA_MODALIDAD.barrido}</option>
                     <option value="por_gml">{ETIQUETA_MODALIDAD.por_gml}</option>
+                    <option value="mixta">{ETIQUETA_MODALIDAD.mixta}</option>
                   </Select>
                 </Field>
                 <Field label="Nota" hint={`${form.nota.length}/${MAX_NOTA}. Por qué se trata aparte; opcional.`}>

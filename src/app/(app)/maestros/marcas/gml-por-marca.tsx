@@ -4,14 +4,25 @@ import { useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
 import { normalizarNombre } from "@/lib/arbol/normalizar";
 import { formatearNumero, plural } from "@/lib/formato";
-import { esMarcaGenerica, esMiembroEfectivo, ETIQUETA_MODALIDAD, type NodoPlano } from "@/components/marcas/comunes-m2b";
+import {
+  columnaModalidad,
+  cuerpoModalidad,
+  esMarcaGenerica,
+  esMiembroEfectivo,
+  ETIQUETA_MODALIDAD,
+  MODALIDADES_ELEGIBLES,
+  sinModalidadGuardada,
+  textoConfirmarModalidad,
+  TEXTO_PENDIENTE,
+  type NodoPlano,
+} from "@/components/marcas/comunes-m2b";
 import {
   ETIQUETA_MOTIVO_IGNORADA,
   type AsignacionGml,
-  type EditarMarcaCuerpoM2b,
   type EstadoGmlEspecial,
   type MarcaConGml,
   type MarcaEstadoGml,
+  type ModalidadEfectiva,
 } from "@/components/marcas/tipos-m2b";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +38,7 @@ import type { OperacionesGml } from "./gml-tab";
 import { SelectorNodos } from "./selector-nodos";
 import { MAX_NOTA } from "./editar-marca-dialogo";
 
-type FiltroLista = "todas" | "por_gml" | "barrido" | "pendientes" | "ignoradas";
+type FiltroLista = "todas" | "por_gml" | "barrido" | "mixta" | "pendientes" | "ignoradas";
 
 /** Una marca que aún no está marcada se muestra como candidata: al asignarle un GML la API la marca. */
 function desdeMarca(m: MarcaConGml): MarcaEstadoGml {
@@ -38,7 +49,7 @@ function desdeMarca(m: MarcaConGml): MarcaEstadoGml {
     activo: m.activo,
     vigente: m.vigente,
     agrupacion_marca: { id: m.agrupacion_marca.id, nombre: m.agrupacion_marca.nombre, activo: m.agrupacion_marca.activo },
-    modalidad_tratamiento: m.modalidad_tratamiento,
+    ...columnaModalidad(m),
     modalidad_efectiva: m.modalidad_efectiva,
     nota_tratamiento: m.nota_tratamiento,
     conjunto: m.conjunto ? { id: m.conjunto.id, nombre: m.conjunto.nombre } : null,
@@ -49,10 +60,11 @@ function desdeMarca(m: MarcaConGml): MarcaEstadoGml {
   };
 }
 
-function etiquetaModalidad(m: Pick<MarcaEstadoGml, "modalidad_efectiva" | "modalidad_tratamiento">): { texto: string; tono: "exito" | "neutro" } {
+function etiquetaModalidad(m: MarcaEstadoGml): { texto: string; tono: "exito" | "neutro" | "marca" } {
   if (m.modalidad_efectiva === "por_gml") return { texto: ETIQUETA_MODALIDAD.por_gml, tono: "exito" };
+  if (m.modalidad_efectiva === "mixta") return { texto: ETIQUETA_MODALIDAD.mixta, tono: "marca" };
   if (m.modalidad_efectiva === "barrido") {
-    return { texto: m.modalidad_tratamiento === null ? "Sin modalidad (al barrer)" : ETIQUETA_MODALIDAD.barrido, tono: "neutro" };
+    return { texto: sinModalidadGuardada({ tratamiento_especial: true, ...columnaModalidad(m) }) ? "Sin modalidad (al barrer)" : ETIQUETA_MODALIDAD.barrido, tono: "neutro" };
   }
   return { texto: "Sin tratamiento", tono: "neutro" };
 }
@@ -112,6 +124,8 @@ export function GmlPorMarca({
         return m.modalidad_efectiva === "por_gml";
       case "barrido":
         return m.modalidad_efectiva === "barrido";
+      case "mixta":
+        return m.modalidad_efectiva === "mixta";
       case "pendientes":
         return m.pendiente;
       case "ignoradas":
@@ -124,6 +138,7 @@ export function GmlPorMarca({
     { id: "todas", label: "Todas", conteo: lista.length },
     { id: "por_gml", label: "Por GML", conteo: lista.filter((m) => m.modalidad_efectiva === "por_gml").length },
     { id: "barrido", label: "Al barrer", conteo: lista.filter((m) => m.modalidad_efectiva === "barrido").length },
+    { id: "mixta", label: "Mixtas", conteo: lista.filter((m) => m.modalidad_efectiva === "mixta").length },
     { id: "pendientes", label: "Pendientes", conteo: lista.filter((m) => m.pendiente).length },
     { id: "ignoradas", label: "Con ignoradas", conteo: lista.filter((m) => m.gml.some((g) => !g.vigente)).length },
   ];
@@ -173,12 +188,14 @@ export function GmlPorMarca({
   }
 
   async function cambiarModalidad(valor: string) {
-    if (!sel || !marcaSel || (valor !== "por_gml" && valor !== "barrido")) return;
-    if (valor === marcaSel.modalidad_tratamiento) return;
-    const vigentes = sel.gml.length;
-    if (valor === "barrido" && vigentes > 0 && !confirm(`¿Pasar ${sel.nombre} a Al barrer? Sus ${vigentes} GML quedarán ignorados (no se borran).`)) return;
-    const cuerpo: EditarMarcaCuerpoM2b = { modalidad_tratamiento: valor };
-    await ops.mutar(() => api.patch(`/api/marcas/${sel.id}`, cuerpo));
+    if (!sel || !marcaSel || !MODALIDADES_ELEGIBLES.includes(valor as ModalidadEfectiva)) return;
+    const nueva = valor as ModalidadEfectiva;
+    if (nueva === marcaSel.modalidad_efectiva && !sinModalidadGuardada(marcaSel)) return;
+    const de: ModalidadEfectiva = marcaSel.modalidad_efectiva ?? "barrido";
+    // Los GML que cambian de estado: los asignados dejan de ignorarse (a Mixta) o los específicos pasan a ignorados (a Al barrer).
+    const cambian = sel.gml.filter((g) => (de === "mixta" ? g.vigente : true)).map((g) => `${g.genero} · ${g.mundo} · ${g.linea}`);
+    if (!confirm(textoConfirmarModalidad({ nombre: sel.nombre, de, a: nueva, gml: cambian, tieneReparto: null }))) return;
+    await ops.mutar(() => api.patch(`/api/marcas/${sel.id}`, cuerpoModalidad(nueva)));
   }
 
   async function aplicarGml() {
@@ -374,7 +391,7 @@ export function GmlPorMarca({
                         <span className="block truncate text-xs text-tinta-suave">{m.agrupacion_marca.nombre}</span>
                         <span className="mt-0.5 flex flex-wrap gap-1">
                           <Badge tono={mod.tono}>{mod.texto}</Badge>
-                          {m.pendiente && <Badge tono="alerta">Pendiente: sin GML</Badge>}
+                          {m.pendiente && <Badge tono="alerta">{m.motivo_pendiente ? TEXTO_PENDIENTE[m.motivo_pendiente] : "Pendiente: sin GML"}</Badge>}
                           {miembro && <Badge tono="neutro">en {m.conjunto?.nombre}</Badge>}
                           {!m.activo && <Badge tono="alerta">Inactiva</Badge>}
                         </span>
@@ -404,7 +421,7 @@ export function GmlPorMarca({
               acciones={
                 <span className="flex flex-wrap items-center justify-end gap-1">
                   <Badge tono={etiquetaModalidad(sel).tono}>{etiquetaModalidad(sel).texto}</Badge>
-                  {sel.pendiente && <Badge tono="alerta">Pendiente: sin GML</Badge>}
+                  {sel.pendiente && <Badge tono="alerta">{sel.motivo_pendiente ? TEXTO_PENDIENTE[sel.motivo_pendiente] : "Pendiente: sin GML"}</Badge>}
                 </span>
               }
             >
@@ -427,14 +444,17 @@ export function GmlPorMarca({
                 {marcaSel?.tratamiento_especial && (
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Modalidad">
-                      <Select value={marcaSel.modalidad_tratamiento ?? ""} onChange={(e) => void cambiarModalidad(e.target.value)} disabled={ops.ocupado}>
-                        {marcaSel.modalidad_tratamiento === null && (
+                      <Select value={sinModalidadGuardada(marcaSel) ? "" : (marcaSel.modalidad_efectiva ?? "")} onChange={(e) => void cambiarModalidad(e.target.value)} disabled={ops.ocupado}>
+                        {sinModalidadGuardada(marcaSel) && (
                           <option value="" disabled>
                             Sin modalidad (al barrer)
                           </option>
                         )}
-                        <option value="por_gml">{ETIQUETA_MODALIDAD.por_gml}</option>
-                        <option value="barrido">{ETIQUETA_MODALIDAD.barrido}</option>
+                        {MODALIDADES_ELEGIBLES.map((o) => (
+                          <option key={o} value={o}>
+                            {ETIQUETA_MODALIDAD[o]}
+                          </option>
+                        ))}
                       </Select>
                     </Field>
                     <div>
@@ -471,7 +491,13 @@ export function GmlPorMarca({
                   columnas={columnasGml}
                   filas={sel.gml}
                   claveFila={(g) => g.id}
-                  vacio={sel.modalidad_efectiva === "barrido" ? "Marca al barrer: flujo independiente, sin GML." : "Sin GML. Asígnale al menos uno o pásala a Al barrer."}
+                  vacio={
+                    sel.modalidad_efectiva === "barrido"
+                      ? "Marca al barrer: flujo independiente, sin GML."
+                      : sel.modalidad_efectiva === "mixta"
+                        ? "Mixta sin GML específicos: se comporta como al barrer. Asígnale los GML con compras específicas."
+                        : "Sin GML. Asígnale al menos uno o pásala a Al barrer."
+                  }
                   claseFila={(g) => (g.vigente ? undefined : "opacity-60")}
                 />
               </div>

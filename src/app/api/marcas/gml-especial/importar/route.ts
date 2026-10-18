@@ -18,7 +18,8 @@ import type { ReporteImportacionGml } from "@/lib/marcas/tipos-api";
  * tandas de 500) y deja marcadas `por_gml` las marcas sin casilla, al barrer o
  * sin modalidad que reciben GML (tandas de 150), que el reporte lista antes en
  * `cambios_marca`. Nunca crea árbol ni marcas y no quita lo que el archivo no
- * traiga. Sin transacción: si algo falla, `500` con lo hecho y reimportar
+ * traiga. M12: una marca al barrer necesita la columna `MODALIDAD` (`POR_GML` o `MIXTA`); sin ella sus filas nuevas se omiten
+ * con `modalidad_destino_requerida`. Sin transacción: si algo falla, `500` con lo hecho y reimportar
  * completa el resto sin duplicar.
  */
 export async function POST(request: NextRequest) {
@@ -58,15 +59,17 @@ export async function POST(request: NextRequest) {
   );
   if (errInsertar) return detener(errInsertar, "crear las asignaciones", `Se crearon ${insertadas} asignaciones.`);
 
-  if (plan.marcar_ids.length > 0) {
-    const { error: errMarcar } = await marcarPorGml(db, plan.marcar_ids);
-    if (errMarcar) {
-      return detener(
-        errMarcar,
-        "marcar las marcas como Por GML",
-        `Se crearon ${insertadas} asignaciones, pero algunas marcas siguen sin marcar y sus GML aparecen ignorados.`
-      );
-    }
+  const mixtas = new Set(plan.marcar_mixta_ids);
+  const soloPorGml = plan.marcar_ids.filter((id) => !mixtas.has(id));
+  const errMarcar =
+    (soloPorGml.length > 0 ? (await marcarPorGml(db, soloPorGml, false)).error : null) ??
+    (plan.marcar_mixta_ids.length > 0 ? (await marcarPorGml(db, plan.marcar_mixta_ids, true)).error : null);
+  if (errMarcar) {
+    return detener(
+      errMarcar,
+      "marcar las marcas como Por GML o Mixta",
+      `Se crearon ${insertadas} asignaciones, pero algunas marcas siguen sin marcar y sus GML aparecen ignorados.`
+    );
   }
 
   const reporte: ReporteImportacionGml = {

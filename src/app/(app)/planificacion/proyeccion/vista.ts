@@ -490,10 +490,15 @@ export function textoParaRevision(n: number): string {
 /** `0.10.8` (07c): los crecimientos guardados no son los que aplicó el último cálculo. No se puede forzar al cerrar. */
 export const TEXTO_CRECIMIENTOS_CAMBIADOS = "Los crecimientos guardados no están aplicados (falló el recálculo o un nodo cambió de mundo): recalcula. No se puede cerrar hasta entonces.";
 
+/** `0.11.0` (M12): cambió la configuración de marcas (modalidad, GML relevantes o conjuntos) después de calcular. Se puede forzar al cerrar solo si el servidor lo permite. */
+export const TEXTO_CONFIG_CAMBIADA =
+  "Cambió la configuración de marcas (modalidades, GML relevantes o conjuntos) después de calcular: recalcula para que las marcas al barrer, mixtas y relevantes se cuenten como están hoy. Tus decisiones se conservan.";
+
 /** Motivo de «desactualizada» en palabras: el del método nuevo se explica aparte; el resto, tal como lo dice el servidor. */
 export function textoMotivoDesactualizada(m: { codigo: string; mensaje: string }): string {
   if (m.codigo === "version_metodo") return "El método de cálculo cambió (método nuevo): recalcula para aplicarlo. Tus decisiones se conservan.";
   if (m.codigo === "crecimientos_cambiados") return TEXTO_CRECIMIENTOS_CAMBIADOS;
+  if (m.codigo === "config_cambiada") return TEXTO_CONFIG_CAMBIADA;
   return m.mensaje;
 }
 

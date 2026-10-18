@@ -73,7 +73,12 @@ export type MotivoDesactualizada =
    * `0.10.8` (07c): la matriz de crecimientos guardada no es la que aplicó el último cálculo (`resumen.huella_crecimientos`), o un nodo con
    * filas base cambió de mundo (`resumen.gm_gml` ≠ catálogo). No se puede saltar con `forzar` al cerrar.
    */
-  | "crecimientos_cambiados";
+  | "crecimientos_cambiados"
+  /**
+   * M12 (`0.11.0`): cambió la configuración de 02b (marcas relevantes, modalidades o conjuntos) después de calcular
+   * (`proyecciones.huella_flujo`); una calculada antes de M12 (huella nula) también. Una proyección cerrada no se toca.
+   */
+  | "config_cambiada";
 
 export type MotivoBloqueo = "sin_meses" | "meses_faltantes" | "tienda_sin_apertura_con_venta" | "sin_mismas_tiendas";
 

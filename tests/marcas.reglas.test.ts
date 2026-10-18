@@ -6,6 +6,7 @@ import {
   marcaVigente,
   modalidadEfectiva,
   modalidadPorDefecto,
+  normalizarModalidad,
   motivoRechazoEliminarMarca,
   motivoRechazoAgrupacionDestino,
   motivoRechazoEliminar,
@@ -85,9 +86,9 @@ describe("motivoRechazoEliminar con los tipos de M2 (regla 4)", () => {
 });
 
 describe("normalizarTratamiento (regla 6, ampliada por 02b)", () => {
-  const conNota = { tratamiento_especial: true, nota_tratamiento: "Licencia", modalidad_tratamiento: "por_gml" as const };
+  const conNota = { tratamiento_especial: true, nota_tratamiento: "Licencia", modalidad_tratamiento: "por_gml" as const, resto_al_barrer: false };
   const sinTratamiento = { tratamiento_especial: false, nota_tratamiento: null, modalidad_tratamiento: null };
-  const apagada = { tratamiento_especial: false, nota_tratamiento: null, modalidad_tratamiento: null };
+  const apagada = { tratamiento_especial: false, nota_tratamiento: null, modalidad_tratamiento: null, resto_al_barrer: false };
 
   it("desmarcar la bandera borra la nota y la modalidad, aunque el cuerpo traiga nota", () => {
     expect(normalizarTratamiento({ tratamiento_especial: false }, conNota)).toEqual({ motivo: null, valor: apagada });
@@ -106,6 +107,7 @@ describe("normalizarTratamiento (regla 6, ampliada por 02b)", () => {
       tratamiento_especial: true,
       nota_tratamiento: "Nueva",
       modalidad_tratamiento: "por_gml",
+      resto_al_barrer: false,
     });
     expect(normalizarTratamiento({ tratamiento_especial: true }, conNota).valor).toEqual(conNota);
     // Solo la nota, sobre una marca que ya tiene tratamiento.
@@ -113,6 +115,7 @@ describe("normalizarTratamiento (regla 6, ampliada por 02b)", () => {
       tratamiento_especial: true,
       nota_tratamiento: "Otra",
       modalidad_tratamiento: "por_gml",
+      resto_al_barrer: false,
     });
   });
 
@@ -121,6 +124,7 @@ describe("normalizarTratamiento (regla 6, ampliada por 02b)", () => {
       tratamiento_especial: true,
       nota_tratamiento: null,
       modalidad_tratamiento: "barrido",
+      resto_al_barrer: false,
     });
     expect(normalizarTratamiento({ tratamiento_especial: true }, sinTratamiento, 0).valor?.modalidad_tratamiento).toBe("barrido");
     expect(normalizarTratamiento({ tratamiento_especial: true }, sinTratamiento, 3).valor?.modalidad_tratamiento).toBe("por_gml");
@@ -136,7 +140,24 @@ describe("normalizarTratamiento (regla 6, ampliada por 02b)", () => {
       tratamiento_especial: true,
       nota_tratamiento: "Licencia",
       modalidad_tratamiento: "barrido",
+      resto_al_barrer: false,
     });
+  });
+
+  it("M12: elegir mixta escribe el par; cambiar a otra modalidad o desmarcar apaga resto_al_barrer; sin modalidad en el cuerpo se conserva la mixta", () => {
+    const mixta = { tratamiento_especial: true, nota_tratamiento: null, modalidad_tratamiento: "por_gml", resto_al_barrer: true };
+    expect(normalizarTratamiento({ modalidad_tratamiento: "mixta" }, conNota).valor).toEqual({
+      tratamiento_especial: true,
+      nota_tratamiento: "Licencia",
+      modalidad_tratamiento: "por_gml",
+      resto_al_barrer: true,
+    });
+    expect(normalizarTratamiento({ nota_tratamiento: "x" }, mixta).valor).toMatchObject({ modalidad_tratamiento: "por_gml", resto_al_barrer: true });
+    expect(normalizarTratamiento({ modalidad_tratamiento: "barrido" }, mixta).valor).toMatchObject({ modalidad_tratamiento: "barrido", resto_al_barrer: false });
+    expect(normalizarTratamiento({ modalidad_tratamiento: "por_gml" }, mixta).valor).toMatchObject({ modalidad_tratamiento: "por_gml", resto_al_barrer: false });
+    expect(normalizarTratamiento({ tratamiento_especial: false }, mixta).valor).toMatchObject({ modalidad_tratamiento: null, resto_al_barrer: false });
+    // Mixta de una marca sin tratamiento que se marca en el mismo cuerpo.
+    expect(normalizarTratamiento({ tratamiento_especial: true, modalidad_tratamiento: "mixta" }, sinTratamiento).valor).toMatchObject({ modalidad_tratamiento: "por_gml", resto_al_barrer: true });
   });
 
   it("modalidad sin casilla y sin traerla → 400 con el mensaje de la ficha", () => {
@@ -154,6 +175,7 @@ describe("normalizarTratamiento (regla 6, ampliada por 02b)", () => {
       tratamiento_especial: true,
       nota_tratamiento: null,
       modalidad_tratamiento: "por_gml",
+      resto_al_barrer: false,
     });
     expect(normalizarTratamiento({ nota_tratamiento: "  recortada  " }, conNota).valor?.nota_tratamiento).toBe("recortada");
   });
@@ -189,6 +211,19 @@ describe("modalidadEfectiva (02b regla 5) y modalidadPorDefecto", () => {
     expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: "por_gml" })).toBe("por_gml");
     expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: "barrido" })).toBe("barrido");
     expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: null })).toBe("barrido");
+  });
+  it("M12: por_gml con resto_al_barrer es mixta; sin casilla sigue siendo null", () => {
+    expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: "por_gml", resto_al_barrer: true })).toBe("mixta");
+    expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: "por_gml", resto_al_barrer: false })).toBe("por_gml");
+    expect(modalidadEfectiva({ tratamiento_especial: false, modalidad_tratamiento: null, resto_al_barrer: true })).toBeNull();
+    // Con barrido o nula la bandera no cambia la lectura (el check de la base impide ese par).
+    expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: "barrido", resto_al_barrer: true })).toBe("barrido");
+    expect(modalidadEfectiva({ tratamiento_especial: true, modalidad_tratamiento: null, resto_al_barrer: true })).toBe("barrido");
+  });
+  it("M12: normalizarModalidad escribe el par; mixta es por_gml + resto_al_barrer y las demás apagan la bandera", () => {
+    expect(normalizarModalidad("mixta")).toEqual({ modalidad_tratamiento: "por_gml", resto_al_barrer: true });
+    expect(normalizarModalidad("por_gml")).toEqual({ modalidad_tratamiento: "por_gml", resto_al_barrer: false });
+    expect(normalizarModalidad("barrido")).toEqual({ modalidad_tratamiento: "barrido", resto_al_barrer: false });
   });
   it("por defecto: por_gml si hay GML y barrido si no", () => {
     expect(modalidadPorDefecto(0)).toBe("barrido");

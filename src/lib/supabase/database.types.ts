@@ -1,9 +1,9 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-16 (0023 M7 07c: `proyeccion_crecimientos`, `proyeccion_fila_anios.base_siguiente`
- * y `.base_normalizada`) contra `generate_typescript_types` del proyecto
- * Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, vistas, funciones,
+ * Verificados el 2026-10-17 (0024 M12: `repartos_marca_barrido.temporadas_usadas`; antes, 0023 M7 07c:
+ * `proyeccion_crecimientos`, `proyeccion_fila_anios.base_siguiente` y `.base_normalizada`) contra
+ * `generate_typescript_types` del proyecto Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, vistas, funciones,
  * columnas, obligatoriedad y claves foráneas. Se actualizan a mano (estilo de este archivo)
  * después de cada migración y se comparan con el generador.
  */
@@ -1606,6 +1606,7 @@ export type Database = {
           normaliza_nino: boolean;
           nota: string | null;
           share_barrido: number | null;
+          temporadas_usadas: Json;
           updated_at: string;
           ventana_meses: number;
           version: number;
@@ -1631,6 +1632,7 @@ export type Database = {
           normaliza_nino?: boolean;
           nota?: string | null;
           share_barrido?: number | null;
+          temporadas_usadas?: Json;
           updated_at?: string;
           ventana_meses: number;
           version: number;
@@ -1656,6 +1658,7 @@ export type Database = {
           normaliza_nino?: boolean;
           nota?: string | null;
           share_barrido?: number | null;
+          temporadas_usadas?: Json;
           updated_at?: string;
           ventana_meses?: number;
           version?: number;

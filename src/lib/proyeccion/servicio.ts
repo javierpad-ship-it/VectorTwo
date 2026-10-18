@@ -170,6 +170,7 @@ export async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalc
         calculado_at: p.calculado_at,
         hasta_periodo: p.hasta_periodo,
         recalculo_pendiente: parametros.recalculo_pendiente,
+        huella_flujo: p.huella_flujo,
         resumen: resumen
           ? { curvas_usadas: resumen.curvas_usadas ?? [], version_metodo: resumen.version_metodo, huella_crecimientos: resumen.huella_crecimientos, gm_gml: resumen.gm_gml }
           : null,
@@ -188,7 +189,8 @@ const anioDeHasta = (hasta: string | null, hoy: string) => Number((hasta ?? hoy)
 
 export async function leerEstadoInicial(): Promise<Salida<RespuestaProyeccionApi>> {
   const d = db();
-  const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: false });
+  // M12: con la configuración de 02b (`huella_flujo`) para marcar `config_cambiada`.
+  const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: true });
   if (ctxR.respuesta) return falla(ctxR.respuesta);
   const ctx = ctxR.data;
   const [lista, ventaTienda, obsoletas] = await Promise.all([listarProyeccionesDb(d), leerVentaTiendaMeses(d), contarCurvasObsoletas(d, ctx)]);
@@ -263,7 +265,7 @@ export async function leerProyeccion(id: string): Promise<Salida<ProyeccionApi>>
   const d = db();
   const p = await proyeccionOr404(d, id);
   if (p.respuesta) return falla(p.respuesta);
-  const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: false });
+  const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: true });
   if (ctxR.respuesta) return falla(ctxR.respuesta);
   const des = await desactualizadaDe(d, p.data, ctxR.data, { leerNiveles: true });
   if (des.respuesta) return falla(des.respuesta);
@@ -739,6 +741,8 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
     resumen: resumen as unknown as TablesInsert<"proyecciones">["resumen"],
     calculado_at: ahora,
     calculando_desde: null,
+    // M12: con qué configuración de 02b se calculó (`config_cambiada` si cambia después).
+    huella_flujo: ctx.huellaFlujo,
   });
   if (upd.error) return fallaDb(upd.error, "proyección: guardar resumen");
   if (!upd.data) return cambioDuranteCalculo();
@@ -814,7 +818,7 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
   const pR = await proyeccionOr404(d, id);
   if (pR.respuesta) return falla(pR.respuesta);
   const p = pR.data;
-  const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: false });
+  const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: true });
   if (ctxR.respuesta) return falla(ctxR.respuesta);
   const des = await desactualizadaDe(d, p, ctxR.data);
   if (des.respuesta) return falla(des.respuesta);

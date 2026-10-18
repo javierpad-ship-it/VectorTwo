@@ -3,6 +3,7 @@ import { modalidadEfectiva, modalidadPorDefecto } from "../reglas";
 import { marcasPorId, unidadDeMarca, type MarcaConjunto, type UnidadDeMarca } from "../conjuntos/reglas";
 import type {
   CambioMarca,
+  ModalidadDestino,
   MotivoIgnorada,
   MotivoNoPermitidoGml,
   MotivoPendiente,
@@ -22,6 +23,8 @@ export type MarcaGml = MarcaConjunto & {
   codigo?: string;
   tratamiento_especial: boolean;
   modalidad_tratamiento: string | null;
+  /** M12: con `por_gml`, la marca es `mixta` (sus GML son específicos y el resto va al barrer). */
+  resto_al_barrer?: boolean | null;
   nota_tratamiento?: string | null;
 };
 
@@ -43,15 +46,27 @@ export function marcaVigenteGml(marca: Pick<MarcaGml, "activo">, agrupacion: Pic
 }
 
 /**
- * Regla 7: qué le pasa a la marca al recibir su primer GML. Sin casilla,
- * al barrer o sin modalidad pasa a `por_gml`; si ya es `por_gml`, `null`.
+ * Regla 7 (M12: con modalidad destino). Qué le pasa a la marca al recibir su primer GML. Sin casilla pasa a `por_gml`
+ * (el destino no aplica); al barrer o sin modalidad pasa a `destino` (`por_gml` o `mixta`; sin destino, `por_gml`: los
+ * handlers lo EXIGEN antes de escribir con `requiereModalidadDestino`); si ya es `por_gml` o `mixta`, `null`.
  */
-export function cambioMarca(marca: Pick<MarcaGml, "tratamiento_especial" | "modalidad_tratamiento">): CambioMarca | null {
+export function cambioMarca(
+  marca: Pick<MarcaGml, "tratamiento_especial" | "modalidad_tratamiento">,
+  destino?: ModalidadDestino
+): CambioMarca | null {
   if (!marca.tratamiento_especial) return { de: "sin_tratamiento", a: "por_gml" };
   if (marca.modalidad_tratamiento === "por_gml") return null;
-  if (marca.modalidad_tratamiento === "barrido") return { de: "barrido", a: "por_gml" };
-  return { de: "sin_modalidad", a: "por_gml" };
+  if (marca.modalidad_tratamiento === "barrido") return { de: "barrido", a: destino ?? "por_gml" };
+  return { de: "sin_modalidad", a: destino ?? "por_gml" };
 }
+
+/** M12 (I3): una marca al barrer (o marcada sin modalidad, que se lee `barrido`) no pasa a `por_gml` sin preguntar: exige `modalidad_destino`. */
+export function requiereModalidadDestino(cambio: CambioMarca | null): boolean {
+  return cambio !== null && (cambio.de === "barrido" || cambio.de === "sin_modalidad");
+}
+
+export const MENSAJE_DESTINO_REQUERIDO =
+  "La marca está al barrer: indica si pasa a Por GML o a Mixta (modalidad_destino) antes de asignarle un GML.";
 
 // ─── Regla 7: rechazo de una asignación ───
 
@@ -140,8 +155,8 @@ export function motivoIgnorada(
 }
 
 /**
- * Regla 9. Una marca marcada y vigente, `por_gml` y con 0 asignaciones
- * vigentes → `sin_gml`; marcada con modalidad nula → `sin_modalidad`; marcada
+ * Regla 9 (M12). Una marca marcada y vigente, `por_gml` y con 0 asignaciones
+ * vigentes → `sin_gml` (`mixta_sin_gml` si es mixta); marcada con modalidad nula → `sin_modalidad`; marcada
  * no vigente → `marca_no_vigente`; `barrido` nunca es pendiente; sin casilla
  * tampoco. Un miembro de un conjunto efectivo no es pendiente (cuenta su
  * cabeza).
@@ -155,6 +170,11 @@ export function motivoPendiente(
   if (!marca.tratamiento_especial || enConjunto) return null;
   if (!marcaVigenteGml(marca, agrupacion)) return "marca_no_vigente";
   if (marca.modalidad_tratamiento === null) return "sin_modalidad";
-  if (marca.modalidad_tratamiento === "por_gml" && gmlVigentes === 0) return "sin_gml";
+  // M12: una mixta sin GML específicos se comporta como al barrer y se persigue con su propio motivo.
+  if (gmlVigentes === 0) {
+    const efectiva = modalidadEfectiva(marca);
+    if (efectiva === "mixta") return "mixta_sin_gml";
+    if (efectiva === "por_gml") return "sin_gml";
+  }
   return null;
 }

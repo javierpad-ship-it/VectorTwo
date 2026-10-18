@@ -18,6 +18,14 @@ export function error(mensaje: string, status = 400) {
 }
 
 /**
+ * Error con un código estable (`{ error, codigo }`) para que la pantalla distinga un `409` de otro sin leer el texto
+ * (p. ej. `huella_cambiada`, `modalidad_destino_requerida`).
+ */
+export function errorConCodigo(mensaje: string, status: number, codigo: string) {
+  return NextResponse.json({ error: mensaje, codigo }, { status, headers: SIN_CACHE });
+}
+
+/**
  * Tope del cuerpo JSON de cualquier petición: 6 MB. Lo más pesado que manda la
  * pantalla son tandas de venta (10 000 filas, unos 400 KB) y las cargas de
  * 10 000 filas de los importadores (pocos MB como mucho); los bloques de 2 MB

@@ -26,6 +26,7 @@ import { cargarEstadoGml, type EstadoGmlCargado } from "@/lib/marcas/gml/estado"
 import { construirConfigFlujo, type ConfigFlujo } from "@/lib/marcas/gml/flujo";
 import { leerTiendas } from "@/lib/tiendas/consultas";
 import { hoyLima } from "@/lib/tiendas/estado";
+import { huellaFlujo } from "@/lib/marcas-barrer/huellas";
 import { ultimoMesCerrado } from "@/lib/ventas/periodo";
 import type { TiendaProy } from "./bloques";
 import { generosDeMatriz } from "./crecimientos";
@@ -183,6 +184,11 @@ export type ContextoCalculo = {
   factoresDb: FactorDb[];
   factores: FactorProy[];
   configFlujo: ConfigFlujo;
+  /**
+   * M12 (`0.11.0`): `huella_flujo` de hoy (hash de la configuración de 02b y `VERSION_METODO_BARRER`). `null` si el contexto se leyó
+   * sin la configuración de marcas (`conFlujo: false`): no se puede comparar, así que no se marca nada.
+   */
+  huellaFlujo: string | null;
   /** `0.10.8` (07c): ids de los géneros que son columna de la matriz de crecimientos (HOMBRE, MUJER), según el catálogo. */
   generosMatriz: string[];
   hoy: string;
@@ -207,10 +213,12 @@ export async function cargarContextoCalculo(db: Db, opciones: { conEat?: boolean
 
   // Marcas, conjuntos y marcas relevantes por GML (claveFlujo para las participaciones).
   let configFlujo: ConfigFlujo = { unidadDe: new Map(), marcas: new Map(), nodoDeEquivalencia: new Map(), nivelDeNodo: new Map(), relevantes: new Set() };
+  let huella: string | null = null;
   if (opciones.conFlujo ?? true) {
     const gml: Awaited<ReturnType<typeof cargarEstadoGml>> = await cargarEstadoGml(db);
     if (gml.error || !gml.estado) return falla(traducirErrorDb(gml.error as NonNullable<typeof gml.error>, "proyección: leer marcas"));
     configFlujo = construirConfigFlujo((gml as EstadoGmlCargado).estado, cat.data.equivalencias);
+    huella = huellaFlujo(configFlujo);
   }
 
   const nodos: NodoProy[] = [];
@@ -254,6 +262,7 @@ export async function cargarContextoCalculo(db: Db, opciones: { conEat?: boolean
     factoresDb: factores.data,
     factores: factores.data.map(aFactorProy),
     configFlujo,
+    huellaFlujo: huella,
     generosMatriz: generosDeMatriz(cat.data.generos).map((g) => g.id),
     hoy,
     ultimoCerrado: publicados.length > 0 ? ultimoMesCerrado(hoy) : null,
@@ -270,6 +279,7 @@ export function estadoActualDe(ctx: ContextoCalculo, nivelesCambiados: number, c
     ultimo_mes_cerrado: ctx.ultimoCerrado,
     curvas_vigentes: ctx.vigentes.map((v) => ({ agrupacion_id: v.agrupacion_id, curva_id: v.curva_id })),
     niveles_cambiados: nivelesCambiados,
+    ...(ctx.huellaFlujo !== null ? { huella_flujo: ctx.huellaFlujo } : {}),
     tiendas: ctx.tiendas,
     factores: ctx.factores,
     periodos_updated_at: periodosUpdated.length > 0 ? periodosUpdated[periodosUpdated.length - 1] : null,

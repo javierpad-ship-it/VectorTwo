@@ -174,6 +174,19 @@ describe("desactualización (regla 33) y avisos de cambio (regla 34)", () => {
     expect(codigos(actual(), { ...p, recalculo_pendiente: true })).toEqual(["recalculo_pendiente"]);
   });
 
+  it("M12 config_cambiada: la huella de la configuración de 02b guardada difiere de la actual, o es nula (calculada antes de M12)", () => {
+    const calculada = { ...p, huella_flujo: "h1" };
+    expect(codigos({ ...actual(), huella_flujo: "h1" }, calculada)).toEqual([]);
+    expect(codigos({ ...actual(), huella_flujo: "h2" }, calculada)).toEqual(["config_cambiada"]);
+    // Una calculada antes de M12 (huella nula): desactualizada.
+    expect(codigos({ ...actual(), huella_flujo: "h1" }, { ...p, huella_flujo: null })).toEqual(["config_cambiada"]);
+    // Quien llama sin la huella (ni guardada ni actual) no marca nada: así los contextos sin configuración de marcas no rompen.
+    expect(codigos(actual(), calculada)).toEqual([]);
+    expect(codigos({ ...actual(), huella_flujo: "h1" }, p)).toEqual([]);
+    // Sin calcular no hay nada que comparar.
+    expect(codigos({ ...actual(), huella_flujo: "h2" }, { ...calculada, calculado_at: null })).toEqual([]);
+  });
+
   it("tiendas_cambiadas: fecha, venta esperada o referente distintos de la foto, o una tienda nueva", () => {
     const a = actual();
     a.tiendas = a.tiendas.map((t) => (t.id === "T4" ? { ...t, fecha_apertura: "2027-04-01" } : t));

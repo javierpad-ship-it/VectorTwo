@@ -1,13 +1,13 @@
 import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requirePlanner } from "@/lib/auth/guard";
-import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
+import { error, errorConCodigo, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { marcarPorGml } from "@/lib/marcas/consultas";
 import { insertarAsignacion } from "@/lib/marcas/gml/consultas";
 import { cargarEstadoGml } from "@/lib/marcas/gml/estado";
 import { crearGmlEspecialSchema, estadoGmlQuerySchema } from "@/lib/marcas/gml/esquemas";
-import { cambioMarca, motivoRechazoAsignacion } from "@/lib/marcas/gml/reglas";
+import { MENSAJE_DESTINO_REQUERIDO, cambioMarca, motivoRechazoAsignacion, requiereModalidadDestino } from "@/lib/marcas/gml/reglas";
 import { armarVistaGml, describirAsignacion } from "@/lib/marcas/gml/vista";
 import { parametrosNoVacios, pideInactivas } from "@/lib/marcas/query";
 import type { CrearGmlEspecialRespuesta, EstadoGmlEspecial } from "@/lib/marcas/tipos-api";
@@ -47,7 +47,9 @@ export async function GET(request: NextRequest) {
  * tratamiento no se toca) y el cambio vuelve en `cambio_marca`. Sin
  * transacción: si el `update` falla tras el `insert`, la asignación queda
  * ignorada y visible (`marca_sin_tratamiento` o `marca_en_barrido`) y repetir
- * desde Marcas lo arregla.
+ * desde Marcas lo arregla. M12: si la marca es `barrido` (o está marcada sin
+ * modalidad) el cuerpo debe traer `modalidad_destino` (`por_gml` o `mixta`); sin él
+ * `409 modalidad_destino_requerida` y no se escribe nada.
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -66,6 +68,10 @@ export async function POST(request: NextRequest) {
   const rechazo = motivoRechazoAsignacion(marca, nodo, estado.marcas);
   if (rechazo || !marca) return error(rechazo?.mensaje ?? "Marca no encontrada.", rechazo?.status ?? 404);
 
+  if (requiereModalidadDestino(cambioMarca(marca, datos.modalidad_destino)) && datos.modalidad_destino === undefined) {
+    return errorConCodigo(MENSAJE_DESTINO_REQUERIDO, 409, "modalidad_destino_requerida");
+  }
+
   const repetida = estado.asignaciones.some(
     (a) => a.marca_id === marca.id && a.genero_mundo_linea_id === datos.genero_mundo_linea_id
   );
@@ -80,10 +86,10 @@ export async function POST(request: NextRequest) {
     return errInsertar ? traducirErrorDb(errInsertar, "hacer relevante una marca") : error("No se pudo guardar el GML.", 500);
   }
 
-  const cambio = cambioMarca(marca);
+  const cambio = cambioMarca(marca, datos.modalidad_destino);
   let marcaFinal = marca;
   if (cambio) {
-    const { error: errMarcar } = await marcarPorGml(db, [marca.id]);
+    const { error: errMarcar } = await marcarPorGml(db, [marca.id], cambio.a === "mixta");
     if (errMarcar) {
       const r = traducirErrorDb(errMarcar, "marcar la marca como Por GML");
       return r.status >= 500
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
           )
         : r;
     }
-    marcaFinal = { ...marca, tratamiento_especial: true, modalidad_tratamiento: "por_gml" };
+    marcaFinal = { ...marca, tratamiento_especial: true, modalidad_tratamiento: "por_gml", resto_al_barrer: cambio.a === "mixta" };
   }
 
   const asignacion = describirAsignacion(fila, marcaFinal, estado);

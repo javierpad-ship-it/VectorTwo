@@ -43,7 +43,7 @@ const CAMPOS: CampoImportador<Campo>[] = [
     etiqueta: "Tratamiento especial",
     alias: ["TRATAMIENTO_ESPECIAL", "TRATAMIENTO", "ESPECIAL"],
     opcional: true,
-    hint: "Si no la mapeas, las marcas nuevas entran sin tratamiento especial.",
+    hint: "Si no la mapeas, las marcas nuevas entran sin tratamiento especial. MIXTA la marca con modalidad mixta.",
   },
   {
     campo: "conjunto",
@@ -126,7 +126,7 @@ export function ImportarMarcas({ onAplicado }: { onAplicado: () => void }) {
           columnas={archivo.columnas}
           mapeo={imp.mapeo}
           onCambiar={imp.setMapeo}
-          descripcion="Detectado por nombre; corrígelo si hace falta. Marca y agrupación son obligatorias. La agrupación se reconoce por código, por nombre o con número delante (1 ULTRA LOW); el tratamiento acepta SI/NO, S/N, X, 1/0."
+          descripcion="Detectado por nombre; corrígelo si hace falta. Marca y agrupación son obligatorias. La agrupación se reconoce por código, por nombre o con número delante (1 ULTRA LOW); el tratamiento acepta SI/NO, S/N, X, 1/0 y MIXTA (con tratamiento y modalidad mixta)."
         >
           <BotonesImportar
             mapeoCompleto={imp.mapeoCompleto}

@@ -4,10 +4,10 @@ import { useState } from "react";
 import { api } from "@/lib/api-client";
 import { normalizarNombre } from "@/lib/arbol/normalizar";
 import { formatearNumero, plural } from "@/lib/formato";
-import type { EditarMarcaCuerpoM2b, MarcaConGml, MiembrosCuerpo, MiembrosRespuesta, Modalidad } from "@/components/marcas/tipos-m2b";
+import type { EditarMarcaCuerpoM2b, MarcaConGml, MiembrosCuerpo, MiembrosRespuesta, ModalidadEfectiva } from "@/components/marcas/tipos-m2b";
 import { ETIQUETA_AVISO_CONJUNTO, ETIQUETA_MOTIVO_RECHAZO_CONJUNTO } from "@/components/marcas/tipos-m2b";
 import type { ConjuntoFila } from "@/components/marcas/tipos-m2b";
-import { esMarcaGenerica, ETIQUETA_MODALIDAD } from "@/components/marcas/comunes-m2b";
+import { cuerpoModalidad, esMarcaGenerica, ETIQUETA_MODALIDAD, MODALIDADES_ELEGIBLES, sinModalidadGuardada, textoConfirmarModalidad } from "@/components/marcas/comunes-m2b";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
@@ -73,12 +73,13 @@ export function ConjuntoDetalle({
   }
 
   function cambiarModalidad(valor: string) {
-    if (!marcaCabeza || (valor !== "por_gml" && valor !== "barrido")) return;
-    if (valor === marcaCabeza.modalidad_tratamiento) return;
-    if (valor === "barrido" && marcaCabeza.gml_asignados > 0) {
-      if (!confirm(`¿Pasar ${cabeza.nombre} a Al barrer? Sus ${marcaCabeza.gml_asignados} GML quedarán ignorados (no se borran).`)) return;
-    }
-    void mutar(() => api.patch(`/api/marcas/${cabeza.id}`, { modalidad_tratamiento: valor satisfies Modalidad } satisfies EditarMarcaCuerpoM2b));
+    if (!marcaCabeza || !MODALIDADES_ELEGIBLES.includes(valor as ModalidadEfectiva)) return;
+    const nueva = valor as ModalidadEfectiva;
+    if (nueva === marcaCabeza.modalidad_efectiva && !sinModalidadGuardada(marcaCabeza)) return;
+    const de: ModalidadEfectiva = marcaCabeza.modalidad_efectiva ?? "barrido";
+    const cambian = de === "mixta" ? marcaCabeza.gml_vigentes : marcaCabeza.gml_asignados;
+    if (!confirm(textoConfirmarModalidad({ nombre: cabeza.nombre, de, a: nueva, gml: cambian, tieneReparto: null }))) return;
+    void mutar(() => api.patch(`/api/marcas/${cabeza.id}`, cuerpoModalidad(nueva)));
   }
 
   async function guardarNota() {
@@ -309,19 +310,22 @@ export function ConjuntoDetalle({
               <p className="text-sm font-medium text-tinta">Modalidad</p>
               {cabeza.tratamiento_especial ? (
                 <Select
-                  value={marcaCabeza?.modalidad_tratamiento ?? ""}
+                  value={marcaCabeza && !sinModalidadGuardada(marcaCabeza) ? (marcaCabeza.modalidad_efectiva ?? "") : ""}
                   onChange={(e) => cambiarModalidad(e.target.value)}
                   disabled={ocupado || !marcaCabeza}
                   className="h-8"
                   aria-label={`Modalidad de ${cabeza.nombre}`}
                 >
-                  {marcaCabeza?.modalidad_tratamiento == null && (
+                  {(!marcaCabeza || sinModalidadGuardada(marcaCabeza)) && (
                     <option value="" disabled>
                       Sin modalidad (al barrer)
                     </option>
                   )}
-                  <option value="por_gml">{ETIQUETA_MODALIDAD.por_gml}</option>
-                  <option value="barrido">{ETIQUETA_MODALIDAD.barrido}</option>
+                  {MODALIDADES_ELEGIBLES.map((o) => (
+                    <option key={o} value={o}>
+                      {ETIQUETA_MODALIDAD[o]}
+                    </option>
+                  ))}
                 </Select>
               ) : (
                 <p className="text-sm text-tinta-suave">Sin tratamiento especial.</p>
@@ -329,6 +333,13 @@ export function ConjuntoDetalle({
               {cabeza.tratamiento_especial && cabeza.modalidad_efectiva === "por_gml" && (
                 <p className="text-xs text-tinta-suave">
                   {cabeza.gml_vigentes > 0 ? `Relevante en ${plural(cabeza.gml_vigentes, "GML", "GML")}.` : "Pendiente: sin GML relevantes."}
+                </p>
+              )}
+              {cabeza.tratamiento_especial && cabeza.modalidad_efectiva === "mixta" && (
+                <p className="text-xs text-tinta-suave">
+                  {cabeza.gml_vigentes > 0
+                    ? `Específica en ${plural(cabeza.gml_vigentes, "GML", "GML")}; el resto va al barrer.`
+                    : "Mixta sin GML específicos: se comporta como al barrer."}
                 </p>
               )}
             </div>

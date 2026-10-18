@@ -3,7 +3,7 @@ import { modalidadEfectiva } from "../reglas";
 import { unidadDeMarca } from "../conjuntos/reglas";
 import { marcaVigenteGml } from "./reglas";
 import { unidadesFlujoEspecial, type EstadoVistaGml } from "./vista";
-import type { ClaveFlujo, HechoFlujo, Modalidad } from "../tipos-api";
+import type { ClaveFlujo, HechoFlujo, ModalidadEfectiva } from "../tipos-api";
 
 /**
  * `claveFlujo` (02b, regla 12): a qué fila del flujo va cada hecho de venta o
@@ -19,6 +19,8 @@ import type { ClaveFlujo, HechoFlujo, Modalidad } from "../tipos-api";
  *   marcada y vigente, `barrido`                   → { tipo: "barrido" }
  *   marcada y vigente, `por_gml`, relevante aquí   → fila de la marca
  *   marcada y vigente, `por_gml`, no relevante aquí→ "otras" (pregunta 1)
+ *   marcada y vigente, `mixta`, relevante aquí     → fila de la marca (M12)
+ *   marcada y vigente, `mixta`, no relevante aquí  → { tipo: "barrido" } (M12: su resto va al barrer, no a "otras")
  *   marcada, no vigente (agrupación inactiva)      → "otras"
  *
  * La partición es completa y disjunta: cada hecho recibe una y solo una clave.
@@ -28,7 +30,7 @@ type MarcaFlujo = {
   agrupacion_marca_id: string;
   marcada: boolean;
   vigente: boolean;
-  modalidad: Modalidad | null;
+  modalidad: ModalidadEfectiva | null;
 };
 
 export type ConfigFlujo = {
@@ -61,6 +63,7 @@ export function construirConfigFlujo(
     });
   }
   const relevantes = new Set<string>();
+  // Las filas `por_gml` de la vista incluyen los GML específicos de una mixta (su fila de GML nulo es `barrido`).
   for (const u of unidadesFlujoEspecial(estado).unidades) {
     if (u.modalidad === "por_gml" && u.genero_mundo_linea_id) {
       relevantes.add(claveRelevante(u.marca_id, u.genero_mundo_linea_id));
@@ -93,9 +96,13 @@ export function claveFlujo(hecho: HechoFlujo, config: ConfigFlujo): ClaveFlujo {
 
   const nodoId = config.nodoDeEquivalencia.get(hecho.equivalencia_id);
   if (nodoId === undefined) throw new Error(`Equivalencia desconocida en el flujo: ${hecho.equivalencia_id}`);
+  const conGml = unidad.modalidad === "por_gml" || unidad.modalidad === "mixta";
+  const relevante = unidad.marcada && unidad.vigente && conGml && config.relevantes.has(claveRelevante(unidadId, nodoId));
+  // M12: la venta de una mixta fuera de sus GML específicos va al flujo al barrer, no a "otras".
+  if (unidad.marcada && unidad.vigente && unidad.modalidad === "mixta" && !relevante) {
+    return { tipo: "barrido", marca_id: unidadId };
+  }
   const abierto = config.nivelDeNodo.get(nodoId) === "GMLE";
-  const relevante =
-    unidad.marcada && unidad.vigente && unidad.modalidad === "por_gml" && config.relevantes.has(claveRelevante(unidadId, nodoId));
 
   return {
     tipo: "unidad",

@@ -38,8 +38,21 @@ export type EditarAgrupacionMarcaCuerpo = Partial<{ nombre: string; codigo: stri
 
 // ─── Marcas (/api/marcas) ───
 
-/** 02b: `por_gml` (relevante en los GML asignados) o `barrido` (flujo propio sin detalle por GML). */
+/**
+ * 02b: `por_gml` (relevante en los GML asignados) o `barrido` (flujo propio sin detalle por GML). Es el valor de la COLUMNA
+ * `marcas.modalidad_tratamiento`: M12 no la amplía (la `mixta` es `por_gml` + `resto_al_barrer`); para leer la modalidad de una
+ * marca usa `modalidad_efectiva` (`ModalidadEfectiva`), nunca la columna.
+ */
 export type Modalidad = "por_gml" | "barrido";
+
+/** M12: la modalidad que ve y edita el usuario. `mixta` = `por_gml` con `resto_al_barrer` (GML específicos + el resto al barrer). */
+export type ModalidadEfectiva = "por_gml" | "barrido" | "mixta";
+
+/** M12: lo que admiten `POST` y `PATCH` de `/api/marcas`: la API normaliza `mixta` al par `por_gml` + `resto_al_barrer`. */
+export type ModalidadEntrada = ModalidadEfectiva;
+
+/** M12: a qué modalidad pasa una marca al barrer cuando recibe su primer GML (`modalidad_destino`). */
+export type ModalidadDestino = "por_gml" | "mixta";
 
 /** 02b: avisos de un conjunto de marcas (regla 22). */
 export type AvisoConjunto = "agrupacion_distinta" | "cabeza_inactiva" | "config_propia_ignorada" | "cadena";
@@ -63,8 +76,8 @@ export type MarcaFila = {
   vigente: boolean;
   /** 02b: solo con la casilla; `null` sin casilla (o heredada de antes de `0010`, que se lee `barrido`). */
   modalidad_tratamiento: Modalidad | null;
-  /** 02b regla 1: `null` sin casilla; con casilla y modalidad nula se lee `barrido`. */
-  modalidad_efectiva: Modalidad | null;
+  /** 02b regla 1 (M12): `null` sin casilla; con casilla y modalidad nula se lee `barrido`; `por_gml` con `resto_al_barrer` es `mixta`. */
+  modalidad_efectiva: ModalidadEfectiva | null;
   /** 02b: asignaciones marca × GML guardadas (vigentes o ignoradas). */
   gml_asignados: number;
   /** 02b: las vigentes (las que cuentan en el flujo). */
@@ -85,8 +98,8 @@ export type CrearMarcaCuerpo = {
   agrupacion_marca_id: string;
   tratamiento_especial?: boolean;
   nota_tratamiento?: string | null;
-  /** 02b: con casilla y sin modalidad se guarda `barrido`; modalidad sin casilla → `400`. */
-  modalidad_tratamiento?: Modalidad | null;
+  /** 02b: con casilla y sin modalidad se guarda `barrido`; modalidad sin casilla → `400`. M12: admite `mixta`. */
+  modalidad_tratamiento?: ModalidadEntrada | null;
 };
 
 export type EditarMarcaCuerpo = Partial<{
@@ -95,7 +108,8 @@ export type EditarMarcaCuerpo = Partial<{
   agrupacion_marca_id: string;
   tratamiento_especial: boolean;
   nota_tratamiento: string | null;
-  modalidad_tratamiento: Modalidad | null;
+  /** M12: admite `mixta` (se guarda como `por_gml` + `resto_al_barrer`). */
+  modalidad_tratamiento: ModalidadEntrada | null;
   /** 02b: entrar en un conjunto, cambiar de conjunto (uuid de la cabeza) o salir (`null`). */
   conjunto_marca_id: string | null;
   activo: boolean;
@@ -231,7 +245,8 @@ export type AsignacionGml = {
   created_at: string;
 };
 
-export type MotivoPendiente = "sin_gml" | "sin_modalidad" | "marca_no_vigente";
+/** M12: `mixta_sin_gml` = marca mixta sin GML específicos vigentes (se comporta como al barrer y se persigue como pendiente). */
+export type MotivoPendiente = "sin_gml" | "sin_modalidad" | "marca_no_vigente" | "mixta_sin_gml";
 
 export type MarcaEstadoGml = {
   id: string;
@@ -241,7 +256,7 @@ export type MarcaEstadoGml = {
   vigente: boolean;
   agrupacion_marca: { id: string; nombre: string; activo: boolean };
   modalidad_tratamiento: Modalidad | null;
-  modalidad_efectiva: Modalidad | null;
+  modalidad_efectiva: ModalidadEfectiva | null;
   nota_tratamiento: string | null;
   /** Cabeza del conjunto al que pertenece (aunque esté inactiva), o `null`. */
   conjunto: { id: string; nombre: string } | null;
@@ -268,14 +283,20 @@ export type NodoEstadoGml = {
 };
 
 export type ResumenGmlEspecial = {
+  /** `marcadas = por_gml + barrido + mixta + sin_modalidad` (M12: `por_gml` cuenta solo las que NO son mixtas). */
   marcadas: number;
   por_gml: number;
   barrido: number;
+  /** M12: marcas mixtas (`por_gml` con `resto_al_barrer`). */
+  mixta: number;
   sin_modalidad: number;
   asignaciones: number;
   asignaciones_vigentes: number;
   asignaciones_ignoradas: number;
+  /** Solo las marcas por GML (no mixtas) sin GML vigentes (`motivo_pendiente = "sin_gml"`); las mixtas van en `pendientes_mixta_sin_gml`. */
   pendientes_sin_gml: number;
+  /** M12: mixtas sin GML específicos vigentes (`motivo_pendiente = "mixta_sin_gml"`); se comportan como al barrer. Pendientes en total = `pendientes_sin_gml + pendientes_mixta_sin_gml`. */
+  pendientes_mixta_sin_gml: number;
   nodos_con_relevantes: number;
   /** Aviso suave (pregunta 14): nodos donde alguna agrupación pasa de 4 relevantes vigentes. */
   nodos_con_mas_de_4_por_agrupacion: number;
@@ -298,10 +319,16 @@ export const ETIQUETA_MOTIVO_IGNORADA: Record<MotivoIgnorada, string> = {
 // ─── Asignación individual y en bloque ───
 
 /** De qué estado pasa la marca a `por_gml` al recibir un GML. */
-export type CambioMarca = { de: "sin_tratamiento" | "barrido" | "sin_modalidad"; a: "por_gml" };
+export type CambioMarca = { de: "sin_tratamiento" | "barrido" | "sin_modalidad"; a: ModalidadDestino };
 
 /** `POST /api/marcas/gml-especial`. */
-export type CrearGmlEspecialCuerpo = { marca_id: string; genero_mundo_linea_id: string; nota?: string | null };
+export type CrearGmlEspecialCuerpo = {
+  marca_id: string;
+  genero_mundo_linea_id: string;
+  nota?: string | null;
+  /** M12: obligatorio si la marca es `barrido` (o está marcada sin modalidad): `409 modalidad_destino_requerida` si falta. */
+  modalidad_destino?: ModalidadDestino;
+};
 
 /** `201`: la asignación (misma forma que en el estado) más el cambio que sufrió la marca. */
 export type CrearGmlEspecialRespuesta = AsignacionGml & { marca_id: string; cambio_marca: CambioMarca | null };
@@ -334,8 +361,8 @@ export type ParMarcaNodo = { marca_id: string; nodo_id: string };
 
 /** `POST /api/marcas/gml-especial/asignar`: producto cartesiano (hasta 5 000 pares) o lista de pares. */
 export type AsignarGmlCuerpo =
-  | { forma: "cartesiano"; accion: "asignar" | "quitar"; marca_ids: string[]; nodo_ids: string[]; nota?: string | null }
-  | { forma: "pares"; accion: "asignar" | "quitar"; pares: ParMarcaNodo[]; nota?: string | null };
+  | { forma: "cartesiano"; accion: "asignar" | "quitar"; marca_ids: string[]; nodo_ids: string[]; nota?: string | null; modalidad_destino?: ModalidadDestino }
+  | { forma: "pares"; accion: "asignar" | "quitar"; pares: ParMarcaNodo[]; nota?: string | null; modalidad_destino?: ModalidadDestino };
 
 export type NoPermitidaGml = {
   marca_id: string;
@@ -346,7 +373,7 @@ export type NoPermitidaGml = {
   detalle?: string;
 };
 
-export type CambioMarcaBloque = { marca_id: string; marca: string; de: CambioMarca["de"]; a: "por_gml" };
+export type CambioMarcaBloque = { marca_id: string; marca: string; de: CambioMarca["de"]; a: ModalidadDestino };
 
 /** Invariante: `pares = asignadas + sin_cambio + quitadas + no_permitidas.length`. */
 export type AsignarGmlRespuesta = {
@@ -424,12 +451,18 @@ export type BarridoVigente = {
   miembros: string[];
 };
 
-export type PendienteVigente = { marca_id: string; marca: string; motivo: "sin_gml" | "sin_modalidad" };
+export type PendienteVigente = { marca_id: string; marca: string; motivo: "sin_gml" | "sin_modalidad" | "mixta_sin_gml" };
+
+/** M12: una marca mixta: su parte al barrer (como en `barrido`) más los nodos con compras específicas (vigentes). */
+export type MixtaVigente = BarridoVigente & { gml_especificos: { genero_mundo_linea_id: string }[] };
 
 export type VigentesRespuesta = {
   /** Solo GML vigentes con al menos una marca relevante vigente. */
   gml: GmlVigente[];
+  /** Solo marcas `barrido` puras (M12: las mixtas van en `mixtas`; sus GML específicos están también en `gml`). */
   barrido: BarridoVigente[];
+  /** M12: marcas mixtas vigentes. */
+  mixtas: MixtaVigente[];
   /** Mapa marca → unidad de toda marca con conjunto efectivo (lo mismo que la vista de unidades de marca). */
   unidades: { marca_id: string; unidad_marca_id: string }[];
   pendientes: PendienteVigente[];
@@ -486,7 +519,7 @@ export type ConjuntoCabeza = {
   activo: boolean;
   agrupacion_marca: { id: string; nombre: string };
   tratamiento_especial: boolean;
-  modalidad_efectiva: Modalidad | null;
+  modalidad_efectiva: ModalidadEfectiva | null;
   gml_vigentes: number;
   /** Tiene venta o stock cargados en M5. */
   vende: boolean;
@@ -626,7 +659,8 @@ export type ReporteImportacionConjuntos = ReporteConjuntosBase & { modo: ModoImp
 
 // ─── Importador de marcas relevantes (POST /api/marcas/gml-especial/importar) ───
 
-export type FilaImportacionGml = { marca: string; genero: string; mundo: string; linea: string; nota: string };
+/** M12: `modalidad` (opcional, columna `MODALIDAD`: `POR_GML` o `MIXTA`) dice a qué pasa una marca al barrer al recibir su primer GML; `""` o ausente = no dice. */
+export type FilaImportacionGml = { marca: string; genero: string; mundo: string; linea: string; nota: string; modalidad?: string };
 
 export type MotivoOmisionGml =
   | "marca_vacia"
@@ -646,6 +680,8 @@ export type MotivoOmisionGml =
   | "gml_inexistente"
   | "gml_inactivo"
   | "nota_larga"
+  | "modalidad_destino_requerida"
+  | "modalidad_invalida"
   | "duplicada_en_archivo";
 
 export const ETIQUETA_MOTIVO_OMISION_GML: Record<MotivoOmisionGml, string> = {
@@ -666,6 +702,8 @@ export const ETIQUETA_MOTIVO_OMISION_GML: Record<MotivoOmisionGml, string> = {
   gml_inexistente: "Esa línea no está en ese género y mundo",
   gml_inactivo: "Género-mundo-línea inactivo",
   nota_larga: "Nota de más de 200 caracteres",
+  modalidad_destino_requerida: "La marca es al barrer: indica en MODALIDAD si pasa a POR_GML o a MIXTA",
+  modalidad_invalida: "La modalidad debe ser POR_GML o MIXTA",
   duplicada_en_archivo: "Duplicada en el archivo",
 };
 

@@ -20,6 +20,7 @@ describe("crearMarcaSchema (regla 16)", () => {
       tratamiento_especial: false,
       nota_tratamiento: null,
       modalidad_tratamiento: null,
+      resto_al_barrer: false,
     });
   });
   it("respeta el código enviado (a ASCII) y H&M → H_M", () => {

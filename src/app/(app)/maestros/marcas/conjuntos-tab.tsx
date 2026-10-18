@@ -225,6 +225,9 @@ export function ConjuntosTab({
                           {c.cabeza.tratamiento_especial && c.cabeza.modalidad_efectiva === "por_gml" && (
                             <Badge tono="exito">Por GML · {c.cabeza.gml_vigentes}</Badge>
                           )}
+                          {c.cabeza.tratamiento_especial && c.cabeza.modalidad_efectiva === "mixta" && (
+                            <Badge tono="marca">Mixta · {c.cabeza.gml_vigentes}</Badge>
+                          )}
                           {avisos.map((a) => (
                             <Badge key={a} tono="alerta">
                               {a === "agrupacion_distinta" ? "Agrupación distinta" : ETIQUETA_AVISO_CONJUNTO[a]}

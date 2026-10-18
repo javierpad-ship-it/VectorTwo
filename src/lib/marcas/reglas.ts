@@ -1,6 +1,7 @@
 import { aCodigo, normalizarNombre } from "@/lib/arbol/normalizar";
 import { MAX_NOTA, MENSAJE_NOTA_LARGA } from "./esquemas";
-import type { Modalidad } from "./tipos-api";
+import { MODALIDADES, esModalidad, modalidadEfectiva, normalizarModalidad, type ParModalidad } from "./modalidad";
+import type { Modalidad, ModalidadEntrada } from "./tipos-api";
 
 /**
  * Reglas de negocio de marcas (docs/modulos/02-marcas.md, reglas 1–4 y 6).
@@ -78,24 +79,7 @@ export function motivoRechazoMarca(marcasExistentes: MarcaMin[], cambio: CambioM
   return null;
 }
 
-export const MODALIDADES = ["por_gml", "barrido"] as const;
-
-export function esModalidad(valor: unknown): valor is Modalidad {
-  return typeof valor === "string" && (MODALIDADES as readonly string[]).includes(valor);
-}
-
-/**
- * 02b regla 5. Sin casilla → `null`; con casilla y `por_gml` → `por_gml`; con
- * casilla y `barrido` o `null` (heredada de antes de `0010` o escrita desde el
- * SQL Editor) → `barrido`: "marcada y sin GML" es al barrer.
- */
-export function modalidadEfectiva(marca: {
-  tratamiento_especial: boolean;
-  modalidad_tratamiento: string | null;
-}): Modalidad | null {
-  if (!marca.tratamiento_especial) return null;
-  return marca.modalidad_tratamiento === "por_gml" ? "por_gml" : "barrido";
-}
+export { MODALIDADES, esModalidad, modalidadEfectiva, normalizarModalidad, type ParModalidad };
 
 /** 02b regla 6: `por_gml` si la marca ya tiene GML asignados, `barrido` si no (la interpretación de Javier de "marcada y sin GML"). */
 export function modalidadPorDefecto(gmlActivos: number): Modalidad {
@@ -109,13 +93,15 @@ export type Tratamiento = {
   tratamiento_especial: boolean;
   nota_tratamiento: string | null;
   modalidad_tratamiento: Modalidad | null;
+  /** M12: `true` solo en una `mixta` (`modalidad_tratamiento = 'por_gml'`). */
+  resto_al_barrer: boolean;
 };
 
 /** Lo que trae el cuerpo del PATCH respecto al tratamiento: cada clave puede faltar (`modalidad_tratamiento: null` cuenta como "no dice"). */
 export type CambioTratamiento = {
   tratamiento_especial?: boolean;
   nota_tratamiento?: string | null;
-  modalidad_tratamiento?: Modalidad | null;
+  modalidad_tratamiento?: ModalidadEntrada | null;
 };
 
 /** Lo actual de la marca (una fila de `marcas` sirve tal cual; la modalidad desconocida se lee como ausente). */
@@ -123,6 +109,7 @@ export type TratamientoActual = {
   tratamiento_especial: boolean;
   nota_tratamiento: string | null;
   modalidad_tratamiento?: string | null;
+  resto_al_barrer?: boolean | null;
 };
 
 export type ResultadoTratamiento = { motivo: string; valor: null } | { motivo: null; valor: Tratamiento };
@@ -132,6 +119,8 @@ export type ResultadoTratamiento = { motivo: string; valor: null } | { motivo: n
  * nota_tratamiento, modalidad_tratamiento }` que se escribirá al editar una
  * marca.
  *
+ *   - M12: la `mixta` del cuerpo se escribe como `por_gml` + `resto_al_barrer`; toda otra modalidad (y desmarcar) deja
+ *     `resto_al_barrer = false`; si el cuerpo no trae modalidad se conserva el par actual;
  *   - casilla resultante `false` → nota y modalidad `null` siempre (aunque el
  *     cuerpo traiga nota o la marca las tuviera): al desmarcar se borran. Las
  *     asignaciones por GML NO se tocan (el handler no las borra);
@@ -164,11 +153,18 @@ export function normalizarTratamiento(
     if (modalidadCuerpo !== undefined && cambio.tratamiento_especial === undefined) {
       return { motivo: MENSAJE_MODALIDAD_SIN_BANDERA_PATCH, valor: null };
     }
-    return { motivo: null, valor: { tratamiento_especial: false, nota_tratamiento: null, modalidad_tratamiento: null } };
+    return {
+      motivo: null,
+      valor: { tratamiento_especial: false, nota_tratamiento: null, modalidad_tratamiento: null, resto_al_barrer: false },
+    };
   }
 
   const nota = traeNota ? (notaCuerpo ?? null) : actual.nota_tratamiento;
-  const modalidadActual = esModalidad(actual.modalidad_tratamiento) ? actual.modalidad_tratamiento : undefined;
-  const modalidad = modalidadCuerpo ?? modalidadActual ?? modalidadPorDefecto(gmlActivos);
-  return { motivo: null, valor: { tratamiento_especial: true, nota_tratamiento: nota, modalidad_tratamiento: modalidad } };
+  // La modalidad actual como la lee el usuario (la columna sola no distingue `mixta`).
+  const efectivaActual = actual.tratamiento_especial ? modalidadEfectiva({ ...actual, modalidad_tratamiento: actual.modalidad_tratamiento ?? null, tratamiento_especial: true }) : null;
+  const columnaActual = actual.modalidad_tratamiento === "por_gml" || actual.modalidad_tratamiento === "barrido" ? actual.modalidad_tratamiento : null;
+  const destino: ModalidadEntrada =
+    modalidadCuerpo ?? (columnaActual !== null && efectivaActual !== null ? efectivaActual : modalidadPorDefecto(gmlActivos));
+  const par = normalizarModalidad(destino);
+  return { motivo: null, valor: { tratamiento_especial: true, nota_tratamiento: nota, ...par } };
 }

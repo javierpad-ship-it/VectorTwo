@@ -903,3 +903,65 @@ describe("upsert: un bloque no mezcla objetos con claves distintas (PostgREST to
     expect(filasDe("proyeccion_tiendas").find((t) => t.tienda_id === "T4")?.rampa).toEqual([3, 1.5, 1]);
   });
 });
+
+describe("M12: huella_flujo y el motivo config_cambiada (regla 17 de la ficha 12)", () => {
+  const motivos = async (id: string) => (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id)))).data.desactualizada.map((m) => m.codigo);
+
+  it("calcular escribe huella_flujo con la huella de la configuración de 02b y no cambia version_metodo", async () => {
+    const { id, cuerpo } = await nueva();
+    expect(proyecciones().find((p) => p.id === id)?.huella_flujo).toBe("huella-flujo-de-prueba");
+    expect(cuerpo.data.resumen?.version_metodo).toBe(4);
+    expect(cuerpo.data.desactualizada).toEqual([]);
+  });
+
+  it("si cambia la configuración de marcas después de calcular, queda desactualizada por config_cambiada; recalcular la deja al día", async () => {
+    const { id } = await nueva();
+    expect(await motivos(id as string)).toEqual([]);
+    contexto.huellaFlujo = "otra-configuracion";
+    expect(await motivos(id as string)).toEqual(["config_cambiada"]);
+    expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
+    expect(proyecciones().find((p) => p.id === id)?.huella_flujo).toBe("otra-configuracion");
+    expect(await motivos(id as string)).toEqual([]);
+  });
+
+  it("una calculada antes de M12 (huella_flujo nula) en trabajo queda desactualizada", async () => {
+    const { id } = await nueva();
+    (proyecciones().find((p) => p.id === id) as Fila).huella_flujo = null;
+    expect(await motivos(id as string)).toEqual(["config_cambiada"]);
+  });
+
+  it("sin configuración leída (huella actual nula) no se marca nada", async () => {
+    const { id } = await nueva();
+    contexto.huellaFlujo = null;
+    expect(await motivos(id as string)).toEqual([]);
+  });
+
+  it("una proyección cerrada no se toca aunque cambie la configuración, y el contrato /cerrada sigue igual", async () => {
+    const { id } = await nueva();
+    for (const f of filasDe("proyeccion_filas").filter((x) => x.tienda_id === null)) {
+      for (const anio of [2026, 2027]) {
+        const a = filasDe("proyeccion_fila_anios").find((x) => x.fila_id === f.id && x.anio === anio) as Fila;
+        if (a.propuesto !== null && (a.propuesto as number) >= 100) {
+          await decidirFila(enviar("PUT", "/x", { origen: "propuesta" }), ctx(id as string, { filaId: f.id as string, anio: String(anio) }));
+        }
+      }
+    }
+    for (const t of filasDe("proyeccion_tiendas").filter((x) => x.bloque === "nuevas" && x.venta_esperada_usada !== null)) {
+      await decidirTienda(enviar("PUT", "/x", { origen: "propuesta" }), ctx(id as string, { tiendaId: t.tienda_id as string, anio: String(t.anio) }));
+    }
+    const cerrada_ = await cerrar(enviar("POST", "/x", {}), ctx(id as string));
+    expect(cerrada_.status).toBe(200);
+    contexto.huellaFlujo = "cambio-despues-de-cerrar";
+    expect(await motivos(id as string)).toEqual([]);
+    const c = await cerrada(get("/cerrada", "?anio=2026"));
+    expect(c.status).toBe(200);
+    expect((await leer<RespuestaCerradaApi>(c)).data.proyeccion.resumen?.version_metodo).toBe(4);
+  });
+
+  it("cerrar una proyección en trabajo con configuración cambiada pide forzar (desactualizada)", async () => {
+    const { id } = await nueva();
+    contexto.huellaFlujo = "otra-configuracion";
+    const r = await cerrar(enviar("POST", "/x", {}), ctx(id as string));
+    expect(r.status).toBe(409);
+  });
+});

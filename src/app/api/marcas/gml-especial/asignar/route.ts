@@ -1,13 +1,14 @@
 import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requirePlanner } from "@/lib/auth/guard";
-import { error, leerCuerpo, ok } from "@/lib/api/respuestas";
+import { error, errorConCodigo, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { describirErrorDb, registrarErrorDb, traducirErrorDb } from "@/lib/api/errores-db";
 import { marcarPorGml } from "@/lib/marcas/consultas";
 import { borrarAsignaciones, insertarAsignacionesSiNoExisten } from "@/lib/marcas/gml/consultas";
 import { cargarEstadoGml } from "@/lib/marcas/gml/estado";
 import { asignarGmlSchema } from "@/lib/marcas/gml/esquemas";
 import { planificarAsignacionBloque } from "@/lib/marcas/gml/asignar";
+import { MENSAJE_DESTINO_REQUERIDO } from "@/lib/marcas/gml/reglas";
 import type { AsignarGmlRespuesta } from "@/lib/marcas/tipos-api";
 import type { PostgrestError } from "@supabase/supabase-js";
 
@@ -21,6 +22,9 @@ import type { PostgrestError } from "@supabase/supabase-js";
  * (`marca_inactiva`, `marca_en_conjunto`, `nodo_no_vigente`) no abortan: vuelven
  * en `no_permitidas`. Sin transacción: repetir el bloque completa lo que faltó.
  * Invariante: `pares = asignadas + sin_cambio + quitadas + no_permitidas.length`.
+ * M12: si alguna marca al barrer (o marcada sin modalidad) recibiría su primer GML y el cuerpo no trae
+ * `modalidad_destino` (`por_gml` o `mixta`), responde `409 modalidad_destino_requerida` SIN escribir nada; con
+ * destino, las marcas al barrer pasan a esa modalidad (`mixta` = `por_gml` + `resto_al_barrer`).
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -39,6 +43,11 @@ export async function POST(request: NextRequest) {
     nodos: estado.nodos,
     asignaciones: estado.asignaciones,
   });
+  if (plan.requieren_destino.length > 0) {
+    const nombres = plan.requieren_destino.slice(0, 5).map((m) => m.marca).join(", ");
+    const mas = plan.requieren_destino.length > 5 ? ` y ${plan.requieren_destino.length - 5} más` : "";
+    return errorConCodigo(`${MENSAJE_DESTINO_REQUERIDO} Marcas: ${nombres}${mas}.`, 409, "modalidad_destino_requerida");
+  }
   const reporte: AsignarGmlRespuesta = plan.reporte;
 
   const fallo = (err: PostgrestError, haciendo: string) => {
@@ -69,9 +78,15 @@ export async function POST(request: NextRequest) {
     reporte.asignadas = insertadas;
   }
 
-  if (plan.marcar_ids.length > 0) {
-    const { error: err } = await marcarPorGml(db, plan.marcar_ids);
+  const mixtas = new Set(plan.marcar_mixta_ids);
+  const soloPorGml = plan.marcar_ids.filter((id) => !mixtas.has(id));
+  if (soloPorGml.length > 0) {
+    const { error: err } = await marcarPorGml(db, soloPorGml, false);
     if (err) return fallo(err, "marcar las marcas como Por GML");
+  }
+  if (plan.marcar_mixta_ids.length > 0) {
+    const { error: err } = await marcarPorGml(db, plan.marcar_mixta_ids, true);
+    if (err) return fallo(err, "marcar las marcas como Mixta");
   }
 
   return ok(reporte);

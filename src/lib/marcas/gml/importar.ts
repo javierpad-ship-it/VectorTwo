@@ -3,12 +3,13 @@ import { MUESTRA_MAX } from "@/lib/arbol/importar";
 import { resolverGml, type EstadoResolverGml } from "@/lib/arbol/nivel/resolver";
 import { MAX_NOTA } from "../esquemas";
 import { marcasPorId, unidadDeMarca } from "../conjuntos/reglas";
-import { cambioMarca, type AsignacionGmlEntrada, type MarcaGml } from "./reglas";
+import { cambioMarca, requiereModalidadDestino, type AsignacionGmlEntrada, type MarcaGml } from "./reglas";
 import type {
   CambioMarcaBloque,
   DiferenciaImportacionGml,
   FilaImportacionGml,
   FilaOmitidaGml,
+  ModalidadDestino,
   MotivoOmisionGml,
   ReporteGmlBase,
 } from "../tipos-api";
@@ -25,7 +26,9 @@ import type {
  * asignaciones que el archivo no traiga y un par existente con otra nota no se
  * modifica (va a `diferencias`). Una marca sin casilla, al barrer o sin
  * modalidad NO se omite: se marcará `por_gml` y se lista en `cambios_marca`
- * antes de aplicar. La resolución de género, mundo, línea y nodo es
+ * antes de aplicar. M12: una marca AL BARRER (o sin modalidad) exige la columna
+ * opcional `MODALIDAD` (`POR_GML` o `MIXTA`) en sus pares nuevos: sin ella la fila se
+ * omite con `modalidad_destino_requerida` (no se decide por el usuario). La resolución de género, mundo, línea y nodo es
  * `resolverGml`, la misma del importador de niveles.
  */
 
@@ -41,11 +44,22 @@ export type AsignacionNueva = { marca_id: string; genero_mundo_linea_id: string;
 export type PlanImportacionGml = {
   reporte: ReporteGmlBase;
   asignaciones: AsignacionNueva[];
-  /** Marcas que pasan a marcadas `por_gml` (las de `cambios_marca`). */
+  /** Marcas que pasan a marcadas `por_gml` (las de `cambios_marca`), mixtas incluidas. */
   marcar_ids: string[];
+  /** M12: de `marcar_ids`, las que pasan a `mixta` (`resto_al_barrer = true`). */
+  marcar_mixta_ids: string[];
 };
 
 const clave = (marcaId: string, nodoId: string) => `${marcaId}|${nodoId}`;
+
+/** M12: la columna `MODALIDAD` del archivo. `vacia` = no dice; `null` = texto que no es `POR_GML` ni `MIXTA`. */
+export function leerModalidadDestino(valor: unknown): ModalidadDestino | "vacia" | null {
+  const codigo = aCodigo(valor);
+  if (codigo === "") return "vacia";
+  if (codigo === "POR_GML" || codigo === "PORGML") return "por_gml";
+  if (codigo === "MIXTA") return "mixta";
+  return null;
+}
 
 export function planificarImportacionGml(filas: FilaImportacionGml[], estado: EstadoImportacionGml): PlanImportacionGml {
   const omitidas: FilaOmitidaGml[] = [];
@@ -54,6 +68,8 @@ export function planificarImportacionGml(filas: FilaImportacionGml[], estado: Es
   const muestra: string[] = [];
   const porMarca = new Map<string, { marca_id: string; marca: string; asignaciones: number }>();
   const marcasNuevas = new Map<string, MarcaGml>();
+  /** M12: la modalidad destino de cada marca al barrer; manda la primera fila que la dice. */
+  const destinoPorMarca = new Map<string, ModalidadDestino>();
   let existentes = 0;
   let procesadas = 0;
 
@@ -70,6 +86,7 @@ export function planificarImportacionGml(filas: FilaImportacionGml[], estado: Es
     const fila = i + 1;
     const marcaTxt = normalizarNombre(cruda.marca);
     const notaTxt = typeof cruda.nota === "string" ? cruda.nota.trim() : "";
+    const modalidadTxt = typeof cruda.modalidad === "string" ? normalizarNombre(cruda.modalidad) : "";
     const omitir = (
       motivo: MotivoOmisionGml,
       textos: { generoTxt: string; mundoTxt: string; lineaTxt: string },
@@ -84,6 +101,7 @@ export function planificarImportacionGml(filas: FilaImportacionGml[], estado: Es
         mundo: textos.mundoTxt,
         linea: textos.lineaTxt,
         nota: notaTxt,
+        ...(modalidadTxt ? { modalidad: modalidadTxt } : {}),
       });
     };
     const textosSolos = {
@@ -125,13 +143,21 @@ export function planificarImportacionGml(filas: FilaImportacionGml[], estado: Es
         ...(previo.nota !== notaTxt && notaTxt ? { detalle: `nota distinta: ${notaTxt}` } : {}),
       });
     }
+
+    // (5b) M12: una marca al barrer necesita saber a qué pasa (Por GML o Mixta) cuando el par es nuevo.
+    const base = baseAsignaciones.get(k);
+    if (!base && requiereModalidadDestino(cambioMarca(marca)) && !destinoPorMarca.has(marca.id)) {
+      const leida = leerModalidadDestino(cruda.modalidad);
+      if (leida === "vacia") return omitir("modalidad_destino_requerida", resuelto, { detalle: marca.nombre });
+      if (leida === null) return omitir("modalidad_invalida", resuelto, { detalle: modalidadTxt });
+      destinoPorMarca.set(marca.id, leida);
+    }
     vistos.set(k, { fila, nota: notaTxt });
     procesadas += 1;
 
     const ruta = `${resuelto.genero.nombre} · ${resuelto.mundo.nombre} · ${resuelto.linea.nombre}`;
 
     // (6) Par existente: se cuenta y, si la nota difiere, se informa; nunca se modifica.
-    const base = baseAsignaciones.get(k);
     if (base) {
       existentes += 1;
       if (notaTxt && notaTxt !== (base.nota ?? "")) {
@@ -150,7 +176,7 @@ export function planificarImportacionGml(filas: FilaImportacionGml[], estado: Es
 
   const cambios_marca: CambioMarcaBloque[] = [];
   for (const marca of marcasNuevas.values()) {
-    const cambio = cambioMarca(marca);
+    const cambio = cambioMarca(marca, destinoPorMarca.get(marca.id));
     if (cambio) cambios_marca.push({ marca_id: marca.id, marca: marca.nombre, de: cambio.de, a: cambio.a });
   }
 
@@ -166,6 +192,7 @@ export function planificarImportacionGml(filas: FilaImportacionGml[], estado: Es
     },
     asignaciones: nuevas,
     marcar_ids: cambios_marca.map((c) => c.marca_id),
+    marcar_mixta_ids: cambios_marca.filter((c) => c.a === "mixta").map((c) => c.marca_id),
   };
 }
 
@@ -186,8 +213,9 @@ export function aplicarPlanGml(estado: EstadoImportacionGml, plan: PlanImportaci
     });
   }
   const marcar = new Set(plan.marcar_ids);
+  const mixtas = new Set(plan.marcar_mixta_ids);
   const marcas = estado.marcas.map((m) =>
-    marcar.has(m.id) ? { ...m, tratamiento_especial: true, modalidad_tratamiento: "por_gml" } : m
+    marcar.has(m.id) ? { ...m, tratamiento_especial: true, modalidad_tratamiento: "por_gml", resto_al_barrer: mixtas.has(m.id) } : m
   );
   return { ...estado, marcas, asignaciones };
 }

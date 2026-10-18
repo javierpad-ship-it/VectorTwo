@@ -63,6 +63,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/planificacion/curvas-estacionalidad", label: "Curvas de estacionalidad" },
       // M7: proyección anual de unidades (año en curso y año siguiente). Solo admin y planner, como toda la sección.
       { href: "/planificacion/proyeccion", label: "Proyección de unidades" },
+      // M12: análisis de las marcas al barrer por GML y reparto aprobado de una compra de la marca. Solo admin y planner.
+      { href: "/planificacion/marcas-barrer", label: "Marcas al barrer por GML" },
     ],
   },
   {

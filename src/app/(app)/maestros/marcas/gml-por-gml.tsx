@@ -306,6 +306,7 @@ export function GmlPorGml({
                         {rel === false && <Badge tono="neutro">Ignorada</Badge>}
                         {rel === undefined && !m.tratamiento_especial && <Badge tono="neutro">Se marcará</Badge>}
                         {rel === undefined && m.modalidad_efectiva === "barrido" && <Badge tono="neutro">{ETIQUETA_MODALIDAD.barrido}</Badge>}
+                        {rel === undefined && m.modalidad_efectiva === "mixta" && <Badge tono="marca">{ETIQUETA_MODALIDAD.mixta}</Badge>}
                       </li>
                     );
                   })}

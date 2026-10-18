@@ -31,7 +31,8 @@ const NO_ENCONTRADA = "Marca no encontrada.";
  * `normalizarTratamiento` (regla 6, 02b): desmarcar borra la nota y la
  * modalidad pero NO toca las asignaciones por GML; nota o modalidad sin bandera
  * → `400`; marcar sin modalidad deja `por_gml` si ya tiene GML y `barrido` si
- * no. Con `conjunto_marca_id` (entrar, cambiar o salir) `motivoRechazoConjunto`
+ * no. M12: `modalidad_tratamiento: "mixta"` se guarda como `por_gml` + `resto_al_barrer`; cambiar de modalidad conserva
+ * las asignaciones por GML (una mixta que vuelve a `barrido` las deja ignoradas). Con `conjunto_marca_id` (entrar, cambiar o salir) `motivoRechazoConjunto`
  * (regla 21) responde `404` cabeza inexistente o `409`; entrar a un conjunto no
  * toca la casilla, la modalidad ni las asignaciones propias (quedan ignoradas).
  * Únicos repetidos → `409`. Devuelve la fila completa (con `gml_asignados` y
@@ -73,6 +74,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     cambio.tratamiento_especial = resultado.valor.tratamiento_especial;
     cambio.nota_tratamiento = resultado.valor.nota_tratamiento;
     cambio.modalidad_tratamiento = resultado.valor.modalidad_tratamiento;
+    // M12: `mixta` se guarda como `por_gml` + `resto_al_barrer`; cualquier otra modalidad (o desmarcar) lo apaga.
+    cambio.resto_al_barrer = resultado.valor.resto_al_barrer;
   }
 
   if (conjunto_marca_id !== undefined) {

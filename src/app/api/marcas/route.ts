@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
  * Crea una marca (`requirePlanner`), 201. Comprueba en orden: la agrupación
  * existe (`404`) → está activa (`409`) → escribe y traduce únicos (`409`
  * nombre o código repetido). La nota o la modalidad sin bandera las rechaza el
- * esquema (`400`); con bandera y sin modalidad se guarda `barrido` (02b).
+ * esquema (`400`); con bandera y sin modalidad se guarda `barrido` (02b); `modalidad_tratamiento: "mixta"` (M12) se guarda como `por_gml` con `resto_al_barrer`.
  */
 export async function POST(request: NextRequest) {
   const { response } = await requirePlanner();
@@ -82,6 +82,8 @@ export async function POST(request: NextRequest) {
     tratamiento_especial: datos.tratamiento_especial,
     nota_tratamiento: datos.nota_tratamiento,
     modalidad_tratamiento: datos.modalidad_tratamiento,
+    // M12: `mixta` = `por_gml` + `resto_al_barrer` (el esquema ya normalizó el par).
+    resto_al_barrer: datos.resto_al_barrer,
   };
   const { data, error: err } = await db.from("marcas").insert(nueva).select(SELECT_MARCA_CON_AGRUPACION).single();
   if (err) return traducirErrorDb(err, "crear marca");
