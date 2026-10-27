@@ -1,6 +1,12 @@
 /**
  * Tipos de la base de datos.
  *
+ * Actualizados a mano el 2026-10-27 con la 0025 (M8 0.13.0: tablas `proveedores`, `compras`, `compra_lineas`, `compra_linea_entregas`,
+ * `compra_linea_repartos`, `compra_linea_recepciones`, `compra_eventos` y `flujo_parametros`, y las funciones `stock_flujo`, `flujo_huella_base`,
+ * `compra_foto`, `compra_recalcular_estado`, `importar_compra`, `registrar_recepciones`, `quitar_recepcion` y `cancelar_compra`). PENDIENTE: la 0025
+ * aun no esta aplicada en `Vector2` (el `execute_sql` espero una confirmacion que no llego); al aplicarla hay que compararlos con
+ * `generate_typescript_types`.
+ *
  * Verificados el 2026-10-27 (0027 M6 06d: tabla `crecimientos_genero_mundo`, `proyeccion_crecimientos.crecimiento_id` y
  * `.version`, y la funcion `venta_genero_mundo`; antes, 0024 M12: `repartos_marca_barrido.temporadas_usadas`; y 0023 M7 07c:
  * `proyeccion_crecimientos`, `proyeccion_fila_anios.base_siguiente` y `.base_normalizada`) contra
@@ -216,6 +222,523 @@ export type Database = {
           {
             foreignKeyName: "cargas_venta_stock_perfil_id_fkey";
             columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_eventos: {
+        Row: {
+          accion: string;
+          antes: Json | null;
+          compra_id: string;
+          created_at: string;
+          despues: Json | null;
+          id: string;
+          linea_id: string | null;
+          motivo: string | null;
+          perfil_id: string | null;
+          resumen: string | null;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          accion: string;
+          antes?: Json | null;
+          compra_id: string;
+          created_at?: string;
+          despues?: Json | null;
+          id?: string;
+          linea_id?: string | null;
+          motivo?: string | null;
+          perfil_id?: string | null;
+          resumen?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          accion?: string;
+          antes?: Json | null;
+          compra_id?: string;
+          created_at?: string;
+          despues?: Json | null;
+          id?: string;
+          linea_id?: string | null;
+          motivo?: string | null;
+          perfil_id?: string | null;
+          resumen?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_eventos_compra_id_fkey";
+            columns: ["compra_id"];
+            isOneToOne: false;
+            referencedRelation: "compras";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_eventos_linea_id_fkey";
+            columns: ["linea_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_lineas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_eventos_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_linea_entregas: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          id: string;
+          linea_id: string;
+          origen: string;
+          periodo: string;
+          unidades: number;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          id?: string;
+          linea_id: string;
+          origen?: string;
+          periodo: string;
+          unidades: number;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          id?: string;
+          linea_id?: string;
+          origen?: string;
+          periodo?: string;
+          unidades?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_linea_entregas_linea_id_fkey";
+            columns: ["linea_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_lineas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_linea_recepciones: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          fecha_recepcion: string;
+          id: string;
+          linea_id: string;
+          nota: string | null;
+          origen: string;
+          perfil_id: string | null;
+          recibida_periodo: string;
+          unidades: number;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          fecha_recepcion: string;
+          id?: string;
+          linea_id: string;
+          nota?: string | null;
+          origen?: string;
+          perfil_id?: string | null;
+          recibida_periodo: string;
+          unidades: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          fecha_recepcion?: string;
+          id?: string;
+          linea_id?: string;
+          nota?: string | null;
+          origen?: string;
+          perfil_id?: string | null;
+          recibida_periodo?: string;
+          unidades?: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_linea_recepciones_linea_id_fkey";
+            columns: ["linea_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_lineas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_recepciones_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_linea_repartos: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          entrega_id: string;
+          equivalencia_id: string | null;
+          error_reparto_pp: number | null;
+          genero_mundo_linea_id: string;
+          id: string;
+          linea_id: string;
+          marca_id: string;
+          reparto_id: string | null;
+          reparto_version: number | null;
+          temporada: string | null;
+          unidades: number;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          entrega_id: string;
+          equivalencia_id?: string | null;
+          error_reparto_pp?: number | null;
+          genero_mundo_linea_id: string;
+          id?: string;
+          linea_id: string;
+          marca_id: string;
+          reparto_id?: string | null;
+          reparto_version?: number | null;
+          temporada?: string | null;
+          unidades: number;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          entrega_id?: string;
+          equivalencia_id?: string | null;
+          error_reparto_pp?: number | null;
+          genero_mundo_linea_id?: string;
+          id?: string;
+          linea_id?: string;
+          marca_id?: string;
+          reparto_id?: string | null;
+          reparto_version?: number | null;
+          temporada?: string | null;
+          unidades?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_linea_repartos_entrega_id_fkey";
+            columns: ["entrega_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_linea_entregas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_repartos_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_repartos_genero_mundo_linea_id_fkey";
+            columns: ["genero_mundo_linea_id"];
+            isOneToOne: false;
+            referencedRelation: "genero_mundo_linea";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_repartos_linea_id_fkey";
+            columns: ["linea_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_lineas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_repartos_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_repartos_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas_unidad";
+            referencedColumns: ["marca_id"];
+          },
+          {
+            foreignKeyName: "compra_linea_repartos_reparto_id_fkey";
+            columns: ["reparto_id"];
+            isOneToOne: false;
+            referencedRelation: "repartos_marca_barrido";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_lineas: {
+        Row: {
+          activo: boolean;
+          agrupacion_marca_id: string | null;
+          alcance: Json;
+          avisos: Json;
+          clave_importacion: string | null;
+          compra_id: string;
+          costo_unitario: number | null;
+          created_at: string;
+          destino: string;
+          equivalencia_id: string | null;
+          genero_mundo_linea_id: string | null;
+          huella_importacion: string | null;
+          id: string;
+          llegada_periodo: string;
+          marca_id: string | null;
+          nota: string | null;
+          tallas: string;
+          tienda_id: string | null;
+          tipo: string;
+          unidades: number;
+          unidades_canceladas: number;
+          unidades_recibidas: number;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          agrupacion_marca_id?: string | null;
+          alcance?: Json;
+          avisos?: Json;
+          clave_importacion?: string | null;
+          compra_id: string;
+          costo_unitario?: number | null;
+          created_at?: string;
+          destino?: string;
+          equivalencia_id?: string | null;
+          genero_mundo_linea_id?: string | null;
+          huella_importacion?: string | null;
+          id?: string;
+          llegada_periodo: string;
+          marca_id?: string | null;
+          nota?: string | null;
+          tallas?: string;
+          tienda_id?: string | null;
+          tipo?: string;
+          unidades: number;
+          unidades_canceladas?: number;
+          unidades_recibidas?: number;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          agrupacion_marca_id?: string | null;
+          alcance?: Json;
+          avisos?: Json;
+          clave_importacion?: string | null;
+          compra_id?: string;
+          costo_unitario?: number | null;
+          created_at?: string;
+          destino?: string;
+          equivalencia_id?: string | null;
+          genero_mundo_linea_id?: string | null;
+          huella_importacion?: string | null;
+          id?: string;
+          llegada_periodo?: string;
+          marca_id?: string | null;
+          nota?: string | null;
+          tallas?: string;
+          tienda_id?: string | null;
+          tipo?: string;
+          unidades?: number;
+          unidades_canceladas?: number;
+          unidades_recibidas?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_lineas_agrupacion_marca_id_fkey";
+            columns: ["agrupacion_marca_id"];
+            isOneToOne: false;
+            referencedRelation: "agrupaciones_marca";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_lineas_compra_id_fkey";
+            columns: ["compra_id"];
+            isOneToOne: false;
+            referencedRelation: "compras";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_lineas_equivalencia_id_fkey";
+            columns: ["equivalencia_id"];
+            isOneToOne: false;
+            referencedRelation: "equivalencias";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_lineas_genero_mundo_linea_id_fkey";
+            columns: ["genero_mundo_linea_id"];
+            isOneToOne: false;
+            referencedRelation: "genero_mundo_linea";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_lineas_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_lineas_marca_id_fkey";
+            columns: ["marca_id"];
+            isOneToOne: false;
+            referencedRelation: "marcas_unidad";
+            referencedColumns: ["marca_id"];
+          },
+          {
+            foreignKeyName: "compra_lineas_tienda_id_fkey";
+            columns: ["tienda_id"];
+            isOneToOne: false;
+            referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compras: {
+        Row: {
+          activo: boolean;
+          cancelada_at: string | null;
+          cancelada_por_id: string | null;
+          cancelada_por_nombre: string | null;
+          confirmada_at: string | null;
+          confirmada_por_id: string | null;
+          confirmada_por_nombre: string | null;
+          created_at: string;
+          estado: string;
+          excede_tope_al_confirmar: Json;
+          fecha_compra: string;
+          id: string;
+          justificacion_exceso: string | null;
+          moneda: string;
+          motivo_cancelacion: string | null;
+          nota: string | null;
+          numero: string;
+          origen: string;
+          perfil_id: string | null;
+          proveedor_id: string;
+          referencia: string | null;
+          revision: number;
+          updated_at: string;
+          updated_by_id: string | null;
+          updated_by_nombre: string | null;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          cancelada_at?: string | null;
+          cancelada_por_id?: string | null;
+          cancelada_por_nombre?: string | null;
+          confirmada_at?: string | null;
+          confirmada_por_id?: string | null;
+          confirmada_por_nombre?: string | null;
+          created_at?: string;
+          estado?: string;
+          excede_tope_al_confirmar?: Json;
+          fecha_compra: string;
+          id?: string;
+          justificacion_exceso?: string | null;
+          moneda?: string;
+          motivo_cancelacion?: string | null;
+          nota?: string | null;
+          numero?: string;
+          origen?: string;
+          perfil_id?: string | null;
+          proveedor_id: string;
+          referencia?: string | null;
+          revision?: number;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          cancelada_at?: string | null;
+          cancelada_por_id?: string | null;
+          cancelada_por_nombre?: string | null;
+          confirmada_at?: string | null;
+          confirmada_por_id?: string | null;
+          confirmada_por_nombre?: string | null;
+          created_at?: string;
+          estado?: string;
+          excede_tope_al_confirmar?: Json;
+          fecha_compra?: string;
+          id?: string;
+          justificacion_exceso?: string | null;
+          moneda?: string;
+          motivo_cancelacion?: string | null;
+          nota?: string | null;
+          numero?: string;
+          origen?: string;
+          perfil_id?: string | null;
+          proveedor_id?: string;
+          referencia?: string | null;
+          revision?: number;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compras_cancelada_por_id_fkey";
+            columns: ["cancelada_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compras_confirmada_por_id_fkey";
+            columns: ["confirmada_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compras_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compras_proveedor_id_fkey";
+            columns: ["proveedor_id"];
+            isOneToOne: false;
+            referencedRelation: "proveedores";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compras_updated_by_id_fkey";
+            columns: ["updated_by_id"];
             isOneToOne: false;
             referencedRelation: "perfiles";
             referencedColumns: ["id"];
@@ -622,6 +1145,65 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "factores_volumen_atipico_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      flujo_parametros: {
+        Row: {
+          activo: boolean;
+          clave: string;
+          created_at: string;
+          extender_horizonte: boolean;
+          id: string;
+          imi_max: number;
+          imi_min: number;
+          meses_tarjeta: number;
+          perfil_id: string | null;
+          temporadas: Json;
+          umbral_conciliacion_pct: number;
+          umbral_conciliacion_u: number;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          clave?: string;
+          created_at?: string;
+          extender_horizonte?: boolean;
+          id?: string;
+          imi_max?: number;
+          imi_min?: number;
+          meses_tarjeta?: number;
+          perfil_id?: string | null;
+          temporadas?: Json;
+          umbral_conciliacion_pct?: number;
+          umbral_conciliacion_u?: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          clave?: string;
+          created_at?: string;
+          extender_horizonte?: boolean;
+          id?: string;
+          imi_max?: number;
+          imi_min?: number;
+          meses_tarjeta?: number;
+          perfil_id?: string | null;
+          temporadas?: Json;
+          umbral_conciliacion_pct?: number;
+          umbral_conciliacion_u?: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "flujo_parametros_perfil_id_fkey";
             columns: ["perfil_id"];
             isOneToOne: false;
             referencedRelation: "perfiles";
@@ -1111,6 +1693,62 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      proveedores: {
+        Row: {
+          activo: boolean;
+          ciudad: string | null;
+          codigo: string | null;
+          created_at: string;
+          es_intercompany: boolean;
+          id: string;
+          identificacion: string | null;
+          nombre: string;
+          nota: string | null;
+          pais: string | null;
+          perfil_id: string | null;
+          updated_at: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          ciudad?: string | null;
+          codigo?: string | null;
+          created_at?: string;
+          es_intercompany?: boolean;
+          id?: string;
+          identificacion?: string | null;
+          nombre: string;
+          nota?: string | null;
+          pais?: string | null;
+          perfil_id?: string | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          ciudad?: string | null;
+          codigo?: string | null;
+          created_at?: string;
+          es_intercompany?: boolean;
+          id?: string;
+          identificacion?: string | null;
+          nombre?: string;
+          nota?: string | null;
+          pais?: string | null;
+          perfil_id?: string | null;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proveedores_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       proyeccion_crecimientos: {
         Row: {
@@ -2362,6 +3000,63 @@ export type Database = {
           p_desde: string;
           p_hasta: string;
           p_umbral_pequeno?: number;
+        };
+        Returns: Json;
+      };
+      stock_flujo: {
+        Args: {
+          p_carga_id: string;
+        };
+        Returns: Json;
+      };
+      flujo_huella_base: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
+      compra_foto: {
+        Args: {
+          p_compra: string;
+        };
+        Returns: Json;
+      };
+      compra_recalcular_estado: {
+        Args: {
+          p_compra: string;
+        };
+        Returns: string;
+      };
+      importar_compra: {
+        Args: {
+          p_actor: Json;
+          p_compra: Json;
+        };
+        Returns: Json;
+      };
+      registrar_recepciones: {
+        Args: {
+          p_actor: Json;
+          p_compra: string;
+          p_motivo: string;
+          p_recepciones: Json;
+          p_revision: number;
+        };
+        Returns: Json;
+      };
+      quitar_recepcion: {
+        Args: {
+          p_actor: Json;
+          p_compra: string;
+          p_recepcion: string;
+          p_revision: number;
+        };
+        Returns: Json;
+      };
+      cancelar_compra: {
+        Args: {
+          p_actor: Json;
+          p_compra: string;
+          p_motivo: string;
+          p_revision: number;
         };
         Returns: Json;
       };
