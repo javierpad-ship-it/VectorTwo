@@ -1,7 +1,8 @@
 /**
  * Tipos de la base de datos.
  *
- * Verificados el 2026-10-17 (0024 M12: `repartos_marca_barrido.temporadas_usadas`; antes, 0023 M7 07c:
+ * Verificados el 2026-10-27 (0027 M6 06d: tabla `crecimientos_genero_mundo`, `proyeccion_crecimientos.crecimiento_id` y
+ * `.version`, y la funcion `venta_genero_mundo`; antes, 0024 M12: `repartos_marca_barrido.temporadas_usadas`; y 0023 M7 07c:
  * `proyeccion_crecimientos`, `proyeccion_fila_anios.base_siguiente` y `.base_normalizada`) contra
  * `generate_typescript_types` del proyecto Supabase `Vector2` (ref tzjsxzmsvvhxyiooihyq): mismas tablas, vistas, funciones,
  * columnas, obligatoriedad y claves foráneas. Se actualizan a mano (estilo de este archivo)
@@ -283,6 +284,101 @@ export type Database = {
             columns: ["perfil_id"];
             isOneToOne: false;
             referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      crecimientos_genero_mundo: {
+        Row: {
+          activo: boolean;
+          alcance: string;
+          anio_aplicacion: number;
+          aprobada_at: string;
+          base_tipo: string;
+          base_valor: number | null;
+          created_at: string;
+          estado: string;
+          genero_id: string | null;
+          id: string;
+          mundo_id: string | null;
+          nota: string | null;
+          pct: number;
+          perfil_id: string | null;
+          proyeccion_referencia_id: string | null;
+          referencia: Json;
+          updated_at: string;
+          usuario_nombre: string | null;
+          version: number;
+        };
+        Insert: {
+          activo?: boolean;
+          alcance: string;
+          anio_aplicacion: number;
+          aprobada_at?: string;
+          base_tipo: string;
+          base_valor?: number | null;
+          created_at?: string;
+          estado?: string;
+          genero_id?: string | null;
+          id?: string;
+          mundo_id?: string | null;
+          nota?: string | null;
+          pct: number;
+          perfil_id?: string | null;
+          proyeccion_referencia_id?: string | null;
+          referencia: Json;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version: number;
+        };
+        Update: {
+          activo?: boolean;
+          alcance?: string;
+          anio_aplicacion?: number;
+          aprobada_at?: string;
+          base_tipo?: string;
+          base_valor?: number | null;
+          created_at?: string;
+          estado?: string;
+          genero_id?: string | null;
+          id?: string;
+          mundo_id?: string | null;
+          nota?: string | null;
+          pct?: number;
+          perfil_id?: string | null;
+          proyeccion_referencia_id?: string | null;
+          referencia?: Json;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crecimientos_genero_mundo_genero_id_fkey";
+            columns: ["genero_id"];
+            isOneToOne: false;
+            referencedRelation: "generos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crecimientos_genero_mundo_mundo_id_fkey";
+            columns: ["mundo_id"];
+            isOneToOne: false;
+            referencedRelation: "mundos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crecimientos_genero_mundo_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crecimientos_genero_mundo_proyeccion_referencia_id_fkey";
+            columns: ["proyeccion_referencia_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
             referencedColumns: ["id"];
           },
         ];
@@ -1020,6 +1116,7 @@ export type Database = {
         Row: {
           activo: boolean;
           created_at: string;
+          crecimiento_id: string | null;
           genero_id: string;
           id: string;
           mundo_id: string;
@@ -1029,10 +1126,12 @@ export type Database = {
           proyeccion_id: string;
           updated_at: string;
           usuario_nombre: string | null;
+          version: number | null;
         };
         Insert: {
           activo?: boolean;
           created_at?: string;
+          crecimiento_id?: string | null;
           genero_id: string;
           id?: string;
           mundo_id: string;
@@ -1042,10 +1141,12 @@ export type Database = {
           proyeccion_id: string;
           updated_at?: string;
           usuario_nombre?: string | null;
+          version?: number | null;
         };
         Update: {
           activo?: boolean;
           created_at?: string;
+          crecimiento_id?: string | null;
           genero_id?: string;
           id?: string;
           mundo_id?: string;
@@ -1055,8 +1156,16 @@ export type Database = {
           proyeccion_id?: string;
           updated_at?: string;
           usuario_nombre?: string | null;
+          version?: number | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "proyeccion_crecimientos_crecimiento_id_fkey";
+            columns: ["crecimiento_id"];
+            isOneToOne: false;
+            referencedRelation: "crecimientos_genero_mundo";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "proyeccion_crecimientos_genero_id_fkey";
             columns: ["genero_id"];
@@ -2221,6 +2330,12 @@ export type Database = {
           p_agrupacion_id: string;
           p_hasta: string;
           p_red: Json;
+        };
+        Returns: Json;
+      };
+      venta_genero_mundo: {
+        Args: {
+          p_desde: string;
         };
         Returns: Json;
       };
