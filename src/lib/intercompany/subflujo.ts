@@ -97,11 +97,14 @@ export function subflujoIntercompany(e: EntradaSubflujo): MesSubflujo[] {
 }
 
 /**
- * Regla 7 (la usa la conciliación de M8): `max(0, Ing − R) ÷ V`, el % directo observado como fracción 0–1; `null` si `V = 0`.
+ * Regla 7 (la usa la conciliación de M8): `max(0, Ing − Rec) ÷ V`, el % directo observado como fracción 0–1; `null` si `V = 0`.
  * Informativo: nunca cambia la regla. Devuelve FRACCIÓN 0–1 (la unidad de la ficha 8, 4c); el contrato de M13
  * (`PctDirectoObservado.valor`) va en puntos 0–100: convertir con `armarPctDirectoObservado` de `reglas.ts`.
+ *
+ * `recepcionesRegistradas` es lo REGISTRADO como recepción de la marca en el mes (`Rec^B_m`, ficha 13 §9 caso 3 y ficha 08 4c), NO la
+ * reposición esperada `R^B_m` del subflujo (con ella el ejemplo daría 0 en vez de 0,80).
  */
-export function pctDirectoObservado(ingresoInferido: number, reposicionEsperada: number, venta: number): number | null {
+export function pctDirectoObservado(ingresoInferido: number, recepcionesRegistradas: number, venta: number): number | null {
   if (venta === 0) return null;
-  return Math.max(0, ingresoInferido - reposicionEsperada) / venta;
+  return Math.max(0, ingresoInferido - recepcionesRegistradas) / venta;
 }

@@ -145,13 +145,20 @@ export function aplicable(
   if (filas === null) return { aplicable: null, motivo: "sin_cerrada" };
   for (const f of filas) {
     if (f.gml_id !== regla.genero_mundo_linea_id) continue;
-    const parte =
-      f.por_marca !== null
-        ? (f.por_marca.find((x) => x.marca_id === regla.marca_id)?.participacion ?? 0)
-        : f.por_clave_flujo.filter((x) => x.marca_id === regla.marca_id).reduce((a, x) => a + x.participacion, 0);
-    if (parte > 0) return { aplicable: true, motivo: null };
+    if (parteDeMarca(f, regla.marca_id) > 0) return { aplicable: true, motivo: null };
   }
   return { aplicable: false, motivo: "marca_sin_clave" };
+}
+
+/**
+ * `part_B` de una fila de la cerrada: la participación de la marca en `por_marca` si la fila la trae; si no (cerrada de `0.10.0`), la
+ * suma de las participaciones de `por_clave_flujo` con esa `marca_id`, sea cual sea el tipo de clave (`unidad` o `barrido`). La usan
+ * `aplicable` y el subflujo de M8 (ficha 08, §0.2 #13): una sola definición.
+ */
+export function parteDeMarca(fila: Pick<ParticipacionFilaCerrada, "por_clave_flujo" | "por_marca">, marcaId: string): number {
+  return fila.por_marca !== null
+    ? (fila.por_marca.find((x) => x.marca_id === marcaId)?.participacion ?? 0)
+    : fila.por_clave_flujo.filter((x) => x.marca_id === marcaId).reduce((a, x) => a + x.participacion, 0);
 }
 
 // ─── Ámbito ───
