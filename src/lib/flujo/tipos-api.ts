@@ -172,6 +172,8 @@ export type SugerenciaApi = {
   unidades: number;
   /** `false` en los lotes en `0.13.0`: la pantalla muestra «Ver compra». */
   boton: boolean;
+  /** `revision` vigente de la compra de la línea (la llena el servicio): «Aceptar sugerencia» la manda sin leer la compra antes. */
+  revision?: number;
 };
 
 export type ConciliacionFilaApi = {
@@ -384,6 +386,8 @@ export type DatosFlujoApi = {
 export type NodoCatalogoFlujoApi = {
   genero_id: string;
   mundo_id: string;
+  /** La línea del nodo (la llena el servicio): permite filtrar por línea en el navegador. */
+  linea_id?: string;
   genero: string;
   mundo: string;
   linea: string;

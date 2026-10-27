@@ -13,6 +13,7 @@ import { cuerpoDeFuncion, limpiar, primeraSentencia, rutasDeApi } from "./api.gu
  * y en ambos casos el handler no llega a tocar ninguna tabla de datos.
  *
  * Fuera de alcance: `tiendas` (tiene sus propios tests). `proyeccion` entra con sus guards reales (todas sus rutas son `requirePlanner`).
+ * M8 (`/api/flujo` y `/api/compras`): toda escritura exige rol (en `0.13.0` el comprador solo lee; `requireUser` en escrituras llega con M9a).
  */
 
 const estado = vi.hoisted(() => ({
@@ -85,7 +86,7 @@ async function llamar({ ruta, metodo }: Caso) {
     method: metodo,
     ...(metodo === "DELETE" ? {} : { body: "{}", headers: { "content-type": "application/json" } }),
   });
-  const ctx = { params: Promise.resolve({ id: UUID, agrupacionId: UUID }) };
+  const ctx = { params: Promise.resolve({ id: UUID, agrupacionId: UUID, recepcionId: UUID }) };
   return handler(peticion, ctx);
 }
 
@@ -122,4 +123,23 @@ describe("rutas de escritura: sesión y rol (guards reales)", () => {
       });
     }
   }
+});
+
+describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritura (el comprador recibe 403)", () => {
+  const m8 = CASOS.filter((c) => /^(flujo|compras)\//.test(c.ruta));
+
+  it("están las seis escrituras de 0.13.0 y ninguna se conforma con tener sesión", () => {
+    const nombre = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}`;
+    expect(m8.map(nombre).sort()).toEqual(
+      [
+        "DELETE compras/[id]/recepciones/[recepcionId]",
+        "POST compras/[id]/cancelar",
+        "POST compras/[id]/recibir",
+        "POST compras/importar",
+        "POST flujo/conciliacion/aceptar",
+        "PUT flujo/parametros",
+      ].sort()
+    );
+    expect(m8.every((c) => c.exigeRol)).toBe(true);
+  });
 });

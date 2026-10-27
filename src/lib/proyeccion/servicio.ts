@@ -121,6 +121,7 @@ import {
   type BloquesApi,
   type EdicionParametros,
   type FactorApi,
+  type FilaCerradaApi,
   type CrecimientosSinAprobarApi,
   type Motivo,
   type ParametrosProyeccion,
@@ -1217,6 +1218,68 @@ export async function leerProyeccionCerrada(anio: number): Promise<Salida<Respue
     cubre,
     bloques: parametros.bloques,
     filas: armarFilasCerradas(planas, [anio]),
+  });
+}
+
+/**
+ * Lo que M8 lee de la cerrada en UNA sola pasada (ficha 08, §0.2 #1): las filas de todos los años que necesita el horizonte, la huella
+ * de la configuración de marcas con que se cerró (`proyecciones.huella_flujo`) y el periodo de referencia de las participaciones.
+ */
+export type CerradaParaFlujo = {
+  proyeccion: ProyeccionApi;
+  /** `anio` pedido: el año de `k'+1`. */
+  anio_pedido: number;
+  cubre: "en_curso" | "siguiente";
+  /** Años cuyas filas se leyeron: `[Y, Y+1]` con `en_curso`; solo el año cubierto con `siguiente`. */
+  anios: number[];
+  huella_flujo: string | null;
+  version_metodo: number;
+  /** Del primer registro base con participaciones; `null` si ninguno la trae (`cerrada_sin_periodo`). */
+  periodo_referencia: { desde: string; hasta: string } | null;
+  filas: FilaCerradaApi[];
+};
+
+/**
+ * `leerCerradaParaFlujo(anio)`: lo mismo que `leerProyeccionCerrada(anio)` + `leerProyeccionCerrada(anio + 1)` sobre LA MISMA cerrada,
+ * pero leyendo las filas una sola vez (aditivo: `leerProyeccionCerrada` y su ruta no cambian). `anio` = año de `k'+1`; con
+ * `cubre = "en_curso"` se piden `[anio, anio + 1]`; con `"siguiente"` (la cerrada del año anterior), solo `anio`. `404 sin_cerrada`
+ * si ninguna cubre el año. Solo lectura.
+ */
+export async function leerCerradaParaFlujo(anio: number): Promise<Salida<CerradaParaFlujo>> {
+  const d = db();
+  const c = await buscarCerrada(d, anio);
+  if (c.respuesta) return falla(c.respuesta);
+  const { cerrada, cubre } = c.data;
+  const anios = cubre === "en_curso" ? [anio, anio + 1] : [anio];
+
+  const catalogo = await cargarContextoCatalogo(d);
+  if (catalogo.respuesta) return falla(catalogo.respuesta);
+  const filas = await leerFilasConAnios(d, cerrada.id, { columnas: "cerrada", soloActivas: true });
+  if (filas.error) return fallaDb(filas.error, "proyección: leer las filas para el flujo");
+  const k = kDe(cerrada);
+  const planas = filas.data
+    .map((f) => aFilaPlana(f, catalogo.data, k, cerrada.anio_en_curso, true))
+    .filter((f): f is NonNullable<typeof f> => f !== null);
+  const filasCerradas = armarFilasCerradas(planas, anios);
+
+  let periodo: { desde: string; hasta: string } | null = null;
+  for (const f of filasCerradas) {
+    const r = f.tienda_id === null ? f.participaciones_historicas?.periodo_referencia : null;
+    if (r) {
+      periodo = { desde: r.desde.slice(0, 7), hasta: r.hasta.slice(0, 7) };
+      break;
+    }
+  }
+  const resumen = cerrada.resumen as { version_metodo?: unknown } | null;
+  return listo({
+    proyeccion: aProyeccionApi(cerrada, [], sello()),
+    anio_pedido: anio,
+    cubre,
+    anios,
+    huella_flujo: cerrada.huella_flujo,
+    version_metodo: typeof resumen?.version_metodo === "number" ? resumen.version_metodo : 0,
+    periodo_referencia: periodo,
+    filas: filasCerradas,
   });
 }
 

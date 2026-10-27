@@ -9,6 +9,7 @@ import { factoresMes } from "@/lib/proyeccion/nino";
 import { cargarContextoCalculo, type ContextoCalculo } from "@/lib/proyeccion/contexto";
 import { falla, fallaDb, fallaMensaje, listo, type Salida } from "@/lib/proyeccion/servicio-base";
 import { leerProyeccionCerrada } from "@/lib/proyeccion/servicio";
+import { leerTemporadasDb } from "@/lib/flujo/consultas";
 import { miembrosPorCabeza, unidadDeMarca } from "@/lib/marcas/conjuntos/reglas";
 import { construirConfigFlujo, type ConfigFlujo } from "@/lib/marcas/gml/flujo";
 import { cargarEstadoGml, type EstadoGmlCargado } from "@/lib/marcas/gml/estado";
@@ -51,7 +52,6 @@ import {
   modoDe,
   temporadasAGuardar,
   temporadasDeVersion,
-  temporadasPorDefecto,
   type VersionLeida,
 } from "./reglas";
 import { veredictoError } from "./error";
@@ -101,19 +101,22 @@ export type ContextoBarrer = {
   rutaDe: (gmlId: string, equivalenciaId: string | null) => string;
   unidadDe: (clave: ClaveG) => UnidadG | null;
   nombreEquivalencia: (id: string) => string;
-  /** Las fechas de temporada con que se calcula HOY (las del defecto hasta que M8 las configure); no las de una versión aprobada. */
+  /** Las fechas de temporada con que se calcula HOY (`flujo_parametros.temporadas`; sin fila, las del defecto); no las de una versión aprobada. */
   temporadas: TemporadasConfig;
 };
 
 /** Marcas y árbol de 02b, catálogo, curvas vigentes y factores del Niño de M3 a M7: todo lo que el análisis lee fuera de la venta. */
 export async function cargarContextoBarrer(d: Db): Promise<Salida<ContextoBarrer>> {
-  const [gml, ctxR, equivalencias] = await Promise.all([
+  const [gml, ctxR, equivalencias, parametros] = await Promise.all([
     cargarEstadoGml(d),
     cargarContextoCalculo(d, { conEat: false, conFlujo: false }),
     leerEquivalencias(d),
+    // M8 (`0.13.0`): las fechas de temporada de hoy son las de Parámetros (`flujo_parametros.temporadas`); sin fila, las de siempre.
+    leerTemporadasDb(d),
   ]);
   if (gml.error || !gml.estado) return falla(traducirErrorDb(gml.error as NonNullable<typeof gml.error>, "marcas al barrer: leer marcas"));
   if (equivalencias.error) return fallaDb(equivalencias.error, "marcas al barrer: leer equivalencias");
+  if (parametros.error) return fallaDb(parametros.error, "marcas al barrer: leer las temporadas de Parámetros");
   if (ctxR.respuesta) return falla(ctxR.respuesta);
   const ctx = ctxR.data;
   const gmlCargado = gml as EstadoGmlCargado;
@@ -196,7 +199,8 @@ export async function cargarContextoBarrer(d: Db): Promise<Salida<ContextoBarrer
     rutaDe,
     unidadDe,
     nombreEquivalencia,
-    temporadas: temporadasPorDefecto(),
+    // `temporadasDeVersion` valida la forma y la cobertura de los doce meses: lo que no sirva toma el defecto.
+    temporadas: temporadasDeVersion(parametros.data),
   });
 }
 
