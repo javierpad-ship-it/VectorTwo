@@ -1,265 +1,265 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ChoqueModal } from "../src/app/(app)/planificacion/proyeccion/choque-modal";
-import { CrecimientosTab, FormularioCrecimientos, PanelPromedio, ResultadoGuardado, TablaCrecimientos } from "../src/app/(app)/planificacion/proyeccion/crecimientos-tab";
-import { borradorDesde, promedioParaPantalla, claveCelda, entradasPromedio } from "../src/app/(app)/planificacion/proyeccion/crecimientos-vista";
+import { CabeceraProyeccion } from "../src/app/(app)/planificacion/proyeccion/cabecera-proyeccion";
 import { CerrarModal } from "../src/app/(app)/planificacion/proyeccion/cerrar-modal";
+import { CrecimientosTab, ResumenCrecimientos, TablaResumenCrecimientos } from "../src/app/(app)/planificacion/proyeccion/crecimientos-tab";
 import { FormularioProyeccion } from "../src/app/(app)/planificacion/proyeccion/formulario-proyeccion";
-import { PESTANAS } from "../src/app/(app)/planificacion/proyeccion/vista";
 import { PieMatriz, TablaMatriz } from "../src/app/(app)/planificacion/proyeccion/matriz-tab";
+import { PESTANAS } from "../src/app/(app)/planificacion/proyeccion/vista";
+import type { ProyeccionApi } from "../src/lib/proyeccion/tipos-api";
 import { bloques, proyeccion, respuestaMatriz, respuestaProyeccion } from "./proyeccion.pantalla.fixture";
-import { conflicto, G_H, M_U, respuestaCrecimientos, respuestaCrecimientosVacia, resultadoGuardado } from "./proyeccion.crecimientos-pantalla.fixture";
+import { resumenAlDia, resumenCrecimientos } from "./proyeccion.crecimientos-pantalla.fixture";
 
-/** Humo de render de la pestaña Crecimientos (07c): ningún componente lanza y los textos clave de la ficha salen. */
+/** Humo de render de la pestaña Crecimientos de solo lectura (06d): ningún componente lanza y los textos clave de la ficha salen. */
 
 const html = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 const noop = () => {};
 /** El atributo `disabled` del botón (no la clase `disabled:` de Tailwind). */
 const deshabilitado = (tag: string | undefined) => /\sdisabled(=""|\s|>)/.test(tag ?? "");
+const boton = (s: string, texto: string) => new RegExp(`<button[^>]*>${texto}</button>`).exec(s)?.[0];
 const RAIZ = path.resolve(__dirname, "..");
 const DIR = "src/app/(app)/planificacion/proyeccion/";
 const fuente = (f: string) => readFileSync(path.join(RAIZ, DIR, f), "utf8");
 
-const formulario = (datos = respuestaCrecimientos(), extra: Partial<Parameters<typeof FormularioCrecimientos>[0]> = {}) =>
-  html(
-    createElement(FormularioCrecimientos, {
-      datos,
-      proyeccion: proyeccion(),
-      bloqueada: false,
-      resultado: null,
-      onCerrarResultado: noop,
-      onGuardado: () => Promise.resolve(),
-      onRecalcular: noop,
-      onRecargar: noop,
-      onCalculando: noop,
-      ...extra,
-    })
-  );
+const SIN_APROBAR = { faltan: [{ clave: "g.m", nombre: "MUJER · CASUAL" }], resto_provisional: true };
+const conCambio = () => proyeccion({ desactualizada: [{ codigo: "crecimientos_cambiados", mensaje: "x" }] });
 
-describe("la matriz de crecimientos", () => {
-  const datos = respuestaCrecimientos();
-  const s = html(createElement(TablaCrecimientos, { datos, borrador: borradorDesde(datos), pctResto: 5, deshabilitada: false, onCelda: noop, onResto: noop }));
+const resumen = (datos = resumenCrecimientos(), p: ProyeccionApi = conCambio(), extra: Partial<Parameters<typeof ResumenCrecimientos>[0]> = {}) =>
+  html(createElement(ResumenCrecimientos, { datos, proyeccion: p, bloqueada: false, onRecalcular: noop, onRecargar: noop, onObjetivoGuardado: () => Promise.resolve(), ...extra }));
 
-  it("filas = mundos reales; columnas = HOMBRE, MUJER y Resto; accesible con caption y encabezados de fila", () => {
-    for (const m of ["FORMAL", "URBANO", "CASUAL"]) expect(s).toContain(`>${m}</th>`);
-    expect(s).toContain('scope="col"');
-    expect(s).toContain('scope="row"');
-    expect(s).toContain("<caption");
-    const cabecera = s.slice(s.indexOf("<thead"), s.indexOf("</thead>"));
-    expect(cabecera.indexOf("HOMBRE")).toBeLessThan(cabecera.indexOf("MUJER"));
-    expect(cabecera.indexOf("MUJER")).toBeLessThan(cabecera.indexOf("Resto"));
+describe("la tabla de solo lectura", () => {
+  const datos = resumenCrecimientos();
+  const s = html(createElement(TablaResumenCrecimientos, { datos }));
+
+  it("una fila por GM, el Resto y el Total, con el % aplicado (versión, quién y cuándo) y lo vigente hoy", () => {
+    for (const n of ["HOMBRE · FORMAL", "HOMBRE · URBANO", "MUJER · FORMAL", "MUJER · CASUAL", "Resto", "Total (mismas tiendas)"]) expect(s).toContain(n);
+    expect(s).toContain("20 % · v1");
+    expect(s).toContain("Javier · ");
+    expect(s).toContain("10 % · v1");
+    expect(s).toContain("15 % · v2");
+    expect(s).toContain("sin aprobar");
+    // El Resto provisional lleva su badge y no tiene quién ni cuándo.
+    expect(s).toContain(">provisional<");
+    expect(s).toContain("5 % · provisional");
   });
 
-  it("el Resto es UNA celda que abarca todas las filas", () => {
-    expect(s.match(/rowSpan="3"/g)).toHaveLength(1);
+  it("«cambió» solo en el GM cuyo vigente de hoy difiere de lo aplicado", () => {
+    expect(s.match(/>cambió</g)).toHaveLength(1);
+    expect(html(createElement(TablaResumenCrecimientos, { datos: resumenAlDia() }))).not.toContain(">cambió<");
+  });
+
+  it("base, resultante, % resultante, rebote del Niño y el desglose del Resto", () => {
+    expect(s).toContain("17,800");
+    expect(s).toContain("19,485");
+    expect(s).toContain("+9.5 %");
+    expect(s).toContain("120,000");
+    expect(s).toContain("+9.6 %");
     expect(s).toContain("JOVENCITOS 8,200 · NIÑOS 6,100 · ACCESORIOS 5,700");
-    expect(s).toContain("base 20,000 u");
+    expect(s).toContain("Rebote del Niño");
   });
 
-  it("cada celda con filas lleva su % obligatorio, su nota y su base; una sin filas se ve «—»", () => {
-    expect(s).toContain('aria-label="Crecimiento bruto de HOMBRE · FORMAL (%)"');
-    expect(s).toContain('aria-label="Crecimiento bruto de MUJER · CASUAL (%)"');
-    expect(s).toContain('aria-label="Crecimiento bruto de Resto (%)"');
-    expect(s).toContain("required");
-    expect(s).toContain('aria-label="Nota de HOMBRE · FORMAL"');
-    expect(s).toContain("base 17,800 u · hoy 2027: 19,485 u");
-    // Dos celdas sin filas: HOMBRE · CASUAL y MUJER · URBANO.
-    expect(s.match(/>sin filas</g)).toHaveLength(2);
-    expect(s).not.toContain('aria-label="Crecimiento bruto de HOMBRE · CASUAL (%)"');
-    expect(s).not.toContain('aria-label="Crecimiento bruto de MUJER · URBANO (%)"');
+  it("badges informativos sin acción: «1 con % propio» y «1 decidida», con el título de dónde se cambian", () => {
+    expect(s).toContain(">1 con % propio<");
+    expect(s).toContain(">1 decidida<");
+    expect(s).toContain("Se cambian fila a fila en Por línea: vacía «Crec.» o usa «Volver a la propuesta»");
   });
 
-  it("insignias: con % propio, decidida y rebote del Niño solo como referencia", () => {
-    expect(s).toContain("1 con % propio");
-    expect(s).toContain("1 decidida");
-    expect(s).toContain("rebote del Niño +9.6 %");
-    expect(s).toContain("Es referencia: no se aplica");
+  it("cada GM y el Resto traen «Analizar y aprobar» con el enlace de la API; el Total no", () => {
+    expect(s.match(/>Analizar y aprobar</g)).toHaveLength(5);
+    expect(s).toContain('href="/planificacion/curvas-estacionalidad?gm=g-hombre.m-urbano&amp;anio=2027&amp;proyeccion=proy-1"');
+    expect(s).toContain("gm=resto");
   });
 
-  it("una celda vacía lleva borde de alerta y «sigue al Resto (5 %)»; el extremo avisa", () => {
-    const vacia = respuestaCrecimientosVacia();
-    const sv = html(createElement(TablaCrecimientos, { datos: vacia, borrador: borradorDesde(vacia), pctResto: 5, deshabilitada: false, onCelda: noop, onResto: noop }));
-    expect(sv).toContain("sigue al Resto (5 %)");
-    expect(sv).toContain("border-alerta!");
-    const b = borradorDesde(datos);
-    b.celdas[claveCelda(G_H, M_U)].pct = "60";
-    const se = html(createElement(TablaCrecimientos, { datos, borrador: b, pctResto: 5, deshabilitada: false, onCelda: noop, onResto: noop }));
-    expect(se).toContain(">extremo<");
-    const sb = html(createElement(TablaCrecimientos, { datos: respuestaCrecimientos({ celdas: datos.celdas.map((c) => (c.mundo_id === M_U ? { ...c, agregado: { ...c.agregado, base: 0 } } : c)) }), borrador: b, pctResto: 5, deshabilitada: false, onCelda: noop, onResto: noop }));
-    expect(sb).toContain("sin base");
-  });
-
-  it("solo lectura: los campos van deshabilitados", () => {
-    const sl = html(createElement(TablaCrecimientos, { datos, borrador: borradorDesde(datos), pctResto: 5, deshabilitada: true, onCelda: noop, onResto: noop }));
-    expect(sl.match(/disabled=""/g)!.length).toBeGreaterThanOrEqual(5);
-  });
-
-  it("se adapta al móvil (scroll horizontal) y usa solo los tokens del tema", () => {
+  it("no tiene campos ni botones: solo lectura, con scroll horizontal y solo tokens del tema", () => {
+    expect(s).not.toContain("<input");
+    expect(s).not.toContain("<button");
     expect(s).toContain("overflow-x-auto");
     expect(s).not.toMatch(/#[0-9a-fA-F]{3,6}|\b(bg|text|border)-(red|green|blue|gray|slate|white|black)-?\d*/);
   });
-
-  it("sin mundos con filas de Hombre o Mujer: todo sigue el Resto", () => {
-    const sin = html(createElement(TablaCrecimientos, { datos: respuestaCrecimientos({ mundos: [], celdas: [] }), borrador: borradorDesde(datos), pctResto: 5, deshabilitada: false, onCelda: noop, onResto: noop }));
-    expect(sin).toContain("Todo sigue el Resto");
-    expect(sin).toContain('aria-label="Crecimiento bruto de Resto (%)"');
-  });
 });
 
-describe("el formulario de la pestaña", () => {
-  it("matriz completa: Calcular promedio y un ÚNICO botón de guardado, «Guardar y recalcular»; sin «Guardar» suelto", () => {
-    const s = formulario();
-    expect(s).toContain("Calcular promedio");
-    expect(s).toContain("Guardar y recalcular");
-    expect(s).toContain("Descartar cambios");
-    expect(s).not.toMatch(/>Guardar</);
-    expect(s).not.toContain("Usar");
-    expect(s).toContain("Objetivo global (%)");
-    expect(s).toContain("Crecimiento bruto 2027 frente a 2026 de las mismas tiendas de 2027 (10 tiendas)");
-  });
-
-  it("con una celda vacía los dos botones están deshabilitados y el mensaje enumera las que faltan", () => {
-    const s = formulario(respuestaCrecimientosVacia());
-    expect(s).toContain("Faltan 4 celdas: HOMBRE · FORMAL, MUJER · FORMAL, HOMBRE · URBANO y MUJER · CASUAL. Escribe un % en cada una (puede ser el mismo del Resto).");
-    const calcular = /<button[^>]*>Calcular promedio<\/button>/.exec(s)?.[0] ?? "";
-    const guardar = /<button[^>]*>Guardar y recalcular<\/button>/.exec(s)?.[0] ?? "";
-    expect(deshabilitado(calcular)).toBe(true);
-    expect(deshabilitado(guardar)).toBe(true);
-    expect(calcular).toContain("aria-describedby");
-  });
-
-  it("completa y al día: ninguno de los dos está deshabilitado", () => {
-    const s = formulario();
-    expect(deshabilitado(/<button[^>]*>Calcular promedio<\/button>/.exec(s)?.[0])).toBe(false);
-    expect(deshabilitado(/<button[^>]*>Guardar y recalcular<\/button>/.exec(s)?.[0])).toBe(false);
-  });
-
-  it("proyección de antes de 0.10.8: avisa «método anterior» con Recalcular y deshabilita Calcular promedio (Guardar y recalcular la pone al día)", () => {
-    const s = formulario(respuestaCrecimientos({ metodo_viejo: true, al_dia: false }));
-    expect(s).toContain("Calculada con el método anterior: recalcula.");
-    expect(s).toContain("Recalcula: método nuevo");
-    expect(deshabilitado(/<button[^>]*>Calcular promedio<\/button>/.exec(s)?.[0])).toBe(true);
-    expect(deshabilitado(/<button[^>]*>Guardar y recalcular<\/button>/.exec(s)?.[0])).toBe(false);
-  });
-
-  it("matriz guardada pero sin aplicar: la alerta ofrece Recalcular", () => {
-    const s = formulario(respuestaCrecimientos({ al_dia: false }));
-    expect(s).toContain("Los crecimientos guardados no están aplicados (falló el recálculo o un nodo cambió de mundo).");
+describe("el resumen de la pestaña", () => {
+  it("avisa que lo aprobado cambió, con la lista y Recalcular", () => {
+    const s = resumen();
+    expect(s).toContain("Los crecimientos aprobados cambiaron después de calcular: HOMBRE · URBANO v1 → v2 (10 % → 15 %). Recalcula.");
     expect(s).toContain(">Recalcular</button>");
+    expect(deshabilitado(boton(s, "Recalcular"))).toBe(false);
   });
 
-  it("falta un género del catálogo: lo dice y sus filas siguen el Resto", () => {
-    const s = formulario(respuestaCrecimientos({ generos_faltantes: ["MUJER"] }));
-    expect(s).toContain("No se encontró el género MUJER en el catálogo: sus filas siguen el Resto.");
+  it("avisa que no se puede cerrar y manda a Crecimiento por género × mundo con el año y la proyección", () => {
+    const s = resumen();
+    expect(s).toContain("No se puede cerrar: falta 1 crecimiento aprobado para 2027 y el Resto es provisional.");
+    expect(s).toContain("Ir a Crecimiento por género × mundo");
+    expect(s).toContain('href="/planificacion/curvas-estacionalidad?pestana=genero-mundo&amp;anio=2027&amp;proyeccion=proy-1"');
+    const alDia = resumen(resumenAlDia(), proyeccion());
+    expect(alDia).not.toContain("No se puede cerrar");
+    expect(alDia).not.toContain("cambiaron después de calcular");
   });
 
-  it("cerrada o archivada: todo se ve y nada se edita; Calcular promedio sigue disponible", () => {
-    const s = formulario(respuestaCrecimientos({ editable: false }), { proyeccion: proyeccion({ estado: "cerrada" }) });
-    expect(s).toContain("los crecimientos se ven pero no se editan");
-    expect(s).not.toContain("Guardar y recalcular");
-    expect(s).not.toContain("Descartar cambios");
-    expect(deshabilitado(/<button[^>]*>Calcular promedio<\/button>/.exec(s)?.[0])).toBe(false);
+  it("cabecera, puente al Total 2027 y objetivo global", () => {
+    const s = resumen();
+    expect(s).toContain("Crecimiento bruto 2027 frente a 2026 de las mismas tiendas de 2027");
+    expect(s).toContain("Puente al Total 2027 de la Matriz");
+    expect(s).toContain("130,099 u");
+    expect(s).toContain("Objetivo global (%)");
+    expect(s).toContain("Objetivo +12.0 % → con lo aplicado te faltan 2.8 pp");
+    expect(s).toContain("llevan el total de +9.2 % a +7.7 %");
   });
 
-  it("mientras la pantalla calcula (bloqueada) los campos y el guardado van deshabilitados sin cambiar de sitio", () => {
-    const s = formulario(respuestaCrecimientos(), { bloqueada: true });
-    expect(deshabilitado(/<button[^>]*>Guardar y recalcular<\/button>/.exec(s)?.[0])).toBe(true);
-    expect(s).toContain("Guardar y recalcular");
+  it("ya no existe nada de la matriz editable: ni «Guardar y recalcular», ni «Calcular promedio», ni el Modal del choque", () => {
+    const s = resumen();
+    for (const t of ["Guardar y recalcular", "Calcular promedio", "Descartar cambios", "Pisar", "Conservar", "Cancelar", "Resto (%)"]) expect(s).not.toContain(t);
+    expect(s).not.toContain('aria-label="Crecimiento bruto de');
+    expect(s).not.toContain("required");
   });
 
-  it("tras guardar: éxito, recálculo fallido con Recalcular y filas editadas mientras se guardaba", () => {
-    const ok = html(createElement(ResultadoGuardado, { resultado: resultadoGuardado({ conservadas: 2, pisadas: [{ fila_id: "fila-pantalon", pct_anterior: 5, decidido_anterior: null }] }), nombres: { "fila-pantalon": "HOMBRE · FORMAL · PANTALON" }, onCerrar: noop, onRecalcular: noop }));
-    expect(ok).toContain("Guardado y recalculado.");
-    expect(ok).toContain("2 filas fijadas a mano conservaron");
-    expect(ok).toContain("HOMBRE · FORMAL · PANTALON: tenía +5.0 % propio");
-    const mal = html(createElement(ResultadoGuardado, { resultado: resultadoGuardado({ recalculo: { ok: false, codigo: "x", mensaje: "falló el cálculo" } }), nombres: {}, onCerrar: noop, onRecalcular: noop }));
-    expect(mal).toContain("Se guardó la matriz pero no se pudo recalcular: falló el cálculo");
-    expect(mal).toContain(">Recalcular</button>");
-    expect(mal).not.toContain("Guardado y recalculado.");
-    const rev = html(createElement(ResultadoGuardado, { resultado: resultadoGuardado({ revertidas: ["a", "b"] }), nombres: {}, onCerrar: noop, onRecalcular: noop }));
-    expect(rev).toContain("2 filas se editaron mientras guardabas");
+  it("en trabajo, el objetivo se edita con «Guardar objetivo», deshabilitado mientras no cambie", () => {
+    const s = resumen();
+    expect(s).toContain("Guardar objetivo");
+    expect(deshabilitado(boton(s, "Guardar objetivo"))).toBe(true);
+    expect(deshabilitado(/<input[^>]*inputMode="decimal"[^>]*>/.exec(s)?.[0])).toBe(false);
+  });
+
+  it("cerrada o archivada: todo igual y el objetivo en solo lectura, sin avisos de cierre ni Recalcular", () => {
+    const s = resumen(resumenCrecimientos(), proyeccion({ estado: "cerrada" }));
+    expect(s).toContain("HOMBRE · URBANO");
+    expect(s).toContain("Objetivo global (%)");
+    expect(s).not.toContain("Guardar objetivo");
+    expect(deshabilitado(/<input[^>]*inputMode="decimal"[^>]*>/.exec(s)?.[0])).toBe(true);
+    expect(s).toContain("solo lectura");
+    expect(s).not.toContain("No se puede cerrar");
+    expect(s).not.toContain(">Recalcular</button>");
+    const arch = resumen(resumenCrecimientos(), proyeccion({ estado: "archivada" }));
+    expect(arch).not.toContain("Guardar objetivo");
+  });
+
+  it("mientras la pantalla calcula (bloqueada) el objetivo y Recalcular no se pueden tocar", () => {
+    const s = resumen(resumenCrecimientos(), conCambio(), { bloqueada: true });
+    expect(s).not.toContain("Guardar objetivo");
+    expect(deshabilitado(boton(s, "Recalcular"))).toBe(true);
+  });
+
+  it("proyección de método anterior: solo el aviso «recalcúlala» (con Recalcular en trabajo); cerrada, solo lectura", () => {
+    const vieja = resumenCrecimientos({ version_metodo: 3, total: null, sin_aprobar: null, cambiados: [] });
+    const s = resumen(vieja, proyeccion());
+    expect(s).toContain("Esta proyección se calculó con un método anterior: recalcúlala para ver sus crecimientos.");
+    expect(s).toContain(">Recalcular</button>");
+    expect(s).not.toContain("<table");
+    const cerrada = resumen(vieja, proyeccion({ estado: "cerrada" }));
+    expect(cerrada).toContain("método anterior");
+    expect(cerrada).not.toContain("recalcúlala");
+    expect(cerrada).not.toContain(">Recalcular</button>");
+    expect(resumen(resumenCrecimientos({ version_metodo: null, total: null }), proyeccion())).toContain("método anterior");
+  });
+
+  it("sin Total no hay pie de puente ni objetivo", () => {
+    const s = resumen(resumenCrecimientos({ total: null }));
+    expect(s).not.toContain("Puente al Total");
+    expect(s).not.toContain("Objetivo global");
   });
 
   it("la pestaña, antes de leer, muestra la carga (los datos vienen de /api)", () => {
-    const s = html(createElement(CrecimientosTab, { proyeccion: proyeccion(), bloqueada: false, onCambio: () => Promise.resolve(), onRecalcular: noop, onCalculando: noop }));
+    const s = html(createElement(CrecimientosTab, { proyeccion: proyeccion(), bloqueada: false, onCambio: () => Promise.resolve(), onRecalcular: noop }));
     expect(s).toContain("Leyendo los crecimientos…");
   });
 });
 
-describe("Calcular promedio: el panel", () => {
-  const r = respuestaCrecimientos();
-  const e = entradasPromedio(r, borradorDesde(r));
-  if (!e.ok) throw new Error("completa");
-  const res = promedioParaPantalla(e.entradas, e.resto, 12, r.puente);
-  const s = html(createElement(PanelPromedio, { resultado: res, obsoleto: false, anioEnCurso: 2026, anioSiguiente: 2027 }));
+describe("Cabecera y modal de cierre: crecimientos sin aprobar (06d §4.3)", () => {
+  const cabecera = (p: ProyeccionApi) =>
+    html(createElement(CabeceraProyeccion, { proyeccion: p, calculandoLocal: false, ocupado: false, onRecalcular: noop, onParametros: noop, onCerrar: noop, onArchivar: noop, onEliminar: noop, onCopiar: noop }));
 
-  it("tabla por celda con el Resto y el total, ponderado vs resultado, objetivo en pp y unidades, y el puente al Total", () => {
-    expect(s).toContain("HOMBRE · FORMAL");
-    expect(s).toContain("19,485");
-    expect(s).toContain("Resto");
-    expect(s).toContain("Total (mismas tiendas)");
-    expect(s).toContain("+11.7 %");
-    expect(s).toContain("+10.2 % · 132,185 u");
-    expect(s).toContain("te faltan 0.3 pp");
-    expect(s).toContain("≈ 2,215 u");
-    expect(s).toContain("llevan el total de +11.7 % a +10.2 %");
-    expect(s).toContain("Puente al Total 2027 de la Matriz");
-    expect(s).toContain("133,099 u");
-    expect(s).toContain("914 u");
-    expect(s).toContain("±0.5 u por fila");
+  it("«Cerrar proyección» se deshabilita con el título del motivo y el enlace a Crecimiento por género × mundo", () => {
+    const s = cabecera(proyeccion({ crecimientos_sin_aprobar: SIN_APROBAR }));
+    expect(deshabilitado(boton(s, "Cerrar proyección"))).toBe(true);
+    expect(boton(s, "Cerrar proyección")).toContain("No se puede cerrar: falta 1 crecimiento aprobado para 2027 y el Resto es provisional.");
+    expect(s).toContain("Ir a Crecimiento por género × mundo");
+    expect(s).toContain('href="/planificacion/curvas-estacionalidad?pestana=genero-mundo&amp;anio=2027&amp;proyeccion=proy-1"');
   });
 
-  it("con cierres sin decidir los muestra en 0 con el aviso; si se editó después de calcular, el panel se marca vencido", () => {
-    const c = promedioParaPantalla(e.entradas, e.resto, null, { ...r.puente, cierres_sin_decidir: 1 });
-    expect(html(createElement(PanelPromedio, { resultado: c, obsoleto: false, anioEnCurso: 2026, anioSiguiente: 2027 }))).toContain("0 u (1 tienda sin decidir)");
-    const viejo = html(createElement(PanelPromedio, { resultado: res, obsoleto: true, anioEnCurso: 2026, anioSiguiente: 2027 }));
-    expect(viejo).toContain("Cambiaste celdas: vuelve a calcular.");
-    expect(s).not.toContain("Cambiaste celdas");
+  it("con todo aprobado (o sin la clave) el botón está habilitado y no hay enlace", () => {
+    for (const p of [proyeccion({ crecimientos_sin_aprobar: null }), proyeccion()]) {
+      const s = cabecera(p);
+      expect(deshabilitado(boton(s, "Cerrar proyección"))).toBe(false);
+      expect(s).not.toContain("Ir a Crecimiento por género × mundo");
+    }
   });
 
-  it("sin objetivo no hay comparación", () => {
-    const sin = html(createElement(PanelPromedio, { resultado: promedioParaPantalla(e.entradas, e.resto, null, r.puente), obsoleto: false, anioEnCurso: 2026, anioSiguiente: 2027 }));
-    expect(sin).not.toContain("Objetivo +");
+  it("una cerrada no muestra el motivo aunque la clave venga", () => {
+    const s = cabecera(proyeccion({ estado: "cerrada", crecimientos_sin_aprobar: SIN_APROBAR }));
+    expect(s).not.toContain("Ir a Crecimiento por género × mundo");
+  });
+
+  const modal = (p: ProyeccionApi) => html(createElement(CerrarModal, { proyeccion: p, onCerrar: noop, onCerrada: noop, onRecalcular: noop }));
+
+  it("cerrar con crecimientos sin aprobar: lista los GM faltantes, no ofrece «Cerrar de todos modos» y deshabilita Cerrar", () => {
+    const s = modal(proyeccion({ crecimientos_sin_aprobar: { faltan: [{ clave: "a", nombre: "HOMBRE · URBANO" }, { clave: "b", nombre: "MUJER · RI" }], resto_provisional: true } }));
+    expect(s).toContain("faltan crecimientos aprobados");
+    expect(s).toContain("Faltan 2 crecimientos aprobados para 2027 (HOMBRE · URBANO, MUJER · RI) y el Resto es provisional");
+    expect(s).toContain("<li>HOMBRE · URBANO</li>");
+    expect(s).toContain("<li>Resto (provisional)</li>");
+    expect(s).toContain("Curvas de estacionalidad → Crecimiento por género × mundo");
+    expect(s).toContain("Este motivo no se puede saltar");
+    expect(s).not.toContain("Cerrar de todos modos");
+    expect(deshabilitado(boton(s, "Cerrar proyección"))).toBe(true);
+    expect(s).toContain("pestana=genero-mundo");
+  });
+
+  it("también con el motivo en la lista de desactualizada: no se puede forzar", () => {
+    const s = modal(proyeccion({ desactualizada: [{ codigo: "crecimientos_sin_aprobar", mensaje: "faltan" }], crecimientos_sin_aprobar: SIN_APROBAR }));
+    expect(s).not.toContain("Cerrar de todos modos");
+    expect(s).toContain("este motivo no se puede saltar");
+  });
+
+  it("crecimientos_cambiados y version_metodo siguen sin poder forzarse y ofrecen recalcular", () => {
+    const s = modal(conCambio());
+    expect(s).toContain("este motivo no se puede saltar");
+    expect(s).not.toContain("Cerrar de todos modos");
+    expect(s).toContain("Recalcular ahora");
+  });
+
+  it("sin faltantes y con otro motivo (cargas nuevas) sí se puede cerrar de todos modos", () => {
+    const s = modal(proyeccion({ desactualizada: [{ codigo: "cargas_nuevas", mensaje: "x" }] }));
+    expect(s).toContain("Cerrar de todos modos");
+    expect(s).not.toContain("faltan crecimientos aprobados");
+    expect(deshabilitado(boton(s, "Cerrar proyección"))).toBe(true); // desactualizada y sin tildar «Cerrar de todos modos»
+    expect(deshabilitado(boton(modal(proyeccion()), "Cerrar proyección"))).toBe(false);
   });
 });
 
-describe("Modal del choque: Pisar / Conservar / Cancelar", () => {
-  const modal = (extra: Partial<Parameters<typeof ChoqueModal>[0]> = {}) =>
-    html(createElement(ChoqueModal, { conflicto: conflicto(), anioSiguiente: 2027, listaCambio: false, ocupado: false, onPisar: noop, onConservar: noop, onCancelar: noop, ...extra }));
+describe("Nueva proyección y Parámetros: el Resto provisional", () => {
+  const estado = respuestaProyeccion();
 
-  it("título, las dos secciones con sus tablas y la casilla desmarcada por defecto", () => {
-    const s = modal();
-    expect(s).toContain("Este cambio choca con filas fijadas a mano.");
-    expect(s).toContain("12 filas tienen un % propio");
-    expect(s).toContain("5 % → 12 %");
-    expect(s).toContain("PANTALON · VALOR");
-    expect(s).toContain("5 filas tienen el total de 2027 decidido: conservan su cifra y mostrarán «propuesta cambió»");
-    expect(s).toContain("10,800 → 11,500");
-    expect(s).toContain("Pisar también estas 5 decisiones (vuelven a la propuesta nueva)");
-    const casilla = /<input[^>]*type="checkbox"[^>]*>/.exec(s)?.[0] ?? "";
-    expect(casilla).not.toContain("checked");
-    for (const b of ["Pisar", "Conservar", "Cancelar"]) expect(s).toContain(`>${b}</button>`);
-    expect(s).toContain("Se muestran 1 de 12.");
+  it("al crear, el campo es «Resto provisional (%)» y su ayuda dice que solo se usa sin un Resto aprobado", () => {
+    const s = html(createElement(FormularioProyeccion, { estado, bloques: bloques(), perfiles: [], onCerrar: noop, onGuardada: noop }));
+    expect(s).toContain("Resto provisional (%)");
+    expect(s).toContain("Se usa solo mientras no haya un Resto aprobado para 2027");
+    expect(s).not.toContain("Crecimiento bruto del año siguiente (Resto) (%)");
+    expect(s).not.toContain("matriz de crecimientos");
+    expect(s).toContain("los crecimientos salen de los aprobados en Curvas de estacionalidad");
   });
 
-  it("sin filas decididas no hay segunda sección ni casilla; sin filas con % propio no hay primera", () => {
-    const sin = modal({ conflicto: conflicto({ decididas: { total: 0, filas: [] } }) });
-    expect(sin).not.toContain("total de 2027 decidido");
-    expect(sin).not.toContain('type="checkbox"');
-    const solo = modal({ conflicto: conflicto({ pct_propio: { total: 0, filas: [] } }) });
-    expect(solo).not.toContain("tienen un % propio");
-    expect(solo).toContain("total de 2027 decidido");
+  it("si una proyección del año ya aplicó un Resto aprobado, la ayuda lo dice", () => {
+    const base = proyeccion();
+    const conResto = proyeccion({ parametros: { ...base.parametros, crecimiento_resto_usado: { pct: 5, crecimiento_id: "c-1", version: 1, por_nombre: "Javier", at: "2026-10-20T00:00:00Z" } } });
+    const s = html(createElement(FormularioProyeccion, { estado: respuestaProyeccion({ proyecciones: [conResto] }), bloques: bloques(), perfiles: [], onCerrar: noop, onGuardada: noop }));
+    expect(s).toContain("Resto aprobado para 2027");
+    expect(s).toContain("5 % (v1)");
   });
 
-  it("cuando la lista cambió avisa; mientras guarda bloquea los tres botones", () => {
-    expect(modal({ listaCambio: true })).toContain("La lista cambió mientras decidías: revisa la lista nueva antes de elegir.");
-    expect(modal()).not.toContain("La lista cambió");
-    const s = modal({ ocupado: true });
-    expect(s).toContain("Guardando y recalculando… (hasta 30 s)");
-    for (const b of ["Pisar", "Conservar", "Cancelar"]) expect(new RegExp(`<button[^>]*disabled[^>]*>${b}</button>`).test(s)).toBe(true);
+  it("al editar no hay campo: muestra el Resto de la foto con su origen y el enlace a la pestaña", () => {
+    const base = proyeccion();
+    const aprobada = proyeccion({ parametros: { ...base.parametros, crecimiento_resto_usado: { pct: 5, crecimiento_id: "c-1", version: 1, por_nombre: "Javier", at: "2026-10-20T00:00:00Z" } } });
+    const edit = html(createElement(FormularioProyeccion, { estado, proyeccion: aprobada, bloques: bloques(), perfiles: [], onCerrar: noop, onGuardada: noop, onIrACrecimientos: noop }));
+    expect(edit).not.toContain("Resto provisional (%)");
+    expect(edit).toContain("5 % · Resto v1 (aprobado)");
+    expect(edit).toContain("El Resto provisional solo se fija al crear la proyección");
+    expect(edit).toContain("Curvas de estacionalidad → Crecimiento por género × mundo");
+    expect(edit).toContain("Ver los crecimientos");
+    const prov = html(createElement(FormularioProyeccion, { estado, proyeccion: proyeccion(), bloques: bloques(), perfiles: [], onCerrar: noop, onGuardada: noop }));
+    expect(prov).toContain("0 % · Resto provisional");
   });
 });
 
@@ -267,11 +267,12 @@ describe("Matriz (Parte 2): columna «Crec. mismas tiendas»", () => {
   const datos = respuestaMatriz();
   const s = html(createElement(TablaMatriz, { datos, proyeccion: proyeccion(), porMarca: false, plegados: new Set<string>(), onAlternar: noop, onIrALinea: noop, onIrATiendas: noop }));
 
-  it("va junto a «Var.» con su título que explica la diferencia", () => {
+  it("va junto a «Var.» con su título que explica la diferencia y de dónde sale el %", () => {
     expect(s).toContain("Crec. mismas tiendas");
     expect(s.indexOf("Var.")).toBeLessThan(s.indexOf("Crec. mismas tiendas"));
     expect(s).toContain("Var. = Total 2027 ÷ Total 2026 (incluye tiendas nuevas, aperturas y cierres).");
-    expect(s).toContain("Crec. mismas tiendas = 2027 de las mismas tiendas ÷ su 2026: es lo que escribes en Crecimientos.");
+    expect(s).toContain("Crec. mismas tiendas = 2027 de las mismas tiendas ÷ su 2026: es el % aprobado en Curvas → Crecimiento por género × mundo (o el % propio de la fila).");
+    expect(s).not.toContain("es lo que escribes en Crecimientos");
     expect(s).toContain("+9.8 %");
   });
 
@@ -280,59 +281,37 @@ describe("Matriz (Parte 2): columna «Crec. mismas tiendas»", () => {
   });
 });
 
-describe("el resto de la pantalla (07c)", () => {
+describe("el resto de la pantalla (06d)", () => {
   it("«Crecimientos» va entre «Tiendas nuevas y cierres» y «Por línea»", () => {
     const ids = PESTANAS.map((p) => p.id);
     expect(ids.indexOf("crecimientos")).toBe(ids.indexOf("tiendas") + 1);
     expect(ids.indexOf("linea")).toBe(ids.indexOf("crecimientos") + 1);
     expect(PESTANAS.find((p) => p.id === "crecimientos")?.etiqueta).toBe("Crecimientos");
   });
-
-  it("cerrar con crecimientos sin aplicar: no se puede forzar y ofrece recalcular", () => {
-    const p = proyeccion({ desactualizada: [{ codigo: "crecimientos_cambiados", mensaje: "x" }] });
-    const s = html(createElement(CerrarModal, { proyeccion: p, onCerrar: noop, onCerrada: noop, onRecalcular: noop }));
-    expect(s).toContain("este motivo no se puede saltar");
-    expect(s).not.toContain("Cerrar de todos modos");
-    const otro = html(createElement(CerrarModal, { proyeccion: proyeccion({ desactualizada: [{ codigo: "cargas_nuevas", mensaje: "x" }] }), onCerrar: noop, onCerrada: noop, onRecalcular: noop }));
-    expect(otro).toContain("Cerrar de todos modos");
-  });
-
-  it("nueva proyección: el campo es el Resto bruto y, al editar, se cambia el campo por un enlace a la pestaña", () => {
-    const estado = respuestaProyeccion();
-    const nueva = html(createElement(FormularioProyeccion, { estado, bloques: bloques(), perfiles: [], onCerrar: noop, onGuardada: noop }));
-    expect(nueva).toContain("Crecimiento bruto del año siguiente (Resto) (%)");
-    const edit = html(createElement(FormularioProyeccion, { estado, proyeccion: proyeccion(), bloques: bloques(), perfiles: [], onCerrar: noop, onGuardada: noop, onIrACrecimientos: noop }));
-    expect(edit).not.toContain("Crecimiento bruto del año siguiente (Resto) (%)");
-    expect(edit).toContain("Se edita en la pestaña Crecimientos");
-    expect(edit).toContain("Ir a Crecimientos");
-  });
 });
 
 describe("estructura de la pestaña Crecimientos", () => {
-  it("el único guardado es «Guardar y recalcular» (PUT con reintento de la huella del choque); nunca manda `resolucion` sin que Javier pulse", () => {
+  it("es de solo lectura: no hay PUT ni POST, el modal del choque se borró y el único `PATCH` es el del objetivo", () => {
     const c = fuente("crecimientos-tab.tsx");
     expect(c.startsWith('"use client"')).toBe(true);
-    expect(c).toContain("api.put<RespuestaGuardarCrecimientosApi>");
-    expect(c).toContain("/crecimientos`");
-    expect(c).not.toMatch(/api\.(post|patch)/);
-    expect(c).toContain("Guardar y recalcular");
-    expect(c).not.toMatch(/>\s*Guardar\s*</);
-    // La resolución solo sale de los manejadores del Modal.
-    const usos = [...c.matchAll(/resolucion:\s*"(pisar|conservar)"/g)].map((m) => m[1]);
-    expect(usos.sort()).toEqual(["conservar", "pisar"]);
-    expect(c).toContain("huella_choque: conflicto.datos.huella_choque");
-    expect(c).toContain("key={conflicto.datos.huella_choque}");
+    expect(existsSync(path.join(RAIZ, DIR, "choque-modal.tsx"))).toBe(false);
+    expect(c).not.toMatch(/api\.(put|post|delete)/);
+    expect(c.match(/api\.patch/g)).toHaveLength(1);
+    expect(c).toContain("crecimiento_objetivo_pct");
+    expect(c).not.toMatch(/resolucion|huella_choque|ChoqueModal|Guardar y recalcular/);
+    expect(c).toContain("Analizar y aprobar");
   });
 
-  it("los errores de la API se muestran con Alert y la matriz parte de lo guardado (key = huella)", () => {
+  it("los errores de la API se muestran con Alert y los datos van por /api con `useLectura`", () => {
     const c = fuente("crecimientos-tab.tsx");
     expect(c).toContain("<AlertaError");
-    expect(c).toContain("key={datos.huella}");
-    expect(c).toContain("confirm(");
+    expect(c).toContain("useLectura<ResumenCrecimientosProyeccionApi>");
+    expect(c).toContain("/crecimientos`");
+    expect(c).not.toMatch(/@supabase/);
   });
 
   it("usa los tokens del tema y no mete librerías ni colores sueltos", () => {
-    for (const f of ["crecimientos-tab.tsx", "choque-modal.tsx", "crecimientos-vista.ts"]) {
+    for (const f of ["crecimientos-tab.tsx", "crecimientos-vista.ts", "cerrar-modal.tsx", "cabecera-proyeccion.tsx", "formulario-proyeccion.tsx"]) {
       const c = fuente(f);
       expect(c, f).not.toMatch(/#[0-9a-fA-F]{6}\b/);
       expect(c, f).not.toMatch(/\b(bg|text|border)-(red|green|blue|gray|slate|zinc|amber|white|black)\b/);

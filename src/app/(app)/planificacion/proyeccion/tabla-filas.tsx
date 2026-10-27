@@ -142,7 +142,7 @@ export function TablaFilas({
               <th className={`${TH} text-right`}>Avance</th>
               <th className={`${TH} text-right`}>{y} propuesto</th>
               <th className={`${TH} text-right`}>{y} decidido</th>
-              <th className={`${TH} text-right`} title={`Crecimiento bruto ${y + 1} ÷ ${y} de la fila, sin corregir por el Niño. Vacío = el de la combinación género · mundo (o el Resto).`}>
+              <th className={`${TH} text-right`} title={`Crecimiento bruto ${y + 1} ÷ ${y} de la fila, sin corregir por el Niño. Vacío = el aprobado de la combinación género · mundo (o el Resto aprobado).`}>
                 Crec.
               </th>
               <th className={`${TH} text-right`}>{y + 1} propuesto</th>

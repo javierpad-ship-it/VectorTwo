@@ -10,8 +10,9 @@ import type { BloquesApi, ProyeccionApi, RespuestaProyeccionApi } from "@/lib/pr
 import { RAMPA_MADURACION, UMBRAL_COLA_LARGA, UMBRAL_DISPONIBILIDAD } from "@/lib/proyeccion/tipos-api";
 import { AlertaError, BotonEnlace } from "./comunes";
 import { ComposicionBloques } from "./composicion-bloques";
+import { ayudaRestoProvisional, restoAprobadoReciente, restoDeFoto, textoRestoDeFoto } from "./crecimientos-vista";
 import { useAccion } from "./use-proyeccion";
-import { leerEntero, leerPorcentaje, leerRampa, formatearPct, leerUmbralDisponibilidad, mesAaaaMm, mesesElegibles, nombrePorDefecto, textoPerfilApertura, textoTendencia, textoRampa } from "./vista";
+import { leerEntero, leerPorcentaje, leerRampa, leerUmbralDisponibilidad, RUTA_APROBAR_CRECIMIENTOS, mesAaaaMm, mesesElegibles, nombrePorDefecto, textoPerfilApertura, textoTendencia, textoRampa } from "./vista";
 
 const ID_FORM = "form-proyeccion";
 
@@ -38,7 +39,7 @@ const casillasDeRampa = (rampa: readonly number[]): string[] => Array.from({ len
 
 /**
  * Nueva proyección (ficha 07, paso 1) o edición de sus parámetros. Nombre, «datos hasta» (arranca en el último mes
- * cerrado y solo se puede retroceder dentro del año en curso), crecimiento por defecto del año siguiente, rampa de
+ * cerrado y solo se puede retroceder dentro del año en curso), Resto provisional del año siguiente, rampa de
  * maduración (sin rampa por defecto: `1 · 1 · 1`; con el perfil observado de las aperturas históricas como referencia),
  * umbral de cola larga y, al crear, «copiar decisiones de» otra proyección del mismo año. Debajo, la composición de los
  * bloques de tiendas que el sistema deduce de Tiendas. Al crear se calcula: puede tardar.
@@ -62,7 +63,7 @@ export function FormularioProyeccion({
   copiarDeInicial?: string;
   onCerrar: () => void;
   onGuardada: (p: ProyeccionApi) => Promise<void> | void;
-  /** Al editar, el crecimiento (el Resto) ya no se escribe aquí: se va a la pestaña Crecimientos. */
+  /** Al editar, el Resto provisional ya no se escribe aquí: se ve el Resto de la foto y se puede ir a la pestaña Crecimientos. */
   onIrACrecimientos?: () => void;
 }) {
   const editando = proyeccion !== undefined;
@@ -70,7 +71,7 @@ export function FormularioProyeccion({
   const anioBase = editando ? proyeccion.anio_en_curso : Number((ultimo ?? estado.datos.hasta ?? "0000").slice(0, 4));
   const [nombre, setNombre] = useState(editando ? proyeccion.nombre : nombrePorDefecto(anioBase));
   const [hasta, setHasta] = useState(editando ? mesAaaaMm(proyeccion.hasta_periodo) : ultimo ? mesAaaaMm(ultimo) : "");
-  // 0.10.8 (07c): este campo es el Resto de la matriz de crecimientos (bruto). Al copiar, arranca con el del origen.
+  // 0.12.1 (06d): este campo es el Resto PROVISIONAL (bruto): se usa solo mientras no haya un Resto aprobado para el año. Al copiar, arranca con el del origen.
   const [crecimiento, setCrecimiento] = useState(() => {
     if (editando) return String(proyeccion.parametros.crecimiento_pct_defecto);
     const origen = copiarDeInicial ? estado.proyecciones.find((p) => p.id === copiarDeInicial) : undefined;
@@ -107,7 +108,7 @@ export function FormularioProyeccion({
       // Al editar solo se manda lo que cambió: un parámetro igual no debe dejar la proyección «pendiente de recalcular».
       const p0 = proyeccion.parametros;
       const cambiados: Record<string, unknown> = {};
-      // El crecimiento (Resto) no se manda: cambiarlo es de «Guardar y recalcular» en Crecimientos (el PATCH respondería `usar_crecimientos`).
+      // El Resto provisional no se manda: solo se fija al crear (el PATCH respondería `usar_crecimientos`); el aprobado se aprueba en Curvas.
       if (parametros.umbral_cola_larga !== p0.umbral_cola_larga) cambiados.umbral_cola_larga = parametros.umbral_cola_larga;
       if (parametros.umbral_disponibilidad !== (p0.umbral_disponibilidad ?? UMBRAL_DISPONIBILIDAD)) cambiados.umbral_disponibilidad = parametros.umbral_disponibilidad;
       if (textoRampa(parametros.rampa_maduracion) !== textoRampa(p0.rampa_maduracion)) cambiados.rampa_maduracion = parametros.rampa_maduracion;
@@ -176,9 +177,11 @@ export function FormularioProyeccion({
           </Field>
           {editando ? (
             <div className="space-y-1">
-              <p className="text-sm font-medium">Crecimiento bruto del año siguiente (Resto): <span className="font-mono">{formatearPct(proyeccion.parametros.crecimiento_pct_defecto)}</span></p>
+              <p className="text-sm font-medium">
+                Crecimiento del Resto aplicado: <span className="font-mono">{textoRestoDeFoto(restoDeFoto(proyeccion))}</span>
+              </p>
               <p className="text-xs text-tinta-suave">
-                Se edita en la pestaña Crecimientos, junto a la matriz por género · mundo.{" "}
+                El Resto provisional solo se fija al crear la proyección; el Resto aprobado se aprueba en {RUTA_APROBAR_CRECIMIENTOS}.{" "}
                 {onIrACrecimientos && (
                   <BotonEnlace
                     onClick={() => {
@@ -187,15 +190,15 @@ export function FormularioProyeccion({
                     }}
                     disabled={accion.ocupado}
                   >
-                    Ir a Crecimientos
+                    Ver los crecimientos
                   </BotonEnlace>
                 )}
               </p>
             </div>
           ) : (
             <Field
-              label="Crecimiento bruto del año siguiente (Resto) (%)"
-              hint={`Variación bruta del año siguiente frente al vigente de las mismas tiendas, sin corregir por el Niño. Es el crecimiento de todo lo que no tenga celda en la matriz de Crecimientos.${tendencia ? ` ${tendencia}` : ""}`}
+              label="Resto provisional (%)"
+              hint={`${ayudaRestoProvisional(anioBase + 1, restoAprobadoReciente(estado.proyecciones, anioBase))} Variación bruta frente al vigente de las mismas tiendas, sin corregir por el Niño.${tendencia ? ` ${tendencia}` : ""}`}
             >
               <Input inputMode="decimal" value={crecimiento} disabled={accion.ocupado} onChange={(e) => setCrecimiento(e.target.value)} className="font-mono" />
             </Field>
@@ -225,13 +228,13 @@ export function FormularioProyeccion({
         </div>
 
         {!editando && (
-          <Field label="Copiar decisiones de" hint={mismoAnio.length === 0 ? `No hay otra proyección de ${anioBase}.` : "Trae las decisiones y la matriz de crecimientos de otra proyección del mismo año; lo que ya no exista se ignora."}>
+          <Field label="Copiar decisiones de" hint={mismoAnio.length === 0 ? `No hay otra proyección de ${anioBase}.` : "Trae las decisiones y el objetivo de otra proyección del mismo año; los crecimientos salen de los aprobados en Curvas de estacionalidad. Lo que ya no exista se ignora."}>
             <Select
               value={copiarDe}
               disabled={accion.ocupado || mismoAnio.length === 0}
               onChange={(e) => {
                 setCopiarDe(e.target.value);
-                // Al elegir de dónde copiar, el Resto arranca con el del origen (la copia trae también sus celdas y su objetivo).
+                // Al elegir de dónde copiar, el Resto provisional arranca con el del origen (la copia trae también su objetivo).
                 const origen = mismoAnio.find((p) => p.id === e.target.value);
                 if (origen) setCrecimiento(String(origen.parametros.crecimiento_pct_defecto));
               }}

@@ -14,12 +14,23 @@ import type { AgregadoCrecimientoApi, CeldaParaPromedio, FilaResultadoPromedio, 
 /** Clave de una celda de la matriz: `genero_id|mundo_id`. */
 export const claveGM = (generoId: string, mundoId: string): string => `${generoId}|${mundoId}`;
 
-/** La matriz que usa el método: las celdas con su % (solo de los géneros de la matriz) y los ids de esos géneros. */
+/**
+ * La matriz que usa el método: las celdas con su % (solo de los géneros de la matriz) y los ids de esos géneros.
+ *
+ * `0.12.1` (06d §3.1): las tres claves opcionales llevan de qué versión aprobada sale cada %. `ids` y `versiones` van por `claveGM`; `resto`
+ * es el Resto aprobado (`id = null`: no hay, el Resto es el provisional). Sin ellas (los literales de las pruebas), todo sigue igual.
+ */
 export type MatrizCrecimientos = {
   /** `claveGM → pct`. */
   celdas: ReadonlyMap<string, number>;
   /** Ids de los géneros que son columna de la matriz (HOMBRE, MUJER). Una celda de otro género no se aplica. */
   generos: ReadonlySet<string>;
+  /** `claveGM → id` de la versión aprobada (`crecimientos_genero_mundo.id`) de la que sale la celda. */
+  ids?: ReadonlyMap<string, string>;
+  /** `claveGM → versión` de esa versión aprobada. */
+  versiones?: ReadonlyMap<string, number>;
+  /** El Resto aprobado que se aplica (`id = null` = el Resto provisional). */
+  resto?: { id: string | null; version: number | null };
 };
 
 export const MATRIZ_SIN_CELDAS: MatrizCrecimientos = { celdas: new Map(), generos: new Set() };
@@ -73,8 +84,11 @@ export function crecimientoEfectivo(
 /** Nodo → su GM y su nombre legible («HOMBRE · URBANO»). */
 export type GMDeNodo = (gmlId: string) => { genero_id: string; mundo_id: string; nombre: string } | undefined;
 
-/** El % efectivo de una fila con su GM (`gm` = `claveGM`, `celda` = nombre del GM). */
-export type CrecimientoDeFila = CrecimientoEfectivo & { gm: string | null; celda: string | null };
+/**
+ * El % efectivo de una fila con su GM (`gm` = `claveGM`, `celda` = nombre del GM). `version` (`0.12.1`): versión aprobada del GM o del Resto
+ * que dio el %; `null` en el % propio de la fila y en el Resto provisional. `provisional`: el % es el Resto provisional.
+ */
+export type CrecimientoDeFila = CrecimientoEfectivo & { gm: string | null; celda: string | null; version?: number | null; provisional?: boolean };
 
 /** `gml_id` de una clave base (`|gml|equivalencia|agrupacion_marca`) o de una clave de fila (`tienda|gml|…`). */
 export const gmlDeClave = (clave: string): string => clave.split("|")[1] ?? "";
@@ -94,13 +108,16 @@ export function crearCrecimientoDe(args: {
     const gm = args.gmDe(gmlDeClave(claveBase));
     const propio = pctFila === undefined ? (args.pctFilaDe?.(claveBase) ?? null) : pctFila;
     const e = crecimientoEfectivo({ pctFila: propio, genero_id: gm?.genero_id, mundo_id: gm?.mundo_id }, args.matriz.celdas, args.resto, args.matriz.generos);
-    return { ...e, gm: gm ? claveGM(gm.genero_id, gm.mundo_id) : null, celda: gm?.nombre ?? null };
+    const clave = gm ? claveGM(gm.genero_id, gm.mundo_id) : null;
+    const resto = args.matriz.resto;
+    const version = e.origen === "celda" && clave !== null ? (args.matriz.versiones?.get(clave) ?? null) : e.origen === "resto" ? (resto?.version ?? null) : null;
+    return { ...e, gm: clave, celda: gm?.nombre ?? null, version, provisional: e.origen === "resto" && (resto === undefined || resto.id === null) };
   };
 }
 
 // ─── Agregados de una celda o del Resto ───
 
-/** Una fila base activa de `Y+1`, con lo que hace falta para agregar y para detectar choques. */
+/** Una fila base activa de `Y+1`, con lo que hace falta para agregar. */
 export type FilaCrecimiento = {
   fila_id: string;
   genero_id: string;
@@ -166,45 +183,6 @@ export function agregarFilas(filas: readonly FilaCrecimiento[]): AgregadoCrecimi
   }
   a.rebote_nino_pct = hayNino && a.base > 0 ? (a.base_normalizada / a.base - 1) * 100 : null;
   return a;
-}
-
-// ─── Choques con filas fijadas a mano ───
-
-/** La matriz guardada o la del borrador, lista para comparar. */
-export type MatrizYResto = { celdas: ReadonlyMap<string, number>; generos: ReadonlySet<string>; resto: number };
-
-export type FilaEnChoquePct = { fila: FilaCrecimiento; pct_fila: number; pct_nuevo: number };
-export type FilaEnChoqueDecidida = { fila: FilaCrecimiento; decidido: number; propuesta_nueva_estimada: number | null };
-
-/**
- * Regla 4 de la ficha. Qué filas fijadas a mano chocan con guardar la matriz `borrador` sobre la `guardada`:
- *   - `pct_propio`: filas con `crecimiento_pct` cuyo % NO manual (celda o Resto) cambia y cuyo % propio ≠ el nuevo efectivo;
- *   - `decididas`: filas con total decidido de `Y+1` cuyo % efectivo cambia.
- * Cambiar el Resto solo afecta a los GM sin celda. `propuesta_nueva_estimada = round(B × (1 + g_nuevo))`.
- */
-export function filasEnChoque(
-  guardada: MatrizYResto,
-  borrador: MatrizYResto,
-  filas: readonly FilaCrecimiento[]
-): { pct_propio: FilaEnChoquePct[]; decididas: FilaEnChoqueDecidida[] } {
-  const pctPropio: FilaEnChoquePct[] = [];
-  const decididas: FilaEnChoqueDecidida[] = [];
-  for (const f of filas) {
-    const gm = { genero_id: f.genero_id, mundo_id: f.mundo_id };
-    const noManualAntes = crecimientoEfectivo({ ...gm, pctFila: null }, guardada.celdas, guardada.resto, guardada.generos).pct;
-    const noManualDespues = crecimientoEfectivo({ ...gm, pctFila: null }, borrador.celdas, borrador.resto, borrador.generos).pct;
-    if (f.crecimiento_pct !== null && noManualAntes !== noManualDespues && Number(f.crecimiento_pct) !== noManualDespues) {
-      pctPropio.push({ fila: f, pct_fila: Number(f.crecimiento_pct), pct_nuevo: noManualDespues });
-    }
-    if (f.decidido !== null) {
-      const antes = crecimientoEfectivo({ ...gm, pctFila: f.crecimiento_pct }, guardada.celdas, guardada.resto, guardada.generos).pct;
-      const despues = crecimientoEfectivo({ ...gm, pctFila: f.crecimiento_pct }, borrador.celdas, borrador.resto, borrador.generos).pct;
-      if (antes !== despues) {
-        decididas.push({ fila: f, decidido: f.decidido, propuesta_nueva_estimada: f.base_siguiente === null ? null : conCrecimiento(f.base_siguiente, despues) });
-      }
-    }
-  }
-  return { pct_propio: pctPropio, decididas };
 }
 
 // ─── Celdas obligatorias ───

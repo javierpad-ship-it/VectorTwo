@@ -8,6 +8,7 @@ import { indiceMes } from "./calendario";
 import { curvaCambio, detalleCambioCurva } from "./curva-fila";
 import { factorDe, type FactorProy } from "./nino";
 import {
+  CODIGO_CRECIMIENTOS_SIN_APROBAR_ANIO,
   TEMPORADAS_FACTOR,
   VERSION_METODO,
   type AvisoFila,
@@ -261,6 +262,11 @@ export type DatosPrerrequisitos = {
   anioSiguienteAtipico?: boolean;
   nivelesCambiados?: number;
   referentesSinHistoria?: readonly string[];
+  /**
+   * `0.12.1` (06d §3.1): lo aprobado hoy en el global para el año siguiente (`anio` = `Y+1`): cuántos GM de HOMBRE o MUJER y si hay Resto aprobado.
+   * Sin él no se avisa. Solo informa: cerrar es lo que exige los aprobados.
+   */
+  crecimientosAprobados?: { anio: number; gm: number; resto: boolean };
 };
 
 /** Regla 35. Qué bloquea y qué solo avisa antes de proyectar. */
@@ -326,6 +332,14 @@ export function prerrequisitos(d: DatosPrerrequisitos): PrerrequisitosProyeccion
   }
   if (d.anioSiguienteAtipico) avisa.push({ codigo: "anio_siguiente_atipico", mensaje: `${d.anio + 1} está marcado como año atípico: la propuesta del año siguiente se pondera con el factor del Niño.` });
   if ((d.nivelesCambiados ?? 0) > 0) avisa.push({ codigo: "nivel_cambiado", mensaje: "Cambió el nivel de planificación de alguna línea desde el último cálculo." });
+  // 0.12.1: avisa (no bloquea) de lo que habrá que aprobar para cerrar mientras falte el Resto o no haya ningún GM aprobado.
+  const aprobados = d.crecimientosAprobados;
+  if (aprobados && (!aprobados.resto || aprobados.gm === 0)) {
+    avisa.push({
+      codigo: CODIGO_CRECIMIENTOS_SIN_APROBAR_ANIO,
+      mensaje: `Para cerrar necesitarás aprobados los crecimientos de HOMBRE y MUJER por mundo y el Resto de ${aprobados.anio} (hoy: ${aprobados.gm} ${aprobados.gm === 1 ? "GM aprobado" : "GM aprobados"}; ${aprobados.resto ? "el Resto está aprobado" : "el Resto es provisional"}).`,
+    });
+  }
 
   const bloques: BloquesApi = { [d.anio]: bloquesDeAnio(d.tiendas, d.anio), [d.anio + 1]: bloquesDeAnio(d.tiendas, d.anio + 1) };
   const nuevas = [...bloques[d.anio].nuevas, ...bloques[d.anio + 1].nuevas];

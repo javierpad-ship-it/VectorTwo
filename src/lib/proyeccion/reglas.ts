@@ -122,11 +122,29 @@ export type FilaSinDecidir = {
   motivo: "umbral" | "revision_cola_larga";
 };
 
+/**
+ * `0.12.1` (06d §3.1): lo que falta aprobar para cerrar. `anio` es el año de aplicación (`Y+1`); `faltan` los GM de HOMBRE o MUJER con filas base sin
+ * versión vigente y `resto_provisional` que se exige el Resto y no hay uno aprobado.
+ */
+export type SinAprobarCierre = { anio: number; faltan: { clave: string; nombre: string }[]; resto_provisional: boolean };
+
+/** Mensaje de `crecimientos_sin_aprobar` («Faltan 3 crecimientos aprobados para 2027 (…) y el Resto es provisional: apruébalos en …»). */
+export function mensajeSinAprobar(s: SinAprobarCierre): string {
+  const donde = "apruébalos en Curvas de estacionalidad → Crecimiento por género × mundo";
+  const n = s.faltan.length;
+  if (n === 0) return `El Resto de ${s.anio} es provisional: apruébalo en Curvas de estacionalidad → Crecimiento por género × mundo antes de cerrar.`;
+  const lista = s.faltan.map((f) => f.nombre).join(", ");
+  const falta = `Faltan ${n} ${n === 1 ? "crecimiento aprobado" : "crecimientos aprobados"} para ${s.anio} (${lista})`;
+  return s.resto_provisional ? `${falta} y el Resto es provisional: ${donde}.` : `${falta}: ${n === 1 ? "apruébalo" : "apruébalos"} en Curvas de estacionalidad → Crecimiento por género × mundo.`;
+}
+
 export type ResultadoCerrar =
   | { ok: true; cola_larga: number }
   | {
       ok: false;
       rechazo: RechazoRegla;
+      /** `0.12.1`: solo con el motivo `crecimientos_sin_aprobar` (el `detalle` del `409`). */
+      crecimientos_sin_aprobar?: { faltan: { clave: string; nombre: string }[]; resto_provisional: boolean };
       /** Las `MAX_FILAS_SIN_DECIDIR_LISTADAS` de mayor propuesta; el total va en `total_filas_sin_decidir`. */
       filas_sin_decidir?: FilaSinDecidir[];
       total_filas_sin_decidir?: number;
@@ -160,6 +178,11 @@ export function motivoRechazoCerrar(args: {
    * (`crecimientos_cambiados`). Como `metodoViejo`, NO se puede saltar con `forzar`.
    */
   crecimientosCambiados?: boolean;
+  /**
+   * `0.12.1` (06d §3.1): GM de HOMBRE o MUJER con filas base sin crecimiento aprobado, o el Resto provisional cuando se exige. `null`/ausente = nada
+   * falta. BLOQUEA SIN EXCEPCIÓN (decisión de Javier): `forzar` no lo salta. Va después de `version_metodo` y `crecimientos_cambiados`.
+   */
+  crecimientosSinAprobar?: SinAprobarCierre | null;
 }): ResultadoCerrar {
   if (args.estado === "cerrada") return { ok: false, rechazo: { status: 409, codigo: "ya_cerrada", mensaje: "La proyección ya está cerrada." } };
   if (args.estado === "archivada") return { ok: false, rechazo: { status: 409, codigo: "archivada", mensaje: MENSAJE_ARCHIVADA } };
@@ -184,6 +207,14 @@ export function motivoRechazoCerrar(args: {
         codigo: "crecimientos_cambiados",
         mensaje: "Cambiaron los crecimientos por género · mundo o el mundo de un nodo: recalcula antes de cerrar (no se puede forzar).",
       },
+    };
+  }
+  const sin = args.crecimientosSinAprobar;
+  if (sin && (sin.faltan.length > 0 || sin.resto_provisional)) {
+    return {
+      ok: false,
+      rechazo: { status: 409, codigo: "crecimientos_sin_aprobar", mensaje: mensajeSinAprobar(sin) },
+      crecimientos_sin_aprobar: { faltan: sin.faltan, resto_provisional: sin.resto_provisional },
     };
   }
   const umbral = args.umbralColaLarga ?? UMBRAL_COLA_LARGA;

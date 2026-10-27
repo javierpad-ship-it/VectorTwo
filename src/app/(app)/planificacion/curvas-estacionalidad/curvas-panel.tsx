@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useColeccion } from "@/lib/use-coleccion";
 import type { EstadoCurvasApi } from "@/lib/curvas/tipos-api";
@@ -10,17 +10,26 @@ import { useMapaColores } from "@/components/estacionalidad/badge-agrupacion";
 import { AniosNinoTab } from "./anios-nino-tab";
 import { CurvasTab } from "./curvas-tab";
 import { DetalleAgrupacion } from "./detalle-agrupacion";
+import { GeneroMundoTab, type DestinoGM } from "./genero-mundo/genero-mundo-tab";
+import { PESTANA_GENERO_MUNDO, leerUrlGM, urlGM } from "./genero-mundo/vista";
 import { PeriodosTab } from "./periodos-tab";
 import type { AgrupacionConTemporada } from "./tipos";
 import { useRecurso } from "./use-recurso";
 import { esIdAgrupacion, esModeloCurva, filtrarAgrupaciones, vecinosDe, type FiltroEstado, type FiltroTemporada, type ResultadoComparar } from "./vista";
 
-type Pestana = "curvas" | "anios" | "periodos";
+type PestanaLocal = "curvas" | "anios" | "periodos";
+type Pestana = PestanaLocal | typeof PESTANA_GENERO_MUNDO;
 
 /**
- * Pantalla /planificacion/curvas-estacionalidad (M6b). Tres pestañas: Agrupaciones (la lista con su estado y,
+ * Pantalla /planificacion/curvas-estacionalidad (M6b). Cuatro pestañas: Agrupaciones (la lista con su estado y,
  * al «Trabajar» una, su vista de trabajo: curva aprobada, años y propuesta, parámetros y aprobación), Años Niño
- * (vista de apoyo a demanda) y Periodos atípicos (el mantenimiento de los rangos de meses distorsionados).
+ * (vista de apoyo a demanda), Periodos atípicos (el mantenimiento de los rangos de meses distorsionados) y
+ * Crecimiento por género × mundo (06d: la curva de venta de cada género × mundo y el crecimiento global del año
+ * siguiente que se aprueba una sola vez).
+ *
+ * Crecimiento por género × mundo también vive en la URL (M10): `?pestana=genero-mundo&anio=2027&proyeccion=<id>` abre la
+ * lista y `?gm=<género>.<mundo>|resto&anio=…&proyeccion=…` abre el detalle (implica la pestaña). Si vienen `?agrupacion`
+ * y `?gm` a la vez manda `?agrupacion` y `gm` se quita de la URL.
  *
  * La agrupación abierta vive en la URL (`?agrupacion=<id>`, y `&modelo=` para la candidata dibujada): recargar o
  * compartir el enlace reabre la misma vista; «← Agrupaciones» quita el parámetro. Se maneja con la API de
@@ -35,13 +44,24 @@ export function CurvasPanel() {
   const modeloUrl = parametros.get("modelo");
   const modeloInicial = esModeloCurva(modeloUrl) ? modeloUrl : null;
 
-  const [pestanaElegida, setPestana] = useState<Pestana>("curvas");
+  const urlDeGM = leerUrlGM(parametros);
+  const gmEnUrl = parametros.get("gm") !== null;
+
+  const [pestanaElegida, setPestana] = useState<PestanaLocal>("curvas");
   const [filtroTemporada, setFiltroTemporada] = useState<FiltroTemporada>("todas");
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("todas");
   /** Ids de la lista como se veía al pulsar «Trabajar» (filtros incluidos): el orden de Anterior / Siguiente. `null` tras recargar la página. */
   const [orden, setOrden] = useState<string[] | null>(null);
   const [comparaciones, setComparaciones] = useState<Record<string, ResultadoComparar>>({});
-  const pestana: Pestana = agrupacionId ? "curvas" : pestanaElegida;
+  const pestana: Pestana = agrupacionId ? "curvas" : urlDeGM.pestanaGM ? PESTANA_GENERO_MUNDO : pestanaElegida;
+
+  // `?agrupacion` manda sobre `?gm`: el parámetro sobrante se quita de la URL sin añadir una entrada al historial.
+  useEffect(() => {
+    if (!agrupacionId || !gmEnUrl) return;
+    const q = new URLSearchParams(window.location.search);
+    q.delete("gm");
+    window.history.replaceState(null, "", q.size > 0 ? `${pathname}?${q.toString()}` : pathname);
+  }, [agrupacionId, gmEnUrl, pathname]);
 
   // Las pestañas Agrupaciones y Periodos leen las mismas agrupaciones (colores de M3 y temporada): una sola carga.
   const agrupaciones = useColeccion<AgrupacionConTemporada>("/api/agrupaciones-estacionalidad?incluir_inactivos=1");
@@ -67,6 +87,16 @@ export function CurvasPanel() {
     [pathname]
   );
 
+  /** Lista o detalle de Crecimiento por género × mundo en la URL (`pushState` al abrir o volver; `replaceState` al cambiar año o proyección). */
+  const irAGM = useCallback(
+    (destino: DestinoGM, modo: "push" | "replace" = "push") => {
+      const url = urlGM(pathname, destino);
+      if (modo === "push") window.history.pushState(null, "", url);
+      else window.history.replaceState(null, "", url);
+    },
+    [pathname]
+  );
+
   function trabajar(id: string, ordenLista?: string[]) {
     setPestana("curvas");
     setOrden(ordenLista ?? null);
@@ -84,7 +114,12 @@ export function CurvasPanel() {
   }
 
   function cambiarPestana(siguiente: Pestana) {
-    if (agrupacionId) irA(null);
+    if (siguiente === PESTANA_GENERO_MUNDO) {
+      // La pestaña nueva se identifica por la URL: una sola entrada de historial, también cuando venía de una agrupación.
+      if (!urlDeGM.pestanaGM || agrupacionId || urlDeGM.gm) irAGM({ gm: null, anio: null, proyeccion: null });
+      return;
+    }
+    if (agrupacionId || urlDeGM.pestanaGM) irA(null);
     // Al volver a la lista se relee el estado: lo que se hizo en otra pestaña (periodos) cambia los bloqueos.
     if (siguiente === "curvas" && pestana !== "curvas") void recargarEstado();
     setPestana(siguiente);
@@ -136,6 +171,7 @@ export function CurvasPanel() {
           { id: "curvas", label: "Agrupaciones" },
           { id: "anios", label: "Años Niño" },
           { id: "periodos", label: "Periodos atípicos" },
+          { id: PESTANA_GENERO_MUNDO, label: "Crecimiento por género × mundo" },
         ]}
         activa={pestana}
         onCambiar={cambiarPestana}
@@ -178,6 +214,7 @@ export function CurvasPanel() {
         ))}
       {pestana === "anios" && <AniosNinoTab onVer={trabajar} />}
       {pestana === "periodos" && <PeriodosTab agrupaciones={agrupaciones.datos} onIrACurvas={irARevisarTodaTemporada} />}
+      {pestana === PESTANA_GENERO_MUNDO && <GeneroMundoTab gm={urlDeGM.gm} anioUrl={urlDeGM.anio} proyeccionUrl={urlDeGM.proyeccion} onIr={irAGM} />}
     </div>
   );
 }

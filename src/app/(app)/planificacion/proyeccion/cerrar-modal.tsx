@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,20 @@ import { Modal } from "@/components/ui/modal";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { AlertaError } from "./comunes";
 import { rutaProyeccion, useAccion } from "./use-proyeccion";
-import { cierreExigeRecalcular, lineasDeCierre, listaSinDecidir, listaTiendasSinDecidir, MAX_SIN_DECIDIR, textoMotivoDesactualizada, type GrupoSinDecidir } from "./vista";
+import {
+  cierreExigeRecalcular,
+  crecimientosSinAprobarDe,
+  enlaceCrecimientoGeneroMundo,
+  leerCrecimientosSinAprobar,
+  lineasDeCierre,
+  listaSinDecidir,
+  listaTiendasSinDecidir,
+  MAX_SIN_DECIDIR,
+  RUTA_APROBAR_CRECIMIENTOS,
+  textoFaltanCrecimientos,
+  textoMotivoDesactualizada,
+  type GrupoSinDecidir,
+} from "./vista";
 import { formatearNumero } from "@/lib/formato";
 
 /** Una lista de filas sin decidir (hasta `MAX_SIN_DECIDIR`, con el total y una pista de dónde decidirlas). */
@@ -37,7 +51,8 @@ export function GrupoLista({ titulo, grupo, pista }: { titulo: string; grupo: Gr
  * propuesta y avisos, y pide confirmación. El servidor bloquea si queda sin decidir una fila con propuesta mayor o igual
  * al umbral de cola larga, o una tienda nueva con venta esperada; si la proyección está desactualizada, ofrece cerrar de
  * todos modos (`?forzar=1`, que solo salta ese aviso). Al cerrar, la cerrada anterior del mismo año pasa a archivada y
- * una cerrada es solo lectura: nunca se vuelve a repartir.
+ * una cerrada es solo lectura: nunca se vuelve a repartir. Desde 0.12.1 (06d) tampoco se cierra sin los crecimientos aprobados de HOMBRE y
+ * MUJER por mundo y el Resto: ese motivo bloquea sin excepción (no hay «Cerrar de todos modos») y manda a Curvas → Crecimiento por género × mundo.
  */
 export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: { proyeccion: ProyeccionApi; onCerrar: () => void; onCerrada: (p: ProyeccionApi) => Promise<void> | void; onRecalcular: () => void }) {
   const [nota, setNota] = useState("");
@@ -49,6 +64,10 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
   const exigeRecalcular = cierreExigeRecalcular(proyeccion);
   const sinDecidir = listaSinDecidir(accion.error?.detalle);
   const tiendasSinDecidir = listaTiendasSinDecidir(accion.error?.detalle, proyeccion.bloques);
+  // Lo que falta aprobar: lo que dijo el servidor al rechazar o, antes de intentarlo, lo que ya trae la proyección.
+  const rechazoSinAprobar = accion.error?.codigo === "crecimientos_sin_aprobar" ? leerCrecimientosSinAprobar(accion.error.detalle) : null;
+  const sinAprobar = rechazoSinAprobar ?? crecimientosSinAprobarDe(proyeccion);
+  const bloqueadoSinAprobar = sinAprobar !== null || accion.error?.codigo === "crecimientos_sin_aprobar";
 
   async function cerrar() {
     const r = await accion.ejecutar(() => api.post<ProyeccionApi>(`${rutaProyeccion(proyeccion.id)}/cerrar${forzar ? "?forzar=1" : ""}`, { nota: nota.trim() === "" ? null : nota.trim() }));
@@ -69,7 +88,7 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
           <Button variante="fantasma" disabled={accion.ocupado} onClick={onCerrar}>
             Cancelar
           </Button>
-          <Button disabled={accion.ocupado || exigeRecalcular || (desactualizada && !forzar)} onClick={() => void cerrar()}>
+          <Button disabled={accion.ocupado || exigeRecalcular || bloqueadoSinAprobar || (desactualizada && !forzar)} onClick={() => void cerrar()}>
             {accion.ocupado ? "Cerrando…" : "Cerrar proyección"}
           </Button>
         </>
@@ -77,6 +96,30 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
     >
       <div className="space-y-4">
         {accion.error && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} />}
+        {bloqueadoSinAprobar && (
+          <Alert tono="alerta">
+            <span className="block font-medium">No se puede cerrar: faltan crecimientos aprobados.</span>
+            {sinAprobar ? (
+              <span className="mt-1 block">{textoFaltanCrecimientos(sinAprobar, proyeccion.anio_siguiente)}.</span>
+            ) : (
+              <span className="mt-1 block">Faltan crecimientos de {proyeccion.anio_siguiente} por aprobar.</span>
+            )}
+            {sinAprobar && sinAprobar.faltan.length > 0 && (
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                {sinAprobar.faltan.map((f) => (
+                  <li key={f.clave}>{f.nombre}</li>
+                ))}
+                {sinAprobar.resto_provisional && <li>Resto (provisional)</li>}
+              </ul>
+            )}
+            <span className="mt-1 block text-xs">Apruébalos en {RUTA_APROBAR_CRECIMIENTOS}. Este motivo no se puede saltar.</span>
+            <span className="mt-1 block">
+              <Link href={enlaceCrecimientoGeneroMundo(proyeccion.anio_siguiente, proyeccion.id)} className="font-medium underline underline-offset-2">
+                Ir a Crecimiento por género × mundo
+              </Link>
+            </span>
+          </Alert>
+        )}
         {sinDecidir && sinDecidir.umbral.total > 0 && (
           <GrupoLista
             titulo={`Filas por decidir con propuesta de ${proyeccion.parametros.umbral_cola_larga} unidades o más`}

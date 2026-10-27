@@ -1,10 +1,11 @@
-import type { AgregadoCrecimientoApi, CeldaCrecimientoApi, ConflictoFilasManualesApi, RespuestaCrecimientosApi, RespuestaGuardarCrecimientosApi } from "../src/lib/proyeccion/tipos-api";
+import { calcularPromedio } from "../src/lib/proyeccion/crecimientos";
+import type { AgregadoCrecimientoApi, FilaResumenCrecimientoApi, ResumenCrecimientosProyeccionApi } from "../src/lib/proyeccion/tipos-api";
 
 /**
- * Datos sintéticos de la pestaña Crecimientos (ficha 07c, §5.2 y §5.3). Las cifras son las del ejemplo de la ficha:
- * HOMBRE · FORMAL 20 % (base 17 800 con una fila con % propio de 4 500 → 4 725 y una decidida de 10 000 → 10 800),
- * HOMBRE · URBANO 10 % (50 000 libres), MUJER · CASUAL 15 % (30 000), MUJER · FORMAL 0 % (2 200) y el Resto 5 % (20 000).
- * HOMBRE · CASUAL y MUJER · URBANO no tienen filas. Σ B = 120 000. Nada real de Lukers.
+ * Datos sintéticos de la pestaña Crecimientos de solo lectura (ficha 06d, §4.2). Las cifras son las del ejemplo de 07c §5.3:
+ * HOMBRE · FORMAL 20 % v1 (base 17 800 con una fila con % propio de 4 500 → 4 725 y una decidida de 10 000 → 10 800),
+ * HOMBRE · URBANO aplicado 10 % v1 pero hoy aprobado 15 % v2 (50 000 libres: «cambió»), MUJER · CASUAL sin aprobar (aplicó el Resto
+ * provisional, 30 000), MUJER · FORMAL 0 % v1 (2 200) y el Resto provisional 5 % (20 000). Σ B = 120 000. Nada real de Lukers.
  */
 
 export const G_H = "g-hombre";
@@ -28,11 +29,7 @@ export function agregado(base: number, extra: Partial<AgregadoCrecimientoApi> = 
   };
 }
 
-export function celda(genero_id: string, mundo_id: string, pct: number | null, a: AgregadoCrecimientoApi | null, extra: Partial<CeldaCrecimientoApi> = {}): CeldaCrecimientoApi {
-  return { genero_id, mundo_id, pct, nota: null, actualizado_por: null, actualizado_at: null, sin_filas: a === null, agregado: a ?? agregado(0, { filas: 0 }), ...extra };
-}
-
-/** HOMBRE · FORMAL del ejemplo de §5.3: 3 filas, una con % propio, una decidida y una libre con meses del Niño. */
+/** HOMBRE · FORMAL: 3 filas, una con % propio, una decidida y una libre con meses del Niño. */
 export const agregadoHombreFormal = agregado(17800, {
   filas: 3,
   base_libre: 3300,
@@ -43,68 +40,75 @@ export const agregadoHombreFormal = agregado(17800, {
   siguiente_vigente: 19485,
 });
 
-export function respuestaCrecimientos(extra: Partial<RespuestaCrecimientosApi> = {}): RespuestaCrecimientosApi {
+const ANIO = 2027;
+export const ID_PROY = "proy-1";
+const enlace = (g: string, m: string) => `/planificacion/curvas-estacionalidad?gm=${g}.${m}&anio=${ANIO}&proyeccion=${ID_PROY}`;
+const APROBADA = "2026-10-20T15:30:00Z";
+
+type Aplicado = FilaResumenCrecimientoApi["aplicado"];
+type Vigente = FilaResumenCrecimientoApi["vigente_hoy"];
+
+const aprobado = (pct: number, version: number, por = "Javier"): Aplicado => ({ pct, version, provisional: false, por_nombre: por, at: APROBADA });
+const provisional = (pct: number): Aplicado => ({ pct, version: null, provisional: true, por_nombre: null, at: null });
+const vigente = (pct: number, version: number, por = "Javier"): NonNullable<Vigente> => ({ pct, version, por_nombre: por, aprobada_at: "2026-10-25T12:00:00Z" });
+
+export function filaResumen(g: string | null, m: string | null, aplicado: Aplicado, vigenteHoy: Vigente, a: AgregadoCrecimientoApi, extra: Partial<FilaResumenCrecimientoApi> = {}): FilaResumenCrecimientoApi {
+  const siguiente = a.pct_propio.siguiente + a.decididas.siguiente + a.base_libre * (1 + aplicado.pct / 100);
   return {
-    editable: true,
-    anio_en_curso: 2026,
-    anio_siguiente: 2027,
-    huella: "huella-1",
-    al_dia: true,
-    metodo_viejo: false,
-    generos: [
-      { id: G_H, nombre: "HOMBRE" },
-      { id: G_M, nombre: "MUJER" },
-    ],
-    generos_faltantes: [],
-    mundos: [
-      { id: M_F, nombre: "FORMAL", orden: 1 },
-      { id: M_U, nombre: "URBANO", orden: 2 },
-      { id: M_C, nombre: "CASUAL", orden: 3 },
-    ],
-    celdas: [
-      celda(G_H, M_F, 20, agregadoHombreFormal),
-      celda(G_M, M_F, 0, agregado(2200)),
-      celda(G_H, M_U, 10, agregado(50000)),
-      celda(G_M, M_U, null, null),
-      celda(G_H, M_C, null, null),
-      celda(G_M, M_C, 15, agregado(30000)),
-    ],
-    resto: {
-      pct: 5,
-      nota: null,
-      actualizado_por: null,
-      actualizado_at: null,
-      agregado: agregado(20000),
-      por_genero: [
-        { genero: "JOVENCITOS", base: 8200 },
-        { genero: "NIÑOS", base: 6100 },
-        { genero: "ACCESORIOS", base: 5700 },
-      ],
-    },
+    clave: g && m ? `${g}.${m}` : "resto",
+    genero: g ? (g === G_H ? "HOMBRE" : "MUJER") : null,
+    mundo: m ? (m === M_F ? "FORMAL" : m === M_U ? "URBANO" : "CASUAL") : null,
+    aplicado,
+    vigente_hoy: vigenteHoy,
+    agregado: { ...a, siguiente_vigente: Math.round(siguiente) },
+    resultante_pct: a.base > 0 ? (siguiente / a.base - 1) * 100 : null,
+    enlace: g && m ? enlace(g, m) : `/planificacion/curvas-estacionalidad?gm=resto&anio=${ANIO}&proyeccion=${ID_PROY}`,
+    ...extra,
+  };
+}
+
+const POR_GENERO = [
+  { genero: "JOVENCITOS", base: 8200 },
+  { genero: "NIÑOS", base: 6100 },
+  { genero: "ACCESORIOS", base: 5700 },
+];
+
+const PUENTE = { total_en_curso: 118000, nuevas_anterior: 0, aperturas: 914, cierres: 0, cierres_sin_decidir: 0 };
+
+export function resumenCrecimientos(extra: Partial<ResumenCrecimientosProyeccionApi> = {}): ResumenCrecimientosProyeccionApi {
+  const filas = [
+    filaResumen(G_H, M_F, aprobado(20, 1), vigente(20, 1), agregadoHombreFormal),
+    filaResumen(G_H, M_U, aprobado(10, 1), vigente(15, 2), agregado(50000)),
+    filaResumen(G_M, M_F, aprobado(0, 1), vigente(0, 1), agregado(2200)),
+    filaResumen(G_M, M_C, provisional(5), null, agregado(30000)),
+  ];
+  const resto = { ...filaResumen(null, null, provisional(5), null, agregado(20000)), por_genero: POR_GENERO };
+  const { resultado } = calcularPromedio(
+    [...filas].map((f) => ({ genero: f.genero ?? "", mundo: f.mundo ?? "", pct: f.aplicado.pct, sin_filas: false, agregado: f.agregado })),
+    { pct: resto.aplicado.pct, agregado: resto.agregado },
+    12,
+    PUENTE
+  );
+  return {
+    anio_siguiente: ANIO,
+    version_metodo: 4,
+    filas,
+    resto,
+    total: resultado,
+    puente: PUENTE,
     objetivo_pct: 12,
-    puente: { total_en_curso: 118000, nuevas_anterior: 0, aperturas: 914, cierres: 0, cierres_sin_decidir: 0 },
+    cambiados: [{ clave: `${G_H}.${M_U}`, nombre: "HOMBRE · URBANO", aplicado: { pct: 10, version: 1 }, vigente: { pct: 15, version: 2 } }],
+    sin_aprobar: { faltan: [{ clave: `${G_M}.${M_C}`, nombre: "MUJER · CASUAL" }], resto_provisional: true },
     ...extra,
   };
 }
 
-/** Una respuesta sin ninguna celda escrita (proyección nueva): todo sigue el Resto. */
-export function respuestaCrecimientosVacia(): RespuestaCrecimientosApi {
-  const r = respuestaCrecimientos({ objetivo_pct: null });
-  return { ...r, celdas: r.celdas.map((c) => ({ ...c, pct: null })) };
-}
-
-export function conflicto(extra: Partial<ConflictoFilasManualesApi> = {}): ConflictoFilasManualesApi {
-  const base = { genero: "HOMBRE", mundo: "FORMAL", linea: "TERNO", equivalencia: null, agrupacion_marca: "PREMIUM" };
-  return {
-    error: "Este cambio choca con filas fijadas a mano.",
-    codigo: "filas_manuales",
-    huella_choque: "choque-1",
-    pct_propio: { total: 12, filas: [{ ...base, fila_id: "fila-pantalon", linea: "PANTALON", agrupacion_marca: "VALOR", pct_fila: 5, pct_nuevo: 12 }] },
-    decididas: { total: 5, filas: [{ ...base, fila_id: "fila-camisa", linea: "CAMISA", equivalencia: "CLASICA", agrupacion_marca: "RECONOCIDO", decidido: 10800, propuesta_nueva_estimada: 11500 }] },
-    ...extra,
+/** Todo aprobado y aplicado (también el Resto): nada cambió y nada falta. */
+export function resumenAlDia(): ResumenCrecimientosProyeccionApi {
+  const r = resumenCrecimientos();
+  const alDia = <T extends FilaResumenCrecimientoApi>(f: T): T => {
+    const v = f.vigente_hoy ?? vigente(f.aplicado.pct, 1);
+    return { ...f, aplicado: aprobado(v.pct, v.version), vigente_hoy: v };
   };
-}
-
-export function resultadoGuardado(extra: Partial<RespuestaGuardarCrecimientosApi> = {}): RespuestaGuardarCrecimientosApi {
-  return { ...respuestaCrecimientos(), pisadas: [], conservadas: 0, revertidas: [], celdas_descartadas: [], recalculo: { ok: true }, ...extra };
+  return { ...r, filas: r.filas.map(alDia), resto: alDia(r.resto), cambiados: [], sin_aprobar: null };
 }

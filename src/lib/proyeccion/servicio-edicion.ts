@@ -181,9 +181,9 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
   const tiendasRows = await leerTiendasProyeccion(d, id);
   if (tiendasRows.error) return fallaDb(tiendasRows.error, "proyección: leer tiendas");
   const parametros = parametrosDe(p.parametros);
-  const matriz = await cargarMatriz(d, id);
-  if (matriz.respuesta) return falla(matriz.respuesta);
-  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, modelos, matriz.data);
+  const foto = await cargarMatriz(d, p);
+  if (foto.respuesta) return falla(foto.respuesta);
+  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, modelos, foto.data);
 
   const tiendasDeLaFila = modelos.filter((f) => f.tienda_id !== null);
   const nuevo = aplicarDecision(
@@ -455,9 +455,9 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
   const parametros = parametrosDe(p.parametros);
   const filas = await leerFilasConAnios(d, id, { columnas: "completas", tiendaId });
   if (filas.error) return fallaDb(filas.error, "proyección: leer las filas de la tienda");
-  const matriz = await cargarMatriz(d, id);
-  if (matriz.respuesta) return falla(matriz.respuesta);
-  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, filas.data.map((f) => aFilaModelo(f, k, Y)), matriz.data);
+  const foto = await cargarMatriz(d, p);
+  if (foto.respuesta) return falla(foto.respuesta);
+  const ctx = contextoModelo(p, parametros, cat.data.catalogo, tiendasRows.data, filas.data.map((f) => aFilaModelo(f, k, Y)), foto.data);
 
   const resultado = await propagarTienda(d, p, parametros, cat.data.catalogo, tiendasRows.data, ctx, tiendaId, anio, actor, ahora, {
     decidido,
@@ -506,7 +506,7 @@ export async function decidirTienda(id: string, tiendaId: string, anio: number, 
     fraccionAnioApertura: fraccion,
     anioMaduroSoles: t.bloque === "nuevas" && t.venta_esperada !== null ? anioMaduroSoles(t.venta_esperada) : null,
     ventaAnioApertura: fraccion !== null && t.venta_esperada !== null ? ventaAnioApertura(t.venta_esperada, fraccion) : null,
-    crecimiento: crec?.pct ?? parametros.crecimiento_pct_defecto,
+    crecimiento: crec?.pct ?? foto.data.resto.pct,
     ...(crec ? { crecimientoOrigen: { origen: crec.origen, celda: crec.celda }, crecimientoPonderado: crec.ponderado } : {}),
   });
   const fila2 = (await leerTiendasProyeccion(d, id)).data.find((x) => x.tienda_id === tiendaId && x.anio === anio);

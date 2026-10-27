@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { estadoFalso } from "./curvas.fake-db";
 import { estado as base, reiniciar, type Fila } from "./proyeccion.fake-db";
-import { contexto, reiniciarContexto } from "./proyeccion.contexto-falso";
+import { aprobarCrecimientosFalsos, contexto, reiniciarContexto } from "./proyeccion.contexto-falso";
 
 // Los módulos de la base y del contexto se cargan dentro de la fábrica para que sean los mismos que importa este archivo.
 vi.mock("server-only", () => ({}));
@@ -67,6 +67,9 @@ const DENIM_REC = `|${N.denim}||${AM.rec}`;
 beforeEach(() => {
   reiniciar();
   reiniciarContexto();
+  // 0.12.1 (06d): todo cierre necesita aprobados los crecimientos de 2027; se siembran ANTES de crear las proyecciones (así no quedan desactualizadas) y al 5 %,
+  // el mismo del `nueva()` de este archivo, para que las cifras no se muevan.
+  aprobarCrecimientosFalsos(2027, { pct: 5, resto: 5 });
   estadoFalso.rol = "planner";
   base.venta = (args) => {
     const v = construirVenta(contexto.hechos, tiendasFixture(), { detalle: args.p_tiendas_detalle, hasta: "2026-09", desdeW12: args.p_desde_w12.slice(0, 7) });

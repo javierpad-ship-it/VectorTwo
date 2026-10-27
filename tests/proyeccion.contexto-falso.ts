@@ -1,6 +1,7 @@
 import type { ContextoCalculo } from "@/lib/proyeccion/contexto";
 import type { Catalogo } from "@/lib/proyeccion/persistencia";
 import type { NodoProy, TiendaProy } from "@/lib/proyeccion/tipos";
+import { sembrar } from "./proyeccion.fake-db";
 import { AM, GEN, MUN, agrupaciones, configFlujo, factores, hechosBase, meses, nodos, periodos, tiendas, vigentes, type Hecho } from "./proyeccion.fixture";
 
 /**
@@ -25,6 +26,8 @@ export const contexto = {
   tiendasExtra: {} as Record<string, Partial<TiendaProy>>,
   /** M12: `huella_flujo` de hoy (la configuración de 02b); un test la cambia para simular que se movió una marca relevante. `null` = sin configuración leída. */
   huellaFlujo: "huella-flujo-de-prueba" as string | null,
+  /** 0.12.1 (06d): ids de los géneros detallados (HOMBRE y MUJER); un test los recorta para probar que un género fuera de la lista exige el Resto. */
+  generosMatriz: [GEN.hombre, GEN.mujer] as string[],
 };
 
 export function reiniciarContexto() {
@@ -39,6 +42,7 @@ export function reiniciarContexto() {
   contexto.nodoMundo = {};
   contexto.tiendasExtra = {};
   contexto.huellaFlujo = "huella-flujo-de-prueba";
+  contexto.generosMatriz = [GEN.hombre, GEN.mujer];
 }
 
 /** El efecto del Niño por temporada y año, con las cifras del fixture (invierno 0,66 / verano 1,24 en 2026; 0,63 / 0,73 en 2023). */
@@ -144,7 +148,7 @@ export function contextoFalso(): ContextoCalculo {
     factores: contexto.factores,
     configFlujo: configFlujo(),
     huellaFlujo: contexto.huellaFlujo,
-    generosMatriz: [GEN.hombre, GEN.mujer],
+    generosMatriz: [...contexto.generosMatriz],
     hoy: "2026-10-15",
     ultimoCerrado: "2026-09",
     hastaDefecto: publicados[publicados.length - 1] ?? null,
@@ -163,4 +167,27 @@ export function ventaTiendaFalsa() {
     const [tienda_id, periodo] = k.split("|");
     return { tienda_id, periodo, unidades };
   });
+}
+
+/**
+ * `0.12.1` (06d): siembra en la base falsa los crecimientos aprobados VIGENTES (versión 1) de `anio` (el año siguiente de la proyección: 2027) para cada
+ * GM del fixture más el Resto, como si alguien los hubiera aprobado en Curvas de estacionalidad. Todo cierre necesita aprobados los GM con filas base (y
+ * el Resto si hay filas de otros géneros): el `beforeEach` de las pruebas de rutas la llama ANTES de crear las proyecciones (si no, quedarían
+ * desactualizadas por `crecimientos_cambiados`). Sin opciones aprueba todo al 0 % (el mismo % que el Resto provisional por defecto, así las cifras no se mueven).
+ *
+ * - `pct`: % de todos los GM (un número) o por GM (`"HOMBRE · URBANO"`; los que falten, 0).
+ * - `resto`: % del Resto, o `null` para no aprobar el Resto.
+ * - `sin`: GM (por nombre) que NO se aprueban.
+ * Devuelve las filas sembradas (con su `id`).
+ */
+export function aprobarCrecimientosFalsos(anio: number, o: { pct?: number | Record<string, number>; resto?: number | null; sin?: readonly string[] } = {}) {
+  const gm = new Map<string, { genero_id: string; mundo_id: string; nombre: string }>();
+  for (const n of nodos()) gm.set(`${n.genero_id}|${n.mundo_id}`, { genero_id: n.genero_id, mundo_id: n.mundo_id, nombre: `${n.genero} · ${n.mundo}` });
+  const base = { anio_aplicacion: anio, version: 1, estado: "vigente", base_tipo: "ninguna", referencia: {}, usuario_nombre: "Javier de prueba", aprobada_at: "2026-10-10T12:00:00.000Z" };
+  const pctDe = (nombre: string) => (typeof o.pct === "number" ? o.pct : (o.pct?.[nombre] ?? 0));
+  const filas: Record<string, unknown>[] = [...gm.values()]
+    .filter((g) => !(o.sin ?? []).includes(g.nombre))
+    .map((g) => ({ ...base, alcance: "gm", genero_id: g.genero_id, mundo_id: g.mundo_id, pct: pctDe(g.nombre) }));
+  if (o.resto !== null) filas.push({ ...base, alcance: "resto", genero_id: null, mundo_id: null, pct: o.resto ?? 0 });
+  return sembrar("crecimientos_genero_mundo", filas);
 }

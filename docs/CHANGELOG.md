@@ -2,6 +2,18 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.12.1 · M6 — 2026-10-27
+
+Ficha `docs/modulos/06d-curva-y-crecimiento-por-genero-mundo.md`. Migración `0027` (aplicada en Vector2). Sin cambio de `VERSION_METODO` (sigue en 4).
+
+- **Crecimiento por género × mundo, en Curvas de estacionalidad** (pestaña nueva «Crecimiento por género × mundo»): lista por GM con estado, y detalle con la curva de venta por año (2023 → año en curso, bandas del Niño, vistas Unidades / Forma / Sin Niño, tabla año × mes y CSV) y las cifras de referencia de mismas tiendas (acumulado, cierre proyectado, años completos, lo que aplica hoy; con y sin Niño). El planner **aprueba** un % por GM con nota; es **global y versionado** como las curvas. Solo HOMBRE, MUJER y el Resto se aprueban; los demás géneros se ven y siguen al Resto.
+- **M7 lee el crecimiento global:** el cálculo usa fila fijada a mano > GM aprobado > Resto aprobado > `crecimiento_pct_defecto` (Resto provisional). `proyeccion_crecimientos` pasa a ser la foto de lo aplicado y `parametros.crecimiento_resto_usado` guarda el Resto usado; B2, las lecturas y las cerradas leen la foto. Aprobar deja las proyecciones con «crecimientos cambiados» (recalcular, no forzable).
+- **Cierre:** nuevo motivo `crecimientos_sin_aprobar` (faltan HOMBRE o MUJER con filas base, o el Resto provisional): **bloquea sin excepción**.
+- **Pestaña «Crecimientos» de la proyección:** solo lectura (tabla por GM, Resto y Total con % aplicado y versión, vigente hoy, base, rebote del Niño y enlace «Analizar y aprobar»); solo el objetivo global sigue editable. `PUT …/crecimientos` responde `410`. Se retiran «Alinear / Pisar-Conservar», «Calcular promedio» editable y `choque-modal`; una fila vuelve al aprobado con «Volver a la propuesta».
+- **Antes de validar:** recalcular la proyección 2026 (hoy del método 3, sin base de método 4) para que las cifras de referencia y «Aplicado hoy» salgan.
+- **Medido en Vector2:** `venta_genero_mundo` ≈ 1,5 s (609 series, 19 213 celdas, 0,55 MB).
+- **Pendientes menores (QA y seguridad, sin bloqueantes ni importantes):** la foto no copia `nota` ni `perfil_id` y el «cuándo» del % aplicado de una versión ya no vigente sale del `updated_at` de la celda; el `pct` del POST no se redondea a 2 decimales; el detalle no devuelve la proyección de referencia (con la lista caída, el POST puede dar `409 datos_cambiados` en bucle) y «Ver foto» no recibe la foto; `base_valor numeric(8,2)` puede desbordar con saltos de más de 10 000 veces (500 sin reintento); aprobar no es atómico (caída entre reemplazar e insertar deja el GM sin vigente; se repara re-aprobando); la referencia del POST acepta una proyección archivada; la nota no filtra marcas bidi/ceros de ancho (LRM, RLM, U+200B…); el aviso `crecimientos_sin_aprobar_anio` solo sale si falta el Resto o ningún GM aprobado; la caché de venta ignora `tiendas.tipo` y su cola no tiene tope; el redirect a `/login` pierde la query (preexistente). Sin probar con datos reales ni con navegador.
+
 ## 0.12.0 · M13 — 2026-10-18
 
 Ficha `docs/modulos/13-intercompany.md`. Sin migración nueva (la `0020`, `intercompany_reglas` + vista `intercompany_vigente`, ya estaba aplicada). Incluye ajustes menores de M12 que dejó la auditoría de la 0.11.0.

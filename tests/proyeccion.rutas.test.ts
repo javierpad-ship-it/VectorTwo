@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { estadoFalso } from "./curvas.fake-db";
 import { estado as base, reiniciar, type Fila } from "./proyeccion.fake-db";
-import { contexto, reiniciarContexto } from "./proyeccion.contexto-falso";
+import { aprobarCrecimientosFalsos, contexto, reiniciarContexto } from "./proyeccion.contexto-falso";
 
 // Los módulos de la base y del contexto se cargan dentro de la fábrica para que sean los mismos que importa este archivo.
 vi.mock("server-only", () => ({}));
@@ -72,6 +72,9 @@ const DENIM_REC = `|${N.denim}||${AM.rec}`;
 beforeEach(() => {
   reiniciar();
   reiniciarContexto();
+  // 0.12.1 (06d): todo cierre necesita aprobados los crecimientos de 2027; se siembran ANTES de crear las proyecciones (así no quedan desactualizadas) y al 5 %,
+  // el mismo del `nueva()` de este archivo, para que las cifras no se muevan.
+  aprobarCrecimientosFalsos(2027, { pct: 5, resto: 5 });
   estadoFalso.rol = "planner";
   base.venta = (args) => {
     const v = construirVenta(contexto.hechos, tiendasFixture(), { detalle: args.p_tiendas_detalle, hasta: "2026-09", desdeW12: args.p_desde_w12.slice(0, 7) });
@@ -611,6 +614,21 @@ describe("cerrar, archivar y el contrato de M8 (casos 14 y 17)", () => {
     }
   }
 
+  it("0.12.1: sin los crecimientos aprobados, cerrar responde 409 crecimientos_sin_aprobar (también con ?forzar=1) aunque todo esté decidido; con ellos aprobados y recalculado, cierra", async () => {
+    base.tablas.crecimientos_genero_mundo = [];
+    const { id } = await nueva();
+    await decidirTodo(id as string);
+    for (const query of ["", "?forzar=1"]) {
+      const r = await cerrar(new NextRequest(`${URL_BASE}/x${query}`, { method: "POST", body: "{}", headers: { "content-type": "application/json" } }), ctx(id as string));
+      expect(r.status).toBe(409);
+      expect((await leer(r)).codigo).toBe("crecimientos_sin_aprobar");
+    }
+    expect(proyecciones()[0].estado).toBe("en_trabajo");
+    aprobarCrecimientosFalsos(2027, { pct: 5, resto: 5 });
+    expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
+    expect((await cerrar(enviar("POST", "/x", {}), ctx(id as string))).status).toBe(200);
+  });
+
   it("bloquea con filas_sin_decidir (la lista) y tiendas_sin_decidir; con todo decidido cierra y la cola larga queda con la propuesta", async () => {
     const { id } = await nueva();
     const sin = await cerrar(enviar("POST", "/x", {}), ctx(id as string));
@@ -818,7 +836,7 @@ describe("editar parámetros y «datos hasta»", () => {
     const q = (await leer<ProyeccionApi>(await leerUna(get("/x"), ctx(id as string)))).data;
     expect(q.desactualizada).toEqual([]);
     expect(q.parametros.umbral_cola_larga).toBe(150);
-    // 0.10.8: el crecimiento por defecto es el «Resto» de la matriz y se cambia con `PUT …/crecimientos`; el mismo valor sí pasa.
+    // 0.12.1: el Resto provisional solo se fija al crear (un valor distinto da 400 usar_crecimientos); el mismo valor sí pasa.
     expect((await editar(enviar("PATCH", "/x", { parametros: { crecimiento_pct_defecto: 5 } }), ctx(id as string))).status).toBe(200);
     expect((await editar(enviar("PATCH", "/x", { hasta_periodo: "2025-12" }), ctx(id as string))).status).toBe(400);
     expect((await editar(enviar("PATCH", "/x", { hasta_periodo: "2026-10" }), ctx(id as string))).status).toBe(400);

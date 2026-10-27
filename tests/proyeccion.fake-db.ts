@@ -2,7 +2,7 @@
  * Base falsa en memoria para probar los handlers de M7 sin red ni datos reales. Implementa lo que usan las consultas de M7:
  * `select` (con columnas y relaciones embebidas filas ↔ años), filtros (`eq`, `neq`, `is`, `in`, `not … is null`), `order`,
  * `range`, `limit`, `single`, `maybeSingle`, `insert`, `update`, `upsert` con `onConflict`, `delete` con `cascade` y el `rpc`
- * `venta_proyeccion`. Hace cumplir los `check` y únicos de la 0018 que importan (la decisión con su origen, doce meses, una
+ * `venta_proyeccion`. Hace cumplir los `check` y únicos de la 0018 y de la 0027 (crecimientos globales: una sola vigente por GM y año) que importan (la decisión con su origen, doce meses, una
  * sola `cerrada` por año, nombre único por año, `unique (fila_id, anio)`), con los mismos nombres de restricción que Postgres.
  */
 
@@ -14,7 +14,8 @@ const COLUMNAS: Record<string, string[]> = {
   proyeccion_filas: ["id", "proyeccion_id", "tienda_id", "gml_id", "equivalencia_id", "agrupacion_marca_id", "clave", "nivel_proyectado", "agrupacion_estacionalidad_id", "temporada", "curva", "curva_origen", "factores_mes", "historico", "participaciones", "composicion", "avisos", "activo", "created_at", "updated_at"],
   proyeccion_fila_anios: ["id", "fila_id", "anio", "bloque", "subbloque", "vendido", "propuesto", "metodo", "referencia_alternativa", "referencia_tres_meses", "explicacion", "crecimiento_pct", "base_siguiente", "base_normalizada", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "meses", "origen_meses", "curva_origen_usada", "meses_propuestos", "curva_origen_propuesta", "avisos", "activo", "created_at", "updated_at"],
   proyeccion_tiendas: ["id", "proyeccion_id", "tienda_id", "anio", "bloque", "subbloque", "fecha_usada", "venta_esperada_usada", "referente_id_usado", "origen_composicion", "rampa", "unidades_maduras", "vendido", "propuesto", "metodo", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "explicacion", "referencia_alternativa", "referencia_tres_meses", "avisos", "activo", "created_at", "updated_at"],
-  proyeccion_crecimientos: ["id", "proyeccion_id", "genero_id", "mundo_id", "pct", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
+  proyeccion_crecimientos: ["id", "proyeccion_id", "genero_id", "mundo_id", "pct", "nota", "perfil_id", "usuario_nombre", "crecimiento_id", "version", "activo", "created_at", "updated_at"],
+  crecimientos_genero_mundo: ["id", "anio_aplicacion", "alcance", "genero_id", "mundo_id", "version", "estado", "pct", "nota", "base_tipo", "base_valor", "referencia", "proyeccion_referencia_id", "perfil_id", "usuario_nombre", "aprobada_at", "activo", "created_at", "updated_at"],
   factores_volumen_atipico: ["id", "anio", "temporada", "ratio_calculado", "ratio_aplicado", "huella_cargas", "calculado_at", "tiendas_comunes", "meses_comparados", "parcial", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
 };
 
@@ -24,6 +25,7 @@ const DEFECTOS: Record<string, Fila> = {
   proyeccion_fila_anios: { vendido: 0, metodo: "sin_propuesta", explicacion: "", curva_origen_usada: [], avisos: [], activo: true },
   proyeccion_tiendas: { rampa: [1, 1, 1], vendido: 0, metodo: "sin_propuesta", explicacion: "", avisos: [], activo: true },
   proyeccion_crecimientos: { activo: true },
+  crecimientos_genero_mundo: { estado: "vigente", base_tipo: "ninguna", referencia: {}, activo: true },
   factores_volumen_atipico: { parcial: false, activo: true },
 };
 
@@ -32,6 +34,7 @@ const ONCONFLICT: Record<string, string[]> = {
   proyeccion_fila_anios: ["fila_id", "anio"],
   proyeccion_tiendas: ["proyeccion_id", "tienda_id", "anio"],
   proyeccion_crecimientos: ["proyeccion_id", "genero_id", "mundo_id"],
+  crecimientos_genero_mundo: ["id"],
   factores_volumen_atipico: ["anio", "temporada"],
 };
 
@@ -243,6 +246,19 @@ class Consulta implements PromiseLike<Resultado> {
       if (filas.some((f) => f !== previa && f !== fila && f.proyeccion_id === fila.proyeccion_id && f.genero_id === fila.genero_id && f.mundo_id === fila.mundo_id)) {
         return err("23505", 'duplicate key value violates unique constraint "proyeccion_crecimientos_celda_key"');
       }
+      if (!nulo(fila.version) && !((fila.version as number) >= 1)) return err("23514", 'violates check constraint "proyeccion_crecimientos_version_check"');
+    }
+    if (t === "crecimientos_genero_mundo") {
+      const pct = Number(fila.pct);
+      if (nulo(fila.pct) || !(pct >= -95 && pct <= 500)) return err("23514", 'violates check constraint "crecimientos_genero_mundo_pct_check"');
+      if (!nulo(fila.nota) && String(fila.nota).length > 300) return err("23514", 'violates check constraint "crecimientos_genero_mundo_nota_len_check"');
+      if (!["vigente", "reemplazada", "retirada"].includes(String(fila.estado))) return err("23514", 'violates check constraint "crecimientos_genero_mundo_estado_check"');
+      if (!((fila.version as number) >= 1)) return err("23514", 'violates check constraint "crecimientos_genero_mundo_version_check"');
+      if (fila.alcance === "gm" && (nulo(fila.genero_id) || nulo(fila.mundo_id))) return err("23514", 'violates check constraint "crecimientos_genero_mundo_gm_check"');
+      if (fila.alcance === "resto" && !(nulo(fila.genero_id) && nulo(fila.mundo_id))) return err("23514", 'violates check constraint "crecimientos_genero_mundo_resto_check"');
+      const mismaClave = (f: Fila) => f !== previa && f !== fila && f.anio_aplicacion === fila.anio_aplicacion && f.alcance === fila.alcance && (f.genero_id ?? null) === (fila.genero_id ?? null) && (f.mundo_id ?? null) === (fila.mundo_id ?? null);
+      if (filas.some((f) => mismaClave(f) && f.version === fila.version)) return err("23505", 'duplicate key value violates unique constraint "crecimientos_genero_mundo_version_uniq"');
+      if (fila.estado === "vigente" && filas.some((f) => mismaClave(f) && f.estado === "vigente")) return err("23505", 'duplicate key value violates unique constraint "crecimientos_genero_mundo_vigente_uniq"');
     }
     if (t === "proyeccion_tiendas") {
       if (nulo(fila.decidido) !== nulo(fila.origen)) return err("23514", 'violates check constraint "proyeccion_tiendas_decision_check"');
@@ -286,6 +302,8 @@ class Consulta implements PromiseLike<Resultado> {
       estado.tablas.proyeccion_filas = (estado.tablas.proyeccion_filas ?? []).filter((f) => !ids.includes(f.proyeccion_id as string));
       estado.tablas.proyeccion_tiendas = (estado.tablas.proyeccion_tiendas ?? []).filter((f) => !ids.includes(f.proyeccion_id as string));
       estado.tablas.proyeccion_crecimientos = (estado.tablas.proyeccion_crecimientos ?? []).filter((f) => !ids.includes(f.proyeccion_id as string));
+      // `on delete set null` de `proyeccion_referencia_id`: la versión aprobada sobrevive a la proyección de referencia.
+      for (const v of estado.tablas.crecimientos_genero_mundo ?? []) if (ids.includes(v.proyeccion_referencia_id as string)) v.proyeccion_referencia_id = null;
     }
     if (tabla === "proyeccion_filas") {
       estado.tablas.proyeccion_fila_anios = (estado.tablas.proyeccion_fila_anios ?? []).filter((a) => !ids.includes(a.fila_id as string));
@@ -319,6 +337,10 @@ class Consulta implements PromiseLike<Resultado> {
       }
     }
     return salida;
+  }
+
+  ejecutarAhora(): Resultado {
+    return this.ejecutar();
   }
 
   private ejecutar(): Resultado {
@@ -409,6 +431,14 @@ class Consulta implements PromiseLike<Resultado> {
     if (this.una) return { data: datos?.[0] ?? null, error: null };
     return { data: datos, error: null };
   }
+}
+
+/** Inserta filas directamente (síncrono, con las mismas restricciones que la base); lanza si alguna falla. Para sembrar datos que no vienen de una ruta. */
+export function sembrar(tabla: string, filas: Fila[]): Fila[] {
+  const c = new Consulta(tabla).insert(filas).select("*");
+  const r = c.ejecutarAhora();
+  if (r.error) throw new Error(`${r.error.code}: ${r.error.message}`);
+  return r.data as Fila[];
 }
 
 export function clienteFalso() {

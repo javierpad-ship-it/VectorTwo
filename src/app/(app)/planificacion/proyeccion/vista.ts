@@ -17,6 +17,7 @@ import {
   type BloquesApi,
   type ClaseAnioFila,
   type ColaLargaApi,
+  type CrecimientosSinAprobarApi,
   type EstadoLinea,
   type FilaApi,
   type FilaDetalleApi,
@@ -435,12 +436,13 @@ export function motivoCifraInvalida(texto: string, minimo: number): string | nul
 
 /**
  * Los títulos de las dos columnas de variación de la Matriz. `Var.` compara los totales (con tiendas nuevas, aperturas y cierres);
- * `Crec. mismas tiendas` es lo que se escribe en Crecimientos: el año siguiente de las mismas tiendas frente a su año en curso.
+ * `Crec. mismas tiendas` es el % aprobado en Curvas → Crecimiento por género × mundo (o el % propio de la fila): el año siguiente
+ * de las mismas tiendas frente a su año en curso (06d).
  */
 export function textoColumnasVariacion(anioEnCurso: number): { var: string; crec: string; nota: string } {
   const s = anioEnCurso + 1;
   const v = `Var. = Total ${s} ÷ Total ${anioEnCurso} (incluye tiendas nuevas, aperturas y cierres).`;
-  const c = `Crec. mismas tiendas = ${s} de las mismas tiendas ÷ su ${anioEnCurso}: es lo que escribes en Crecimientos.`;
+  const c = `Crec. mismas tiendas = ${s} de las mismas tiendas ÷ su ${anioEnCurso}: es el % aprobado en Curvas → Crecimiento por género × mundo (o el % propio de la fila).`;
   return { var: v, crec: c, nota: `${v} ${c}` };
 }
 
@@ -469,8 +471,11 @@ export function lineasDeCierre(p: Pick<ProyeccionApi, "anio_en_curso" | "resumen
   return lineas;
 }
 
-/** Los motivos de «desactualizada» que `cerrar?forzar=1` NO salta: el método viejo y los crecimientos sin aplicar (0.10.8). */
-export const MOTIVOS_NO_FORZABLES: readonly string[] = ["version_metodo", "crecimientos_cambiados"];
+/**
+ * Los motivos que `cerrar?forzar=1` NO salta: el método viejo, los crecimientos aprobados que cambiaron después de calcular (0.10.8 /
+ * 0.12.1) y los crecimientos sin aprobar (0.12.1, decisión de Javier: se bloquea sin excepción).
+ */
+export const MOTIVOS_NO_FORZABLES: readonly string[] = ["version_metodo", "crecimientos_cambiados", "crecimientos_sin_aprobar"];
 
 /** ¿Hay un motivo de desactualización que obliga a recalcular antes de cerrar (no se puede forzar)? */
 export function cierreExigeRecalcular(p: Pick<ProyeccionApi, "desactualizada">): boolean {
@@ -487,8 +492,61 @@ export function textoParaRevision(n: number): string {
   return plural(n, "fila para revisión", "filas para revisión");
 }
 
-/** `0.10.8` (07c): los crecimientos guardados no son los que aplicó el último cálculo. No se puede forzar al cerrar. */
-export const TEXTO_CRECIMIENTOS_CAMBIADOS = "Los crecimientos guardados no están aplicados (falló el recálculo o un nodo cambió de mundo): recalcula. No se puede cerrar hasta entonces.";
+/** `0.12.1` (06d): los crecimientos aprobados no son los que aplicó el último cálculo (o un nodo cambió de mundo). No se puede forzar al cerrar. */
+export const TEXTO_CRECIMIENTOS_CAMBIADOS = "Los crecimientos aprobados cambiaron después de calcular (o un nodo cambió de mundo): recalcula. No se puede cerrar hasta entonces.";
+
+/** Dónde se aprueban los crecimientos desde `0.12.1` (06d). */
+export const RUTA_APROBAR_CRECIMIENTOS = "Curvas de estacionalidad → Crecimiento por género × mundo";
+
+/** Enlace a la pestaña «Crecimiento por género × mundo» de Curvas, con el año y la proyección de referencia (06d §4.1, M10). */
+export function enlaceCrecimientoGeneroMundo(anioSiguiente: number, proyeccionId: string): string {
+  return `/planificacion/curvas-estacionalidad?pestana=genero-mundo&anio=${anioSiguiente}&proyeccion=${encodeURIComponent(proyeccionId)}`;
+}
+
+/** Lo que falta aprobar para cerrar, solo en una proyección en trabajo; `null` si no falta nada (o si no está en trabajo). */
+export function crecimientosSinAprobarDe(p: Pick<ProyeccionApi, "estado" | "crecimientos_sin_aprobar">): CrecimientosSinAprobarApi | null {
+  if (p.estado !== "en_trabajo") return null;
+  const s = p.crecimientos_sin_aprobar;
+  return s && (s.faltan.length > 0 || s.resto_provisional) ? s : null;
+}
+
+/** Cuántos crecimientos faltan, contando el Resto si es provisional. */
+export function cuantosFaltanCrecimientos(s: CrecimientosSinAprobarApi): number {
+  return s.faltan.length + (s.resto_provisional ? 1 : 0);
+}
+
+/**
+ * «Faltan 3 crecimientos aprobados para 2027 (HOMBRE · URBANO, MUJER · RI, MUJER · DEPORTIVO) y el Resto es provisional». Con `lista = false`
+ * omite los nombres (para la alerta corta de la pestaña y la cabecera).
+ */
+export function textoFaltanCrecimientos(s: CrecimientosSinAprobarApi, anioSiguiente: number, lista = true): string {
+  const n = s.faltan.length;
+  const nombres = lista && n > 0 ? ` (${s.faltan.map((f) => f.nombre).join(", ")})` : "";
+  const gm = n > 0 ? `${n === 1 ? "Falta 1 crecimiento aprobado" : `Faltan ${formatearNumero(n)} crecimientos aprobados`} para ${anioSiguiente}${nombres}` : "";
+  const resto = s.resto_provisional ? (gm ? "el Resto es provisional" : `el Resto de ${anioSiguiente} es provisional`) : "";
+  if (gm && resto) return `${gm} y ${resto}`;
+  return gm || (resto ? resto.charAt(0).toUpperCase() + resto.slice(1) : "");
+}
+
+/** El título del botón «Cerrar proyección» deshabilitado y el aviso de la cabecera. */
+export function textoNoSePuedeCerrarPorCrecimientos(s: CrecimientosSinAprobarApi, anioSiguiente: number): string {
+  return `No se puede cerrar: ${textoFaltanCrecimientos(s, anioSiguiente, false).replace(/^[A-Z]/, (c) => c.toLowerCase())}. Apruébalos en ${RUTA_APROBAR_CRECIMIENTOS}.`;
+}
+
+/**
+ * Lee del cuerpo del `409 crecimientos_sin_aprobar` lo que falta (`detalle = { faltan, resto_provisional }`, que puede venir en la raíz del
+ * cuerpo o dentro de `detalle`). `null` si no trae la forma esperada.
+ */
+export function leerCrecimientosSinAprobar(cuerpo: Record<string, unknown> | null | undefined): CrecimientosSinAprobarApi | null {
+  if (!cuerpo) return null;
+  const candidato = (typeof cuerpo.detalle === "object" && cuerpo.detalle !== null ? cuerpo.detalle : cuerpo) as Record<string, unknown>;
+  const faltan = candidato.faltan;
+  if (!Array.isArray(faltan)) return null;
+  const lista = faltan
+    .filter((f): f is { clave: string; nombre: string } => typeof f === "object" && f !== null && typeof (f as { nombre?: unknown }).nombre === "string")
+    .map((f) => ({ clave: String((f as { clave?: unknown }).clave ?? f.nombre), nombre: f.nombre }));
+  return { faltan: lista, resto_provisional: candidato.resto_provisional === true };
+}
 
 /** `0.11.0` (M12): cambió la configuración de marcas (modalidad, GML relevantes o conjuntos) después de calcular. Se puede forzar al cerrar solo si el servidor lo permite. */
 export const TEXTO_CONFIG_CAMBIADA =
@@ -498,6 +556,7 @@ export const TEXTO_CONFIG_CAMBIADA =
 export function textoMotivoDesactualizada(m: { codigo: string; mensaje: string }): string {
   if (m.codigo === "version_metodo") return "El método de cálculo cambió (método nuevo): recalcula para aplicarlo. Tus decisiones se conservan.";
   if (m.codigo === "crecimientos_cambiados") return TEXTO_CRECIMIENTOS_CAMBIADOS;
+  if (m.codigo === "crecimientos_sin_aprobar") return m.mensaje;
   if (m.codigo === "config_cambiada") return TEXTO_CONFIG_CAMBIADA;
   return m.mensaje;
 }

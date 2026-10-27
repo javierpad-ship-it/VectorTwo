@@ -1,127 +1,176 @@
 import { describe, expect, it } from "vitest";
-import { calcularPromedio as calcularPromedioLib } from "@/lib/proyeccion/crecimientos";
 import {
   ayudaCrecimientoFila,
-  borradorDesde,
-  promedioParaPantalla,
-  cuerpoGuardar,
-  diagnostico,
-  entradasPromedio,
-  esExtremo,
-  firmaBorrador,
-  hayCambios,
-  insigniasDeConjunto,
-  leerConflicto,
-  leerPctMatriz,
+  ayudaRestoProvisional,
+  esMetodoAnterior,
+  filaCambio,
+  filasDeResumen,
+  insigniasDeFijadas,
+  lineasPuente,
   listaEnPalabras,
   marcadorCrecimiento,
-  motivoIncompleta,
-  motivoSinBase,
-  nombreFilaChoque,
-  textoBaseCelda,
+  restoAprobadoReciente,
+  restoDeFoto,
+  textoAlertaCambiados,
+  textoAplicadoPrincipal,
   textoCabeceraCrecimientos,
-  textoCambioDecidido,
-  textoCambioPct,
-  textoCasillaPisarDecididas,
+  textoCambiado,
   textoCierresPuente,
-  textoCrecimientosSinAplicar,
   textoDesgloseResto,
   textoDesvioPorFijadas,
-  textoFaltan,
-  textoListaRecortada,
+  textoMetodoAnterior,
   textoObjetivo,
   textoOrigenCrecimiento,
   textoPieCrecimientoLinea,
-  textoPisada,
+  textoQuienCuando,
   textoRebote,
-  textoRevertidas,
-  textoSigueResto,
+  textoRestoDeFoto,
+  textoVersion,
+  textoVigenteHoy,
   textosDetalleBruto,
-  tiendasMismasSiguiente,
-  tituloSeccionDecididas,
-  tituloSeccionPctPropio,
-  claveCelda,
-  resumenChoquePrevisto,
-  textoChoquePrevisto,
-  textoCeldasIncompletas,
-  textoDescartadas,
+  tieneMotivoCambiados,
+  TITULO_FILAS_FIJADAS,
 } from "../src/app/(app)/planificacion/proyeccion/crecimientos-vista";
 import {
   accionParaCodigo,
   cierreExigeRecalcular,
+  crecimientosSinAprobarDe,
+  cuantosFaltanCrecimientos,
+  enlaceCrecimientoGeneroMundo,
+  leerCrecimientosSinAprobar,
+  MOTIVOS_NO_FORZABLES,
   textoAperturaTardia,
   textoColumnasVariacion,
+  textoFaltanCrecimientos,
   textoMotivoDesactualizada,
+  textoNoSePuedeCerrarPorCrecimientos,
   textoVentaEsperadaTienda,
 } from "../src/app/(app)/planificacion/proyeccion/vista";
-import { bloques, tiendaProyeccion } from "./proyeccion.pantalla.fixture";
-import { agregado, agregadoHombreFormal, conflicto, G_H, G_M, M_C, M_F, M_U, respuestaCrecimientos, respuestaCrecimientosVacia } from "./proyeccion.crecimientos-pantalla.fixture";
+import { proyeccion, tiendaProyeccion } from "./proyeccion.pantalla.fixture";
+import { agregado, agregadoHombreFormal, resumenAlDia, resumenCrecimientos } from "./proyeccion.crecimientos-pantalla.fixture";
 
-/** Pruebas puras de la pestaña Crecimientos (07c, 0.10.8) y de la venta esperada de la tienda nueva (07d): datos sintéticos de las fichas. */
+/** Pruebas puras de la pestaña Crecimientos de solo lectura (06d, 0.12.1) y de la venta esperada de la tienda nueva (07d): datos sintéticos de las fichas. */
 
-describe("lectura del % de una celda", () => {
-  it("vacío es «falta»; un número en rango es válido; coma o punto; fuera de rango o texto, inválido", () => {
-    expect(leerPctMatriz("")).toEqual({ estado: "vacio" });
-    expect(leerPctMatriz("   ")).toEqual({ estado: "vacio" });
-    expect(leerPctMatriz("20")).toEqual({ estado: "ok", valor: 20 });
-    expect(leerPctMatriz("7,5")).toEqual({ estado: "ok", valor: 7.5 });
-    expect(leerPctMatriz("-95")).toEqual({ estado: "ok", valor: -95 });
-    expect(leerPctMatriz("500")).toEqual({ estado: "ok", valor: 500 });
-    expect(leerPctMatriz("-96").estado).toBe("invalido");
-    expect(leerPctMatriz("501").estado).toBe("invalido");
-    expect(leerPctMatriz("abc").estado).toBe("invalido");
+describe("tabla por GM, Resto y Total (§4.2)", () => {
+  const r = resumenCrecimientos();
+  const filas = filasDeResumen(r);
+  const por = (nombre: string) => filas.find((f) => f.nombre === nombre)!;
+
+  it("los GM, luego el Resto y al final el Total; sin Total (método anterior) no hay fila Total", () => {
+    expect(filas.map((f) => f.tipo)).toEqual(["gm", "gm", "gm", "gm", "resto", "total"]);
+    expect(filas.map((f) => f.nombre)).toEqual(["HOMBRE · FORMAL", "HOMBRE · URBANO", "MUJER · FORMAL", "MUJER · CASUAL", "Resto", "Total (mismas tiendas)"]);
+    expect(filasDeResumen({ ...r, total: null }).map((f) => f.tipo)).toEqual(["gm", "gm", "gm", "gm", "resto"]);
   });
 
-  it("un % es extremo solo si pasa de ±50: el aviso no bloquea", () => {
-    expect(esExtremo(50)).toBe(false);
-    expect(esExtremo(-50)).toBe(false);
-    expect(esExtremo(50.1)).toBe(true);
-    expect(esExtremo(-60)).toBe(true);
-    expect(esExtremo(null)).toBe(false);
+  it("lo aplicado sale de la foto y lo vigente de hoy del global; «cambió» solo si difieren", () => {
+    expect(textoAplicadoPrincipal(por("HOMBRE · FORMAL").aplicado!)).toBe("20 % · v1");
+    expect(textoVigenteHoy(por("HOMBRE · FORMAL").vigenteHoy)).toBe("20 % · v1");
+    expect(por("HOMBRE · FORMAL").cambio).toBe(false);
+    expect(textoAplicadoPrincipal(por("HOMBRE · URBANO").aplicado!)).toBe("10 % · v1");
+    expect(textoVigenteHoy(por("HOMBRE · URBANO").vigenteHoy)).toBe("15 % · v2");
+    expect(por("HOMBRE · URBANO").cambio).toBe(true);
+    // Un GM sin aprobar sigue al Resto provisional: no hay nada vigente que haya cambiado.
+    expect(textoAplicadoPrincipal(por("MUJER · CASUAL").aplicado!)).toBe("5 % · provisional");
+    expect(textoVigenteHoy(por("MUJER · CASUAL").vigenteHoy)).toBe("sin aprobar");
+    expect(por("MUJER · CASUAL").cambio).toBe(false);
+    expect(filas.filter((f) => f.cambio).map((f) => f.nombre)).toEqual(["HOMBRE · URBANO"]);
+    expect(filasDeResumen(resumenAlDia()).some((f) => f.cambio)).toBe(false);
+  });
+
+  it("filaCambio: otra versión, otro % o una versión aplicada que hoy ya no está vigente", () => {
+    const f = (aplicado: Parameters<typeof filaCambio>[0]["aplicado"], vigente_hoy: Parameters<typeof filaCambio>[0]["vigente_hoy"]) => filaCambio({ aplicado, vigente_hoy });
+    const v1 = { pct: 20, version: 1, provisional: false, por_nombre: "J", at: null };
+    expect(f(v1, { pct: 20, version: 1, por_nombre: "J", aprobada_at: "x" })).toBe(false);
+    expect(f(v1, { pct: 20, version: 2, por_nombre: "J", aprobada_at: "x" })).toBe(true);
+    expect(f(v1, { pct: 21, version: 1, por_nombre: "J", aprobada_at: "x" })).toBe(true);
+    expect(f(v1, null)).toBe(true);
+    // El Resto provisional pasa a aprobado: cambió.
+    expect(f({ pct: 5, version: null, provisional: true, por_nombre: null, at: null }, { pct: 5, version: 1, por_nombre: "J", aprobada_at: "x" })).toBe(true);
+    expect(f({ pct: 5, version: null, provisional: true, por_nombre: null, at: null }, null)).toBe(false);
+  });
+
+  it("base, resultante y % resultante por fila; el Total sale de calcularPromedio sobre la foto", () => {
+    expect(por("HOMBRE · FORMAL").base).toBe(17800);
+    expect(por("HOMBRE · FORMAL").siguiente).toBe(19485);
+    expect(por("HOMBRE · FORMAL").resultantePct).toBeCloseTo(9.466, 2);
+    const t = por("Total (mismas tiendas)");
+    expect(t.base).toBe(120000);
+    expect(t.siguiente).toBeCloseTo(129185, 6);
+    expect(t.resultantePct).toBeCloseTo(7.654, 2);
+    expect(t.ponderado).toBeCloseTo(9.2167, 3);
+    expect(t.aplicado).toBeNull();
+    expect(t.enlace).toBeNull();
+  });
+
+  it("el Resto lleva el desglose de su base por género; los GM traen su enlace «Analizar y aprobar»", () => {
+    expect(por("Resto").desglose).toBe("JOVENCITOS 8,200 · NIÑOS 6,100 · ACCESORIOS 5,700");
+    expect(textoDesgloseResto([])).toBeNull();
+    expect(textoDesgloseResto([{ genero: "SIN", base: 0 }])).toBeNull();
+    expect(por("HOMBRE · URBANO").enlace).toBe("/planificacion/curvas-estacionalidad?gm=g-hombre.m-urbano&anio=2027&proyeccion=proy-1");
+    expect(por("Resto").enlace).toContain("gm=resto");
+  });
+
+  it("insignias informativas sin acción: «N con % propio» y «N decidida(s)», con el título de dónde se cambian", () => {
+    const i = insigniasDeFijadas(agregadoHombreFormal);
+    expect(i.map((x) => x.texto)).toEqual(["1 con % propio", "1 decidida"]);
+    expect(i.every((x) => x.titulo === TITULO_FILAS_FIJADAS)).toBe(true);
+    expect(TITULO_FILAS_FIJADAS).toBe("Se cambian fila a fila en Por línea: vacía «Crec.» o usa «Volver a la propuesta»");
+    expect(insigniasDeFijadas({ ...agregadoHombreFormal, pct_propio: { filas: 2, base: 1, siguiente: 1 }, decididas: { filas: 3, base: 1, siguiente: 1 } }).map((x) => x.texto)).toEqual(["2 con % propio", "3 decididas"]);
+    expect(insigniasDeFijadas(agregado(1000))).toEqual([]);
+    expect(por("HOMBRE · FORMAL").insignias.map((x) => x.texto)).toEqual(["1 con % propio", "1 decidida"]);
+    expect(por("Total (mismas tiendas)").insignias.map((x) => x.texto)).toEqual(["1 con % propio", "1 decidida"]);
+  });
+
+  it("rebote del Niño solo como referencia; en el Total, Σ B'' ÷ Σ B − 1", () => {
+    expect(por("HOMBRE · FORMAL").rebote?.texto).toBe("rebote del Niño +9.6 %");
+    expect(por("HOMBRE · FORMAL").rebote?.titulo).toContain("Es referencia: no se aplica");
+    expect(por("HOMBRE · URBANO").rebote).toBeNull();
+    expect(textoRebote(agregado(100))).toBeNull();
+    expect(por("Total (mismas tiendas)").rebote?.texto).toBe("rebote del Niño +1.4 %");
   });
 });
 
-describe("borrador, faltantes y cuerpo del PUT", () => {
-  it("el borrador parte de lo guardado: una celda sin definir queda vacía", () => {
-    const b = borradorDesde(respuestaCrecimientosVacia());
-    expect(b.resto.pct).toBe("5");
-    expect(b.objetivo).toBe("");
-    expect(b.celdas[claveCelda(G_H, M_F)].pct).toBe("");
-    const lleno = borradorDesde(respuestaCrecimientos());
-    expect(lleno.celdas[claveCelda(G_H, M_F)].pct).toBe("20");
-    expect(lleno.celdas[claveCelda(G_M, M_F)].pct).toBe("0");
-    expect(lleno.objetivo).toBe("12");
+describe("avisos, foto y cabecera", () => {
+  const r = resumenCrecimientos();
+
+  it("quién y cuándo de la foto: vacío en el Resto provisional", () => {
+    expect(textoQuienCuando(null, null)).toBeNull();
+    expect(textoQuienCuando("Javier", null)).toBe("Javier");
+    const q = textoQuienCuando("Javier", "2026-10-20T15:30:00Z");
+    expect(q).toContain("Javier · ");
+    expect(q).toContain("2026");
+    expect(textoVersion({ version: 2, provisional: false })).toBe("v2");
+    expect(textoVersion({ version: null, provisional: true })).toBe("provisional");
+    expect(textoVersion({ version: null, provisional: false })).toBe("sin versión");
   });
 
-  it("la matriz completa no tiene faltantes: una celda sin filas no es obligatoria", () => {
-    const r = respuestaCrecimientos();
-    const d = diagnostico(r, borradorDesde(r));
-    expect(d.faltan).toEqual([]);
-    expect(motivoIncompleta(d)).toBeNull();
+  it("lo aprobado cambió después de calcular: lista cada GM con su versión y su %", () => {
+    expect(textoCambiado(r.cambiados[0])).toBe("HOMBRE · URBANO v1 → v2 (10 % → 15 %)");
+    expect(textoCambiado({ clave: "k", nombre: "Resto", aplicado: null, vigente: { pct: 15, version: 1 } })).toBe("Resto provisional → v1 (— → 15 %)");
+    expect(textoCambiado({ clave: "k", nombre: "MUJER · RI", aplicado: { pct: 8.5, version: 2 }, vigente: null })).toBe("MUJER · RI v2 → sin aprobar (8.5 % → —)");
+    expect(textoAlertaCambiados(r.cambiados, true)).toBe("Los crecimientos aprobados cambiaron después de calcular: HOMBRE · URBANO v1 → v2 (10 % → 15 %). Recalcula.");
+    // Sin lista pero con el motivo (un nodo cambió de mundo): aviso genérico; sin ninguno, nada.
+    expect(textoAlertaCambiados([], true)).toContain("cambiaron después de calcular");
+    expect(textoAlertaCambiados([], false)).toBeNull();
+    const muchos = Array.from({ length: 7 }, (_, i) => ({ clave: `k${i}`, nombre: `GM ${i}`, aplicado: { pct: 1, version: 1 }, vigente: { pct: 2, version: 2 } }));
+    expect(textoAlertaCambiados(muchos, true)).toContain("y 2 más");
+    expect(tieneMotivoCambiados({ desactualizada: [{ codigo: "crecimientos_cambiados", mensaje: "x" }] })).toBe(true);
+    expect(tieneMotivoCambiados({ desactualizada: [] })).toBe(false);
   });
 
-  it("enumera las celdas que faltan con el mensaje de la ficha", () => {
-    const r = respuestaCrecimientos();
-    const b = borradorDesde(r);
-    for (const [g, m] of [[G_H, M_F], [G_M, M_F], [G_M, M_C]]) b.celdas[claveCelda(g, m)].pct = "";
-    const d = diagnostico(r, b);
-    expect(d.faltan).toEqual(["HOMBRE · FORMAL", "MUJER · FORMAL", "MUJER · CASUAL"]);
-    expect(textoFaltan(d.faltan)).toBe("Faltan 3 celdas: HOMBRE · FORMAL, MUJER · FORMAL y MUJER · CASUAL. Escribe un % en cada una (puede ser el mismo del Resto).");
-    expect(textoFaltan(["MUJER · CASUAL"])).toBe("Falta 1 celda: MUJER · CASUAL. Escribe un % en cada una (puede ser el mismo del Resto).");
-    expect(textoFaltan([])).toBeNull();
+  it("proyección de método anterior: solo dice que se recalcule (en trabajo) o que es de solo lectura", () => {
+    expect(esMetodoAnterior({ version_metodo: 3 })).toBe(true);
+    expect(esMetodoAnterior({ version_metodo: null })).toBe(true);
+    expect(esMetodoAnterior({ version_metodo: 4 })).toBe(false);
+    expect(textoMetodoAnterior(true)).toBe("Esta proyección se calculó con un método anterior: recalcúlala para ver sus crecimientos.");
+    expect(textoMetodoAnterior(false)).not.toMatch(/[Rr]ecalc/);
   });
 
-  it("el Resto vacío también falta; un % inválido y un objetivo inválido impiden guardar con su motivo", () => {
-    const r = respuestaCrecimientos();
-    const b = borradorDesde(r);
-    b.resto.pct = "";
-    expect(diagnostico(r, b).faltan).toEqual(["Resto"]);
-    b.resto.pct = "5";
-    b.celdas[claveCelda(G_H, M_U)].pct = "600";
-    expect(motivoIncompleta(diagnostico(r, b))).toContain("HOMBRE · URBANO");
-    b.celdas[claveCelda(G_H, M_U)].pct = "10";
-    b.objetivo = "xx";
-    expect(motivoIncompleta(diagnostico(r, b))).toContain("Objetivo global");
+  it("la cabecera explica que el crecimiento es global y bruto", () => {
+    const t = textoCabeceraCrecimientos(2026, 2027);
+    expect(t).toContain("Crecimiento bruto 2027 frente a 2026 de las mismas tiendas de 2027");
+    expect(t).toContain("sin corregir por el Niño");
+    expect(t).toContain("Curvas de estacionalidad");
   });
 
   it("listaEnPalabras", () => {
@@ -129,363 +178,115 @@ describe("borrador, faltantes y cuerpo del PUT", () => {
     expect(listaEnPalabras(["A", "B"])).toBe("A y B");
     expect(listaEnPalabras(["A", "B", "C"])).toBe("A, B y C");
   });
-
-  it("el cuerpo del PUT lleva la huella, el Resto, el objetivo y todas las celdas escritas; conserva una «sin filas» guardada", () => {
-    const r = respuestaCrecimientos({ celdas: respuestaCrecimientos().celdas.map((c) => (c.genero_id === G_H && c.mundo_id === M_C ? { ...c, pct: 7 } : c)) });
-    const b = borradorDesde(r);
-    b.celdas[claveCelda(G_H, M_U)].nota = "  nota nueva  ";
-    const c = cuerpoGuardar(r, b);
-    expect(c.ok).toBe(true);
-    if (!c.ok) return;
-    expect(c.cuerpo.huella).toBe("huella-1");
-    expect(c.cuerpo.resto).toEqual({ pct: 5, nota: null });
-    expect(c.cuerpo.objetivo_pct).toBe(12);
-    // 6 celdas: 4 con filas escritas + HOMBRE·CASUAL («sin filas» con 7 % guardado, se conserva); MUJER·URBANO sin filas y sin % no viaja.
-    expect(c.cuerpo.celdas).toHaveLength(5);
-    expect(c.cuerpo.celdas.find((x) => x.genero_id === G_H && x.mundo_id === M_C)).toMatchObject({ pct: 7 });
-    expect(c.cuerpo.celdas.find((x) => x.genero_id === G_M && x.mundo_id === M_U)).toBeUndefined();
-    expect(c.cuerpo.celdas.find((x) => x.genero_id === G_H && x.mundo_id === M_U)).toMatchObject({ pct: 10, nota: "nota nueva" });
-    expect(c.cuerpo.resolucion).toBeUndefined();
-  });
-
-  it("sin objetivo viaja null; con celdas incompletas no hay cuerpo", () => {
-    const r = respuestaCrecimientos({ objetivo_pct: null });
-    const b = borradorDesde(r);
-    const c = cuerpoGuardar(r, b);
-    expect(c.ok && c.cuerpo.objetivo_pct).toBeNull();
-    b.celdas[claveCelda(G_H, M_F)].pct = "";
-    const malo = cuerpoGuardar(r, b);
-    expect(malo.ok).toBe(false);
-  });
-
-  it("la resolución solo sale cuando se pasa: Pisar con la casilla, Pisar sin ella y Conservar", () => {
-    const r = respuestaCrecimientos();
-    const b = borradorDesde(r);
-    const pisarTodo = cuerpoGuardar(r, b, { resolucion: "pisar", incluir_decididas: true, huella_choque: "choque-1" });
-    expect(pisarTodo.ok && pisarTodo.cuerpo).toMatchObject({ resolucion: "pisar", incluir_decididas: true, huella_choque: "choque-1" });
-    const pisar = cuerpoGuardar(r, b, { resolucion: "pisar", incluir_decididas: false, huella_choque: "choque-1" });
-    expect(pisar.ok && "incluir_decididas" in pisar.cuerpo).toBe(false);
-    const conservar = cuerpoGuardar(r, b, { resolucion: "conservar", incluir_decididas: true, huella_choque: "choque-1" });
-    expect(conservar.ok && conservar.cuerpo.resolucion).toBe("conservar");
-    // `incluir_decididas` solo con «pisar»: con «conservar» no viaja.
-    expect(conservar.ok && "incluir_decididas" in conservar.cuerpo).toBe(false);
-  });
-
-  it("hay cambios solo cuando algo difiere de lo guardado (texto o nota)", () => {
-    const r = respuestaCrecimientos();
-    const b = borradorDesde(r);
-    expect(hayCambios(r, b)).toBe(false);
-    b.celdas[claveCelda(G_H, M_F)].pct = "21";
-    expect(hayCambios(r, b)).toBe(true);
-    b.celdas[claveCelda(G_H, M_F)].pct = "20.0";
-    expect(hayCambios(r, b)).toBe(false);
-    b.resto.nota = "x";
-    expect(hayCambios(r, b)).toBe(true);
-    const vacia = respuestaCrecimientosVacia();
-    expect(hayCambios(vacia, borradorDesde(vacia))).toBe(false);
-  });
-
-  it("la firma cambia con cualquier % o con el objetivo, no con la nota", () => {
-    const r = respuestaCrecimientos();
-    const b = borradorDesde(r);
-    const f0 = firmaBorrador(b);
-    expect(firmaBorrador(borradorDesde(r))).toBe(f0);
-    b.celdas[claveCelda(G_H, M_U)].nota = "otra";
-    expect(firmaBorrador(b)).toBe(f0);
-    b.celdas[claveCelda(G_H, M_U)].pct = "11";
-    expect(firmaBorrador(b)).not.toBe(f0);
-    const b2 = borradorDesde(r);
-    b2.objetivo = "13";
-    expect(firmaBorrador(b2)).not.toBe(f0);
-  });
 });
 
-describe("Calcular promedio (§5.2)", () => {
-  const r = respuestaCrecimientos();
-  const entradas = () => {
-    const e = entradasPromedio(r, borradorDesde(r));
-    if (!e.ok) throw new Error("debería estar completa");
-    return e;
-  };
+describe("pie: objetivo y puente al Total 2027 (sobre la foto)", () => {
+  const total = resumenCrecimientos().total!;
 
-  it("el ejemplo de la ficha: 11.7 % ponderado escrito, 10.2 % resultante, 132 185 u, faltan 2 215 u frente al 12 %, Total 133 099", () => {
-    const e = entradas();
-    const res = promedioParaPantalla(e.entradas, e.resto, 12, r.puente);
-    expect(res.base).toBe(120000);
-    expect(res.ponderado_escrito).toBeCloseTo(11.7167, 3);
-    expect(Math.round((res.ponderado_escrito ?? 0) * 10) / 10).toBe(11.7);
-    expect(res.siguiente).toBeCloseTo(132185, 6);
-    expect(Math.round((res.resultante ?? 0) * 10) / 10).toBe(10.2);
-    expect(res.objetivo?.faltan_unidades).toBeCloseTo(2215, 6);
-    expect(res.objetivo?.faltan_pp_escrito).toBeCloseTo(0.2833, 3);
-    expect(res.objetivo?.faltan_pp_resultado).toBeCloseTo(1.846, 2);
-    expect(res.puente.total).toBeCloseTo(133099, 6);
-    expect(res.filas_con_pct_propio).toBe(1);
-    expect(res.filas_decididas).toBe(1);
+  it("objetivo frente a lo aplicado y al resultado, en pp y en unidades", () => {
+    expect(textoObjetivo(total.objetivo!)).toBe("Objetivo +12.0 % → con lo aplicado te faltan 2.8 pp; con el resultado, te faltan 4.3 pp ≈ 5,215 u.");
+    const o = { pct: 5, faltan_pp_escrito: -4.2, faltan_pp_resultado: -2.7, faltan_unidades: -3000 };
+    expect(textoObjetivo(o)).toContain("te pasas por 4.2 pp");
+    expect(textoObjetivo(o)).toContain("3,000 u de más");
+    expect(textoObjetivo({ pct: 12, faltan_pp_escrito: null, faltan_pp_resultado: null, faltan_unidades: null })).not.toContain("≈");
   });
 
-  it("la celda HOMBRE · FORMAL resulta en 19 485 u (+9.5 %) y el total tiene su propia fila", () => {
-    const e = entradas();
-    const res = promedioParaPantalla(e.entradas, e.resto, null, r.puente);
-    const hf = res.filas.find((f) => f.nombre === "HOMBRE · FORMAL");
-    expect(hf?.siguiente).toBe(19485);
-    expect(hf?.resultante).toBeCloseTo(9.466, 2);
-    expect(res.filas.map((f) => f.tipo)).toEqual(["celda", "celda", "celda", "celda", "resto", "total"]);
-    expect(res.filas[res.filas.length - 1].nombre).toBe("Total (mismas tiendas)");
-    expect(res.objetivo).toBeNull();
-  });
-
-  it("los cierres de Y+1 SUMAN al Total 2027; sin decidir se avisa", () => {
-    const e = entradas();
-    const res = promedioParaPantalla(e.entradas, e.resto, null, { ...r.puente, cierres: 300, cierres_sin_decidir: 1 });
-    expect(res.puente.total).toBeCloseTo(133399, 6);
+  it("desvío por filas fijadas y cierres sin decidir", () => {
+    expect(textoDesvioPorFijadas(total)).toBe("1 fila con % propio y 1 decidida llevan el total de +9.2 % a +7.7 %.");
+    expect(textoDesvioPorFijadas({ filas_con_pct_propio: 0, filas_decididas: 0, ponderado_escrito_pct: 3, resultante_pct: 3 })).toBe("No hay filas fijadas a mano: el resultado coincide con lo aplicado.");
     expect(textoCierresPuente({ cierres: 0, cierres_sin_decidir: 1 })).toBe("0 u (1 tienda sin decidir)");
     expect(textoCierresPuente({ cierres: 300, cierres_sin_decidir: 0 })).toBe("300 u");
     expect(textoCierresPuente({ cierres: 0, cierres_sin_decidir: 2 })).toBe("0 u (2 tiendas sin decidir)");
   });
 
-  it("la variación del puente se compara con el Total de Y de la Matriz", () => {
-    const e = entradas();
-    const res = promedioParaPantalla(e.entradas, e.resto, null, { ...r.puente, total_en_curso: 100000 });
-    expect(res.puente.variacion_pct).toBeCloseTo(33.099, 3);
-    expect(promedioParaPantalla(e.entradas, e.resto, null, { ...r.puente, total_en_curso: 0 }).puente.variacion_pct).toBeNull();
-  });
-
-  it("con una celda vacía no calcula y lista las que faltan; con «vacías como Resto» (solo lectura) siguen al Resto", () => {
-    const b = borradorDesde(r);
-    b.celdas[claveCelda(G_M, M_C)].pct = "";
-    const e = entradasPromedio(r, b);
-    expect(e).toEqual({ ok: false, faltan: ["MUJER · CASUAL"] });
-    const lectura = entradasPromedio(r, b, { vaciasComoResto: true });
-    expect(lectura.ok).toBe(true);
-    if (!lectura.ok) return;
-    expect(lectura.entradas.find((x) => x.nombre === "MUJER · CASUAL")?.pct).toBe(5);
-    // Un % inválido nunca se toma por Resto.
-    b.celdas[claveCelda(G_M, M_C)].pct = "abc";
-    expect(entradasPromedio(r, b, { vaciasComoResto: true }).ok).toBe(false);
-  });
-
-  it("una celda «sin filas» no entra en el promedio", () => {
-    const e = entradas();
-    expect(e.entradas).toHaveLength(4);
-    expect(e.entradas.map((x) => x.nombre)).not.toContain("HOMBRE · CASUAL");
-    expect(e.entradas.map((x) => x.nombre)).not.toContain("MUJER · URBANO");
-  });
-
-  it("Σ B = 0: sin ponderado ni comparación posible; el motivo dice que se recalcule", () => {
-    const sinBase = respuestaCrecimientos({
-      celdas: respuestaCrecimientos().celdas.map((c) => ({ ...c, agregado: agregado(0, { filas: c.agregado.filas }) })),
-      resto: { ...respuestaCrecimientos().resto, agregado: agregado(0, { filas: 0 }) },
-    });
-    const e = entradasPromedio(sinBase, borradorDesde(sinBase));
-    if (!e.ok) throw new Error("completa");
-    const res = promedioParaPantalla(e.entradas, e.resto, 12, sinBase.puente);
-    expect(res.ponderado_escrito).toBeNull();
-    expect(res.resultante).toBeNull();
-    // Sin base no hay unidades que faltar: el texto del objetivo no inventa «≈ 0 u».
-    expect(res.objetivo?.faltan_unidades).toBeNull();
-    expect(textoObjetivo(res.objetivo!)).not.toContain("≈");
-    expect(motivoSinBase(sinBase)).toBe("Sin base: recalcula la proyección.");
-    expect(motivoSinBase(respuestaCrecimientos())).toBeNull();
-  });
-
-  it("proyección de antes de 0.10.8: el motivo es «recalcula: método nuevo»", () => {
-    const vieja = respuestaCrecimientos({ metodo_viejo: true, al_dia: false });
-    expect(motivoSinBase(vieja)).toMatch(/Recalcula: método nuevo/);
-    expect(textoCrecimientosSinAplicar(vieja)).toBe("Calculada con el método anterior: recalcula.");
-  });
-
-  it("proyección cerrada o archivada anterior a 0.10.8: no manda a recalcular, manda a crear una nueva", () => {
-    const vieja = respuestaCrecimientos({ metodo_viejo: true, al_dia: true, editable: false });
-    const motivo = motivoSinBase(vieja, false);
-    expect(motivo).toBe("Proyección cerrada con el método anterior: solo lectura; crea una nueva.");
-    expect(motivo).not.toMatch(/[Rr]ecalcula/);
-    // Cerrada sin base por otra razón: tampoco ofrece recalcular.
-    const sinBase = respuestaCrecimientos({
-      editable: false,
-      celdas: respuestaCrecimientos().celdas.map((c) => ({ ...c, agregado: agregado(0, { filas: c.agregado.filas }) })),
-      resto: { ...respuestaCrecimientos().resto, agregado: agregado(0, { filas: 0 }) },
-    });
-    expect(motivoSinBase(sinBase, false)).not.toMatch(/recalcula/);
-    expect(motivoSinBase(sinBase, true)).toBe("Sin base: recalcula la proyección.");
-    // Una proyección en trabajo conserva el motivo de siempre.
-    expect(motivoSinBase(vieja, true)).toMatch(/Recalcula: método nuevo/);
-    expect(motivoSinBase(respuestaCrecimientos(), false)).toBeNull();
-  });
-
-  it("la pantalla no tiene su propia cuenta: el resultado sale de calcularPromedio de la librería", () => {
-    const e = entradas();
-    const pantalla = promedioParaPantalla(e.entradas, e.resto, 12, r.puente);
-    const { resultado: lib } = calcularPromedioLib(
-      e.entradas.map((x) => ({ genero: x.nombre, mundo: "", pct: x.pct, sin_filas: false, agregado: x.agregado })),
-      { pct: e.resto.pct, agregado: e.resto.agregado },
-      12,
-      r.puente
-    );
-    expect(lib).not.toBeNull();
-    expect(pantalla.base).toBe(lib!.base_total);
-    expect(pantalla.siguiente).toBe(lib!.siguiente_total);
-    expect(pantalla.ponderado_escrito).toBe(lib!.ponderado_escrito_pct);
-    expect(pantalla.resultante).toBe(lib!.resultante_pct);
-    expect(pantalla.objetivo).toEqual(lib!.objetivo);
-    expect(pantalla.puente.total).toBe(lib!.puente.total_siguiente);
-    expect(pantalla.puente.variacion_pct).toBe(lib!.puente.var_pct);
-    // Una fila por celda con filas + el Resto + el Total, en ese orden.
-    expect(pantalla.filas.map((f) => f.siguiente)).toEqual([...lib!.filas.map((f) => f.siguiente), lib!.siguiente_total]);
-  });
-
-  it("textos del objetivo y del desvío por filas fijadas", () => {
-    const e = entradas();
-    const res = promedioParaPantalla(e.entradas, e.resto, 12, r.puente);
-    expect(textoObjetivo(res.objetivo!)).toBe("Objetivo +12.0 % → con lo escrito te faltan 0.3 pp; con el resultado, te faltan 1.8 pp ≈ 2,215 u.");
-    expect(textoDesvioPorFijadas(res)).toBe("1 fila con % propio y 1 decidida llevan el total de +11.7 % a +10.2 %.");
-    const pasado = promedioParaPantalla(e.entradas, e.resto, 5, r.puente);
-    expect(textoObjetivo(pasado.objetivo!)).toContain("te pasas por");
-    expect(textoObjetivo(pasado.objetivo!)).toContain("de más");
-    expect(textoDesvioPorFijadas({ filas_con_pct_propio: 0, filas_decididas: 0, ponderado_escrito: 3, resultante: 3 })).toBe("No hay filas fijadas a mano: el resultado coincide con lo escrito.");
+  it("el puente: base × crecimiento resultante + nuevas + aperturas + cierres = Total 2027, y la Var. de la Matriz", () => {
+    const l = lineasPuente(total, 2026, 2027);
+    expect(l.map((x) => x.clave)).toEqual(["base", "mismas", "nuevas", "aperturas", "cierres", "total", "comparado"]);
+    const v = (clave: string) => l.find((x) => x.clave === clave)!;
+    expect(v("base").valor).toBe("120,000 u");
+    expect(v("mismas").texto).toContain("+7.7 %");
+    expect(v("aperturas").valor).toBe("914 u");
+    expect(v("total").valor).toBe("130,099 u");
+    expect(v("total").negrita).toBe(true);
+    expect(v("comparado").texto).toContain("118,000 u");
+    expect(v("comparado").valor).toBe("+10.3 %");
   });
 });
 
-describe("aviso de celdas descartadas", () => {
-  it("lista cada celda quitada con su %; sin ninguna no hay aviso", () => {
-    expect(textoDescartadas([])).toBeNull();
-    expect(textoDescartadas([{ genero: "HOMBRE", mundo: "CASUAL", pct: 12 }])).toBe("1 celda guardada se quitó porque su mundo está desactivado: HOMBRE · CASUAL (12 %).");
-    expect(textoDescartadas([{ genero: "HOMBRE", mundo: "CASUAL", pct: 12.5 }, { genero: "MUJER", mundo: "CASUAL", pct: 3 }])).toBe(
-      "2 celdas guardadas se quitaron porque su mundo está desactivado: HOMBRE · CASUAL (12.5 %) y MUJER · CASUAL (3 %)."
+describe("el Resto en Nueva proyección y Parámetros", () => {
+  it("el Resto de la foto: el usado en el último cálculo o, antes de 0.12.1, el provisional", () => {
+    const base = proyeccion();
+    expect(restoDeFoto(base)).toEqual({ pct: 0, version: null, aprobado: false });
+    expect(textoRestoDeFoto(restoDeFoto(base))).toBe("0 % · Resto provisional");
+    const aprobado = proyeccion({ parametros: { ...base.parametros, crecimiento_resto_usado: { pct: 10, crecimiento_id: "c-1", version: 2, por_nombre: "Javier", at: "2026-10-20T00:00:00Z" } } });
+    expect(restoDeFoto(aprobado)).toEqual({ pct: 10, version: 2, aprobado: true });
+    expect(textoRestoDeFoto(restoDeFoto(aprobado))).toBe("10 % · Resto v2 (aprobado)");
+    // `crecimiento_id = null` = el cálculo usó el provisional.
+    const prov = proyeccion({ parametros: { ...base.parametros, crecimiento_resto_usado: { pct: 5, crecimiento_id: null, version: null, por_nombre: null, at: null } } });
+    expect(textoRestoDeFoto(restoDeFoto(prov))).toBe("5 % · Resto provisional");
+  });
+
+  it("la ayuda del Resto provisional: solo se usa mientras no haya un Resto aprobado; si lo hay, lo dice", () => {
+    expect(ayudaRestoProvisional(2027, null)).toBe("Se usa solo mientras no haya un Resto aprobado para 2027.");
+    const t = ayudaRestoProvisional(2027, { pct: 5, version: 1, nombre: "Proyección 2026–2027" });
+    expect(t).toContain("Se usa solo mientras no haya un Resto aprobado para 2027.");
+    expect(t).toContain("Resto aprobado para 2027");
+    expect(t).toContain("5 % (v1)");
+  });
+
+  it("el Resto aprobado sale de la foto de la proyección calculada más reciente del año; sin ninguno, null", () => {
+    const base = proyeccion();
+    const con = (nombre: string, calculado_at: string | null, usado: { pct: number; version: number | null; id: string | null } | null, anio = 2026) =>
+      proyeccion({ nombre, anio_en_curso: anio, calculado_at, parametros: { ...base.parametros, ...(usado ? { crecimiento_resto_usado: { pct: usado.pct, crecimiento_id: usado.id, version: usado.version, por_nombre: null, at: null } } : {}) } });
+    expect(restoAprobadoReciente([con("A", "2026-10-01T00:00:00Z", null)], 2026)).toBeNull();
+    expect(restoAprobadoReciente([con("A", "2026-10-01T00:00:00Z", { pct: 5, version: null, id: null })], 2026)).toBeNull();
+    const r = restoAprobadoReciente(
+      [con("Vieja", "2026-10-01T00:00:00Z", { pct: 5, version: 1, id: "c1" }), con("Nueva", "2026-10-10T00:00:00Z", { pct: 8, version: 2, id: "c2" }), con("Otro año", "2026-10-20T00:00:00Z", { pct: 1, version: 9, id: "c9" }, 2025)],
+      2026
     );
-  });
-});
-
-describe("insignias y textos de cada celda", () => {
-  it("«N con % propio», «N decididas», «extremo» y «sin base»", () => {
-    const i = insigniasDeConjunto(agregadoHombreFormal, 20);
-    expect(i.map((x) => x.texto)).toEqual(["1 con % propio", "1 decidida"]);
-    expect(insigniasDeConjunto({ ...agregadoHombreFormal, pct_propio: { filas: 2, base: 1, siguiente: 1 }, decididas: { filas: 3, base: 1, siguiente: 1 } }, 20).map((x) => x.texto)).toEqual(["2 con % propio", "3 decididas"]);
-    expect(insigniasDeConjunto(agregado(1000), 60).map((x) => x.texto)).toEqual(["extremo"]);
-    expect(insigniasDeConjunto(agregado(1000), -51).map((x) => x.texto)).toEqual(["extremo"]);
-    expect(insigniasDeConjunto(agregado(1000), 50)).toEqual([]);
-    expect(insigniasDeConjunto(agregado(0, { filas: 2 }), 10).map((x) => x.texto)).toEqual(["sin base"]);
-    expect(insigniasDeConjunto(agregado(0, { filas: 0 }), 10)).toEqual([]);
-  });
-
-  it("base, rebote del Niño, sigue al Resto y desglose del Resto", () => {
-    expect(textoBaseCelda(agregadoHombreFormal, 2027)).toBe("base 17,800 u · hoy 2027: 19,485 u");
-    expect(textoRebote(agregadoHombreFormal)?.texto).toBe("rebote del Niño +9.6 %");
-    expect(textoRebote(agregadoHombreFormal)?.titulo).toContain("Es referencia: no se aplica");
-    expect(textoRebote(agregado(100))).toBeNull();
-    expect(textoSigueResto(5)).toBe("sigue al Resto (5 %)");
-    expect(textoSigueResto(2.5)).toBe("sigue al Resto (2.5 %)");
-    expect(textoSigueResto(null)).toBe("sigue al Resto");
-    expect(textoDesgloseResto([{ genero: "JOVENCITOS", base: 8200 }, { genero: "NIÑOS", base: 6100 }, { genero: "SIN", base: 0 }])).toBe("JOVENCITOS 8,200 · NIÑOS 6,100");
-    expect(textoDesgloseResto([])).toBeNull();
-  });
-
-  it("cabecera y alertas", () => {
-    expect(textoCabeceraCrecimientos(2026, 2027, 10)).toBe(
-      "Crecimiento bruto 2027 frente a 2026 de las mismas tiendas de 2027 (10 tiendas). No se corrige por el Niño: si 2026 fue Niño en un mundo, inclúyelo en tu %."
-    );
-    expect(tiendasMismasSiguiente(bloques(), 2027)).toBe(10);
-    expect(textoCrecimientosSinAplicar(respuestaCrecimientos())).toBeNull();
-    expect(textoCrecimientosSinAplicar(respuestaCrecimientos({ al_dia: false }))).toContain("falló el recálculo o un nodo cambió de mundo");
-  });
-});
-
-describe("Modal del choque y resultado del guardado", () => {
-  it("lee el 409 filas_manuales solo si trae la forma esperada", () => {
-    const c = conflicto();
-    expect(leerConflicto(c as unknown as Record<string, unknown>)?.huella_choque).toBe("choque-1");
-    expect(leerConflicto(null)).toBeNull();
-    expect(leerConflicto({ codigo: "conflicto" })).toBeNull();
-    expect(leerConflicto({ codigo: "filas_manuales", huella_choque: "x" })).toBeNull();
-    expect(leerConflicto({ ...c, huella_choque: 3 } as unknown as Record<string, unknown>)).toBeNull();
-  });
-
-  it("textos de las dos secciones y de la casilla (desmarcada por defecto en el componente)", () => {
-    expect(tituloSeccionPctPropio(12)).toBe("12 filas tienen un % propio");
-    expect(tituloSeccionPctPropio(1)).toBe("1 fila tiene un % propio");
-    expect(tituloSeccionDecididas(5, 2027)).toBe("5 filas tienen el total de 2027 decidido: conservan su cifra y mostrarán «propuesta cambió»");
-    expect(textoCasillaPisarDecididas(5)).toBe("Pisar también estas 5 decisiones (vuelven a la propuesta nueva)");
-    expect(textoCasillaPisarDecididas(1)).toBe("Pisar también esta decisión (vuelve a la propuesta nueva)");
-    expect(textoListaRecortada(350, 200)).toBe("Se muestran 200 de 350.");
-    expect(textoListaRecortada(5, 5)).toBeNull();
-    expect(textoCambioPct(5, 12)).toBe("5 % → 12 %");
-    expect(textoCambioPct(5, 12.5)).toBe("5 % → 12.5 %");
-    expect(textoCambioDecidido(10800, 11500)).toBe("10,800 → 11,500");
-    expect(textoCambioDecidido(10800, null)).toBe("10,800 → —");
-    expect(nombreFilaChoque({ linea: "CAMISA", equivalencia: "CLASICA", agrupacion_marca: "RECONOCIDO" })).toBe("CAMISA · CLASICA · RECONOCIDO");
-    expect(nombreFilaChoque({ linea: "TERNO", equivalencia: null, agrupacion_marca: "PREMIUM" })).toBe("TERNO · PREMIUM");
-  });
-
-  it("pisadas con lo que tenían y aviso de filas editadas mientras se guardaba", () => {
-    expect(textoPisada({ fila_id: "f1", pct_anterior: 5, decidido_anterior: null }, "HOMBRE · FORMAL · PANTALON")).toBe("HOMBRE · FORMAL · PANTALON: tenía +5.0 % propio");
-    expect(textoPisada({ fila_id: "f1", pct_anterior: null, decidido_anterior: 10800 }, "X")).toBe("X: tenía decidido 10,800");
-    expect(textoPisada({ fila_id: "f1", pct_anterior: 5, decidido_anterior: 10800 }, "X")).toBe("X: tenía +5.0 % propio y tenía decidido 10,800");
-    expect(textoRevertidas(0)).toBeNull();
-    expect(textoRevertidas(3)).toBe("3 filas se editaron mientras guardabas: conservan su % o su total; revísalas y recalcula.");
-    expect(textoRevertidas(1)).toBe("1 fila se editó mientras guardabas: conserva su % o su total; revísala y recalcula.");
-  });
-});
-
-describe("aviso previo de filas fijadas a mano y errores del servidor", () => {
-  it("avisa solo si cambiaste una celda (o el Resto) que tiene filas con % propio o decididas", () => {
-    const r = respuestaCrecimientos();
-    const b = borradorDesde(r);
-    expect(textoChoquePrevisto(resumenChoquePrevisto(r, b))).toBeNull();
-    b.celdas[claveCelda(G_H, M_U)].pct = "11"; // URBANO no tiene filas fijadas
-    expect(textoChoquePrevisto(resumenChoquePrevisto(r, b))).toBeNull();
-    b.celdas[claveCelda(G_H, M_F)].pct = "25"; // FORMAL tiene 1 con % propio y 1 decidida
-    const c = resumenChoquePrevisto(r, b);
-    expect(c).toEqual({ conjuntos: 1, con_pct_propio: 1, decididas: 1 });
-    expect(textoChoquePrevisto(c)).toBe(
-      "Cambiaste 1 celda con filas fijadas a mano (1 con % propio y 1 decidida): al guardar se te preguntará qué hacer con ellas (pisar, conservar o cancelar). Nada se pisa sin tu respuesta."
-    );
-  });
-
-  it("el Resto también cuenta cuando tiene filas fijadas", () => {
-    const base = respuestaCrecimientos();
-    const r = { ...base, resto: { ...base.resto, agregado: agregado(20000, { pct_propio: { filas: 2, base: 100, siguiente: 105 } }) } };
-    const b = borradorDesde(r);
-    b.resto.pct = "6";
-    expect(resumenChoquePrevisto(r, b)).toEqual({ conjuntos: 1, con_pct_propio: 2, decididas: 0 });
-  });
-
-  it("celdas_incompletas del servidor se dice con la lista", () => {
-    expect(textoCeldasIncompletas({ codigo: "celdas_incompletas", faltan: [{ genero: "MUJER", mundo: "URBANO" }, { genero: "HOMBRE", mundo: "CASUAL" }] })).toBe(
-      "Faltan celdas por llenar: MUJER · URBANO y HOMBRE · CASUAL. Actualiza la pantalla para verlas y escribe un % en cada una."
-    );
-    expect(textoCeldasIncompletas({ codigo: "otro" })).toBeNull();
-    expect(textoCeldasIncompletas(null)).toBeNull();
+    expect(r).toEqual({ pct: 8, version: 2, nombre: "Nueva" });
+    expect(restoAprobadoReciente([con("Sin calcular", null, { pct: 5, version: 1, id: "c1" })], 2026)).toBeNull();
   });
 });
 
 describe("Por línea: % bruto efectivo y su origen", () => {
-  it("marcador, ayuda y origen de una fila", () => {
-    const celda = { pct: 20, origen: "celda" as const, celda: "HOMBRE · URBANO" };
-    expect(textoOrigenCrecimiento(celda)).toBe("20 % · HOMBRE · URBANO");
-    expect(textoOrigenCrecimiento({ pct: 5, origen: "resto", celda: null })).toBe("5 % · Resto");
+  it("el origen dice la versión: «20 % · HOMBRE · URBANO v2», «5 % · Resto v1», «5 % · Resto provisional»", () => {
+    expect(textoOrigenCrecimiento({ pct: 20, origen: "celda", celda: "HOMBRE · URBANO", version: 2 })).toBe("20 % · HOMBRE · URBANO v2");
+    expect(textoOrigenCrecimiento({ pct: 5, origen: "resto", celda: null, version: 1 })).toBe("5 % · Resto v1");
+    expect(textoOrigenCrecimiento({ pct: 5, origen: "resto", celda: null, version: null, provisional: true })).toBe("5 % · Resto provisional");
     expect(textoOrigenCrecimiento({ pct: 8.5, origen: "fila", celda: null })).toBe("8.5 % · esta fila");
     expect(textoOrigenCrecimiento(null)).toBeNull();
-    expect(marcadorCrecimiento({ crecimiento_efectivo: celda })).toBe("20 % · HOMBRE · URBANO");
+    // Datos de antes de 0.12.1 (sin versión): el texto de siempre.
+    expect(textoOrigenCrecimiento({ pct: 20, origen: "celda", celda: "HOMBRE · URBANO" })).toBe("20 % · HOMBRE · URBANO");
+    expect(textoOrigenCrecimiento({ pct: 5, origen: "resto", celda: null })).toBe("5 % · Resto");
+    expect(marcadorCrecimiento({ crecimiento_efectivo: { pct: 20, origen: "celda", celda: "HOMBRE · URBANO", version: 2 } })).toBe("20 % · HOMBRE · URBANO v2");
     expect(marcadorCrecimiento(undefined)).toBeNull();
-    expect(ayudaCrecimientoFila(celda, 2027, 2026)).toBe("% bruto 2027 ÷ 2026 de esta fila, sin corregir por el Niño. Vacío = el de la combinación (20 %).");
-    expect(ayudaCrecimientoFila({ pct: 5, origen: "resto", celda: null }, 2027, 2026)).toContain("Vacío = el del Resto (5 %).");
-    expect(ayudaCrecimientoFila(null, 2027, 2026)).toContain("Vacío = el de la combinación");
+  });
+
+  it("la ayuda del campo «Crec.»: vacío = el aprobado de la combinación o el Resto (aprobado o provisional)", () => {
+    const celda = { pct: 20, origen: "celda" as const, celda: "HOMBRE · URBANO", version: 2 };
+    expect(ayudaCrecimientoFila(celda, 2027, 2026)).toBe("% bruto 2027 ÷ 2026 de esta fila, sin corregir por el Niño. Vacío = el aprobado de HOMBRE · URBANO (20 %).");
+    expect(ayudaCrecimientoFila({ pct: 5, origen: "resto", celda: null, version: 1 }, 2027, 2026)).toContain("Vacío = el Resto aprobado (5 %).");
+    expect(ayudaCrecimientoFila({ pct: 5, origen: "resto", celda: null, provisional: true }, 2027, 2026)).toContain("Vacío = el Resto provisional (5 %).");
+    expect(ayudaCrecimientoFila(null, 2027, 2026)).toContain("Vacío = el aprobado de la combinación");
+    expect(ayudaCrecimientoFila({ pct: 8, origen: "fila", celda: null }, 2027, 2026)).toContain("Vacío = el aprobado de la combinación");
     // Nunca habla de «la proyección» como origen del %.
     expect(ayudaCrecimientoFila(celda, 2027, 2026)).not.toContain("el de la proyección");
   });
 
-  it("detalle: bruto efectivo, base, equivalencia sobre la normalizada por el Niño y decisión", () => {
+  it("detalle: bruto efectivo con su versión, base, equivalencia sobre la normalizada por el Niño y decisión", () => {
     const t = textosDetalleBruto(
-      { crecimiento_efectivo: { pct: 20, origen: "celda", celda: "HOMBRE · URBANO" }, base_siguiente: 19424, base_normalizada: 19424, pct_bruto: 20, pct_sobre_normalizada: 20, decidido: null },
+      { crecimiento_efectivo: { pct: 20, origen: "celda", celda: "HOMBRE · URBANO", version: 2 }, base_siguiente: 19424, base_normalizada: 19424, pct_bruto: 20, pct_sobre_normalizada: 20, decidido: null },
       2027,
       2026
     );
-    expect(t).toEqual(["Crecimiento bruto efectivo +20.0 % (HOMBRE · URBANO) · base 2026 de las mismas tiendas de 2027: 19,424 u"]);
+    expect(t).toEqual(["Crecimiento bruto efectivo +20.0 % (HOMBRE · URBANO v2) · base 2026 de las mismas tiendas de 2027: 19,424 u"]);
     const nino = textosDetalleBruto(
-      { crecimiento_efectivo: { pct: 20, origen: "celda", celda: "HOMBRE · FORMAL" }, base_siguiente: 3300, base_normalizada: 5000, pct_bruto: 20, pct_sobre_normalizada: -20.8, decidido: 3700 },
+      { crecimiento_efectivo: { pct: 20, origen: "resto", celda: null, provisional: true }, base_siguiente: 3300, base_normalizada: 5000, pct_bruto: 20, pct_sobre_normalizada: -20.8, decidido: 3700 },
       2027,
       2026
     );
+    expect(nino[0]).toContain("(Resto provisional)");
     expect(nino).toContain("Sobre la base normalizada por el Niño equivale a -20.8 %.");
     expect(nino).toContain("Tu decisión: +20.0 % bruto.");
     expect(textosDetalleBruto({ crecimiento_efectivo: null, base_siguiente: null, base_normalizada: null, pct_bruto: null, pct_sobre_normalizada: null, decidido: null }, 2027, 2026)).toEqual([]);
@@ -497,20 +298,22 @@ describe("Por línea: % bruto efectivo y su origen", () => {
     expect(textoPieCrecimientoLinea(60002, undefined, 2027, 2026)).toBeNull();
   });
 
-  it("la Matriz explica la diferencia entre «Var.» y «Crec. mismas tiendas»", () => {
+  it("la Matriz explica que «Crec. mismas tiendas» es el % aprobado en Curvas (o el % propio de la fila)", () => {
     const t = textoColumnasVariacion(2026);
     expect(t.var).toBe("Var. = Total 2027 ÷ Total 2026 (incluye tiendas nuevas, aperturas y cierres).");
-    expect(t.crec).toBe("Crec. mismas tiendas = 2027 de las mismas tiendas ÷ su 2026: es lo que escribes en Crecimientos.");
+    expect(t.crec).toBe("Crec. mismas tiendas = 2027 de las mismas tiendas ÷ su 2026: es el % aprobado en Curvas → Crecimiento por género × mundo (o el % propio de la fila).");
+    expect(t.nota).not.toContain("es lo que escribes en Crecimientos");
   });
 });
 
-describe("desactualización y cierre (07c)", () => {
-  it("crecimientos_cambiados y version_metodo no se pueden forzar al cerrar", () => {
-    expect(cierreExigeRecalcular({ desactualizada: [{ codigo: "crecimientos_cambiados", mensaje: "x" }] })).toBe(true);
-    expect(cierreExigeRecalcular({ desactualizada: [{ codigo: "version_metodo", mensaje: "x" }] })).toBe(true);
+describe("desactualización y cierre (06d)", () => {
+  it("crecimientos_cambiados, crecimientos_sin_aprobar y version_metodo no se pueden forzar al cerrar; el resto sí", () => {
+    expect(MOTIVOS_NO_FORZABLES).toEqual(["version_metodo", "crecimientos_cambiados", "crecimientos_sin_aprobar"]);
+    for (const codigo of MOTIVOS_NO_FORZABLES) expect(cierreExigeRecalcular({ desactualizada: [{ codigo, mensaje: "x" }] })).toBe(true);
+    expect(cierreExigeRecalcular({ desactualizada: [{ codigo: "config_cambiada", mensaje: "x" }] })).toBe(false);
     expect(cierreExigeRecalcular({ desactualizada: [{ codigo: "cargas_nuevas", mensaje: "x" }] })).toBe(false);
     expect(cierreExigeRecalcular({ desactualizada: [] })).toBe(false);
-    expect(textoMotivoDesactualizada({ codigo: "crecimientos_cambiados", mensaje: "x" })).toContain("Los crecimientos guardados no están aplicados");
+    expect(textoMotivoDesactualizada({ codigo: "crecimientos_cambiados", mensaje: "x" })).toContain("Los crecimientos aprobados cambiaron después de calcular");
   });
 
   it("los errores de crecimientos ofrecen la acción que corresponde", () => {
@@ -518,10 +321,46 @@ describe("desactualización y cierre (07c)", () => {
     expect(accionParaCodigo("estado_cambiado")).toBe("recargar");
     expect(accionParaCodigo("calculo_en_curso")).toBe("recargar");
     expect(accionParaCodigo("crecimientos_cambiados")).toBe("recalcular");
-    expect(accionParaCodigo("filas_manuales")).toBeNull();
-    expect(accionParaCodigo("celdas_incompletas")).toBe("recargar");
+    // Sin aprobar no se arregla recalculando: se aprueba en Curvas.
+    expect(accionParaCodigo("crecimientos_sin_aprobar")).toBeNull();
+    expect(accionParaCodigo("crecimientos_globales")).toBeNull();
+  });
+
+  const sin3 = { faltan: [{ clave: "a", nombre: "HOMBRE · URBANO" }, { clave: "b", nombre: "MUJER · RI" }, { clave: "c", nombre: "MUJER · DEPORTIVO" }], resto_provisional: true };
+
+  it("qué falta aprobar: el mensaje de la ficha, con los nombres y el Resto provisional", () => {
+    expect(textoFaltanCrecimientos(sin3, 2027)).toBe("Faltan 3 crecimientos aprobados para 2027 (HOMBRE · URBANO, MUJER · RI, MUJER · DEPORTIVO) y el Resto es provisional");
+    expect(textoFaltanCrecimientos(sin3, 2027, false)).toBe("Faltan 3 crecimientos aprobados para 2027 y el Resto es provisional");
+    expect(textoFaltanCrecimientos({ faltan: [{ clave: "a", nombre: "MUJER · CASUAL" }], resto_provisional: false }, 2027)).toBe("Falta 1 crecimiento aprobado para 2027 (MUJER · CASUAL)");
+    expect(textoFaltanCrecimientos({ faltan: [], resto_provisional: true }, 2027)).toBe("El Resto de 2027 es provisional");
+    expect(cuantosFaltanCrecimientos(sin3)).toBe(4);
+    expect(textoNoSePuedeCerrarPorCrecimientos(sin3, 2027)).toBe(
+      "No se puede cerrar: faltan 3 crecimientos aprobados para 2027 y el Resto es provisional. Apruébalos en Curvas de estacionalidad → Crecimiento por género × mundo."
+    );
+  });
+
+  it("«Cerrar proyección» se deshabilita solo en trabajo y solo si falta algo", () => {
+    expect(crecimientosSinAprobarDe({ estado: "en_trabajo", crecimientos_sin_aprobar: sin3 })).toEqual(sin3);
+    expect(crecimientosSinAprobarDe({ estado: "en_trabajo", crecimientos_sin_aprobar: null })).toBeNull();
+    expect(crecimientosSinAprobarDe({ estado: "en_trabajo" })).toBeNull();
+    expect(crecimientosSinAprobarDe({ estado: "en_trabajo", crecimientos_sin_aprobar: { faltan: [], resto_provisional: false } })).toBeNull();
+    expect(crecimientosSinAprobarDe({ estado: "cerrada", crecimientos_sin_aprobar: sin3 })).toBeNull();
+  });
+
+  it("el cuerpo del 409 crecimientos_sin_aprobar se lee con o sin anidar en `detalle`; si no trae la forma, null", () => {
+    const esperado = { faltan: [{ clave: "a", nombre: "HOMBRE · URBANO" }], resto_provisional: true };
+    expect(leerCrecimientosSinAprobar({ codigo: "crecimientos_sin_aprobar", faltan: esperado.faltan, resto_provisional: true })).toEqual(esperado);
+    expect(leerCrecimientosSinAprobar({ codigo: "crecimientos_sin_aprobar", detalle: { faltan: esperado.faltan, resto_provisional: true } })).toEqual(esperado);
+    expect(leerCrecimientosSinAprobar({ faltan: [], resto_provisional: false })).toEqual({ faltan: [], resto_provisional: false });
+    expect(leerCrecimientosSinAprobar({ codigo: "otro" })).toBeNull();
+    expect(leerCrecimientosSinAprobar(null)).toBeNull();
+  });
+
+  it("el enlace a Curvas lleva la pestaña, el año y la proyección", () => {
+    expect(enlaceCrecimientoGeneroMundo(2027, "proy-1")).toBe("/planificacion/curvas-estacionalidad?pestana=genero-mundo&anio=2027&proyeccion=proy-1");
   });
 });
+
 
 describe("venta esperada de la tienda nueva (07d)", () => {
   it("sin meses reales: venta mensual, año maduro y lo que vende en su año de apertura", () => {

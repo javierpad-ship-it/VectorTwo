@@ -5,6 +5,8 @@ import { aniosAtipicidad } from "@/lib/curvas/atipicos";
 import { calcularEfectoNino } from "@/lib/curvas/lectura";
 import type { TemporadaAgrupacion, VolumenAnioApi } from "@/lib/curvas/tipos-api";
 import { enTandas } from "@/lib/arbol/importar";
+import { leerVigentes } from "@/lib/crecimientos/consultas-vigentes";
+import { faltantesDeCierre, gmExigidos, matrizDeVigentes, restoEfectivo, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
 import type { Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { aPeriodo } from "@/lib/ventas/periodo";
 import { bloquesDeAnio, clavesPertenencia, idsDe } from "./bloques";
@@ -21,8 +23,7 @@ import {
   guardarResultadoCalculo,
   insertarProyeccionDb,
   leerCalculosActivos,
-  leerCrecimientos,
-  leerCrecimientosDeProyecciones,
+  escribirFotoCrecimientos,
   leerProyeccionDb,
   leerCerradaDeAnio,
   leerFactoresDb,
@@ -37,14 +38,12 @@ import {
   soltarCalculo,
   tomarCalculo,
   upsertAnios,
-  upsertCrecimientos,
   upsertFactores,
   upsertFilas,
   upsertTiendasProyeccion,
-  type CrecimientoDb,
   type ProyeccionDb,
 } from "./consultas";
-import { claveGM, matrizDeCeldas } from "./crecimientos";
+import { claveGM } from "./crecimientos";
 import { huellaDeMatriz } from "./huellas-crecimientos";
 import {
   cargarCatalogo,
@@ -56,10 +55,12 @@ import {
   type ContextoCalculo,
 } from "./contexto";
 import {
+  crecimientosCambiados,
   dudasDeRed,
   motivosDesactualizada,
   nivelesCambiados,
   prerrequisitos,
+  type CrecimientosActuales,
   type DatosPrerrequisitos,
 } from "./desactualizado";
 import { armarFilasCerradas } from "./mensual";
@@ -87,6 +88,7 @@ import {
   motivoRechazoTopeEnTrabajo,
   periodoADate,
   puedeEliminar,
+  type SinAprobarCierre,
 } from "./reglas";
 import {
   aFactorApi,
@@ -119,6 +121,7 @@ import {
   type BloquesApi,
   type EdicionParametros,
   type FactorApi,
+  type CrecimientosSinAprobarApi,
   type Motivo,
   type ParametrosProyeccion,
   type PlanAnterior,
@@ -142,11 +145,53 @@ const db = (): Db => supabaseAdmin();
 // ─── Estado inicial: GET /api/proyeccion ───
 
 /**
+ * Lo que hoy valen los crecimientos aprobados para una proyección en trabajo (06d §3.1): la huella de lo que se aplicaría ahora (matriz
+ * de los GM vigentes del año siguiente y Resto efectivo, con sus ids), la matriz y el Resto, y lo que falta aprobar para cerrar (I4: los GM de
+ * HOMBRE o MUJER con filas base —`resumen.gm_gml`— sin versión vigente, y el Resto si hay filas de otros géneros). `vigentes` puede traer
+ * varios años: solo cuentan los de `Y+1`. Puro.
+ */
+export function crecimientosDeHoy(
+  p: Pick<ProyeccionDb, "anio_en_curso" | "parametros" | "resumen">,
+  ctx: Pick<ContextoCalculo, "generosMatriz" | "nodos">,
+  vigentes: readonly VigenteCrecimiento[]
+): { actuales: CrecimientosActuales; sinAprobar: SinAprobarCierre | null } {
+  const anio = p.anio_en_curso + 1;
+  const parametros = parametrosDe(p.parametros);
+  const resumen = p.resumen as unknown as Partial<ResumenProyeccion> | null;
+  const matriz = matrizDeVigentes(vigentes, ctx.generosMatriz, anio);
+  const resto = restoEfectivo(vigentes, parametros.crecimiento_pct_defecto, anio);
+  const actuales: CrecimientosActuales = {
+    huella: huellaDeMatriz(matriz, resto.pct),
+    gm_por_nodo: new Map(ctx.nodos.map((n) => [n.gml_id, claveGM(n.genero_id, n.mundo_id)])),
+  };
+  const faltan = faltantesDeCierre(gmExigidos(resumen?.gm_gml ?? {}, ctx.generosMatriz), vigentes, anio);
+  if (faltan.gm.length === 0 && !faltan.resto_provisional) return { actuales, sinAprobar: null };
+  const nombres = new Map(ctx.nodos.map((n) => [claveGM(n.genero_id, n.mundo_id), `${n.genero} · ${n.mundo}`]));
+  return {
+    actuales,
+    sinAprobar: { anio, faltan: faltan.gm.map((clave) => ({ clave: clave.replace("|", "."), nombre: nombres.get(clave) ?? clave })), resto_provisional: faltan.resto_provisional },
+  };
+}
+
+/** `ProyeccionApi.crecimientos_sin_aprobar`: lo que falta aprobar, sin el año (que viaja en el mensaje); `null` si nada falta. */
+const sinAprobarApi = (s: SinAprobarCierre | null): CrecimientosSinAprobarApi | null => (s ? { faltan: s.faltan, resto_provisional: s.resto_provisional } : null);
+
+/** Los vigentes del global de los años que se pidan, o `respuesta` si la lectura falla. */
+async function vigentesDe(d: Db, anios: readonly number[]): Promise<Salida<VigenteCrecimiento[]>> {
+  const r = await leerVigentes(d, anios);
+  if (r.error) return fallaDb(r.error, "proyección: leer los crecimientos aprobados");
+  return listo(r.data);
+}
+
+/**
  * Motivos por los que una proyección en trabajo quedó desactualizada. Los niveles con que se calculó viajan en el `resumen`
  * (`niveles_gml`, una foto de unos cientos de nodos): así listar proyecciones no recorre las filas de ninguna. Solo una
  * proyección anterior a esa foto lee los niveles de la base, y únicamente si se pide (`leerNiveles`, en el detalle).
+ *
+ * `0.12.1` (06d §3.1): `o.vigentes` son los crecimientos aprobados vigentes (de uno o varios años: cuentan los de `Y+1`); quien lista varias
+ * proyecciones los lee UNA vez por año. Sin ellos, se leen aquí.
  */
-export async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, o: { leerNiveles?: boolean; celdas?: readonly CrecimientoDb[] } = {}): Promise<Salida<Motivo[]>> {
+export async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, o: { leerNiveles?: boolean; vigentes?: readonly VigenteCrecimiento[] } = {}): Promise<Salida<Motivo[]>> {
   if (p.estado !== "en_trabajo") return listo([]);
   const resumen = p.resumen as unknown as Partial<ResumenProyeccion> | null;
   let niveles: { gml_id: string; nivel_proyectado: string }[] = [];
@@ -159,14 +204,12 @@ export async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalc
   }
   const actuales = new Map(ctx.nodos.map((n) => [n.gml_id, n.nivel as string]));
   const parametros = parametrosDe(p.parametros);
-  // 0.10.8 (07c): la matriz de crecimientos de hoy (celdas + Resto) y el GM vigente de cada nodo, para `crecimientos_cambiados`.
-  let celdas = o.celdas;
-  if (celdas === undefined) {
-    const leidas = await leerCrecimientos(d, p.id);
-    if (leidas.error) return fallaDb(leidas.error, "proyección: matriz de crecimientos");
-    celdas = leidas.data;
+  let vigentes = o.vigentes;
+  if (vigentes === undefined) {
+    const v = await vigentesDe(d, [p.anio_en_curso + 1]);
+    if (v.respuesta) return falla(v.respuesta);
+    vigentes = v.data;
   }
-  const matriz = matrizDeCeldas(celdas.map((c) => ({ genero_id: c.genero_id, mundo_id: c.mundo_id, pct: Number(c.pct) })), ctx.generosMatriz);
   return listo(
     motivosDesactualizada(
       {
@@ -179,10 +222,8 @@ export async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalc
           : null,
         parametros: { factores_usados: parametros.factores_usados, bloques: parametros.bloques },
       },
-      estadoActualDe(ctx, nivelesCambiados(niveles, actuales), {
-        huella: huellaDeMatriz(matriz, parametros.crecimiento_pct_defecto),
-        gm_por_nodo: new Map(ctx.nodos.map((n) => [n.gml_id, claveGM(n.genero_id, n.mundo_id)])),
-      })
+      // 0.12.1: la huella de lo que aplicaría hoy el global (los GM aprobados vigentes y el Resto efectivo, con sus ids) y el GM vigente de cada nodo.
+      estadoActualDe(ctx, nivelesCambiados(niveles, actuales), crecimientosDeHoy(p, ctx, vigentes).actuales)
     )
   );
 }
@@ -208,6 +249,12 @@ export async function leerEstadoInicial(): Promise<Salida<RespuestaProyeccionApi
   const conVenta = new Set(ventaTienda.data.filter((v) => v.unidades > 0).map((v) => v.tienda_id));
   const pend = factoresPendientes(ctx, anio);
   const dudas = hasta ? dudasDeRed(ctx.tiendas, ventaTienda.data, anio, hasta, ctx.publicados) : [];
+  // 0.12.1: los crecimientos aprobados, UNA lectura para todos los años que hacen falta (los de las proyecciones en trabajo y el del año en curso).
+  const enTrabajo = lista.data.filter((p) => p.estado === "en_trabajo");
+  const vigentesR = await vigentesDe(d, [anio + 1, ...enTrabajo.map((p) => p.anio_en_curso + 1)]);
+  if (vigentesR.respuesta) return falla(vigentesR.respuesta);
+  const vigentesTodos = vigentesR.data;
+  const delSiguiente = vigentesTodos.filter((v) => v.anio_aplicacion === anio + 1);
   const prereq = prerrequisitos({
     anio,
     hasta,
@@ -219,19 +266,21 @@ export async function leerEstadoInicial(): Promise<Salida<RespuestaProyeccionApi
     curvasObsoletas: obsoletas.data,
     factoresFaltantes: pend.faltantes,
     anioSiguienteAtipico: pend.siguienteAtipico,
+    crecimientosAprobados: {
+      anio: anio + 1,
+      gm: delSiguiente.filter((v) => v.alcance === "gm" && v.genero_id !== null && ctx.generosMatriz.includes(v.genero_id)).length,
+      resto: delSiguiente.some((v) => v.alcance === "resto"),
+    },
   });
 
   const claves = clavesPertenencia(ctx.tiendas, anio);
   const bloques: BloquesApi = { [anio]: bloquesDeAnio(ctx.tiendas, anio, claves), [anio + 1]: bloquesDeAnio(ctx.tiendas, anio + 1, claves) };
   const ahora = sello();
   const proyecciones: ProyeccionApi[] = [];
-  // Las celdas de todas las proyecciones en trabajo en una sola lectura (no una por proyección).
-  const celdasTodas = await leerCrecimientosDeProyecciones(d, lista.data.filter((p) => p.estado === "en_trabajo").map((p) => p.id));
-  if (celdasTodas.error) return fallaDb(celdasTodas.error, "proyección: matrices de crecimientos");
   for (const p of lista.data) {
-    const des = await desactualizadaDe(d, p, ctx, { celdas: celdasTodas.data.filter((c) => c.proyeccion_id === p.id) });
+    const des = await desactualizadaDe(d, p, ctx, { vigentes: vigentesTodos });
     if (des.respuesta) return falla(des.respuesta);
-    proyecciones.push(aProyeccionApi(p, des.data, ahora));
+    proyecciones.push(aProyeccionApi(p, des.data, ahora, p.estado === "en_trabajo" ? sinAprobarApi(crecimientosDeHoy(p, ctx, vigentesTodos).sinAprobar) : undefined));
   }
   const factores = await factoresConPendientes(d, ctx, anio);
   if (factores.respuesta) return falla(factores.respuesta);
@@ -270,9 +319,11 @@ export async function leerProyeccion(id: string): Promise<Salida<ProyeccionApi>>
   if (p.respuesta) return falla(p.respuesta);
   const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: true });
   if (ctxR.respuesta) return falla(ctxR.respuesta);
-  const des = await desactualizadaDe(d, p.data, ctxR.data, { leerNiveles: true });
+  const v = p.data.estado === "en_trabajo" ? await vigentesDe(d, [p.data.anio_en_curso + 1]) : listo<VigenteCrecimiento[]>([]);
+  if (v.respuesta) return falla(v.respuesta);
+  const des = await desactualizadaDe(d, p.data, ctxR.data, { leerNiveles: true, vigentes: v.data });
   if (des.respuesta) return falla(des.respuesta);
-  return listo(aProyeccionApi(p.data, des.data, sello()));
+  return listo(aProyeccionApi(p.data, des.data, sello(), p.data.estado === "en_trabajo" ? sinAprobarApi(crecimientosDeHoy(p.data, ctxR.data, v.data).sinAprobar) : undefined));
 }
 
 /** Prerrequisitos que bloquean el cálculo (lo que `crear` y `calcular` comprueban antes de leer venta). */
@@ -336,8 +387,8 @@ export async function crearProyeccion(cuerpo: CrearProyeccionCuerpo, actor: Acto
 
   const base = parametrosDe({});
   const parametros: ParametrosProyeccion = { ...base, ...(cuerpo.parametros ?? {}) };
-  // 0.10.8 (07c): con `copiar_de` manda el cuerpo para el Resto (`crecimiento_pct_defecto`, como todo `parametros`) y la copia trae del origen
-  // las celdas (más abajo) y el objetivo global.
+  // 0.12.1 (06d): con `copiar_de` manda el cuerpo para el Resto provisional (`crecimiento_pct_defecto`, como todo `parametros`) y la copia trae del
+  // origen el objetivo global; ya no copia celdas (el primer cálculo escribe la foto desde el global).
   if (origen) {
     const objetivoOrigen = parametrosDe(origen.parametros).crecimiento_objetivo_pct;
     if (objetivoOrigen !== undefined) parametros.crecimiento_objetivo_pct = objetivoOrigen;
@@ -353,31 +404,6 @@ export async function crearProyeccion(cuerpo: CrearProyeccionCuerpo, actor: Acto
   };
   const ins = await insertarProyeccionDb(d, nueva);
   if (ins.error) return fallaDb(ins.error, "proyección: crear");
-
-  if (origen) {
-    // La copia empieza con las celdas del origen (con su nota y su quién): el cálculo ya las aplica.
-    const celdasOrigen = await leerCrecimientos(d, origen.id);
-    if (celdasOrigen.error) {
-      await eliminarProyeccionDb(d, ins.data.id);
-      return fallaDb(celdasOrigen.error, "proyección: leer la matriz de la proyección de origen");
-    }
-    const copia = await upsertCrecimientos(
-      d,
-      celdasOrigen.data.map((c) => ({
-        proyeccion_id: ins.data.id,
-        genero_id: c.genero_id,
-        mundo_id: c.mundo_id,
-        pct: c.pct,
-        nota: c.nota,
-        perfil_id: c.perfil_id,
-        usuario_nombre: c.usuario_nombre,
-      }))
-    );
-    if (copia.error) {
-      await eliminarProyeccionDb(d, ins.data.id);
-      return fallaDb(copia.error, "proyección: copiar la matriz de crecimientos");
-    }
-  }
 
   const calculada = await ejecutarCalculo(d, ins.data, ctx, { previasDe: origen });
   if (calculada.respuesta) {
@@ -401,10 +427,10 @@ export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerp
   const rechazo = motivoRechazoEdicion({ estado: p.estado === "cerrada" ? "cerrada" : p.estado === "archivada" ? "archivada" : "en_trabajo", calculandoDesde: p.calculando_desde, ahora: sello() });
   if (rechazo) return fallaRegla(rechazo);
 
-  // 0.10.8 (07c): el crecimiento por defecto es el «Resto» de la matriz y se escribe solo desde ella (una sola pregunta de choque).
+  // 0.12.1 (06d §3.2): el Resto provisional (`crecimiento_pct_defecto`) solo se fija al crear; el aprobado se aprueba en Curvas de estacionalidad.
   if (cuerpo.parametros?.crecimiento_pct_defecto !== undefined && cuerpo.parametros.crecimiento_pct_defecto !== parametrosDe(p.parametros).crecimiento_pct_defecto) {
     return fallaMensaje(
-      "El crecimiento por defecto ahora es el «Resto» de la pestaña Crecimientos: cámbialo allí con «Guardar y recalcular».",
+      "El Resto provisional solo se fija al crear la proyección; el Resto aprobado se aprueba en Curvas de estacionalidad → Crecimiento por género × mundo.",
       400,
       "usar_crecimientos"
     );
@@ -434,7 +460,11 @@ export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerp
   }
   if (cuerpo.parametros) {
     const nuevos = { ...parametros, ...cuerpo.parametros };
-    recalcular = recalcular || JSON.stringify({ ...nuevos, bloques: null, factores_usados: null, recalculo_pendiente: null }) !== JSON.stringify({ ...parametros, bloques: null, factores_usados: null, recalculo_pendiente: null });
+    // M2 (06d): el objetivo global es solo una meta informativa: moverlo no pide recalcular (como `bloques` y `factores_usados`).
+    // Se comparan con las claves ordenadas: añadir `crecimiento_objetivo_pct` (que `parametros` puede no traer) no debe cambiar el texto por el orden.
+    const sinObjetivo = { bloques: null, factores_usados: null, recalculo_pendiente: null, crecimiento_objetivo_pct: null };
+    const texto = (o: ParametrosProyeccion) => JSON.stringify(Object.entries({ ...o, ...sinObjetivo }).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    recalcular = recalcular || texto(nuevos) !== texto(parametros);
     // Las tiendas con la rampa del defecto anterior siguen al defecto nuevo; las que se editaron a mano, no.
     if (cuerpo.parametros.rampa_maduracion && JSON.stringify(cuerpo.parametros.rampa_maduracion) !== JSON.stringify(parametros.rampa_maduracion)) {
       const filas = await leerTiendasProyeccion(d, id);
@@ -462,12 +492,13 @@ export async function editarProyeccion(id: string, cuerpo: EditarProyeccionCuerp
     parametros.umbral_cola_larga = nuevos.umbral_cola_larga;
     parametros.umbral_disponibilidad = nuevos.umbral_disponibilidad;
     parametros.rampa_maduracion = nuevos.rampa_maduracion;
+    if (cuerpo.parametros.crecimiento_objetivo_pct !== undefined) parametros.crecimiento_objetivo_pct = cuerpo.parametros.crecimiento_objetivo_pct;
   }
   if (recalcular) parametros.recalculo_pendiente = true;
   if (cuerpo.parametros || recalcular) cambio.parametros = parametros as unknown as TablesInsert<"proyecciones">["parametros"];
 
   // Condicional: solo si sigue en trabajo, sin cálculo vivo y con el mismo `updated_at` que se leyó (otra persona pudo cerrarla, calcularla o
-  // guardar la matriz mientras tanto: el `jsonb` `parametros` se escribe completo y una escritura no debe borrar la de la otra).
+  // recalcular mientras tanto: el `jsonb` `parametros` se escribe completo y una escritura no debe borrar la de la otra).
   const r = await cambiarEstadoProyeccion(d, id, "en_trabajo", cambio, { sinCalculoDesde: limiteCalculoVivo(sello()), updatedAt: p.updated_at });
   if (r.error) return fallaDb(r.error, "proyección: editar");
   if (!r.data) return fallaMensaje("La proyección cambió mientras se editaba (se cerró o empezó a calcularse). Vuelve a cargar.", 409, "estado_cambiado");
@@ -568,12 +599,8 @@ async function leerPlanAnterior(d: Db, anio: number): Promise<Salida<PlanAnterio
   return listo({ nombre: cerrada.data.nombre, totales });
 }
 
-/**
- * `previasDe`: proyección de la que se copian las decisiones (al crear con `copiar_de`). `candado` (`0.10.8`, `PUT …/crecimientos`): el
- * `calculando_desde` que quien llama YA tomó; `ejecutarCalculo` no vuelve a tomarlo, lo usa para guardar y lo libera al terminar (también si
- * falla antes de empezar).
- */
-type OpcionesCalculo = { previasDe: ProyeccionDb | null; candado?: string };
+/** `previasDe`: proyección de la que se copian las decisiones (al crear con `copiar_de`). */
+type OpcionesCalculo = { previasDe: ProyeccionDb | null };
 
 /**
  * Solo un cálculo pesado a la vez en todo el sistema. Dos barreras: un semáforo de proceso (`calculoLocal`, la barrera exacta
@@ -596,23 +623,16 @@ export async function rechazoCalculoSimultaneo(d: Db, exceptoId: string | null):
  */
 export async function ejecutarCalculo(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo, o: OpcionesCalculo): Promise<Salida<ProyeccionApi>> {
   const ahora = sello();
-  // Con `candado` el que llama ya lo tomó (y la proyección que pasa lo trae vivo): solo hay que liberarlo si ni siquiera se empieza.
-  if (!o.candado && calculoEnCurso(proy.calculando_desde, ahora)) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
-  if (calculoLocal) {
-    if (o.candado) await soltarCalculo(d, proy.id, o.candado);
-    return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_SISTEMA, 409, "calculo_en_curso");
-  }
+  if (calculoEnCurso(proy.calculando_desde, ahora)) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
+  if (calculoLocal) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_SISTEMA, 409, "calculo_en_curso");
   calculoLocal = true;
-  let valorTomado: string | null = o.candado ?? null;
-  let tomado: { data: ProyeccionDb } | null = o.candado ? { data: proy } : null;
+  let valorTomado: string | null = null;
   try {
-    if (!tomado) {
-      const t = await tomarCalculo(d, proy.id, proy.calculando_desde, ahora);
-      if (t.error) return fallaDb(t.error, "proyección: iniciar cálculo");
-      if (!t.data) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
-      tomado = { data: t.data };
-      valorTomado = t.data.calculando_desde ?? ahora;
-    }
+    const t = await tomarCalculo(d, proy.id, proy.calculando_desde, ahora);
+    if (t.error) return fallaDb(t.error, "proyección: iniciar cálculo");
+    if (!t.data) return fallaMensaje(MENSAJE_CALCULO_EN_CURSO_PROYECCION, 409, "calculo_en_curso");
+    const tomado = { data: t.data };
+    valorTomado = t.data.calculando_desde ?? ahora;
 
     const otros = await leerCalculosActivos(d, proy.id, limiteCalculoVivo(ahora));
     if (otros.error) return fallaDb(otros.error, "proyección: cálculos en curso");
@@ -694,16 +714,20 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   }
   const plan = await leerPlanAnterior(d, Y);
   if (plan.respuesta) return falla(plan.respuesta);
-  // 0.10.8 (07c): la matriz de crecimientos guardada (siempre la guardada: las recalculaciones en el acto no usan ningún borrador).
-  const celdas = await leerCrecimientos(d, proy.id);
-  if (celdas.error) return fallaDb(celdas.error, "proyección: leer la matriz de crecimientos");
+  // 0.12.1 (06d §3.1): el cálculo es el ÚNICO que lee el global. Los GM aprobados vigentes de `Y+1` arman la matriz y el Resto efectivo (el aprobado
+  // o, sin él, el provisional = `crecimiento_pct_defecto`); `calcularProyeccion` recibe ese Resto como su `crecimiento_pct_defecto`.
+  const vigentesR = await vigentesDe(d, [Y + 1]);
+  if (vigentesR.respuesta) return falla(vigentesR.respuesta);
+  const vigentesGlobal = vigentesR.data;
+  const matriz = matrizDeVigentes(vigentesGlobal, ctx.generosMatriz, Y + 1);
+  const resto = restoEfectivo(vigentesGlobal, parametros.crecimiento_pct_defecto, Y + 1);
 
   const salida = calcularProyeccion({
     anio: Y,
     k,
     hoy: ctx.hoy,
     parametros: {
-      crecimiento_pct_defecto: parametros.crecimiento_pct_defecto,
+      crecimiento_pct_defecto: resto.pct,
       umbral_avance: parametros.umbral_avance,
       umbral_cobertura: parametros.umbral_cobertura,
       umbral_cola_larga: parametros.umbral_cola_larga,
@@ -720,7 +744,7 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
     planAnterior: plan.data,
     configFlujo: ctx.configFlujo,
     previas,
-    crecimientos: matrizDeCeldas(celdas.data.map((c) => ({ genero_id: c.genero_id, mundo_id: c.mundo_id, pct: Number(c.pct) })), ctx.generosMatriz),
+    crecimientos: matriz,
   });
 
   // ── Guardar: filas, registros por año y tiendas; nunca las decisiones ──
@@ -730,11 +754,23 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   if (!vigente.data || vigente.data.estado !== "en_trabajo" || !vigente.data.calculando_desde || Date.parse(vigente.data.calculando_desde) !== Date.parse(valorTomado)) return cambioDuranteCalculo();
   const guardado = await guardarCalculo(d, proy.id, salida, propias.data, tiendasPropias.data, !!o.previasDe);
   if (guardado.respuesta) return falla(guardado.respuesta);
+  // 0.12.1: la foto de lo aplicado (`proyeccion_crecimientos`) se reescribe con los GM vigentes que usó este cálculo. Dentro del mismo candado; si falla, el
+  // cálculo responde con error y el candado se libera como en cualquier otro fallo (sin transacción: recalcular lo repara).
+  const porId = new Map(vigentesGlobal.map((v) => [v.id, v]));
+  const foto: TablesInsert<"proyeccion_crecimientos">[] = [];
+  for (const [clave, pct] of matriz.celdas) {
+    const [genero_id = "", mundo_id = ""] = clave.split("|");
+    const id = matriz.ids.get(clave) ?? null;
+    foto.push({ proyeccion_id: proy.id, genero_id, mundo_id, pct, crecimiento_id: id, version: matriz.versiones.get(clave) ?? null, nota: null, perfil_id: null, usuario_nombre: id ? (porId.get(id)?.usuario_nombre ?? null) : null });
+  }
+  const escrita = await escribirFotoCrecimientos(d, proy.id, foto);
+  if (escrita.error) return fallaDb(escrita.error, "proyección: guardar la foto de los crecimientos");
 
   const factoresUsados: ParametrosProyeccion["factores_usados"] = ctx.factoresDb
     .map((f) => aFactorApi(f, Y + 1))
     .map((f) => ({ anio: f.anio, temporada: f.temporada, ratio: f.ratio_efectivo, origen: f.origen }));
-  const nuevosParametros: ParametrosProyeccion = { ...parametros, factores_usados: factoresUsados, bloques: salida.bloques };
+  // `crecimiento_pct_defecto` queda tal cual (el Resto provisional nunca se sobrescribe con el aprobado); el Resto que se aplicó va en `crecimiento_resto_usado`.
+  const nuevosParametros: ParametrosProyeccion = { ...parametros, factores_usados: factoresUsados, bloques: salida.bloques, crecimiento_resto_usado: resto };
   delete nuevosParametros.recalculo_pendiente;
   const niveles_gml: Record<string, string> = {};
   for (const f of salida.filas) niveles_gml[f.gml_id] = f.nivel;
@@ -749,9 +785,9 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   });
   if (upd.error) return fallaDb(upd.error, "proyección: guardar resumen");
   if (!upd.data) return cambioDuranteCalculo();
-  const des = await desactualizadaDe(d, upd.data, ctx);
+  const des = await desactualizadaDe(d, upd.data, ctx, { vigentes: vigentesGlobal });
   if (des.respuesta) return falla(des.respuesta);
-  return listo(aProyeccionApi(upd.data, des.data, sello()));
+  return listo(aProyeccionApi(upd.data, des.data, sello(), sinAprobarApi(crecimientosDeHoy(upd.data, ctx, vigentesGlobal).sinAprobar)));
 }
 
 function cambioDuranteCalculo(): Salida<never> {
@@ -823,8 +859,13 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
   const p = pR.data;
   const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: true });
   if (ctxR.respuesta) return falla(ctxR.respuesta);
-  const des = await desactualizadaDe(d, p, ctxR.data);
+  const ctx = ctxR.data;
+  // 0.12.1: los crecimientos aprobados de hoy (una sola lectura) para la desactualización y para `crecimientos_sin_aprobar`.
+  const vigentesR = p.estado === "en_trabajo" ? await vigentesDe(d, [p.anio_en_curso + 1]) : listo<VigenteCrecimiento[]>([]);
+  if (vigentesR.respuesta) return falla(vigentesR.respuesta);
+  const des = await desactualizadaDe(d, p, ctx, { vigentes: vigentesR.data });
   if (des.respuesta) return falla(des.respuesta);
+  const crecimientosHoy = crecimientosDeHoy(p, ctx, vigentesR.data);
 
   const filas = await leerFilasConAnios(d, id, { columnas: "ligeras", tiendaId: null, soloActivas: true });
   if (filas.error) return fallaDb(filas.error, "proyección: leer filas");
@@ -850,6 +891,8 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     metodoViejo: !esMetodoVigente(p.resumen),
     // 0.10.8 (07c): como `metodoViejo`, no se puede saltar con `forzar`.
     crecimientosCambiados: des.data.some((m) => m.codigo === "crecimientos_cambiados"),
+    // 0.12.1 (decisión de Javier): GM de HOMBRE o MUJER sin aprobar, o el Resto provisional: bloquea SIN excepción, tampoco con `forzar`.
+    crecimientosSinAprobar: crecimientosHoy.sinAprobar,
   });
   if (!resultado.ok) {
     let filasLegibles: Record<string, unknown>[] | undefined;
@@ -877,6 +920,7 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
         total_filas_sin_decidir: resultado.total_filas_sin_decidir,
         total_filas_para_revision: resultado.total_filas_para_revision,
         tiendas_sin_decidir: resultado.tiendas_sin_decidir,
+        detalle: resultado.crecimientos_sin_aprobar,
         desactualizada: des.data,
       })
     );
@@ -917,10 +961,11 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     return fallaMensaje("La proyección cambió mientras se cerraba (empezó a calcularse o ya no está en trabajo). Vuelve a cargar.", 409, "estado_cambiado");
   }
 
-  // Carrera con una decisión: el cierre no es transaccional y una decisión (p. ej. «volver a la propuesta») que pasó su comprobación justo
-  // antes de este UPDATE puede escribirse después. Se vuelven a leer las pendientes con la proyección ya cerrada; si aparece alguna, se
-  // revierte el cierre (y el archivado) como en cualquier otro fallo y se responde con el mismo 409 que habría dado antes.
-  const pendientes = await pendientesDeCierre(d, id, p.anio_en_curso, parametros.umbral_cola_larga);
+  // Carrera con una decisión o con una aprobación (M5): el cierre no es transaccional y una decisión (p. ej. «volver a la propuesta») o un
+  // crecimiento aprobado que pasó su comprobación justo antes de este UPDATE puede escribirse después. Se vuelven a leer las pendientes y los
+  // vigentes con la proyección ya cerrada; si aparece alguna, se revierte el cierre (y el archivado) como en cualquier otro fallo y se responde
+  // con el mismo 409 que habría dado antes.
+  const pendientes = await pendientesDeCierre(d, cerrada.data, ctx, parametros.umbral_cola_larga);
   if (pendientes.respuesta) {
     await revertirCierre(d, id);
     await revertirArchivado();
@@ -940,17 +985,25 @@ async function revertirCierre(d: Db, id: string) {
   await cambiarEstadoProyeccion(d, id, "cerrada", { estado: "en_trabajo", cerrada_at: null, cerrada_por_id: null, cerrada_por_nombre: null });
 }
 
-/** Las filas y tiendas que siguen sin decidir justo ahora (misma regla que el cierre; `forzar` no aplica): `respuesta` si hay alguna. */
-async function pendientesDeCierre(d: Db, id: string, anioEnCurso: number, umbralColaLarga: number): Promise<{ respuesta: NextResponse | null }> {
+/**
+ * Lo que sigue pendiente justo ahora (misma regla que el cierre; `forzar` no aplica): filas y tiendas sin decidir y, desde `0.12.1` (M5), los
+ * crecimientos aprobados — se vuelven a leer los vigentes: si la huella de hoy ya no es la que aplicó el cálculo (`409 crecimientos_cambiados`) o
+ * falta alguno (`409 crecimientos_sin_aprobar`), `respuesta` lo dice y quien llama revierte el cierre.
+ */
+async function pendientesDeCierre(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, umbralColaLarga: number): Promise<{ respuesta: NextResponse | null }> {
+  const id = p.id;
   const filas = await leerFilasConAnios(d, id, { columnas: "ligeras", tiendaId: null, soloActivas: true });
   if (filas.error) return { respuesta: fallaDb(filas.error, "proyección: releer las filas").respuesta };
   const tiendas = await leerTiendasProyeccion(d, id);
   if (tiendas.error) return { respuesta: fallaDb(tiendas.error, "proyección: releer las tiendas").respuesta };
+  const vigentes = await vigentesDe(d, [p.anio_en_curso + 1]);
+  if (vigentes.respuesta) return { respuesta: vigentes.respuesta };
+  const hoy = crecimientosDeHoy(p, ctx, vigentes.data);
   const r = motivoRechazoCerrar({
     estado: "en_trabajo",
     calculandoDesde: null,
     ahora: sello(),
-    anioEnCurso,
+    anioEnCurso: p.anio_en_curso,
     filasBase: filas.data.map((f) => ({
       clave: f.clave,
       anios: Object.fromEntries(f.proyeccion_fila_anios.filter((a) => a.activo).map((a) => [a.anio, { clave: f.clave, propuesto: a.propuesto, decidido: a.decidido, avisos: comoAvisos(a.avisos) }])),
@@ -959,14 +1012,23 @@ async function pendientesDeCierre(d: Db, id: string, anioEnCurso: number, umbral
     desactualizada: false,
     forzar: true,
     umbralColaLarga,
+    crecimientosCambiados: crecimientosCambiados(p.resumen as unknown as Partial<ResumenProyeccion> | null, hoy.actuales),
+    crecimientosSinAprobar: hoy.sinAprobar,
   });
   if (r.ok) return { respuesta: null };
+  const deCrecimientos = r.rechazo.codigo === "crecimientos_cambiados" || r.rechazo.codigo === "crecimientos_sin_aprobar";
   return {
-    respuesta: errorConCodigoExtra(`${r.rechazo.mensaje} Alguien cambió una decisión mientras se cerraba: el cierre se deshizo.`, r.rechazo.status, r.rechazo.codigo, {
-      total_filas_sin_decidir: r.total_filas_sin_decidir,
-      total_filas_para_revision: r.total_filas_para_revision,
-      tiendas_sin_decidir: r.tiendas_sin_decidir,
-    }),
+    respuesta: errorConCodigoExtra(
+      `${r.rechazo.mensaje} ${deCrecimientos ? "Se aprobó un crecimiento mientras se cerraba" : "Alguien cambió una decisión mientras se cerraba"}: el cierre se deshizo.`,
+      r.rechazo.status,
+      r.rechazo.codigo,
+      {
+        total_filas_sin_decidir: r.total_filas_sin_decidir,
+        total_filas_para_revision: r.total_filas_para_revision,
+        tiendas_sin_decidir: r.tiendas_sin_decidir,
+        detalle: r.crecimientos_sin_aprobar,
+      }
+    ),
   };
 }
 

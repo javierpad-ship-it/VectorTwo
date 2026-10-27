@@ -121,6 +121,9 @@ describe("M6b: rutas", () => {
       "src/app/api/curvas/red-comparable/route.ts": ["GET"],
       "src/app/api/curvas/anios-atipicos/route.ts": ["GET"],
       "src/app/api/curvas/vigentes/route.ts": ["GET"],
+      // 06d: crecimiento por género × mundo (lista, detalle y aprobar).
+      "src/app/api/curvas/genero-mundo/route.ts": ["GET"],
+      "src/app/api/curvas/genero-mundo/[clave]/route.ts": ["GET", "POST"],
     };
     expect(rutas.map((r) => r.ruta).sort()).toEqual(Object.keys(esperado).sort());
     for (const r of rutas) expect(metodos(r.texto), r.ruta).toEqual(esperado[r.ruta]);
@@ -248,8 +251,8 @@ describe("M6b pantallas (frontend): nada de lo retirado, y los contratos de la v
     expect(fuente(`${DIR}page.tsx`)).toMatch(/<Suspense[\s\S]*<CurvasPanel/);
   });
 
-  it("solo hay una versión vigente (0.12.0 · M13)", () => {
-    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.12.0 · M13"');
+  it("solo hay una versión vigente (0.12.1 · M6)", () => {
+    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.12.1 · M6"');
   });
 });
 

@@ -4,8 +4,8 @@ import type { Database } from "@/lib/supabase/database.types";
 import { error } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { errorConCodigo } from "@/lib/curvas/lectura";
-import { crearCrecimientoDe, generosDeMatriz, matrizDeCeldas, type MatrizCrecimientos } from "./crecimientos";
-import { leerCrecimientos, leerGenerosMundos, leerProyeccionDb, type ProyeccionDb } from "./consultas";
+import { claveGM, crearCrecimientoDe, generosDeMatriz, type MatrizCrecimientos } from "./crecimientos";
+import { leerCrecimientos, leerGenerosMundos, leerProyeccionDb, type CrecimientoDb, type ProyeccionDb } from "./consultas";
 import type { InfoTienda, ContextoModelo } from "./decision";
 import { aAnioApi, aFilaApi, aFilaModelo, aTiendaModelo, type Catalogo, type CrecimientoDeApi, type FilaConAnios, type TiendaPyDb } from "./persistencia";
 import { CALCULO_CADUCA_MS, calculoEnCurso, type RechazoRegla } from "./reglas";
@@ -20,8 +20,10 @@ import {
   type FactorApi,
   type FilaModelo,
   type Motivo,
+  type CrecimientosSinAprobarApi,
   type ParametrosProyeccion,
   type ProyeccionApi,
+  type RestoUsadoApi,
   type ResumenProyeccion,
   type TiendaProyeccionApi,
 } from "./tipos";
@@ -78,6 +80,11 @@ export function parametrosDe(json: unknown): ParametrosProyeccion {
     // 0.10.8 (07c): quién fijó el Resto y el objetivo global; las dos claves son opcionales y viajan en el mismo `jsonb`.
     ...(o.crecimiento_resto_meta && typeof o.crecimiento_resto_meta === "object" ? { crecimiento_resto_meta: o.crecimiento_resto_meta } : {}),
     ...(typeof o.crecimiento_objetivo_pct === "number" || o.crecimiento_objetivo_pct === null ? { crecimiento_objetivo_pct: o.crecimiento_objetivo_pct } : {}),
+    // 0.12.1 (06d §2.2, B1): el Resto con que se calculó. `editarProyeccion` reescribe el `jsonb` completo desde aquí: sin esta línea, el primer
+    // `PATCH` de un umbral borraría la clave y B2 volvería al Resto provisional.
+    ...(o.crecimiento_resto_usado && typeof o.crecimiento_resto_usado === "object" && typeof o.crecimiento_resto_usado.pct === "number"
+      ? { crecimiento_resto_usado: o.crecimiento_resto_usado }
+      : {}),
   };
 }
 
@@ -96,7 +103,11 @@ function sinFotoInterna(r: ResumenProyeccion): ResumenProyeccion {
   return resto;
 }
 
-export function aProyeccionApi(p: ProyeccionDb, desactualizada: Motivo[], ahora: string): ProyeccionApi {
+/**
+ * `sinAprobar` (`0.12.1`, 06d §3.1): lo que falta aprobar para cerrar, solo de una proyección en trabajo; `undefined` = quien llama no lo midió (la
+ * clave no viaja) y `null` = no falta nada.
+ */
+export function aProyeccionApi(p: ProyeccionDb, desactualizada: Motivo[], ahora: string, sinAprobar?: CrecimientosSinAprobarApi | null): ProyeccionApi {
   const parametros = parametrosDe(p.parametros);
   return {
     id: p.id,
@@ -118,6 +129,7 @@ export function aProyeccionApi(p: ProyeccionDb, desactualizada: Motivo[], ahora:
     updated_at: p.updated_at,
     desactualizada,
     bloques: parametros.bloques,
+    ...(sinAprobar !== undefined && p.estado === "en_trabajo" ? { crecimientos_sin_aprobar: sinAprobar } : {}),
   };
 }
 
@@ -158,8 +170,8 @@ export function contextoModelo(
   catalogo: Catalogo,
   tiendasRows: readonly TiendaPyDb[],
   filas: readonly FilaModelo[],
-  /** `0.10.8` (07c): la matriz de crecimientos guardada (solo las celdas de HOMBRE y MUJER). */
-  matriz: MatrizCrecimientos
+  /** `0.12.1` (06d §3.1): la FOTO de lo aplicado (`cargarMatriz`): las celdas de HOMBRE y MUJER con su versión y el Resto con que se calculó. */
+  foto: FotoCrecimientos
 ): ContextoModelo {
   const Y = p.anio_en_curso;
   const todas = new Map<string, { codigo: string; nombre: string; fecha_apertura: string | null; fecha_cierre: string | null; venta_esperada: number | null; referente_id: string | null }>();
@@ -204,7 +216,8 @@ export function contextoModelo(
   return {
     anio: Y,
     k: kDe(p),
-    crecimiento_pct_defecto: parametros.crecimiento_pct_defecto,
+    // 0.12.1: lleva el Resto de la FOTO (aprobado o provisional), así los respaldos de `decision.ts` usan el Resto correcto sin tocarlo.
+    crecimiento_pct_defecto: foto.resto.pct,
     umbral_cola_larga: parametros.umbral_cola_larga,
     rampa_maduracion: parametros.rampa_maduracion,
     nombresCurva: new Map([...catalogo.agrupacionesEstacionalidad].map(([id, a]) => [id, a.nombre])),
@@ -212,8 +225,8 @@ export function contextoModelo(
     tiendas: info,
     // 0.10.8 (07c): fila con % propio > celda GM > Resto, todo bruto. El nodo (vigente, del catálogo) da el paso de la clave base al GM.
     crecimientoDe: crearCrecimientoDe({
-      matriz,
-      resto: parametros.crecimiento_pct_defecto,
+      matriz: foto.matriz,
+      resto: foto.resto.pct,
       gmDe: (gml) => {
         const n = catalogo.nodos.get(gml);
         return n ? { genero_id: n.genero_id, mundo_id: n.mundo_id, nombre: `${n.genero} · ${n.mundo}` } : undefined;
@@ -236,12 +249,40 @@ export function crecimientoParaApi(matriz: MatrizCrecimientos, resto: number, ca
   return (claveBase, pctFila) => f(claveBase, pctFila);
 }
 
-/** La matriz de crecimientos guardada de una proyección, lista para el método: las celdas de los géneros de la matriz (HOMBRE, MUJER). */
-export async function cargarMatriz(db: Db, proyeccionId: string): Promise<Salida<MatrizCrecimientos>> {
-  const [celdas, catalogo] = await Promise.all([leerCrecimientos(db, proyeccionId), leerGenerosMundos(db)]);
-  if (celdas.error) return fallaDb(celdas.error, "proyección: leer la matriz de crecimientos");
+/** La foto de los crecimientos de una proyección: la matriz que aplicó el último cálculo y el Resto con que se calculó. */
+export type FotoCrecimientos = { matriz: MatrizCrecimientos; resto: RestoUsadoApi };
+
+/**
+ * `0.12.1` (06d §3.1): la FOTO de lo aplicado de una proyección, lista para el método. `matriz` sale de las filas de `proyeccion_crecimientos`
+ * (solo los géneros de la matriz, con `crecimiento_id` y `version`); `resto` es `parametros.crecimiento_resto_usado` o, en una proyección
+ * calculada antes de `0.12.1`, `crecimiento_pct_defecto` (que es justo lo que usó). Nunca lee el global: solo el cálculo lo hace.
+ */
+export async function cargarMatriz(db: Db, p: ProyeccionDb): Promise<Salida<FotoCrecimientos>> {
+  const [celdas, catalogo] = await Promise.all([leerCrecimientos(db, p.id), leerGenerosMundos(db)]);
+  if (celdas.error) return fallaDb(celdas.error, "proyección: leer la foto de los crecimientos");
   if (catalogo.error) return fallaDb(catalogo.error, "proyección: leer géneros y mundos");
-  return listo(matrizDeCeldas(celdas.data.map((c) => ({ genero_id: c.genero_id, mundo_id: c.mundo_id, pct: Number(c.pct) })), generosDeMatriz(catalogo.generos).map((g) => g.id)));
+  return listo(fotoDe(p, celdas.data, generosDeMatriz(catalogo.generos).map((g) => g.id)));
+}
+
+/** La foto a partir de las celdas ya leídas (sin tocar la base). */
+export function fotoDe(p: Pick<ProyeccionDb, "parametros">, celdas: readonly CrecimientoDb[], generosMatriz: Iterable<string>): FotoCrecimientos {
+  const generos = new Set(generosMatriz);
+  const parametros = parametrosDe(p.parametros);
+  const mapa = new Map<string, number>();
+  const ids = new Map<string, string>();
+  const versiones = new Map<string, number>();
+  for (const c of celdas) {
+    if (!generos.has(c.genero_id)) continue;
+    const clave = claveGM(c.genero_id, c.mundo_id);
+    mapa.set(clave, Number(c.pct));
+    if (c.crecimiento_id) ids.set(clave, c.crecimiento_id);
+    if (c.version !== null && c.version !== undefined) versiones.set(clave, c.version);
+  }
+  const usado = parametros.crecimiento_resto_usado;
+  const resto: RestoUsadoApi = usado
+    ? { pct: usado.pct, crecimiento_id: usado.crecimiento_id ?? null, version: usado.version ?? null, por_nombre: usado.por_nombre ?? null, at: usado.at ?? null }
+    : { pct: parametros.crecimiento_pct_defecto, crecimiento_id: null, version: null, por_nombre: null, at: null };
+  return { matriz: { celdas: mapa, generos, ids, versiones, resto: { id: resto.crecimiento_id, version: resto.version } }, resto };
 }
 
 /** Clave base de una fila (misma GML-AM, sin tienda). */

@@ -5,7 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { BadgeEstadoProyeccion } from "./comunes";
-import { formatearMomento, resumenCabecera, textoMotivoDesactualizada } from "./vista";
+import { crecimientosSinAprobarDe, enlaceCrecimientoGeneroMundo, formatearMomento, resumenCabecera, textoNoSePuedeCerrarPorCrecimientos, textoMotivoDesactualizada } from "./vista";
 
 /**
  * Cabecera de la proyección abierta (ficha 07, pasos 0, 6 y 7): una línea con lo esencial (datos hasta, bloques de
@@ -37,6 +37,9 @@ export function CabeceraProyeccion({
   const enTrabajo = proyeccion.estado === "en_trabajo";
   const calculando = proyeccion.calculando || calculandoLocal;
   const piezas = resumenCabecera(proyeccion);
+  // 06d: sin los crecimientos de HOMBRE y MUJER (y el Resto) aprobados no se puede cerrar, ni forzando: el botón se deshabilita con el motivo.
+  const sinAprobar = crecimientosSinAprobarDe(proyeccion);
+  const motivoSinAprobar = sinAprobar ? textoNoSePuedeCerrarPorCrecimientos(sinAprobar, proyeccion.anio_siguiente) : null;
   return (
     <div className="space-y-3 rounded-xl border border-borde bg-superficie px-5 py-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -59,7 +62,7 @@ export function CabeceraProyeccion({
               <Button variante="secundario" tamano="sm" disabled={ocupado || calculando} onClick={onParametros}>
                 Parámetros
               </Button>
-              <Button tamano="sm" disabled={ocupado || calculando} onClick={onCerrar}>
+              <Button tamano="sm" disabled={ocupado || calculando || sinAprobar !== null} title={motivoSinAprobar ?? undefined} onClick={onCerrar}>
                 Cerrar proyección
               </Button>
               <Button variante="fantasma" tamano="sm" disabled={ocupado || calculando} onClick={onArchivar}>
@@ -82,6 +85,15 @@ export function CabeceraProyeccion({
           )}
         </div>
       </div>
+
+      {enTrabajo && motivoSinAprobar && (
+        <p className="text-xs text-alerta">
+          {motivoSinAprobar}{" "}
+          <Link href={enlaceCrecimientoGeneroMundo(proyeccion.anio_siguiente, proyeccion.id)} className="font-medium underline underline-offset-2">
+            Ir a Crecimiento por género × mundo
+          </Link>
+        </p>
+      )}
 
       {calculando && (
         <Alert tono="info">

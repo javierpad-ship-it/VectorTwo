@@ -6,14 +6,13 @@ import {
   claveGM,
   crearCrecimientoDe,
   crecimientoEfectivo,
-  filasEnChoque,
   generosDeMatriz,
   matrizDeCeldas,
   type FilaCrecimiento,
-  type MatrizYResto,
 } from "@/lib/proyeccion/crecimientos";
 import { explicar } from "@/lib/proyeccion/explicar";
-import { huellaChoque, huellaCrecimientos, huellaDeMatriz, huellaMatriz } from "@/lib/proyeccion/huellas-crecimientos";
+import { createHash } from "node:crypto";
+import { huellaCrecimientos, huellaDeMatriz } from "@/lib/proyeccion/huellas-crecimientos";
 import { calcularProyeccion, registroDe, type ContextoModelo } from "@/lib/proyeccion/modelo";
 import { crecimientoDeTienda } from "@/lib/proyeccion/decision";
 import { maduroDeVigente, rampaMensual, sumaCurva } from "@/lib/proyeccion/tiendas-nuevas";
@@ -21,7 +20,7 @@ import type { AgregadoCrecimientoApi, DecisionPrevia, FilaModelo, NodoProy, Prev
 import { AM, CURVA_INVIERNO, CURVA_PLANA, EQ, GEN, MUN, N, Y, clave, claveTienda, entrada, nodos } from "./proyeccion.fixture";
 
 /**
- * 07c (sintético; nada real): precedencia, agregados, choques con filas fijadas a mano, huellas, «Calcular promedio» y el cálculo con
+ * 07c y 06d (sintético; nada real): precedencia, agregados, huellas (con ids desde 0.12.1), «Calcular promedio» y el cálculo con
  * la matriz de crecimientos (método 4: el % es bruto).
  */
 
@@ -93,6 +92,28 @@ describe("regla 1: crecimientoEfectivo (fila > celda GM > Resto)", () => {
   });
 });
 
+describe("06d: crearCrecimientoDe con la matriz ampliada (versión y Resto provisional)", () => {
+  const gmDe = (gml: string) => (gml === "n1" ? { genero_id: HOMBRE, mundo_id: URBANO, nombre: "HOMBRE · URBANO" } : undefined);
+  const base = matrizDeCeldas([{ genero_id: HOMBRE, mundo_id: URBANO, pct: 12 }], [HOMBRE, MUJER]);
+
+  it("con ids y versiones: la celda trae su versión; el Resto aprobado, la suya; el % propio, ninguna", () => {
+    const matriz = { ...base, ids: new Map([[claveGM(HOMBRE, URBANO), "v-h"]]), versiones: new Map([[claveGM(HOMBRE, URBANO), 2]]), resto: { id: "r1", version: 3 } };
+    const f = crearCrecimientoDe({ matriz, resto: 4, gmDe, pctFilaDe: (cb) => (cb === "|n1||am-propio" ? 7 : null) });
+    expect(f("|n1||am-x")).toMatchObject({ pct: 12, origen: "celda", version: 2, provisional: false });
+    expect(f("|n1||am-propio")).toMatchObject({ pct: 7, origen: "fila", version: null, provisional: false });
+    expect(f("|otro||am-x")).toMatchObject({ pct: 4, origen: "resto", version: 3, provisional: false });
+  });
+
+  it("sin Resto aprobado (id null) o con una matriz sin las claves nuevas, el Resto es provisional y no tiene versión", () => {
+    const f1 = crearCrecimientoDe({ matriz: { ...base, resto: { id: null, version: null } }, resto: 4, gmDe });
+    expect(f1("|otro||am-x")).toMatchObject({ pct: 4, origen: "resto", version: null, provisional: true });
+    const f2 = crearCrecimientoDe({ matriz: base, resto: 4, gmDe });
+    expect(f2("|otro||am-x")).toMatchObject({ origen: "resto", version: null, provisional: true });
+    // Una celda sin versión conocida (matriz de un literal) tampoco inventa una.
+    expect(f2("|n1||am-x")).toMatchObject({ origen: "celda", version: null, provisional: false });
+  });
+});
+
 describe("regla 3: ejemplo de §5.3 (HOMBRE · FORMAL al 20 %)", () => {
   // (A) CAMISA decidida 10 800; (B) TERNO invierno con Niño 2026 (B = 3 300, B'' = 5 000); (C) PANTALÓN con % propio 5 %.
   const filas: FilaCrecimiento[] = [
@@ -124,56 +145,6 @@ describe("regla 3: ejemplo de §5.3 (HOMBRE · FORMAL al 20 %)", () => {
   });
 });
 
-describe("regla 4: filasEnChoque y huellaChoque", () => {
-  const generos = new Set([HOMBRE, MUJER]);
-  const m = (celdas: [string, string, number][], resto: number): MatrizYResto => ({ celdas: new Map(celdas.map(([g, mu, p]) => [claveGM(g, mu), p])), generos, resto });
-  const guardada = m([[HOMBRE, FORMAL, 10], [MUJER, FORMAL, 10]], 5);
-  const filas: FilaCrecimiento[] = [
-    fc({ fila_id: "sin", base_siguiente: 1000 }),
-    fc({ fila_id: "propia", crecimiento_pct: 7, base_siguiente: 2000 }),
-    fc({ fila_id: "propia-igual", crecimiento_pct: 20, base_siguiente: 500 }),
-    fc({ fila_id: "decidida", decidido: 900, base_siguiente: 800 }),
-    fc({ fila_id: "otra-celda", genero_id: MUJER, crecimiento_pct: 7, base_siguiente: 300, decidido: 350 }),
-    fc({ fila_id: "resto", genero_id: "g-jov", mundo_id: "m-x", crecimiento_pct: 9, base_siguiente: 400 }),
-  ];
-
-  it("cambiar la celda de HOMBRE · FORMAL a 20: choca la fila con % propio distinto y la decidida; la de % igual al nuevo no; las de otro GM no", () => {
-    const r = filasEnChoque(guardada, m([[HOMBRE, FORMAL, 20], [MUJER, FORMAL, 10]], 5), filas);
-    expect(r.pct_propio.map((c) => [c.fila.fila_id, c.pct_fila, c.pct_nuevo])).toEqual([["propia", 7, 20]]);
-    expect(r.decididas.map((c) => [c.fila.fila_id, c.decidido, c.propuesta_nueva_estimada])).toEqual([["decidida", 900, 960]]);
-  });
-
-  it("una decidida con % propio conserva su % efectivo: no está entre las decididas, pero su % propio sí puede chocar", () => {
-    const r = filasEnChoque(guardada, m([[HOMBRE, FORMAL, 10], [MUJER, FORMAL, 30]], 5), filas);
-    expect(r.decididas).toEqual([]);
-    expect(r.pct_propio.map((c) => c.fila.fila_id)).toEqual(["otra-celda"]);
-  });
-
-  it("cambiar el Resto solo afecta a los GM sin celda", () => {
-    const r = filasEnChoque(guardada, m([[HOMBRE, FORMAL, 10], [MUJER, FORMAL, 10]], 12), filas);
-    expect(r.pct_propio.map((c) => [c.fila.fila_id, c.pct_nuevo])).toEqual([["resto", 12]]);
-    expect(r.decididas).toEqual([]);
-    // Sin ningún cambio, ningún choque.
-    expect(filasEnChoque(guardada, guardada, filas)).toEqual({ pct_propio: [], decididas: [] });
-  });
-
-  it("huellaChoque no depende del orden y cambia si cambia el % o el total de una fila de la lista, o si entra o sale una", () => {
-    const base = [
-      { fila_id: "a", crecimiento_pct: 7, decidido: null },
-      { fila_id: "b", crecimiento_pct: null, decidido: 900 },
-    ];
-    const h = huellaChoque(base);
-    expect(huellaChoque([...base].reverse())).toBe(h);
-    expect(huellaChoque([{ ...base[0], crecimiento_pct: 8 }, base[1]])).not.toBe(h);
-    expect(huellaChoque([base[0], { ...base[1], decidido: 901 }])).not.toBe(h);
-    expect(huellaChoque([...base, { fila_id: "c", crecimiento_pct: 1, decidido: null }])).not.toBe(h);
-    expect(huellaChoque([base[0]])).not.toBe(h);
-    // Una fila que está en las dos listas cuenta una sola vez.
-    expect(huellaChoque([...base, base[1]])).toBe(h);
-    expect(h).toMatch(/^[0-9a-f]{32}$/);
-  });
-});
-
 describe("regla 12: huellas", () => {
   it("huellaCrecimientos no depende del orden; cambia con una celda o con el Resto; no con la nota ni el objetivo", () => {
     const celdas = [
@@ -189,12 +160,31 @@ describe("regla 12: huellas", () => {
     expect(huellaDeMatriz(matrizDeCeldas(celdas, [HOMBRE, MUJER]), 5)).toBe(h);
   });
 
-  it("huellaMatriz (la del bloqueo optimista) sí ve la nota y el objetivo", () => {
-    const celdas = [{ genero_id: HOMBRE, mundo_id: FORMAL, pct: 20, nota: null }];
-    const h = huellaMatriz(celdas, { pct: 5, nota: null }, null);
-    expect(huellaMatriz(celdas, { pct: 5, nota: null }, 12)).not.toBe(h);
-    expect(huellaMatriz([{ ...celdas[0], nota: "x" }], { pct: 5, nota: null }, null)).not.toBe(h);
-    expect(huellaMatriz(celdas, { pct: 5, nota: "y" }, null)).not.toBe(h);
+  it("06d regla 7: sin ids el texto es el de 0.10.8 (md5 de «resto=20»); con ids cambia aunque el % sea igual y no depende del orden", () => {
+    const md5 = (t: string) => createHash("md5").update(t).digest("hex");
+    expect(huellaCrecimientos([], 20)).toBe(md5("resto=20"));
+    expect(huellaCrecimientos([{ genero_id: HOMBRE, mundo_id: FORMAL, pct: 20 }], 5)).toBe(md5(`${HOMBRE}|${FORMAL}=20\nresto=5`));
+    const celdas = [
+      { genero_id: HOMBRE, mundo_id: FORMAL, pct: 20, crecimiento_id: "v1" },
+      { genero_id: MUJER, mundo_id: URBANO, pct: 5, crecimiento_id: null },
+    ];
+    const h = huellaCrecimientos(celdas, 5, "r1");
+    expect(h).toBe(md5(`${HOMBRE}|${FORMAL}=20#v1\n${MUJER}|${URBANO}=5\nresto=5#r1`));
+    expect(huellaCrecimientos([...celdas].reverse(), 5, "r1")).toBe(h);
+    // Aprobar otra versión con el mismo valor cambia la huella (la foto debe decir quién decidió); el Resto aprobado también.
+    expect(huellaCrecimientos([{ ...celdas[0], crecimiento_id: "v2" }, celdas[1]], 5, "r1")).not.toBe(h);
+    expect(huellaCrecimientos(celdas, 5, "r2")).not.toBe(h);
+    expect(huellaCrecimientos(celdas, 5)).not.toBe(h);
+    expect(huellaCrecimientos(celdas, 5, null)).toBe(huellaCrecimientos(celdas, 5));
+  });
+
+  it("huellaDeMatriz lee los ids de matriz.ids y matriz.resto; sin ellos da la huella de 0.10.8", () => {
+    const celdas = [{ genero_id: HOMBRE, mundo_id: FORMAL, pct: 20 }];
+    const sinIds = matrizDeCeldas(celdas, [HOMBRE, MUJER]);
+    expect(huellaDeMatriz(sinIds, 5)).toBe(huellaCrecimientos(celdas, 5));
+    const conIds = { ...sinIds, ids: new Map([[claveGM(HOMBRE, FORMAL), "v1"]]), versiones: new Map([[claveGM(HOMBRE, FORMAL), 1]]), resto: { id: "r1", version: 1 } };
+    expect(huellaDeMatriz(conIds, 5)).toBe(huellaCrecimientos([{ ...celdas[0], crecimiento_id: "v1" }], 5, "r1"));
+    expect(huellaDeMatriz({ ...conIds, resto: { id: null, version: null } }, 5)).toBe(huellaCrecimientos([{ ...celdas[0], crecimiento_id: "v1" }], 5));
   });
 
   it("celdasFaltantes lista las obligatorias que no vinieron", () => {

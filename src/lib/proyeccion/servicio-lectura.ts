@@ -30,11 +30,11 @@ async function base(d: Db, id: string): Promise<Salida<Base>> {
   return listo({ p: p.data, catalogo: cat.data.catalogo, k: kDe(p.data), umbral: parametrosDe(p.data.parametros).umbral_cola_larga ?? UMBRAL_COLA_LARGA });
 }
 
-/** El % efectivo de las filas base de `Y+1` para las respuestas de lectura (matriz guardada + Resto + árbol vigente). */
+/** El % efectivo de las filas base de `Y+1` para las respuestas de lectura (la foto de lo aplicado + su Resto + el árbol vigente). */
 async function crecimientoDeLectura(d: Db, b: Base): Promise<Salida<CrecimientoDeApi>> {
-  const m = await cargarMatriz(d, b.p.id);
-  if (m.respuesta) return falla(m.respuesta);
-  return listo(crecimientoParaApi(m.data, parametrosDe(b.p.parametros).crecimiento_pct_defecto, b.catalogo));
+  const foto = await cargarMatriz(d, b.p);
+  if (foto.respuesta) return falla(foto.respuesta);
+  return listo(crecimientoParaApi(foto.data.matriz, foto.data.resto.pct, b.catalogo));
 }
 
 async function planas(d: Db, b: Base, columnas: "ligeras" | "cerrada" = "ligeras"): Promise<Salida<FilaPlana[]>> {

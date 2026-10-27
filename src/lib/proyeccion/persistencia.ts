@@ -335,7 +335,9 @@ export function conCamposBrutos(api: AnioFilaApi, fila: Pick<FilaModelo, "tienda
   const v = api.vigente;
   return {
     ...api,
-    crecimiento_efectivo: e ? { pct: e.pct, origen: e.origen, celda: e.celda } : null,
+    crecimiento_efectivo: e
+      ? { pct: e.pct, origen: e.origen, celda: e.celda, ...(e.version !== undefined ? { version: e.version } : {}), ...(e.provisional !== undefined ? { provisional: e.provisional } : {}) }
+      : null,
     pct_bruto: b !== null && b > 0 && v !== null ? (v / b - 1) * 100 : null,
     pct_sobre_normalizada: bn !== null && bn > 0 && v !== null ? (v / bn - 1) * 100 : null,
   };

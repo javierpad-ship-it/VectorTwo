@@ -101,22 +101,6 @@ export async function leerCalculosActivos(db: Db, exceptoId: string | null, limi
   return { data: (data ?? []) as { id: string; calculando_desde: string }[], error };
 }
 
-/**
- * `0.10.8` (07c): escribe `parametros` (la matriz: Resto, nota y objetivo) SOLO si la proyección sigue con el candado tomado; `data` es `null`
- * si el candado ya no es el que se tomó (no se escribe nada).
- */
-export async function escribirParametrosConCandado(db: Db, id: string, valorTomado: string, parametros: Json) {
-  const { data, error } = await db
-    .from("proyecciones")
-    .update({ parametros })
-    .eq("id", id)
-    .eq("estado", "en_trabajo")
-    .eq("calculando_desde", valorTomado)
-    .select("*")
-    .maybeSingle();
-  return { data, error };
-}
-
 /** El guardado final del cálculo: solo si la proyección sigue `en_trabajo` y con el mismo candado; si no, `data` es `null` y no escribe. */
 export async function guardarResultadoCalculo(db: Db, id: string, valorTomado: string, cambio: TablesUpdate<"proyecciones">) {
   const { data, error } = await db
@@ -498,31 +482,27 @@ export function leerCrecimientos(db: Db, proyeccionId: string) {
   );
 }
 
-/** Las celdas de varias proyecciones (para la lista, que decide `crecimientos_cambiados` de cada una sin una lectura por proyección). */
-export async function leerCrecimientosDeProyecciones(db: Db, proyeccionIds: readonly string[]): Promise<Resultado<CrecimientoDb[]>> {
-  const salida: CrecimientoDb[] = [];
-  for (const tanda of enTandas([...proyeccionIds], TANDA_IN)) {
-    const r = await leerTodo<CrecimientoDb>((d, h) => db.from("proyeccion_crecimientos").select("*").in("proyeccion_id", tanda).order("id").range(d, h));
-    if (r.error) return { data: salida, error: r.error };
-    salida.push(...r.data);
-  }
-  return { data: salida, error: null };
-}
-
-/** `upsert` de celdas (`onConflict: proyeccion_id,genero_id,mundo_id`) en tandas. */
-export async function upsertCrecimientos(db: Db, filas: readonly TablesInsert<"proyeccion_crecimientos">[]): Promise<{ error: PostgrestError | null }> {
+/**
+ * `0.12.1` (06d §2.2): reescribe la FOTO de lo aplicado de una proyección (`proyeccion_crecimientos`) con los crecimientos por GM que usó el
+ * último cálculo. `upsert` de `filas` (`onConflict: proyeccion_id,genero_id,mundo_id`, en tandas) y borrado de las celdas guardadas que ya
+ * no están (una versión que dejó de aplicarse a un GM). Sin transacción: recalcular lo repara.
+ */
+export async function escribirFotoCrecimientos(
+  db: Db,
+  proyeccionId: string,
+  filas: readonly TablesInsert<"proyeccion_crecimientos">[]
+): Promise<{ error: PostgrestError | null }> {
+  const existentes = await leerCrecimientos(db, proyeccionId);
+  if (existentes.error) return { error: existentes.error };
   for (const grupo of agruparPorColumnas(filas)) {
     for (const tanda of enTandas(grupo, TANDA_UPSERT)) {
       const { error } = await db.from("proyeccion_crecimientos").upsert(tanda, { onConflict: "proyeccion_id,genero_id,mundo_id" });
       if (error) return { error };
     }
   }
-  return { error: null };
-}
-
-/** Borra celdas por id (las que el reemplazo completo ya no trae). */
-export async function borrarCrecimientos(db: Db, ids: readonly string[]): Promise<{ error: PostgrestError | null }> {
-  for (const tanda of enTandas([...ids], TANDA_IN)) {
+  const vivas = new Set(filas.map((f) => `${f.genero_id}|${f.mundo_id}`));
+  const sobran = existentes.data.filter((c) => !vivas.has(`${c.genero_id}|${c.mundo_id}`)).map((c) => c.id);
+  for (const tanda of enTandas(sobran, TANDA_IN)) {
     const { error } = await db.from("proyeccion_crecimientos").delete().in("id", tanda);
     if (error) return { error };
   }
@@ -540,40 +520,4 @@ export async function leerGenerosMundos(db: Db) {
     mundos: (mundos.data ?? []) as { id: string; nombre: string; orden: number | null; activo: boolean }[],
     error: generos.error ?? mundos.error,
   };
-}
-
-/**
- * «Pisar» (07c): `crecimiento_pct = null` en el registro de `anio` de las filas dadas (`proyeccion_filas.id`), en tandas. Con
- * `incluirDecididas` además `decidido`, `origen`, `propuesta_al_decidir`, `nota` y `decidido_*` a `null` en las filas de `decididas`
- * (vuelven a la propuesta). El registro se reescribe después con el recálculo encadenado.
- */
-export async function pisarRegistros(
-  db: Db,
-  anio: number,
-  filas: { conPctPropio: readonly string[]; decididas: readonly string[] }
-): Promise<{ error: PostgrestError | null }> {
-  for (const tanda of enTandas([...filas.conPctPropio], TANDA_IN)) {
-    const { error } = await db.from("proyeccion_fila_anios").update({ crecimiento_pct: null }).in("fila_id", tanda).eq("anio", anio);
-    if (error) return { error };
-  }
-  for (const tanda of enTandas([...filas.decididas], TANDA_IN)) {
-    const { error } = await db
-      .from("proyeccion_fila_anios")
-      .update({ decidido: null, origen: null, propuesta_al_decidir: null, nota: null, decidido_at: null, decidido_por_id: null, decidido_por_nombre: null })
-      .in("fila_id", tanda)
-      .eq("anio", anio);
-    if (error) return { error };
-  }
-  return { error: null };
-}
-
-/** `crecimiento_pct` y `decidido` actuales de unas filas en `anio` (el paso 8 del `PUT`: detecta lo que volvió a tener valor). */
-export async function leerDecisionesDeFilas(db: Db, anio: number, filaIds: readonly string[]) {
-  const salida: { fila_id: string; crecimiento_pct: number | null; decidido: number | null }[] = [];
-  for (const tanda of enTandas([...filaIds], TANDA_IN)) {
-    const { data, error } = await db.from("proyeccion_fila_anios").select("fila_id, crecimiento_pct, decidido").in("fila_id", tanda).eq("anio", anio);
-    if (error) return { data: salida, error };
-    for (const f of data ?? []) salida.push({ fila_id: f.fila_id, crecimiento_pct: f.crecimiento_pct === null ? null : Number(f.crecimiento_pct), decidido: f.decidido });
-  }
-  return { data: salida, error: null as PostgrestError | null };
 }

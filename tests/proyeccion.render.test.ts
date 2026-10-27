@@ -128,7 +128,7 @@ describe("celdas de decisión", () => {
     expect(s).toContain("8 % · esta fila");
     const sinPropio = html(
       createElement(CeldaCrecimiento, {
-        registro: registro(2027, { crecimiento_efectivo: { pct: 20, origen: "celda", celda: "HOMBRE · URBANO" } }),
+        registro: registro(2027, { crecimiento_efectivo: { pct: 20, origen: "celda", celda: "HOMBRE · URBANO", version: 2 } }),
         anio: 2027,
         anioEnCurso: 2026,
         bloqueada: false,
@@ -138,8 +138,23 @@ describe("celdas de decisión", () => {
       })
     );
     expect(sinPropio).toContain('placeholder="20"');
-    expect(sinPropio).toContain("20 % · HOMBRE · URBANO");
-    expect(sinPropio).toContain("Vacío = el de la combinación (20 %).");
+    expect(sinPropio).toContain("20 % · HOMBRE · URBANO v2");
+    expect(sinPropio).toContain("Vacío = el aprobado de HOMBRE · URBANO (20 %).");
+    const resto = (efectivo: { version?: number | null; provisional?: boolean }) =>
+      html(
+        createElement(CeldaCrecimiento, {
+          registro: registro(2027, { crecimiento_efectivo: { pct: 5, origen: "resto", celda: null, ...efectivo } }),
+          anio: 2027,
+          anioEnCurso: 2026,
+          bloqueada: false,
+          ocupado: false,
+          onDecidir: sinAsync,
+          etiqueta: "crecimiento",
+        })
+      );
+    expect(resto({ version: 1 })).toContain("5 % · Resto v1");
+    expect(resto({ version: null, provisional: true })).toContain("5 % · Resto provisional");
+    expect(resto({ version: null, provisional: true })).toContain("Vacío = el Resto provisional (5 %).");
   });
 });
 

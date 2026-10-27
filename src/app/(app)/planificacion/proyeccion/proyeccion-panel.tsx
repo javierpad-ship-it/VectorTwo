@@ -43,7 +43,7 @@ function proyeccionPorDefecto(lista: readonly ProyeccionApi[]): ProyeccionApi | 
 /**
  * Pantalla /planificacion/proyeccion (M7). Proyección anual de unidades del año en curso y del siguiente, por GML ×
  * agrupación de marca. Seis pestañas en el orden de trabajo: Factores del Niño · Tiendas nuevas y cierres · Crecimientos
- * (matriz género × mundo, 07c) · Por línea (Parte 1) · Matriz (Parte 2) · Mensual (Parte 3, solo lectura). Todo el estado de la vista vive en la URL
+ * (resumen de solo lectura de los crecimientos aprobados, 06d) · Por línea (Parte 1) · Matriz (Parte 2) · Mensual (Parte 3, solo lectura). Todo el estado de la vista vive en la URL
  * (`?proyeccion=&pestana=&genero=&mundo=&linea=&temporada=&agrupacion_estacionalidad=&agrupacion_marca=&solo=&fila=&tienda=`):
  * recargar o compartir el enlace reabre la misma vista y cambiar de pestaña conserva el recorte. Admin y planner tienen las
  * mismas acciones; el comprador no entra (menú y página). Nada se aprueba en bloque.
@@ -274,7 +274,7 @@ export function ProyeccionPanel() {
       {proyeccion && pestana === "tiendas" && <TiendasTab proyeccion={proyeccion} tiendaId={tiendaId} bloqueada={!editable} onCambio={recargarTodo} onRecalcular={() => void recalcular()} />}
 
       {proyeccion && pestana === "crecimientos" && (
-        <CrecimientosTab proyeccion={proyeccion} bloqueada={!editable} onCambio={recargarTodo} onRecalcular={recalcular} onCalculando={setCalculandoLocal} />
+        <CrecimientosTab proyeccion={proyeccion} bloqueada={!editable} onCambio={recargarTodo} onRecalcular={recalcular} />
       )}
 
       {proyeccion && pestana === "linea" && (

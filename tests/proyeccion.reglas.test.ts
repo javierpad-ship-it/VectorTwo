@@ -11,6 +11,7 @@ import {
   motivoRechazoDecision,
   motivoRechazoHasta,
   puedeEliminar,
+  type SinAprobarCierre,
 } from "@/lib/proyeccion/reglas";
 import { bloquesDeAnio } from "@/lib/proyeccion/bloques";
 import { crearSchema, decisionSchema, decisionTiendaSchema, aplicarCurvaSchema, editarSchema, factoresPutSchema, matrizQuerySchema, parametrosSchema, mensualQuerySchema } from "@/lib/proyeccion/esquemas";
@@ -118,6 +119,79 @@ describe("cerrar la proyección (caso 17, regla 37)", () => {
     expect(motivoRechazoCerrar({ ...e, forzar: true }).ok).toBe(true);
     const cerrada = motivoRechazoCerrar({ ...e, estado: "cerrada" });
     expect(!cerrada.ok && cerrada.rechazo.codigo).toBe("ya_cerrada");
+  });
+});
+
+describe("cerrar: crecimientos sin aprobar (06d regla 14)", () => {
+  const s = calcularProyeccion(entrada());
+  const base = s.filas.filter((f) => f.tienda_id === null);
+  const todoDecidido = base.map((f) => ({ clave: f.clave, anios: Object.fromEntries(f.registros.map((r) => [r.anio, { clave: f.clave, propuesto: r.propuesto, decidido: r.propuesto ?? 0 }])) }));
+  const comunes = { estado: "en_trabajo" as const, calculandoDesde: null, ahora: AHORA, anioEnCurso: Y, desactualizada: false, forzar: false, filasBase: todoDecidido, tiendas: [] };
+  const faltan = (n: number): SinAprobarCierre["faltan"] => [
+    { clave: "g1.m1", nombre: "HOMBRE · URBANO" },
+    { clave: "g2.m2", nombre: "MUJER · RI" },
+    { clave: "g2.m3", nombre: "MUJER · DEPORTIVO" },
+  ].slice(0, n);
+
+  it("falta algún GM: 409 crecimientos_sin_aprobar con el detalle y el mensaje; tampoco con forzar", () => {
+    const e = { ...comunes, crecimientosSinAprobar: { anio: Y + 1, faltan: faltan(3), resto_provisional: true } };
+    for (const forzar of [false, true]) {
+      const r = motivoRechazoCerrar({ ...e, forzar });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.rechazo).toMatchObject({ status: 409, codigo: "crecimientos_sin_aprobar" });
+        expect(r.rechazo.mensaje).toBe(
+          "Faltan 3 crecimientos aprobados para 2027 (HOMBRE · URBANO, MUJER · RI, MUJER · DEPORTIVO) y el Resto es provisional: apruébalos en Curvas de estacionalidad → Crecimiento por género × mundo."
+        );
+        expect(r.crecimientos_sin_aprobar).toEqual({ faltan: faltan(3), resto_provisional: true });
+      }
+    }
+  });
+
+  it("solo el Resto provisional también bloquea; solo GM, sin hablar del Resto; nada que aprobar (null o vacío) deja cerrar", () => {
+    const soloResto = motivoRechazoCerrar({ ...comunes, forzar: true, crecimientosSinAprobar: { anio: Y + 1, faltan: [], resto_provisional: true } });
+    expect(!soloResto.ok && soloResto.rechazo.codigo).toBe("crecimientos_sin_aprobar");
+    expect(!soloResto.ok && soloResto.rechazo.mensaje).toContain("El Resto de 2027 es provisional");
+    const uno = motivoRechazoCerrar({ ...comunes, crecimientosSinAprobar: { anio: Y + 1, faltan: faltan(1), resto_provisional: false } });
+    expect(!uno.ok && uno.rechazo.mensaje).toBe("Faltan 1 crecimiento aprobado para 2027 (HOMBRE · URBANO): apruébalo en Curvas de estacionalidad → Crecimiento por género × mundo.");
+    expect(motivoRechazoCerrar({ ...comunes, crecimientosSinAprobar: null }).ok).toBe(true);
+    expect(motivoRechazoCerrar({ ...comunes, crecimientosSinAprobar: { anio: Y + 1, faltan: [], resto_provisional: false } }).ok).toBe(true);
+    expect(motivoRechazoCerrar({ ...comunes }).ok).toBe(true);
+  });
+
+  it("orden: va después de version_metodo y crecimientos_cambiados y antes de las filas sin decidir; ya_cerrada y calculando mandan primero", () => {
+    const sin = { anio: Y + 1, faltan: faltan(1), resto_provisional: false };
+    const codigo = (extra: Record<string, unknown>) => {
+      const r = motivoRechazoCerrar({ ...comunes, crecimientosSinAprobar: sin, ...extra });
+      return r.ok ? "ok" : r.rechazo.codigo;
+    };
+    expect(codigo({ metodoViejo: true, crecimientosCambiados: true })).toBe("version_metodo");
+    expect(codigo({ crecimientosCambiados: true })).toBe("crecimientos_cambiados");
+    expect(codigo({ filasBase: [{ clave: "x", anios: { [Y + 1]: { clave: "x", propuesto: 500, decidido: null } } }] })).toBe("crecimientos_sin_aprobar");
+    expect(codigo({ tiendas: [{ tienda_id: "T4", anio: Y + 1, venta_esperada: 85000, decidido: null }] })).toBe("crecimientos_sin_aprobar");
+    expect(codigo({ desactualizada: true })).toBe("crecimientos_sin_aprobar");
+    expect(codigo({ estado: "cerrada" })).toBe("ya_cerrada");
+    expect(codigo({ calculandoDesde: hace(2) })).toBe("calculo_en_curso");
+    // `config_cambiada` (desactualizada) sigue siendo forzable cuando todo lo demás está aprobado.
+    expect(motivoRechazoCerrar({ ...comunes, desactualizada: true, forzar: true, crecimientosSinAprobar: null }).ok).toBe(true);
+  });
+});
+
+describe("prerrequisitos: aviso crecimientos_sin_aprobar_anio (06d)", () => {
+  const base = { anio: Y, hasta: "2026-09", mesesPublicados: meses("2023-01", "2026-09"), tiendas: tiendas(), tiendasConVenta: new Set<string>() };
+
+  it("avisa (no bloquea) mientras falte el Resto o no haya ningún GM aprobado, con lo aprobado hoy", () => {
+    const p = prerrequisitos({ ...base, crecimientosAprobados: { anio: Y + 1, gm: 4, resto: false } });
+    const aviso = p.avisa.find((m) => m.codigo === "crecimientos_sin_aprobar_anio");
+    expect(aviso?.mensaje).toBe("Para cerrar necesitarás aprobados los crecimientos de HOMBRE y MUJER por mundo y el Resto de 2027 (hoy: 4 GM aprobados; el Resto es provisional).");
+    expect(p.bloquea.map((m) => m.codigo)).not.toContain("crecimientos_sin_aprobar_anio");
+    const cero = prerrequisitos({ ...base, crecimientosAprobados: { anio: Y + 1, gm: 0, resto: true } }).avisa.find((m) => m.codigo === "crecimientos_sin_aprobar_anio");
+    expect(cero?.mensaje).toContain("hoy: 0 GM aprobados; el Resto está aprobado");
+  });
+
+  it("sin el dato, o con el Resto y algún GM aprobados, no avisa", () => {
+    expect(prerrequisitos(base).avisa.map((m) => m.codigo)).not.toContain("crecimientos_sin_aprobar_anio");
+    expect(prerrequisitos({ ...base, crecimientosAprobados: { anio: Y + 1, gm: 10, resto: true } }).avisa.map((m) => m.codigo)).not.toContain("crecimientos_sin_aprobar_anio");
   });
 });
 

@@ -172,6 +172,26 @@ describe("M7: rutas", () => {
     }
   });
 
+  it("0.12.1 (06d): PUT …/crecimientos solo responde 410 crecimientos_globales: requirePlanner primero, sin leer el cuerpo ni llamar al servicio", () => {
+    const t = sinComentarios(fuente("src/app/api/proyeccion/proyecciones/[id]/crecimientos/route.ts"));
+    const put = t.slice(t.indexOf("export async function PUT("));
+    expect(put.indexOf("requirePlanner")).toBeGreaterThan(-1);
+    expect(put).toContain('errorConCodigo(MENSAJE_CRECIMIENTOS_GLOBALES, 410, "crecimientos_globales")');
+    expect(put).not.toMatch(/leerCuerpo|request\.json|\.formData\(|\.text\(|guardar[A-Za-z]*\(/);
+    expect(put.indexOf("requirePlanner")).toBeLessThan(put.indexOf("errorConCodigo"));
+    expect(t).not.toMatch(/guardarCrecimientosSchema|guardarCrecimientos\b/);
+    // Lo retirado en backend: choques, pisar, guardar la matriz y su huella.
+    for (const f of src.filter((x) => x.ruta.startsWith(LIB))) {
+      expect(sinComentarios(f.texto), f.ruta).not.toMatch(/filasEnChoque|huellaChoque|huellaMatriz|pisarRegistros|guardarCrecimientos\b/);
+    }
+  });
+
+  it("0.12.1 (06d): solo consultas.ts escribe la foto de los crecimientos y ningún archivo de M7 nombra el global (crecimientos_genero_mundo)", () => {
+    const nombranGlobal = src.filter((f) => f.ruta.startsWith(LIB) && /crecimientos_genero_mundo|venta_genero_mundo/.test(sinComentarios(f.texto))).map((f) => f.ruta);
+    expect(nombranGlobal).toEqual([]);
+    expect(sinComentarios(fuente(CONSULTAS))).toContain("escribirFotoCrecimientos");
+  });
+
   it("sincronizar y calcular son POST (nunca un GET con efectos)", () => {
     expect(fuente("src/app/api/proyeccion/factores/sincronizar/route.ts")).toMatch(/export async function POST/);
     expect(fuente("src/app/api/proyeccion/factores/sincronizar/route.ts")).not.toMatch(/export async function GET/);
