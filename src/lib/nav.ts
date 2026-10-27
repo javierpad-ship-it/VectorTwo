@@ -70,6 +70,19 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    // M8: huecos, flujo mensual y compras. La sección es de TODOS los roles: el comprador mira los huecos y el flujo y registra sus
+    // compras (M9a). `puedeVerRuta` usa esta misma lista como guard de la ruta, así que `/compras/registro` también va con TODOS en
+    // lectura; los botones de escritura (importar, confirmar ingreso, quitar, cancelar) se ocultan por rol en la pantalla y la API
+    // los exige con `requirePlanner`.
+    title: "Compras",
+    roles: TODOS,
+    links: [
+      { href: "/compras", label: "Huecos", exact: true },
+      { href: "/compras/flujo", label: "Flujo mensual" },
+      { href: "/compras/registro", label: "Compras" },
+    ],
+  },
+  {
     title: "Administración",
     roles: ["admin"],
     links: [{ href: "/usuarios", label: "Usuarios" }],
