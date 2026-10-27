@@ -321,7 +321,7 @@ export const calcularAgrupacionSchema = z
 export type CalcularCuerpoValidado = z.infer<typeof calcularAgrupacionSchema>;
 
 /** Caracteres de control (`Cc`) y de dirección de texto (bidi): no tienen sitio en una nota de una línea y sirven para disfrazar texto. */
-const CARACTERES_PROHIBIDOS_NOTA = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
+export const CARACTERES_PROHIBIDOS_NOTA =/[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
 
 const porcentajeUsuario = z
   .number("Cada mes debe ser un número.")

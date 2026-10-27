@@ -198,7 +198,34 @@ export type ParametrosProyeccion = {
   crecimiento_resto_meta?: { nota: string | null; por_nombre: string | null; at: string };
   /** `0.10.8` (07c §2.6): meta informativa de crecimiento bruto de mismas tiendas (`-95..500`) o `null`. No se aplica a ninguna fila. */
   crecimiento_objetivo_pct?: number | null;
+  /**
+   * `0.12.1` (06d §2.2): el Resto con que se calculó la proyección (el aprobado vigente o, sin él, el provisional = `crecimiento_pct_defecto`).
+   * `crecimiento_id = null` = se usó el Resto provisional. Sin la clave (calculada antes de `0.12.1`), el Resto de la foto es
+   * `crecimiento_pct_defecto`. `parametrosDe` debe dejarla pasar.
+   */
+  crecimiento_resto_usado?: RestoUsadoApi;
 };
+
+/** `0.12.1` (06d): el Resto aplicado en un cálculo (`parametros.crecimiento_resto_usado`). */
+export type RestoUsadoApi = {
+  pct: number;
+  crecimiento_id: string | null;
+  version: number | null;
+  por_nombre: string | null;
+  at: string | null;
+};
+
+/** `0.12.1` (06d §3.1): qué falta aprobar para cerrar (`ProyeccionApi.crecimientos_sin_aprobar`, detalle del `409 crecimientos_sin_aprobar`). */
+export type CrecimientosSinAprobarApi = {
+  faltan: { clave: string; nombre: string }[];
+  /** Se exige el Resto y no hay uno aprobado (el provisional no basta). */
+  resto_provisional: boolean;
+};
+
+/** `0.12.1` (06d §3.1): código del `409` que bloquea el cierre (no se puede forzar). */
+export const CODIGO_CRECIMIENTOS_SIN_APROBAR = "crecimientos_sin_aprobar";
+/** `0.12.1` (06d §3.1): código del aviso (no bloqueo) de «Antes de proyectar» (`prerrequisitos.avisa`). */
+export const CODIGO_CRECIMIENTOS_SIN_APROBAR_ANIO = "crecimientos_sin_aprobar_anio";
 
 // ─── 0.10.8 · 07c: crecimientos por género × mundo ───
 
@@ -206,7 +233,15 @@ export type ParametrosProyeccion = {
 export type OrigenCrecimiento = "fila" | "celda" | "resto";
 
 /** `crecimiento_efectivo` de una fila base de `Y+1`. `celda` es el nombre del GM («HOMBRE · FORMAL») si el origen es `celda` (o el GM al que pertenece la fila). */
-export type CrecimientoEfectivoApi = { pct: number; origen: OrigenCrecimiento; celda: string | null };
+export type CrecimientoEfectivoApi = {
+  pct: number;
+  origen: OrigenCrecimiento;
+  celda: string | null;
+  /** `0.12.1` (06d): versión aprobada del GM o del Resto que dio el %; `null` si es el Resto provisional o un % propio de la fila. */
+  version?: number | null;
+  /** `0.12.1` (06d): el % es el Resto provisional de la proyección (`crecimiento_pct_defecto`), no uno aprobado. */
+  provisional?: boolean;
+};
 
 /** Agregado sobre las filas base activas de `Y+1` de una celda o del Resto. */
 export type AgregadoCrecimientoApi = {
@@ -228,6 +263,7 @@ export type AgregadoCrecimientoApi = {
   siguiente_vigente: number;
 };
 
+/** @deprecated `0.12.1` (06d): la matriz editable de 07c ya no existe; sin uso, se borra en la siguiente versión que toque este archivo. */
 export type CeldaCrecimientoApi = {
   genero_id: string;
   mundo_id: string;
@@ -241,6 +277,7 @@ export type CeldaCrecimientoApi = {
   agregado: AgregadoCrecimientoApi;
 };
 
+/** @deprecated `0.12.1` (06d): la matriz editable de 07c ya no existe; sin uso, se borra en la siguiente versión que toque este archivo. */
 export type RespuestaCrecimientosApi = {
   /** `false` si la proyección está cerrada, archivada o calculándose. */
   editable: boolean;
@@ -343,6 +380,7 @@ export type ResultadoPromedio = {
 
 
 /** Cuerpo del `PUT …/crecimientos` (reemplazo completo; lo que no viene se borra). */
+/** @deprecated `0.12.1` (06d): la matriz editable de 07c ya no existe; sin uso, se borra en la siguiente versión que toque este archivo. */
 export type GuardarCrecimientosCuerpoApi = {
   huella: string;
   resto: { pct: number; nota?: string | null };
@@ -355,6 +393,7 @@ export type GuardarCrecimientosCuerpoApi = {
   huella_choque?: string;
 };
 
+/** @deprecated `0.12.1` (06d): la matriz editable de 07c ya no existe; sin uso, se borra en la siguiente versión que toque este archivo. */
 export type ResultadoGuardarCrecimientosApi = {
   pisadas: { fila_id: string; pct_anterior: number | null; decidido_anterior: number | null }[];
   conservadas: number;
@@ -369,6 +408,7 @@ export type ResultadoGuardarCrecimientosApi = {
 };
 
 /** `data` de la respuesta `200` del `PUT …/crecimientos`: el `GET` recalculado más el resultado del guardado. */
+/** @deprecated `0.12.1` (06d): la matriz editable de 07c ya no existe; sin uso, se borra en la siguiente versión que toque este archivo. */
 export type RespuestaGuardarCrecimientosApi = RespuestaCrecimientosApi & ResultadoGuardarCrecimientosApi;
 
 type FilaChoqueBaseApi = { fila_id: string; genero: string; mundo: string; linea: string; equivalencia: string | null; agrupacion_marca: string };
@@ -377,6 +417,7 @@ type FilaChoqueBaseApi = { fila_id: string; genero: string; mundo: string; linea
  * Cuerpo (más allá de `{ error, codigo }`) del `409` con `codigo = "filas_manuales"` del `PUT …/crecimientos`. No se escribió nada.
  * `huella_choque` identifica TODAS las filas en choque (no solo las mostradas, ≤ 200 por lista).
  */
+/** @deprecated `0.12.1` (06d): la matriz editable de 07c ya no existe; sin uso, se borra en la siguiente versión que toque este archivo. */
 export type ConflictoFilasManualesApi = {
   error: string;
   codigo: "filas_manuales";
@@ -386,10 +427,62 @@ export type ConflictoFilasManualesApi = {
 };
 
 /** Cuerpo del `400` con `codigo = "celdas_incompletas"`. */
+/** @deprecated `0.12.1` (06d): la matriz editable de 07c ya no existe; sin uso, se borra en la siguiente versión que toque este archivo. */
 export type CeldasIncompletasApi = { error: string; codigo: "celdas_incompletas"; faltan: { genero: string; mundo: string }[] };
 
 /** Cuerpo del `400` con `codigo = "usar_crecimientos"` (un `PATCH` de parámetros intentó cambiar `crecimiento_pct_defecto`). */
 export type UsarCrecimientosApi = { error: string; codigo: "usar_crecimientos" };
+
+// ─── 0.12.1 · 06d: resumen de solo lectura de la pestaña «Crecimientos» ───
+
+/** Puente al Total de `Y+1` (07c §5.2): lo que entra a `calcularPromedio` además de la base. */
+export type PuenteApi = {
+  total_en_curso: number;
+  nuevas_anterior: number;
+  aperturas: number;
+  /** Vigente de `Y+1` de las tiendas que cierran en `Y+1`: SUMA (su `Y` ya salió de `B`). */
+  cierres: number;
+  /** Tiendas que cierran en `Y+1` sin total decidido (hoy proponen 0). */
+  cierres_sin_decidir: number;
+};
+
+/** Lo que aplicó el último cálculo (de la foto) o lo que hay aprobado hoy en el global, de un GM o del Resto. */
+export type CrecimientoAplicadoApi = { pct: number; version: number | null };
+
+export type FilaResumenCrecimientoApi = {
+  /** `<genero_id>.<mundo_id>` o `resto`. */
+  clave: string;
+  /** `null` en el Resto. */
+  genero: string | null;
+  mundo: string | null;
+  /** De la foto (`proyeccion_crecimientos` o `parametros.crecimiento_resto_usado`). */
+  aplicado: { pct: number; version: number | null; provisional: boolean; por_nombre: string | null; at: string | null };
+  /** Del global (`crecimientos_genero_mundo`); `null` si no hay versión vigente. */
+  vigente_hoy: { pct: number; version: number; por_nombre: string | null; aprobada_at: string } | null;
+  /** 07c: `B`, `B''`, rebote, filas con % propio, decididas y `Σ vigente` de `Y+1`. */
+  agregado: AgregadoCrecimientoApi;
+  /** `Σ vigente de Y+1 ÷ Σ B − 1` en %; `null` sin base. */
+  resultante_pct: number | null;
+  /** `/planificacion/curvas-estacionalidad?gm=<g>.<m>&anio=2027&proyeccion=<id>` (o `gm=resto`). */
+  enlace: string;
+};
+
+/** `data` del `GET …/proyecciones/[id]/crecimientos` desde `0.12.1`: solo lectura. */
+export type ResumenCrecimientosProyeccionApi = {
+  anio_siguiente: number;
+  /** `< 4` (o `null`): la pantalla solo dice «recalcula la proyección». */
+  version_metodo: number | null;
+  /** Los GM de HOMBRE y MUJER con filas base (`gm_gml`) o con foto. */
+  filas: FilaResumenCrecimientoApi[];
+  /** Con desglose por género. */
+  resto: FilaResumenCrecimientoApi & { por_genero: { genero: string; base: number }[] };
+  /** `calcularPromedio` de 07c sobre la foto; `null` si la proyección es de un método anterior. */
+  total: ResultadoPromedio | null;
+  puente: PuenteApi;
+  objetivo_pct: number | null;
+  cambiados: { clave: string; nombre: string; aplicado: CrecimientoAplicadoApi | null; vigente: CrecimientoAplicadoApi | null }[];
+  sin_aprobar: CrecimientosSinAprobarApi | null;
+};
 
 // ─── Filas y años ───
 
@@ -694,6 +787,8 @@ export type ProyeccionApi = {
   updated_at: string;
   desactualizada: Motivo[];
   bloques: BloquesApi;
+  /** `0.12.1` (06d §3.1): solo en trabajo; `null` si no falta nada. Deshabilita «Cerrar proyección» sin esperar al `409`. */
+  crecimientos_sin_aprobar?: CrecimientosSinAprobarApi | null;
 };
 
 export type DatosProyeccionApi = {
