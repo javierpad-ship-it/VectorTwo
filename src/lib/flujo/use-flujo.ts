@@ -18,7 +18,8 @@ import type {
 /**
  * Lecturas y acciones de las pantallas de flujo de M8 (ficha 08, §7). Reutilizan `useLectura` y `useAccion` de M7 (descarte de
  * respuestas fuera de orden, estado tocado solo dentro de promesas y el código de negocio de los `409`): no se vuelven a escribir. Nunca
- * se habla con Supabase desde aquí: todo va por `/api/flujo/**`, que construye T3b.
+ * se habla con Supabase desde aquí: todo va por `/api/flujo/**` (T3b). Los errores de las lecturas (`404 sin_cerrada`, `404 sin_mes`, `404
+ * fila_no_encontrada`) llegan como mensaje en `error`; los de las escrituras, con su `codigo` en `useAccion`.
  */
 export { useAccion };
 
@@ -78,5 +79,9 @@ export function useParametros(activo = true) {
 /** `PUT /api/flujo/parametros` (planner o admin): la fila es única y se reemplaza entera. */
 export const guardarParametros = (cuerpo: ParametrosFlujoCuerpo) => api.put<ParametrosFlujoApi>(URL_PARAMETROS, cuerpo);
 
-/** `POST /api/flujo/conciliacion/aceptar` («Aceptar sugerencia»; solo líneas específicas en `0.13.0`). */
+/**
+ * `POST /api/flujo/conciliacion/aceptar` («Aceptar sugerencia»; `requirePlanner`; solo líneas específicas en `0.13.0`). La `revision` es la
+ * que trae la propia sugerencia (`SugerenciaApi.revision`): no hace falta leer la compra antes. Errores `409` con código: `sugerencia_vencida`,
+ * `compra_cambio`, `excede_pendiente`, `tipo_no_disponible`; `404 no_pertenece`; `403` si el rol no escribe.
+ */
 export const aceptarSugerencia = (cuerpo: AceptarSugerenciaCuerpo) => api.post<RespuestaAceptarApi>(URL_ACEPTAR_SUGERENCIA, cuerpo);

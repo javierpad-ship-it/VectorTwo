@@ -24,8 +24,12 @@ import {
   mesesConciliables,
   nodosDeArbol,
   opcionesArbol,
+  CODIGOS_QUE_PIDEN_RECARGA,
+  filtroExcelFlujo,
   ordenarLista,
   PARAMETROS_FLUJO_VACIOS,
+  totalesPorGrupo,
+  type FilaDeLista,
 } from "../src/components/compras/vista-flujo";
 import {
   consultaCompras,
@@ -33,9 +37,11 @@ import {
   fechaPorDefectoIngreso,
   filtrarCompras,
   filtrosCompras,
+  hayFiltrosCompras,
   leerParametrosCompras,
   mesesParaIngreso,
   mesPorDefectoIngreso,
+  PARAMETROS_COMPRAS_VACIOS,
   resumenIngreso,
   textoConfirmarCancelar,
   textoConfirmarQuitar,
@@ -231,14 +237,112 @@ describe("Flujo: parámetros, filtros, lista y conciliación", () => {
   });
 });
 
+describe("Flujo: totales por género, mundo y línea y Excel", () => {
+  const fila = (genero: string, mundo: string, linea: string, r: Partial<FilaDeLista["fila"]["resumen"]>, stock: number, ids = true): FilaDeLista => {
+    const base = flujoEjemplo().filas[0];
+    return {
+      clave: `${genero}|${mundo}|${linea}|${stock}`,
+      fila: { ...base, stock_k: { cd: stock / 2, tiendas: stock / 2, total: stock }, resumen: { ...base.resumen, saldo_n_meses: 0, en_camino: 0, por_confirmar: 0, vpm_k: 100, senal: "al_dia", ...r } },
+      genero,
+      mundo,
+      linea,
+      generoId: ids ? `g-${genero}` : null,
+      mundoId: ids ? `m-${genero}-${mundo}` : null,
+      lineaId: ids ? `l-${genero}-${mundo}-${linea}` : null,
+      equivalencia: null,
+      agrupacion: "X",
+      ruta: `${genero} · ${mundo} · ${linea}`,
+    };
+  };
+  const filas = [
+    fila("HOMBRE", "URBANO", "DENIM", { saldo_n_meses: 300, senal: "falta", en_camino: 500, por_confirmar: 200 }, 700),
+    fila("HOMBRE", "URBANO", "POLO", { saldo_n_meses: 0, senal: "exceso", vpm_k: 50 }, 900),
+    fila("HOMBRE", "FORMAL", "CAMISA", { saldo_n_meses: 80, senal: "quiebre" }, 100),
+    fila("MUJER", "URBANO", "BLUSA", { saldo_n_meses: 10, senal: "al_dia", vpm_k: 20 }, 40),
+    fila("MUJER", "URBANO", "SIN CURVA", { senal: "sin_curva", vpm_k: null }, 999),
+  ];
+
+  it("por género suma stock, saldo, en camino y por confirmar, cuenta filas en falta (con el quiebre) y en exceso, y ordena por saldo", () => {
+    const g = totalesPorGrupo(filas, "genero");
+    expect(g.map((x) => x.nombre)).toEqual(["HOMBRE", "MUJER"]);
+    expect(g[0]).toMatchObject({ filas: 3, stock: 1700, stockCd: 850, saldo: 380, enCamino: 500, porConfirmar: 200, enFalta: 2, enExceso: 1, sinCurva: 0 });
+    expect(g[1]).toMatchObject({ filas: 2, stock: 1039, saldo: 10, enFalta: 0, sinCurva: 1 });
+  });
+
+  it("el IMI del grupo es stock ÷ suma de las ventas promedio y deja fuera las filas sin curva (como el total general)", () => {
+    const [hombre, mujer] = totalesPorGrupo(filas, "genero");
+    expect(hombre.imi).toBeCloseTo(1700 / 250, 6);
+    expect(mujer.imi).toBeCloseTo(40 / 20, 6);
+    expect(totalesPorGrupo([filas[4]], "genero")[0].imi).toBeNull();
+  });
+
+  it("por mundo y por línea usan el nombre completo del camino; sin ids en el catálogo agrupan por nombre", () => {
+    expect(totalesPorGrupo(filas, "mundo").map((x) => x.nombre)).toEqual(["HOMBRE · URBANO", "HOMBRE · FORMAL", "MUJER · URBANO"]);
+    expect(totalesPorGrupo(filas, "linea")).toHaveLength(5);
+    const sinIds = filas.map((f) => ({ ...f, generoId: null, mundoId: null, lineaId: null }));
+    expect(totalesPorGrupo(sinIds, "mundo").map((x) => x.filas)).toEqual([2, 1, 2]);
+    expect(totalesPorGrupo([], "genero")).toEqual([]);
+  });
+
+  it("con el flujo de ejemplo, los grupos reparten todas las filas y todo el stock", () => {
+    const flujo = flujoEjemplo();
+    const lista = filasDeLista(flujo.filas, flujo.catalogo);
+    for (const nivel of ["genero", "mundo", "linea"] as const) {
+      const g = totalesPorGrupo(lista, nivel);
+      expect(g.reduce((a, x) => a + x.filas, 0)).toBe(lista.length);
+      expect(g.reduce((a, x) => a + x.stock, 0)).toBe(lista.reduce((a, f) => a + f.fila.stock_k.total, 0));
+    }
+  });
+
+  it("el filtro de Excel rotula lo que ve la pantalla, pero no manda «Falta» (en el servidor incluye el quiebre y en la hoja no)", () => {
+    const p = leerParametrosFlujo(lector(`genero=${UUID}&agrupacion=${UUID2}&solo=exceso&mio=1`));
+    expect(filtroExcelFlujo(p)).toEqual({ genero_id: UUID, mundo_id: undefined, agrupacion_marca_id: UUID2, solo: "exceso", mio: true });
+    expect(filtroExcelFlujo({ ...p, solo: "falta" }).solo).toBeUndefined();
+    expect(filtroExcelFlujo(PARAMETROS_FLUJO_VACIOS)).toEqual({ genero_id: undefined, mundo_id: undefined, agrupacion_marca_id: undefined, solo: undefined, mio: undefined });
+  });
+
+  it("«Aceptar sugerencia» relee sola cuando lo que mirabas cambió, pero no ante un error de permisos o de datos", () => {
+    for (const c of ["sugerencia_vencida", "compra_cambio", "excede_pendiente", "no_pertenece", "tipo_no_disponible"]) expect(CODIGOS_QUE_PIDEN_RECARGA.has(c), c).toBe(true);
+    expect(CODIGOS_QUE_PIDEN_RECARGA.has("carga_inicial_requerida")).toBe(false);
+  });
+
+  it("el catálogo con `linea_id` deja los ids de género, mundo y línea en cada fila de la lista", () => {
+    const flujo = flujoEjemplo();
+    const f = flujo.filas[0];
+    const nodo = flujo.catalogo.nodos[f.equivalencia_id ?? f.gml_id] ?? flujo.catalogo.nodos[f.gml_id];
+    flujo.catalogo.nodos[f.equivalencia_id ?? f.gml_id] = { ...nodo, linea_id: "linea-1" };
+    const lista = filasDeLista(flujo.filas, flujo.catalogo);
+    expect(lista[0]).toMatchObject({ generoId: nodo.genero_id, mundoId: nodo.mundo_id, lineaId: "linea-1" });
+  });
+});
+
 describe("Compras: parámetros, estado y valores por defecto de Confirmar ingreso", () => {
   it("la URL guarda la compra abierta, los filtros y el modo importar; el texto libre no viaja al servidor", () => {
     const q = `compra=${UUID}&estado=confirmada&proveedor=${UUID2}&origen=carga_inicial&por_confirmar=1&q=norte&importar=1`;
     const p = leerParametrosCompras(lector(q));
-    expect(p).toEqual({ compra: UUID, estado: "confirmada", proveedor: UUID2, origen: "carga_inicial", porConfirmar: true, q: "norte", importar: true });
+    expect(p).toEqual({ ...PARAMETROS_COMPRAS_VACIOS, compra: UUID, estado: "confirmada", proveedor: UUID2, origen: "carga_inicial", porConfirmar: true, q: "norte", importar: true });
     expect(leerParametrosCompras(lector(consultaCompras(p)))).toEqual(p);
     expect(filtrosCompras(p)).toEqual({ estado: "confirmada", proveedor_id: UUID2, origen: "carga_inicial", por_confirmar: true });
     expect(leerParametrosCompras(lector("compra=x&estado=otro&origen=z"))).toMatchObject({ compra: null, estado: null, origen: null });
+  });
+
+  it("mes de entrega, género, mundo, línea y marca viajan al servidor con los nombres de la API y vuelven de la URL", () => {
+    const q = `desde=2026-11&hasta=2027-02&genero=${UUID}&mundo=${UUID2}&linea=${UUID}&marca=${UUID2}`;
+    const p = leerParametrosCompras(lector(q));
+    expect(p).toMatchObject({ desde: "2026-11", hasta: "2027-02", genero: UUID, mundo: UUID2, linea: UUID, marca: UUID2 });
+    expect(filtrosCompras(p)).toEqual({ llegada_desde: "2026-11", llegada_hasta: "2027-02", genero_id: UUID, mundo_id: UUID2, linea_id: UUID, marca_id: UUID2 });
+    expect(urlCompras(filtrosCompras(p))).toBe(`/api/compras?llegada_desde=2026-11&llegada_hasta=2027-02&genero_id=${UUID}&mundo_id=${UUID2}&linea_id=${UUID}&marca_id=${UUID2}`);
+    expect(leerParametrosCompras(lector(consultaCompras(p)))).toEqual(p);
+    expect(hayFiltrosCompras(p)).toBe(true);
+    expect(hayFiltrosCompras(PARAMETROS_COMPRAS_VACIOS)).toBe(false);
+    expect(hayFiltrosCompras({ ...PARAMETROS_COMPRAS_VACIOS, desde: "2026-11" })).toBe(true);
+  });
+
+  it("un mes mal escrito se ignora y un rango al revés se descarta entero (la API lo rechazaría con 400)", () => {
+    expect(leerParametrosCompras(lector("desde=2026-13&hasta=oct"))).toMatchObject({ desde: null, hasta: null });
+    expect(leerParametrosCompras(lector("desde=2027-03&hasta=2026-11"))).toMatchObject({ desde: null, hasta: null });
+    expect(leerParametrosCompras(lector("desde=2026-11&hasta=2026-11"))).toMatchObject({ desde: "2026-11", hasta: "2026-11" });
+    expect(leerParametrosCompras(lector("hasta=2026-11"))).toMatchObject({ desde: null, hasta: "2026-11" });
   });
 
   it("el texto libre busca por número, proveedor y referencia sin distinguir acentos ni mayúsculas", () => {

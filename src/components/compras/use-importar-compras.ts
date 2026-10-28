@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ErrorApi } from "@/lib/api-client";
 import { leerArchivoTabular, type TablaLeida } from "@/lib/arbol/leer-archivo";
 import type { ReporteImportacionComprasApi } from "@/lib/compras/tipos-api";
 import { importarCompras } from "@/lib/compras/use-compras";
@@ -35,6 +36,15 @@ export type CampoCompra =
   | "nota";
 
 /**
+ * El texto del error de la API. `403`: el rol no escribe compras (la pantalla ya oculta el botón, pero la API manda); `400
+ * carga_inicial_requerida`: la casilla es obligatoria en `0.13.0`. Los demás salen con el mensaje de la API tal cual.
+ */
+export function textoErrorImportar(e: unknown): string {
+  if (e instanceof ErrorApi && e.status === 403) return `${e.message} Importar compras es de administración y planeamiento.`;
+  return mensajeError(e);
+}
+
+/**
  * Flujo de cuatro pasos (archivo → mapeo → previsualizar → aplicar) del importador de compras (ficha 08 §4.7). Es hermano de
  * `useImportador`, que no sirve tal cual porque este endpoint recibe además `carga_inicial` (en `0.13.0` la casilla es obligatoria: sin
  * ella la API responde `400 carga_inicial_requerida`) y devuelve el reporte en los dos modos. Aplicar solo se habilita con una
@@ -44,10 +54,13 @@ export function useImportarCompras({
   campos,
   cargaInicial,
   confirmarAplicar,
+  alAplicar,
 }: {
   campos: CampoImportador<CampoCompra>[];
   cargaInicial: boolean;
   confirmarAplicar: (nombreArchivo: string, reporte: ReporteImportacionComprasApi) => string;
+  /** Se llama cuando la API terminó de aplicar (con o sin compras sin aplicar): la pantalla relee su lista. */
+  alAplicar?: () => void;
 }) {
   const [archivo, setArchivo] = useState<ArchivoImportacion | null>(null);
   const [original, setOriginal] = useState<File | null>(null);
@@ -117,9 +130,10 @@ export function useImportarCompras({
         setFinal(null);
       } else {
         setFinal(reporte);
+        alAplicar?.();
       }
     } catch (e) {
-      setError(mensajeError(e));
+      setError(textoErrorImportar(e));
     } finally {
       setEnviando(null);
     }

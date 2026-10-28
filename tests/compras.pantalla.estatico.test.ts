@@ -88,8 +88,24 @@ describe("datos, kit de UI y errores", () => {
     for (const r of ["/api/compras", "/api/compras/${id}", "/api/compras/proveedores", "/api/compras/importar", "/recibir", "/recepciones/${recepcionId}?revision=${revision}", "/cancelar", "/historial"]) expect(compras, r).toContain(r);
     expect(compras).toContain("api.post<CompraApi>(`${urlCompra(compraId)}/recibir`");
     expect(compras).toContain("api.delete<CompraApi>(");
-    expect(compras).toContain("useColeccion<CompraApi>(urlCompras(filtros))");
+    expect(compras).toContain("useLectura<CompraApi[]>(urlCompras(filtros), true)");
     expect(compras).toContain("useColeccion<ProveedorApi>(URL_PROVEEDORES)");
+  });
+
+  it("«Aceptar sugerencia» manda la `revision` que trae la sugerencia: no se lee la compra antes", () => {
+    const flujo = sinComentarios(fuente("src/app/(app)/compras/flujo/flujo-panel.tsx"));
+    expect(flujo).toContain("s.revision");
+    expect(flujo).not.toContain("leerCompra");
+    expect(sinComentarios(fuente("src/lib/compras/use-compras.ts"))).not.toContain("leerCompra");
+  });
+
+  it("Excel: Flujo y Compras usan las hojas de `lib/flujo/excel.ts` y la descarga del navegador, sin import estático de xlsx", () => {
+    const descarga = sinComentarios(fuente("src/components/compras/descarga.ts"));
+    expect(descarga).toContain("hojasFlujo(");
+    expect(descarga).toContain("hojasCompras(");
+    expect(descarga).toContain("descargarLibro");
+    expect(sinComentarios(fuente("src/app/(app)/compras/flujo/flujo-panel.tsx"))).toContain("descargarFlujo(");
+    expect(sinComentarios(fuente("src/app/(app)/compras/registro/registro-panel.tsx"))).toContain("descargarCompras(visibles)");
   });
 
   it("los tipos de la API se importan de los contratos del módulo y no se duplican", () => {

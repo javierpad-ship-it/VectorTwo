@@ -25,25 +25,63 @@ export type ParametrosCompras = {
   estado: EstadoCompra | null;
   proveedor: string | null;
   origen: OrigenCompra | null;
+  /** Mes de entrega (`aaaa-mm`): compras con alguna entrega entre `desde` y `hasta`, ambos incluidos. */
+  desde: string | null;
+  hasta: string | null;
+  /** Ids del árbol de producto y de la marca (viajan al servidor). */
+  genero: string | null;
+  mundo: string | null;
+  linea: string | null;
+  marca: string | null;
   porConfirmar: boolean;
   q: string;
   importar: boolean;
 };
 
-export const PARAMETROS_COMPRAS_VACIOS: ParametrosCompras = { compra: null, estado: null, proveedor: null, origen: null, porConfirmar: false, q: "", importar: false };
+export const PARAMETROS_COMPRAS_VACIOS: ParametrosCompras = {
+  compra: null,
+  estado: null,
+  proveedor: null,
+  origen: null,
+  desde: null,
+  hasta: null,
+  genero: null,
+  mundo: null,
+  linea: null,
+  marca: null,
+  porConfirmar: false,
+  q: "",
+  importar: false,
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export function leerParametrosCompras(get: (clave: string) => string | null): ParametrosCompras {
   const estado = get("estado");
   const origen = get("origen");
-  const compra = get("compra");
-  const proveedor = get("proveedor");
+  const uuidONulo = (k: string) => {
+    const v = get(k);
+    return v !== null && UUID.test(v) ? v : null;
+  };
+  const mesONulo = (k: string) => {
+    const v = get(k);
+    return v !== null && MES.test(v) ? v : null;
+  };
+  const desde = mesONulo("desde");
+  const hasta = mesONulo("hasta");
   return {
-    compra: compra !== null && UUID.test(compra) ? compra : null,
+    compra: uuidONulo("compra"),
     estado: (ESTADOS_COMPRA as readonly string[]).includes(estado ?? "") ? (estado as EstadoCompra) : null,
-    proveedor: proveedor !== null && UUID.test(proveedor) ? proveedor : null,
+    proveedor: uuidONulo("proveedor"),
     origen: (ORIGENES_COMPRA as readonly string[]).includes(origen ?? "") ? (origen as OrigenCompra) : null,
+    // Un rango al revés (`desde` después de `hasta`) se ignora entero: la API lo rechazaría con 400.
+    desde: desde !== null && hasta !== null && desde > hasta ? null : desde,
+    hasta: desde !== null && hasta !== null && desde > hasta ? null : hasta,
+    genero: uuidONulo("genero"),
+    mundo: uuidONulo("mundo"),
+    linea: uuidONulo("linea"),
+    marca: uuidONulo("marca"),
     porConfirmar: get("por_confirmar") === "1",
     q: get("q") ?? "",
     importar: get("importar") === "1",
@@ -56,6 +94,12 @@ export function consultaCompras(p: ParametrosCompras): string {
   if (p.estado) q.set("estado", p.estado);
   if (p.proveedor) q.set("proveedor", p.proveedor);
   if (p.origen) q.set("origen", p.origen);
+  if (p.desde) q.set("desde", p.desde);
+  if (p.hasta) q.set("hasta", p.hasta);
+  if (p.genero) q.set("genero", p.genero);
+  if (p.mundo) q.set("mundo", p.mundo);
+  if (p.linea) q.set("linea", p.linea);
+  if (p.marca) q.set("marca", p.marca);
   if (p.porConfirmar) q.set("por_confirmar", "1");
   if (p.q.trim() !== "") q.set("q", p.q);
   if (p.importar) q.set("importar", "1");
@@ -64,10 +108,32 @@ export function consultaCompras(p: ParametrosCompras): string {
 
 /** Lo que viaja al servidor; el texto libre se aplica en el navegador (`filtrarCompras`). */
 export function filtrosCompras(p: ParametrosCompras): FiltrosCompras {
-  return { estado: p.estado ?? undefined, proveedor_id: p.proveedor ?? undefined, origen: p.origen ?? undefined, por_confirmar: p.porConfirmar || undefined };
+  return {
+    estado: p.estado ?? undefined,
+    proveedor_id: p.proveedor ?? undefined,
+    origen: p.origen ?? undefined,
+    llegada_desde: p.desde ?? undefined,
+    llegada_hasta: p.hasta ?? undefined,
+    genero_id: p.genero ?? undefined,
+    mundo_id: p.mundo ?? undefined,
+    linea_id: p.linea ?? undefined,
+    marca_id: p.marca ?? undefined,
+    por_confirmar: p.porConfirmar || undefined,
+  };
 }
 
-export const hayFiltrosCompras = (p: ParametrosCompras): boolean => p.estado !== null || p.proveedor !== null || p.origen !== null || p.porConfirmar || p.q.trim() !== "";
+export const hayFiltrosCompras = (p: ParametrosCompras): boolean =>
+  p.estado !== null ||
+  p.proveedor !== null ||
+  p.origen !== null ||
+  p.desde !== null ||
+  p.hasta !== null ||
+  p.genero !== null ||
+  p.mundo !== null ||
+  p.linea !== null ||
+  p.marca !== null ||
+  p.porConfirmar ||
+  p.q.trim() !== "";
 
 /** Número, proveedor, referencia y nota; sin distinguir mayúsculas ni acentos. */
 export function filtrarCompras(compras: readonly CompraApi[], q: string): CompraApi[] {

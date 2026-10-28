@@ -2,6 +2,7 @@ import type { AvisoFila, CatalogoFlujoApi, ConciliacionFilaApi, FilaFlujoListaAp
 import { SOLO_CONCILIACION, SOLO_FLUJO } from "@/lib/flujo/tipos-api";
 import type { ClaveFila } from "@/lib/flujo/use-flujo";
 import type { ArbolRespuesta } from "@/lib/arbol/tipos-api";
+import type { FiltroExcelFlujo } from "@/lib/flujo/excel";
 import { OPCIONES_HISTORIA, type MesesHistoria } from "./matriz";
 import { sumarMes, unidades } from "./formato";
 
@@ -117,6 +118,23 @@ export function filtrosConciliacion(p: ParametrosFlujo): FiltrosConciliacion {
   };
 }
 
+/**
+ * Los filtros que reciben las hojas de Excel. El servidor ya filtró la lista, así que esto solo rotula la hoja `FILTROS` y es inocuo
+ * al volver a filtrar, salvo en «Falta»: en el servidor incluye el quiebre y en la hoja no, de modo que ese chip no se manda.
+ */
+export function filtroExcelFlujo(p: ParametrosFlujo): FiltroExcelFlujo {
+  return {
+    genero_id: p.genero ?? undefined,
+    mundo_id: p.mundo ?? undefined,
+    agrupacion_marca_id: p.agrupacion ?? undefined,
+    solo: p.solo === "falta" ? undefined : (p.solo ?? undefined),
+    mio: p.mio || undefined,
+  };
+}
+
+/** Códigos de error de «Aceptar sugerencia» que significan «lo que mirabas ya cambió»: la pantalla relee sola. */
+export const CODIGOS_QUE_PIDEN_RECARGA: ReadonlySet<string> = new Set(["sugerencia_vencida", "compra_cambio", "excede_pendiente", "no_pertenece", "tipo_no_disponible", "fila_no_encontrada"]);
+
 export const hayFiltros = (p: ParametrosFlujo): boolean =>
   p.genero !== null || p.mundo !== null || p.linea !== null || (p.pestana === "flujo" ? p.agrupacion !== null || p.solo !== null : p.soloConciliacion !== null) || p.mio;
 
@@ -162,6 +180,10 @@ export type FilaDeLista = {
   genero: string;
   mundo: string;
   linea: string;
+  /** Ids del nodo (el catálogo trae `linea_id` desde T3b); `null` si el catálogo no los trae. */
+  generoId: string | null;
+  mundoId: string | null;
+  lineaId: string | null;
   equivalencia: string | null;
   agrupacion: string;
   /** Texto de ordenar y buscar. */
@@ -172,14 +194,83 @@ export const claveDeFila = (f: Pick<FilaFlujoListaApi, "gml_id" | "equivalencia_
 
 export function filasDeLista(filas: readonly FilaFlujoListaApi[], catalogo: CatalogoFlujoApi): FilaDeLista[] {
   return filas.map((fila) => {
-    const nodo = catalogo.nodos[fila.equivalencia_id ?? fila.gml_id];
+    const nodo = catalogo.nodos[fila.equivalencia_id ?? fila.gml_id] ?? catalogo.nodos[fila.gml_id];
     const genero = nodo?.genero ?? "—";
     const mundo = nodo?.mundo ?? "—";
     const linea = nodo?.linea ?? "—";
     const equivalencia = nodo?.equivalencia ?? null;
     const agrupacion = catalogo.agrupaciones[fila.agrupacion_marca_id] ?? "—";
-    return { clave: claveDeFila(fila), fila, genero, mundo, linea, equivalencia, agrupacion, ruta: `${genero} · ${mundo} · ${linea}${equivalencia ? ` › ${equivalencia}` : ""}` };
+    return {
+      clave: claveDeFila(fila),
+      fila,
+      genero,
+      mundo,
+      linea,
+      generoId: nodo?.genero_id ?? null,
+      mundoId: nodo?.mundo_id ?? null,
+      lineaId: nodo?.linea_id ?? null,
+      equivalencia,
+      agrupacion,
+      ruta: `${genero} · ${mundo} · ${linea}${equivalencia ? ` › ${equivalencia}` : ""}`,
+    };
   });
+}
+
+// ─── Totales por género, mundo y línea (ficha 08 §4.3) ───
+
+export type NivelGrupo = "genero" | "mundo" | "linea";
+export const NIVELES_GRUPO: readonly NivelGrupo[] = ["genero", "mundo", "linea"];
+export const ETIQUETA_NIVEL_GRUPO: Record<NivelGrupo, string> = { genero: "Por género", mundo: "Por mundo", linea: "Por línea" };
+
+export type GrupoTotales = {
+  clave: string;
+  nombre: string;
+  filas: number;
+  /** Stock de la cadena al cierre de `k'` y, de él, el del CD. */
+  stock: number;
+  stockCd: number;
+  /** IMI del grupo = stock ÷ suma de las ventas promedio de sus filas con curva; `null` si no hay venta. */
+  imi: number | null;
+  /** `Σ` del saldo de los próximos `N` meses y de lo que viene en camino. */
+  saldo: number;
+  enCamino: number;
+  /** Filas en falta (con el quiebre) y en exceso, y filas sin curva (fuera del IMI, como en el total general). */
+  enFalta: number;
+  enExceso: number;
+  sinCurva: number;
+  porConfirmar: number;
+};
+
+/**
+ * Totales por género, mundo o línea de las filas de la lista, sin pedir nada más a la API: salen de `resumen` y `stock_k` de cada fila.
+ * Las filas sin curva no entran al IMI (igual que en el total general, §0.10); su stock sí cuenta en «Stock». El IMI usa la venta
+ * promedio de cada fila (`vpm_k`, con un decimal), así que puede diferir en décimas del que daría el servidor para ese grupo.
+ * Ordenados por saldo, de mayor a menor.
+ */
+export function totalesPorGrupo(filas: readonly FilaDeLista[], nivel: NivelGrupo): GrupoTotales[] {
+  const grupos = new Map<string, GrupoTotales & { stockImi: number; vpm: number }>();
+  for (const f of filas) {
+    const g = nivel === "genero" ? { clave: f.generoId ?? f.genero, nombre: f.genero } : nivel === "mundo" ? { clave: `${f.generoId ?? f.genero}|${f.mundoId ?? f.mundo}`, nombre: `${f.genero} · ${f.mundo}` } : { clave: f.lineaId ?? `${f.generoId ?? f.genero}|${f.mundoId ?? f.mundo}|${f.linea}`, nombre: `${f.genero} · ${f.mundo} · ${f.linea}` };
+    const t = grupos.get(g.clave) ?? { ...g, filas: 0, stock: 0, stockCd: 0, imi: null, saldo: 0, enCamino: 0, enFalta: 0, enExceso: 0, sinCurva: 0, porConfirmar: 0, stockImi: 0, vpm: 0 };
+    const r = f.fila.resumen;
+    t.filas += 1;
+    t.stock += f.fila.stock_k.total;
+    t.stockCd += f.fila.stock_k.cd;
+    t.saldo += r.saldo_n_meses;
+    t.enCamino += r.en_camino;
+    t.porConfirmar += r.por_confirmar;
+    if (r.senal === "falta" || r.senal === "quiebre") t.enFalta += 1;
+    if (r.senal === "exceso") t.enExceso += 1;
+    if (r.senal === "sin_curva") t.sinCurva += 1;
+    else {
+      t.stockImi += f.fila.stock_k.total;
+      t.vpm += r.vpm_k ?? 0;
+    }
+    grupos.set(g.clave, t);
+  }
+  return [...grupos.values()]
+    .map(({ stockImi, vpm, ...t }) => ({ ...t, imi: vpm > 0 ? stockImi / vpm : null }))
+    .sort((a, b) => b.saldo - a.saldo || a.nombre.localeCompare(b.nombre, "es"));
 }
 
 export type ClaveOrden = "fila" | "estado" | "imi" | "saldo" | "stock" | "camino";

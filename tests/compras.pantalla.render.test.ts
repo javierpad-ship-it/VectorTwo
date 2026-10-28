@@ -8,7 +8,12 @@ import { DetalleFila } from "../src/components/compras/detalle-fila";
 import { DialogoCancelar } from "../src/components/compras/dialogo-cancelar";
 import { DialogoIngreso } from "../src/components/compras/dialogo-ingreso";
 import { DialogoParametros } from "../src/components/compras/dialogo-parametros";
+import { BarraFiltrosCompras } from "../src/components/compras/barra-filtros-compras";
 import { ImportarCompras, ReporteImportacionCompras } from "../src/components/compras/importar-compras";
+import { TotalesGrupo } from "../src/components/compras/totales-grupo";
+import { textoErrorImportar } from "../src/components/compras/use-importar-compras";
+import { ErrorApi } from "../src/lib/api-client";
+import { PARAMETROS_COMPRAS_VACIOS } from "../src/components/compras/vista-compras";
 import { ListaCompras } from "../src/components/compras/lista-compras";
 import { ListaFilas } from "../src/components/compras/lista-filas";
 import { PestanaConciliacion } from "../src/components/compras/pestana-conciliacion";
@@ -394,5 +399,45 @@ describe("Importar compras", () => {
     const r = reporteImportacionEjemplo("aplicar");
     r.no_aplicadas = [{ clave: "FERIA SUR|FS-001", proveedor: "Feria Sur", referencia: "FS-001", motivo: "compra_cambio", mensaje: "Otra persona cambió la compra." }];
     expect(html(createElement(ReporteImportacionCompras, { titulo: "4. Resultado", reporte: r, nombreArchivo: "a.xlsx" }))).toContain("Compras que no se aplicaron (1)");
+  });
+});
+
+describe("Flujo mensual: totales por género, mundo y línea", () => {
+  it("la tabla trae las columnas de la ficha, empieza por género y ofrece mundo y línea", () => {
+    const flujo = flujoEjemplo();
+    const h = html(createElement(TotalesGrupo, { filas: filasDeLista(flujo.filas, flujo.catalogo), rango: { imi_min: 4, imi_max: 8 }, meses: 6 }));
+    for (const t of ["Totales por género, mundo y línea", "Por género", "Por mundo", "Por línea", "Stock cadena", "Saldo 6 m", "En camino", "En falta", "En exceso", "Por confirmar", "HOMBRE"]) expect(h, t).toContain(t);
+    expect(h).toContain("overflow-x-auto");
+  });
+});
+
+describe("Compras: filtros de la lista", () => {
+  const props = {
+    parametros: PARAMETROS_COMPRAS_VACIOS,
+    proveedores: [{ id: "p1", nombre: "Proveedor Norte" }],
+    generos: [{ id: "g1", nombre: "HOMBRE" }],
+    mundos: [{ id: "m1", nombre: "URBANO" }],
+    lineas: [{ id: "l1", nombre: "DENIM" }],
+    marcas: [{ id: "k1", nombre: "ALFA" }],
+    onCambiar: noop,
+  };
+
+  it("ofrece mes de entrega, género, mundo, línea y marca además de estado, proveedor y origen", () => {
+    const h = html(createElement(BarraFiltrosCompras, props));
+    for (const t of ["Entrega desde", "Entrega hasta", "Género", "Mundo", "Línea", "Marca", "Proveedor", "Origen", "Buscar", "Por confirmar", "Proveedor Norte", "ALFA", "DENIM"]) expect(h, t).toContain(t);
+    expect(h).toContain('type="month"');
+    expect(h).not.toContain("Quitar filtros");
+  });
+
+  it("con algún filtro activo aparece «Quitar filtros»", () => {
+    expect(html(createElement(BarraFiltrosCompras, { ...props, parametros: { ...PARAMETROS_COMPRAS_VACIOS, desde: "2026-11" } }))).toContain("Quitar filtros");
+  });
+});
+
+describe("Importar compras: errores de la API", () => {
+  it("un 403 explica quién puede importar y los demás errores salen con el mensaje de la API", () => {
+    expect(textoErrorImportar(new ErrorApi("Tu rol es de solo lectura.", 403))).toContain("administración y planeamiento");
+    expect(textoErrorImportar(new ErrorApi("Por ahora solo se pueden importar compras ya hechas: marca la casilla.", 400, "carga_inicial_requerida"))).toContain("marca la casilla");
+    expect(textoErrorImportar(new Error("sin red"))).toBe("sin red");
   });
 });

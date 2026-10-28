@@ -3,15 +3,16 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { api } from "@/lib/api-client";
 import { useArbol } from "@/lib/arbol/use-arbol";
 import type { Rol } from "@/lib/auth/roles";
-import { leerCompra } from "@/lib/compras/use-compras";
+import { NOMBRE_ARCHIVO_FLUJO } from "@/lib/flujo/excel";
 import { IMI_MAX, IMI_MIN } from "@/lib/flujo/tipos";
-import type { ConciliacionFilaApi, SugerenciaApi } from "@/lib/flujo/tipos-api";
-import { aceptarSugerencia, useAccion, useConciliacion, useFilaFlujo, useFlujo, useHuecos } from "@/lib/flujo/use-flujo";
+import type { ConciliacionApi, ConciliacionFilaApi, FlujoApi, SugerenciaApi } from "@/lib/flujo/tipos-api";
+import { aceptarSugerencia, urlConciliacion, urlFlujo, useAccion, useConciliacion, useFilaFlujo, useFlujo, useHuecos } from "@/lib/flujo/use-flujo";
 import type { AgrupacionMarcaFila } from "@/lib/marcas/tipos-api";
 import { useColeccion } from "@/lib/use-coleccion";
-import { plural } from "@/lib/formato";
+import { mensajeError, plural } from "@/lib/formato";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,6 +22,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { AvisoPorConfirmar } from "@/components/compras/aviso-por-confirmar";
 import { AvisosFlujo } from "@/components/compras/avisos-flujo";
 import { BarraFiltrosFlujo } from "@/components/compras/barra-filtros-flujo";
+import { descargarFlujo } from "@/components/compras/descarga";
 import { DetalleFila } from "@/components/compras/detalle-fila";
 import { DialogoParametros } from "@/components/compras/dialogo-parametros";
 import { mesLargo } from "@/components/compras/formato";
@@ -29,10 +31,13 @@ import { columnasTotales, filasMatrizTotales } from "@/components/compras/matriz
 import { resumenIngreso } from "@/components/compras/vista-compras";
 import { PestanaConciliacion } from "@/components/compras/pestana-conciliacion";
 import { TablaMatriz } from "@/components/compras/tabla-matriz";
+import { TotalesGrupo } from "@/components/compras/totales-grupo";
 import {
+  CODIGOS_QUE_PIDEN_RECARGA,
   consultaFlujo,
   filasDeLista,
   filtrarPorTexto,
+  filtroExcelFlujo,
   filtrosConciliacion,
   filtrosFlujo,
   leerParametrosFlujo,
@@ -80,6 +85,7 @@ export function FlujoPanel({ rol }: { rol: Rol }) {
   const [paginado, setPaginado] = useState<{ clave: string; limite: number }>({ clave: "", limite: PAGINA });
   const [dialogoParametros, setDialogoParametros] = useState(false);
   const [aceptando, setAceptando] = useState<string | null>(null);
+  const [exportando, setExportando] = useState(false);
   const [mensaje, setMensaje] = useState<Mensaje | null>(null);
 
   const irA = (siguiente: ParametrosFlujo, modo: "push" | "replace") => {
@@ -121,6 +127,8 @@ export function FlujoPanel({ rol }: { rol: Rol }) {
   };
 
   const periodoConciliado = parametros.periodo ?? conciliacion.datos?.periodo ?? datos?.k_prima ?? "";
+  // Si el mes elegido falla (p. ej. no está publicado), no se deja a la vista la tabla de otro mes bajo el selector del nuevo.
+  const conciliacionVisible = conciliacion.error !== null && conciliacion.datos?.periodo !== periodoConciliado ? null : conciliacion.datos;
   const mesesParaConciliar = datos ? mesesConciliables(datos.k_prima) : periodoConciliado ? [periodoConciliado] : [];
 
   async function recargarTodo() {
@@ -130,23 +138,59 @@ export function FlujoPanel({ rol }: { rol: Rol }) {
   async function aceptar(fila: ConciliacionFilaApi, s: SugerenciaApi) {
     setMensaje(null);
     accion.limpiar();
-    setAceptando(s.entrega_id);
-    const r = await accion.ejecutar(async () => {
-      // La revisión vigente de la compra se lee justo antes de pedir la confirmación: si alguien la cambió, la API responde `compra_cambio`.
-      const compra = await leerCompra(s.compra_id);
-      const numeroLinea = compra.lineas.findIndex((l) => l.id === s.linea_id) + 1;
-      if (!confirm(`Confirmar ${resumenIngreso(s.compra_numero, numeroLinea, s.unidades, fila.periodo)}.`)) return null;
-      return aceptarSugerencia({ periodo: fila.periodo, linea_id: s.linea_id, entrega_id: s.entrega_id, unidades: s.unidades, revision: compra.revision });
-    });
-    setAceptando(null);
-    if (!r.ok) {
-      // Una sugerencia vencida o una compra que cambió se arreglan releyendo.
-      if (r.error.codigo === "sugerencia_vencida" || r.error.codigo === "compra_cambio") await recargarTodo();
+    // La conciliación ya trae la `revision` vigente de la compra: se manda tal cual, sin leer la compra antes. Si otra persona la cambió
+    // desde entonces, la API responde `compra_cambio`.
+    if (s.revision === undefined) {
+      accion.setError({ mensaje: "Esta sugerencia no trae la versión actual de la compra. Recargamos la conciliación: inténtalo de nuevo.", codigo: null });
+      await recargarTodo();
       return;
     }
-    if (r.valor === null) return;
-    setMensaje({ tono: "exito", texto: `Ingreso confirmado: ${s.unidades} u de ${s.compra_numero} en ${mesLargo(fila.periodo)}, a tu nombre.` });
+    const revision = s.revision;
+    if (!confirm(`Confirmar ${resumenIngreso(s.compra_numero, null, s.unidades, fila.periodo)} (entrega de ${mesLargo(s.periodo_entrega)}).`)) return;
+    setAceptando(s.entrega_id);
+    const r = await accion.ejecutar(() => aceptarSugerencia({ periodo: fila.periodo, linea_id: s.linea_id, entrega_id: s.entrega_id, unidades: s.unidades, revision }));
+    setAceptando(null);
+    if (!r.ok) {
+      // Una sugerencia vencida o una compra que cambió se arreglan releyendo; el mensaje de la API queda visible.
+      if (r.error.codigo !== null && CODIGOS_QUE_PIDEN_RECARGA.has(r.error.codigo)) await recargarTodo();
+      return;
+    }
+    setMensaje({ tono: "exito", texto: `Ingreso confirmado: ${s.unidades} u de ${r.valor.compra.numero} en ${mesLargo(fila.periodo)}, a tu nombre. Queda en el historial de la compra.` });
     await recargarTodo();
+  }
+
+  /**
+   * Excel (ficha 08 §4.3): `FLUJO`, `SALDO`, `PARAMETROS` y `FILTROS` con los filtros de pantalla, más `CONCILIACION` del mes que se mira. Parte
+   * de lo que la pantalla ya leyó; lo que no está abierto (la lista, si se mira el detalle o la conciliación; la conciliación, si se mira la
+   * lista) se lee ahora con los mismos filtros, por las mismas rutas.
+   */
+  async function exportar() {
+    if (datos === null) return;
+    setMensaje(null);
+    accion.limpiar();
+    setExportando(true);
+    const r = await accion.ejecutar(async () => {
+      const flujo = lista.datos ?? (await api.get<FlujoApi>(urlFlujo(filtrosFlujo(parametros))));
+      let conc: ConciliacionApi | null = null;
+      let sinConciliacion: string | null = null;
+      if (parametros.pestana === "conciliacion") conc = conciliacionVisible;
+      else {
+        try {
+          conc = await api.get<ConciliacionApi>(urlConciliacion(filtrosConciliacion(parametros)));
+        } catch (e) {
+          sinConciliacion = mensajeError(e);
+        }
+      }
+      await descargarFlujo({ flujo, conciliacion: conc, filtro: filtroExcelFlujo(parametros) });
+      return sinConciliacion;
+    });
+    setExportando(false);
+    if (!r.ok) return;
+    setMensaje(
+      r.valor === null
+        ? { tono: "exito", texto: `Excel descargado (${NOMBRE_ARCHIVO_FLUJO}) con los filtros que ves.` }
+        : { tono: "alerta", texto: `Excel descargado (${NOMBRE_ARCHIVO_FLUJO}), pero sin la hoja de conciliación: ${r.valor}` }
+    );
   }
 
   async function parametrosGuardados() {
@@ -175,6 +219,16 @@ export function FlujoPanel({ rol }: { rol: Rol }) {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {datos && (
+            <Button
+              variante="secundario"
+              onClick={() => void exportar()}
+              disabled={exportando || (enLista && lista.cargando) || (parametros.pestana === "conciliacion" && conciliacion.cargando)}
+              title="Descarga el flujo con los filtros que ves, en Excel"
+            >
+              {exportando ? "Preparando Excel…" : "Excel"}
+            </Button>
+          )}
           {puedeEscribir && datos && (
             <Button variante="secundario" onClick={() => setDialogoParametros(true)}>
               Parámetros
@@ -228,6 +282,7 @@ export function FlujoPanel({ rol }: { rol: Rol }) {
                   titulo="Totales del flujo de las filas mostradas"
                 />
               </Card>
+              <TotalesGrupo filas={filasLista} rango={rango} meses={rango.meses_tarjeta} />
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div className="w-full max-w-xs">
                   <label className="mb-1 block text-sm font-medium text-tinta" htmlFor="buscar-fila">
@@ -273,7 +328,7 @@ export function FlujoPanel({ rol }: { rol: Rol }) {
         <div className="space-y-4">
           <BarraFiltrosFlujo parametros={parametros} generos={opciones.generos} mundos={opciones.mundos} lineas={opciones.lineas} agrupaciones={opcionesAgrupacion} onCambiar={cambiar} />
           <PestanaConciliacion
-            datos={conciliacion.datos}
+            datos={conciliacionVisible}
             cargando={conciliacion.cargando}
             periodo={periodoConciliado}
             meses={mesesParaConciliar}

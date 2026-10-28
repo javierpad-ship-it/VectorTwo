@@ -99,10 +99,10 @@ function mensajeConfirmarAplicar(nombre: string, r: ReporteImportacionComprasApi
  * duplica nada, insertar o corregir filas solo afecta a esas filas, y las líneas cambiadas se omiten (para corregirlas se cancela la compra
  * y se reimporta). Crea proveedores nuevos; nunca marcas ni árbol de producto.
  */
-export function ImportarCompras({ onAplicado }: { onAplicado: () => void }) {
+export function ImportarCompras({ onAplicado, onImportado }: { onAplicado: () => void; onImportado?: () => void }) {
   // La casilla es obligatoria en `0.13.0`: arranca marcada y sin ella la API responde 400.
   const [cargaInicial, setCargaInicial] = useState(true);
-  const imp = useImportarCompras({ campos: CAMPOS, cargaInicial, confirmarAplicar: mensajeConfirmarAplicar });
+  const imp = useImportarCompras({ campos: CAMPOS, cargaInicial, confirmarAplicar: mensajeConfirmarAplicar, alAplicar: onImportado });
   const { archivo, previa, previaVigente, final } = imp;
 
   return (
@@ -159,7 +159,7 @@ export function ImportarCompras({ onAplicado }: { onAplicado: () => void }) {
       {final && archivo && (
         <>
           <Alert tono={final.no_aplicadas.length === 0 ? "exito" : "alerta"}>
-            {final.no_aplicadas.length === 0 ? "Importación aplicada. " : `Importación aplicada con ${plural(final.no_aplicadas.length, "compra sin aplicar", "compras sin aplicar")}: reimporta el archivo y se completará lo que falte. `}
+            {final.no_aplicadas.length === 0 ? "Importación aplicada. " : `Importación aplicada con ${plural(final.no_aplicadas.length, "compra sin aplicar", "compras sin aplicar")}: pulsa Previsualizar otra vez y aplica de nuevo; se completará lo que falte. `}
             {resumen(final)}
             <span className="ml-3">
               <Button tamano="sm" onClick={onAplicado}>
