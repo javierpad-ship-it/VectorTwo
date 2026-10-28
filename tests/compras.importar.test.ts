@@ -350,6 +350,12 @@ describe("omisiones de la fila", () => {
     expect(motivos(previsualizar([fila({ proveedor: "" })]))).toEqual(["proveedor_requerido"]);
   });
 
+  it("PROVEEDOR de más de 120 caracteres y REFERENCIA de más de 80 se omiten; en el tope exacto pasan", () => {
+    expect(motivos(previsualizar([fila({ proveedor: "P".repeat(121) })]))).toEqual(["proveedor_largo"]);
+    expect(motivos(previsualizar([fila({ referencia: "R".repeat(81) })]))).toEqual(["referencia_larga"]);
+    expect(motivos(previsualizar([fila({ proveedor: "P".repeat(120), referencia: "R".repeat(80) })]))).toEqual([]);
+  });
+
   it("la misma clave dos veces → linea_repetida con la fila original; manda la primera válida", () => {
     const r = previsualizar([fila(), fila({ unidades: "300", llegada: "2026-12" })]);
     expect(r.reporte.omitidas).toEqual([

@@ -48,6 +48,13 @@ describe("leerCuerpo: tope de tamaño", () => {
     expect(respuesta?.status).toBe(413);
   });
 
+  it("el tope cuenta bytes, no caracteres: 4 MB de «ñ» (8 MB en UTF-8) dan 413", async () => {
+    const grande = JSON.stringify({ x: "ñ".repeat(4 * 1024 * 1024) });
+    expect(grande.length).toBeLessThan(MAX_BYTES_CUERPO);
+    const { respuesta } = await leerCuerpo(peticion(grande), esquema);
+    expect(respuesta?.status).toBe(413);
+  });
+
   it("JSON inválido sigue dando 400", async () => {
     const { respuesta } = await leerCuerpo(peticion("{no es json"), esquema);
     expect(respuesta?.status).toBe(400);

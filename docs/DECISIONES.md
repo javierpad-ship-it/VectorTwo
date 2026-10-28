@@ -1022,3 +1022,121 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Descartado.** Preguntar cada vez «mantener el total / subir el total» (la ficha original del arquitecto, con `ajuste_tienda`, `Modal` y `409 excede_total_tienda`); mantener el total de la tienda y absorber el cambio en las demás filas; mostrar solo las 3 marcas reescaladas a 100 %; una migración para guardar la composición por marca de las filas de tienda (`participaciones.por_marca` de la fila base ya la trae).
 
 **Consecuencia a tener presente.** El total movido es una decisión explícita del planner (lleva quién, cuándo y «ajustado desde la línea G · M · L»), y nunca queda por debajo de lo fijado a mano. La medición de bytes y tiempo de `/lineas` frente a `0.10.6` no se hizo.
+
+## 2026-10-16 · M7 (07c): el crecimiento del año siguiente es bruto y todas las filas de un género × mundo crecen igual (construido 2026-10-17, `0.10.8`)
+
+**Decisión.** El % que escribe el planner para el año siguiente es la **variación bruta** `Y+1 ÷ Y` de las mismas tiendas de `Y+1`: incluye la tienda que abrió a fines de `Y−1`, excluye las que cierran en `Y+1` y no corrige por el Niño. Vale en la celda del género × mundo, en el Resto y en la fila. La propuesta es `P = round(B × (1 + g))`, donde `B` es la base de las mismas tiendas, y el factor del Niño del año siguiente solo da forma al reparto mensual, no mueve el total. Dentro de un género × mundo todas las filas crecen el mismo %. Precedencia: fila fijada a mano, luego la celda del GM, luego el Resto.
+
+**Por qué.** Javier lo pidió así («variación bruta 2027 ÷ 2026»). Con el 20 % aplicado sobre la base normalizada por el Niño, la pantalla mostraba +25 %: el planner escribía un número y veía otro. Repartir el rebote del Niño dentro de cada GM habría inventado diferencias entre filas que nadie decidió.
+
+**Descartado.** Aplicar el % sobre la base normalizada (ajusta la decisión del 2026-10-15 de que el año siguiente es la base normalizada por el crecimiento: la normalización se mantiene en el cierre del año en curso y queda como referencia en el siguiente); repartir el rebote del Niño entre las filas.
+
+## 2026-10-16 · M7 (07c): la matriz tiene solo Hombre, Mujer y el Resto, se llena entera, y guardar siempre recalcula (construido 2026-10-17, `0.10.8`)
+
+**Decisión.** La matriz de crecimientos tiene los mundos como filas y, como columnas, HOMBRE, MUJER y el **Resto** (el crecimiento objetivo de todo lo demás, que es `crecimiento_pct_defecto`). Todas las celdas son obligatorias. «Calcular promedio» (en el navegador) pondera lo escrito por las unidades base, lo compara con un objetivo global opcional y muestra el puente hasta el Total. Hay un único botón «Guardar y recalcular»: el recálculo se encadena en el servidor con el candado tomado. `crecimientos_cambiados` y `version_metodo` no se pueden forzar al cerrar. `VERSION_METODO` pasa a 4.
+
+**Por qué.** Javier dijo «yo tengo que llenar todos los cuadrados» y pidió un ponderado de lo que escribe, no una sugerencia por celda. Un «Guardar» suelto dejaba filas con `meses` y `propuesto` viejos (hallazgo bloqueante de la revisión).
+
+**Descartado.** Sugerencia de % por celda con «Usar»; guardar sin recalcular; permitir cerrar con `crecimientos_cambiados`.
+
+**Consecuencia.** El Modal «Pisar / Conservar / Cancelar» de esta versión (con `huella_choque`) lo retira la entrada siguiente de 06d: el crecimiento deja de escribirse dentro de la proyección.
+
+## 2026-10-27 · M6 (06d): el crecimiento por género × mundo es global y versionado; se aprueba en M6 y M7 lo lee (construido `0.12.1`)
+
+**Decisión.** El crecimiento bruto del año siguiente por género × mundo (GM) y el Resto es un **supuesto global y versionado por año**, con nota, quién y cuándo, igual que las curvas. Se analiza y se aprueba en una pestaña nueva de Curvas de estacionalidad («Crecimiento por género × mundo», migración `0027`), y **todas las proyecciones lo leen**. Reemplaza la matriz por proyección de 07c: la pestaña Crecimientos de la proyección queda de solo lectura (con enlace «Analizar y aprobar») y `PUT …/crecimientos` responde `410`. Solo se aprueban **HOMBRE y MUJER** por mundo más el **Resto**; los demás géneros con venta se analizan y se ven, pero siguen al Resto. M7 aplica: fila fijada a mano, luego GM aprobado, luego Resto aprobado, luego `crecimiento_pct_defecto` (Resto provisional). Aprobar una versión nueva deja las proyecciones con «crecimientos cambiados» (hay que recalcular; no se fuerza) y una proyección cerrada no cambia.
+
+**Por qué.** Javier no quiere reescribir el crecimiento dentro de cada proyección: quiere mirar la curva de venta de cada GM de las mismas tiendas y decidir una sola vez. Con un supuesto global hay una sola respuesta a «¿cuánto crece Hombre Urbano?», con su historia y su autor.
+
+**Descartado.** Seguir con la matriz por proyección (cada proyección con su propia respuesta); aprobar también los demás géneros (decisión de Javier: solo HOMBRE, MUJER y el Resto); dejar la pestaña de la proyección editable.
+
+## 2026-10-27 · M6 (06d): `proyeccion_crecimientos` es la foto de lo aplicado y el cierre exige crecimientos aprobados, sin excepción
+
+**Decisión.** `proyeccion_crecimientos` no se borra pero pasa a ser la **foto de lo aplicado**: cada cálculo la reescribe con los crecimientos por GM que usó (con `crecimiento_id` y `version` de la versión global), y el Resto usado va en `parametros.crecimiento_resto_usado`. B2 (recalcular el año siguiente al decidir), las explicaciones, las lecturas y las cerradas leen la foto; solo el cálculo lee el supuesto global. **Cerrar bloquea sin excepción** con el motivo `crecimientos_sin_aprobar` (falta HOMBRE o MUJER con filas base, o el Resto está provisional): no se puede forzar con `?forzar=1`. Una proyección cerrada no cambia al aprobar una versión nueva.
+
+**Por qué.** Una cerrada es lo que M8 lee: debe poder explicarse sin depender de lo que se apruebe después. Leer de la foto garantiza que lo que se ve es lo que se aplicó. Javier decidió que cerrar sin aprobar esos crecimientos no se permite ni forzando, porque el año siguiente de una cerrada con un Resto provisional sería una cifra sin dueño.
+
+**Descartado.** Que las proyecciones lean siempre el global vigente (una cerrada cambiaría sola); permitir forzar el cierre.
+
+## 2026-10-27 · M6 (06d): referencias por comparables C(Z), `VERSION_METODO` sigue en 4 y lo que queda fuera de `0.12.1`
+
+**Decisión.** Las cifras de referencia del análisis (acumulado, cierre proyectado, años completos, lo aplicado hoy, con y sin Niño) usan **comparables por par de periodos, `C(Z)`**; el % aprobado se sigue aplicando sobre `B`, la base de las mismas tiendas, y las cifras que dependen de la proyección exigen `version_metodo ≥ 4`. **`VERSION_METODO` sigue en 4**: el método numérico no cambió, solo de dónde sale el %. Quedan **fuera de `0.12.1`**: «Alinear / Pisar-Conservar» (hoy hay 0 filas con % propio y 4 decididas; una fila vuelve al aprobado con «Volver a la propuesta»), `GET …/vigentes` (sin consumidor) y «Simulación %» (no existía en ninguna pantalla construida); el Modal de choque se borra. «Obsoleto por composición» solo cuenta cambios de GM de los nodos de la foto, y un **mundo desactivado con filas base se puede aprobar**.
+
+**Por qué.** Subir `VERSION_METODO` habría dejado todas las proyecciones en trabajo «desactualizadas: método nuevo» sin que cambiara ninguna fórmula. Los recortes salen de preguntarle a Javier qué se usa de verdad.
+
+**Descartado.** Subir `VERSION_METODO` a 5; construir `GET …/vigentes` «por si M8 lo necesita» (M8 no lo lee); comparar con una sola cohorte de tiendas para todas las cifras.
+
+## 2026-10-27 · M8: no hay recepción presunta; una persona confirma el ingreso de cada compra en un mes X (decisión 54)
+
+**Decisión.** Lo que vale para los meses cerrados es el **inventario publicado** (el ingreso se infiere de stock fin − stock inicio + ventas). El sistema **nunca deja de contar una entrega por su cuenta**: una entrega vencida (periodo ya cerrado, con pendiente) se sigue proyectando en el mes siguiente hasta que alguien **confirme su ingreso** en un mes X (una recepción con `recibida_periodo = X`), la cancele o, desde `0.13.1`, la mueva. En pantalla la acción se llama «Confirmar ingreso»; en la base y la API sigue siendo una recepción. Si la mercadería llegó y nadie confirmó, se cuenta dos veces (en el stock publicado y en el mes siguiente) hasta que alguien confirme: el sistema no lo corrige solo, pero lo hace visible (`posible_doble_conteo`, `entregas_sin_confirmar`, banda «por confirmar» en las tarjetas y chip «Por confirmar» en Flujo, Conciliación y Compras).
+
+**Por qué.** Javier: «Lo que va a valer al final es la data real subida de los ingresos. Lo que se tiene que hacer cuando se registren las compras es confirmar su ingreso en un mes X para dejar de considerarlo en el flujo futuro.» Una recepción presunta que consumiera las entregas vencidas contra el ingreso sin registrar habría escondido errores del registro.
+
+**Descartado.** Recepción presunta automática; dejar el doble conteo sin aviso; recibir siempre en el mes de la entrega (la mercadería a veces llega antes o después).
+
+## 2026-10-27 · M8: «Aceptar sugerencia» es el atajo de un clic para confirmar el ingreso, a nombre de quien lo acepta (decisión 55)
+
+**Decisión.** La conciliación propone, por entrega vencida o adelantada, el mes X en que el inventario publicado la respalda (una sugerencia por entrega, asignación voraz). «Aceptar sugerencia» la registra con un clic y un `confirm` corto: crea la recepción con el nombre del usuario, `origen = sugerencia`, la fecha del último día de ese mes y el motivo «sugerencia de conciliación aaaa-mm», y deja el evento. **Nunca se ejecuta sola.** El servidor recalcula la sugerencia con los datos de hoy antes de escribir (`409 sugerencia_vencida` si cambió). En `0.13.0` solo líneas específicas: una recepción de lote toca varias filas y llega en `0.13.1`. El comprador ve las sugerencias sin el botón mientras la escritura sea del planner.
+
+**Por qué.** Javier pidió el clic; confirmar a mano cada entrega es lento cuando son muchas. La trazabilidad (quién y cuándo) hace que el atajo sea tan auditable como la confirmación manual.
+
+**Descartado.** Aceptar en bloque; crear recepciones solas desde la conciliación.
+
+## 2026-10-27 · M8: cancelar una compra con recepciones cierra el saldo (decisión 56)
+
+**Decisión.** Sin recepciones, cancelar deja la compra `cancelada` (inmutable; todo deja de contar y se libera la clave de importación). **Con recepciones, cancelar cierra el saldo**: cada línea guarda `unidades_canceladas = unidades − recibidas` y la compra queda **recibida con saldo cerrado** («Recibida · saldo cancelado»); las recepciones siguen valiendo. Si ya llegó todo, `409 recibida`. Sobre una compra con saldo cerrado se puede confirmar un ingreso tardío (hasta lo cancelado) y quitar una recepción.
+
+**Por qué.** Javier dijo que cancelar con recepciones es cerrar el saldo. Con «cancelada → 0», las recepciones posteriores al último mes publicado dejaban de sumar y la conciliación mostraba un falso ingreso sin registrar.
+
+**Descartado.** Cancelada con todo en cero aunque haya recepciones.
+
+## 2026-10-27 · M8: `0.13.0` se recorta y `0.13.1` trae captura manual, edición completa, aplicar reparto e impacto (decisión 57)
+
+**Decisión.** `0.13.0` es flujo, IMI, conciliación, confirmar ingresos, cancelar e importador de carga inicial (migración `0025` con **todo** el modelo de tablas, también las columnas que solo usará `0.13.1`). `0.13.1` (migración `0026`, solo funciones) trae captura manual, **edición completa de una compra confirmada** (cualquier campo, con historial; respuesta de Javier), aplicar reparto (por línea, compra o marca) e impacto. M9a pasa a la `0028` (la `0027` la tomó 06d). Mientras tanto, un error en una compra importada se corrige quitando sus recepciones, cancelándola y reimportando la fila corregida.
+
+**Por qué.** Javier recortó la `0.13.0` el 2026-10-27 con la lógica de la decisión 32: validar primero el flujo y el IMI antes de abrir la herramienta de captura y de edición. Crear todas las tablas en `0025` evita `alter table` sobre tablas con datos reales y regenerar tipos dos veces.
+
+**Descartado.** Entregar todo M8 de una vez; partir las tablas entre `0025` y `0026`.
+
+## 2026-10-27 · M8: las filas sin curva avisan y quedan fuera del IMI de los totales (decisión 58, provisional)
+
+**Decisión.** Una fila de la proyección cerrada con venta anual pero sin reparto mensual (sin curva de estacionalidad) no puede proyectar su IMI. El flujo **avisa** cuáles son, cuánta venta anual y cuánto stock tienen (`filas_sin_curva`), las **deja fuera del IMI de los totales** (su stock contaría sin su venta e inflaría el IMI de la compañía) y **no impide cerrar** la proyección en M7. Una fila con total 0 o nulo no es «sin curva». Las filas con stock y sin fila en la cerrada sí entran al IMI: es stock real que la proyección no espera vender. Provisional: el hito 3 se lo muestra a Javier para que confirme.
+
+**Por qué.** El revisor midió en la base que más de una de cada cinco filas base de la proyección en trabajo venía sin curva y que parte de ellas tenía stock; exigir curvas completas para cerrar habría bloqueado M7 por algo que se puede completar después, y contarlas en el IMI habría inflado el de toda la compañía.
+
+**Descartado.** Contarlas en el IMI total (lo infla); exigir curvas para cerrar la proyección.
+
+## 2026-10-27 · M8: una línea `intercompany_directo` con regla es una compra extraordinaria sumada a la reposición esperada (decisión 59, provisional)
+
+**Decisión.** Una línea de JH, DONATELLI o VAN HEUSEN con destino `intercompany_directo` y regla vigente suma su ingreso **además** de la reposición directa esperada (`pct_directo × demanda`). Lleva el aviso `directo_con_regla`: «Esta compra directa se suma a la reposición directa esperada… Si ya es parte de esa reposición habitual, se está contando dos veces». Sin regla vigente, `directo_sin_regla`. Es un supuesto: Javier no respondió esa pregunta, y el hito 4 se lo muestra.
+
+**Por qué.** Entre contarla dos veces con aviso y descartarla en silencio, la primera falla hacia el lado visible. La compra habitual ya está modelada como reposición esperada; una compra directa registrada a mano es, por definición, algo fuera de lo habitual.
+
+**Descartado.** Ignorar la compra directa cuando hay regla; sumarla sin avisar.
+
+## 2026-10-28 · M8: la auditoría de compras es inmutable por trigger, con una excepción para el borrado de usuarios (decisión 60)
+
+**Decisión.** `compra_eventos` es un registro insert-only: el trigger `compra_eventos_inmutable` rechaza todo `UPDATE` y `DELETE`, **también para `service_role`**, y las claves foráneas a `compras` y `compra_lineas` son `on delete restrict` (compras y líneas nunca se borran; se cancelan). Una **única excepción**: el `UPDATE` que solo pone `perfil_id` en `NULL`, que emite la clave foránea `on delete set null` cuando se elimina un usuario. Toda mutación de compras va por funciones plpgsql transaccionales (candado por `revision`, pertenencia y evento en la misma transacción) y la API no escribe las tablas directamente (lo vigila una prueba estática).
+
+**Por qué.** La API corre con `service_role`, así que un `revoke` no frena nada: el trigger es la defensa real de la auditoría. QA y seguridad detectaron que, sin excepción, borrar a un usuario que registró compras fallaba; `/usuarios` permite eliminar usuarios.
+
+**Descartado.** Inmutabilidad solo por prueba estática; `on delete cascade` hacia los eventos (borraría la auditoría); impedir eliminar usuarios con compras.
+
+**Límite conocido.** El trigger es por fila: un `TRUNCATE` con `service_role` no lo activa (pendiente M-3).
+
+## 2026-10-28 · M8: lectura en columnas, caché por huella y listas compactas (decisión 61)
+
+**Decisión.** El flujo se calcula a demanda y no se guarda. El stock se lee **un mes por llamada** (`stock_flujo(carga_id)`) y se cachea por `carga_id` **más la huella de `tiendas` y `marcas`**; cada lectura (cerrada, compras, reglas, repartos) se cachea por la parte de `flujo_huella_base()` que la gobierna y el resultado completo por la huella global, con *single-flight*. Las respuestas viajan compactas: la lista de flujo en series por columnas con nombres en un `catalogo` y `ResumenListaApi`, sin `repartos_vigentes` ni `reglas_intercompany`; Huecos con `catalogo`, índices y campos en cero omitidos (~0,35 a 0,39 MB). `GET /api/flujo` con 1 600 filas pesa 1,38 a 1,49 MiB frente a un presupuesto de 1,5 MB.
+
+**Por qué.** PostgREST devuelve a lo sumo 1 000 filas y la base corta cada sentencia a los 8 s. La forma inicial de la ficha pesaba 3,3 a 4 MB. QA encontró que cachear el stock solo por carga era incorrecto porque `stock_flujo` agrega con `tiendas` y `marcas`, que sí cambian.
+
+**Descartado.** Una función de trece meses con talla (~200 mil filas en un `jsonb`); cachear el stock solo por `carga_id`; devolver los nombres en cada fila.
+
+**Consecuencia.** Con 1 600 filas la lista está al límite: si crece, hay que pasar más campos al detalle.
+
+## 2026-10-28 · M8: el importador de carga inicial usa clave natural y exige referencia, número de línea y fecha (decisión 62)
+
+**Decisión.** Cada línea se identifica por proveedor + referencia + número de línea (`LINEA_ORDINAL`, que no es la línea de producto), de modo que insertar o corregir una fila no duplica lo demás; el contenido se compara por una huella y el resultado es `nueva`, `igual` o `cambiada` (en `0.13.0`, una `cambiada` se omite con su detalle; en `0.13.1` se aplicará como edición). Son **obligatorias** `REFERENCIA`, `LINEA_ORDINAL` y `FECHA_COMPRA`. Se valida que las filas de una misma compra coincidan en cabecera (`cabecera_inconsistente`) y que proveedor y referencia no pasen de su largo (`proveedor_largo`, `referencia_larga`). Una transacción por compra: un corte deja compras completas o ninguna, y reimportar completa lo que falta. Un lote de una marca sin reparto vigente en M12 se omite (`sin_reparto`).
+
+**Por qué.** El hash del contenido más un ordinal duplicaba todo lo que venía después de una fila corregida. Con la fecha de hoy como valor por defecto, el mismo archivo crearía compras nuevas al reimportarlo otro día.
+
+**Descartado.** Hash más ordinal; fecha de compra por defecto; importar lotes sin reparto (líneas que no contarían y que nadie podría arreglar hasta `0.13.1`).

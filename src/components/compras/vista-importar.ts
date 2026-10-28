@@ -6,7 +6,9 @@ import type { MotivoOmisionCompra } from "@/lib/compras/tipos-api";
  */
 export const ETIQUETA_MOTIVO_OMISION_COMPRA: Record<MotivoOmisionCompra, string> = {
   proveedor_requerido: "Falta el proveedor",
+  proveedor_largo: "Proveedor demasiado largo",
   referencia_requerida: "Falta la referencia",
+  referencia_larga: "Referencia demasiado larga",
   linea_requerida: "Falta el número de línea",
   linea_repetida: "Línea repetida en el archivo",
   cabecera_inconsistente: "Cabecera inconsistente",

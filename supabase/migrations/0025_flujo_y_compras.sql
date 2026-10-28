@@ -450,6 +450,8 @@ create index if not exists compra_eventos_created_at_idx on public.compra_evento
 create index if not exists compra_eventos_linea_id_idx on public.compra_eventos (linea_id);
 create index if not exists compra_eventos_perfil_id_idx on public.compra_eventos (perfil_id);
 
+-- Única excepción: el UPDATE que solo pone `perfil_id` en NULL (lo emite la FK `on delete set null` al borrar un perfil: el
+-- historial sobrevive sin el autor; el nombre se conserva en `usuario_nombre`). El DELETE nunca se permite.
 -- Trigger de inmutabilidad. Vale para TODOS los roles, `service_role` incluido: la API corre con él, así que un `revoke` no
 -- bastaría. (Un borrado en bloque con la sentencia de vaciado de tabla no pasa por un trigger de fila: la API nunca la ejecuta
 -- y la migración no la nombra.)
@@ -460,7 +462,13 @@ security invoker
 set search_path = ''
 as $$
 begin
-  raise exception 'compra_eventos es un registro inmutable: no admite update ni delete'
+  if tg_op = 'UPDATE'
+     and old.perfil_id is not null
+     and new.perfil_id is null
+     and (to_jsonb(new) - 'perfil_id') = (to_jsonb(old) - 'perfil_id') then
+    return new;
+  end if;
+  raise exception 'compra_eventos es un registro inmutable: no admite cambios ni borrados'
     using errcode = 'restrict_violation';
 end;
 $$;

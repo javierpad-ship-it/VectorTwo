@@ -50,7 +50,7 @@ export async function leerCuerpo<T>(request: Request, esquema: ZodType<T>): Prom
   try {
     const texto = await request.text();
     // Sin `content-length` (transferencia por trozos) el tamaño real manda.
-    if (texto.length > MAX_BYTES_CUERPO) return { datos: null, respuesta: error(MENSAJE_CUERPO_GRANDE, 413) };
+    if (Buffer.byteLength(texto, "utf8") > MAX_BYTES_CUERPO) return { datos: null, respuesta: error(MENSAJE_CUERPO_GRANDE, 413) };
     crudo = JSON.parse(texto);
   } catch {
     return { datos: null, respuesta: error("El cuerpo de la petición no es JSON válido.") };

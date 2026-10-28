@@ -102,3 +102,17 @@ Estado: **en definición con Javier; tres rondas de respuestas (2026-10-15).** E
 51. **Marcas representativas: 3 más «Otras» con su % real.** Las 3 marcas de más unidades por agrupación de marca (últimos 12 meses de las mismas tiendas) y «Otras» con su porcentaje real, que suma 100 %. No se reescalan a las 3. Es solo dato: no se decide ni se guarda por marca.
 52. **Orden de las agrupaciones de marca: PREMIUM → ULTRA LOW**, el de `agrupaciones_marca.orden`, en tablas, secciones y gráficos de la línea.
 53. **El gráfico anual de la línea incluye las tiendas nuevas** (nuevas del año anterior y aperturas del año), de modo que la barra, el «Total línea» y la Matriz coinciden.
+
+## Decisiones de M8 (2026-10-27 y 2026-10-28; numeración que sigue a la 53)
+
+Las decisiones 49 a 53 son de la ficha 07b. Las de M8 de esta tanda son las 54 a 62; el texto completo, con su porqué y lo descartado, está en `docs/DECISIONES.md` (entradas del 2026-10-27 y 2026-10-28). Las de Javier son 54 a 58 y las del equipo, 60 a 62; la 59 es un supuesto que Javier no respondió.
+
+54. **Sin recepción presunta:** una persona confirma el ingreso de cada compra en un mes X.
+55. **«Aceptar sugerencia»** es el atajo de un clic para ese ingreso, a nombre de quien lo acepta, nunca automático.
+56. **Cancelar con recepciones cierra el saldo.**
+57. **`0.13.0` se recorta;** `0.13.1` trae captura manual, edición completa, aplicar reparto e impacto.
+58. **Filas sin curva:** avisan y quedan fuera del IMI de los totales (provisional).
+59. **`intercompany_directo` con regla** es una compra extraordinaria con aviso (provisional; sin respuesta de Javier).
+60. **Auditoría inmutable por trigger,** con la excepción del borrado de usuarios.
+61. **Lectura en columnas, caché por huella (stock con huella de tiendas y marcas) y listas compactas.**
+62. **Importador con clave natural;** `REFERENCIA`, `LINEA_ORDINAL` y `FECHA_COMPRA` obligatorias.

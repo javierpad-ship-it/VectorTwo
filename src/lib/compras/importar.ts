@@ -31,7 +31,9 @@ import {
 } from "./reglas";
 import {
   MAX_ENTREGAS,
+  MAX_NOMBRE_PROVEEDOR,
   MAX_NOTA_LINEA,
+  MAX_REFERENCIA,
   MAX_UNIDADES_LINEA,
   TALLAS_COMPRA,
   TIPOS_LINEA_DISPONIBLES,
@@ -717,12 +719,14 @@ function procesarFila(
   // (1) Fila de totales o vacía.
   if ([cruda.proveedor, cruda.genero, cruda.marca].some((v) => normalizarNombre(v) === "TOTAL")) return falla("fila_total");
   if (proveedorTxt === "") return falla("proveedor_requerido", "Indica el proveedor.");
+  if (proveedorTxt.length > MAX_NOMBRE_PROVEEDOR) return falla("proveedor_largo", `El proveedor no puede superar ${MAX_NOMBRE_PROVEEDOR} caracteres.`);
 
   // (2) Cabecera: fecha, referencia y número de línea (la clave natural no existe sin ellos).
   const fecha = leerFechaCompra(cruda.fecha_compra);
   if (fecha === null) return falla("fecha_requerida", "La fecha de compra es obligatoria (aaaa-mm-dd).");
   if (fecha === "invalida") return falla("fecha_invalida", `«${cruda.fecha_compra.trim()}» no es una fecha válida (aaaa-mm-dd).`);
   if (referenciaTxt === "") return falla("referencia_requerida", "La referencia es obligatoria: agrupa las líneas de una compra.");
+  if (referenciaTxt.length > MAX_REFERENCIA) return falla("referencia_larga", `La referencia no puede superar ${MAX_REFERENCIA} caracteres.`);
   const ordinal = leerEntero(cruda.linea_ordinal);
   if (ordinal === null || ordinal < 1) {
     return falla("linea_requerida", cruda.linea_ordinal.trim() === "" ? "El número de línea es obligatorio." : `«${cruda.linea_ordinal.trim()}» no es un número de línea válido (entero desde 1).`);

@@ -1,7 +1,7 @@
 import "server-only";
 import type { IndiceNodos } from "@/lib/arbol/nivel/indice";
 import type { Rol } from "@/lib/auth/roles";
-import { describirErrorDb } from "@/lib/api/errores-db";
+import { describirErrorDb, registrarErrorDb } from "@/lib/api/errores-db";
 import { errorConCodigo } from "@/lib/api/respuestas";
 import { hastaPorDefecto } from "@/lib/curvas/anios";
 import { leerVigentes } from "@/lib/intercompany/servicio";
@@ -851,7 +851,8 @@ export async function importarCompras(d: Db, usuario: UsuarioCompras, cuerpo: Im
     const r = await rpcImportarCompra(d, argsImportarCompra(compra, actorDe(usuario)));
     if (r.error) {
       // Un fallo de la base (no un motivo de negocio) corta: las que siguen quedan sin aplicar y se avisa; reimportar las completa.
-      const { mensaje } = describirErrorDb(r.error.code, r.error.message, r.error.details);
+      const { status, mensaje } = describirErrorDb(r.error.code, r.error.message, r.error.details);
+      if (status >= 500) registrarErrorDb(r.error, "compras: importar");
       respuestas.push({ clave: compra.clave, ok: false, motivo: "error", mensaje });
       break;
     }
