@@ -9,6 +9,10 @@ export type NavLink = {
   exact?: boolean;
   /** Marcado mientras el módulo que lo construye no esté listo. */
   pendiente?: string;
+  /** Pestaña de la página a la que apunta el item (`?pestana=`): activo solo con esa pestaña. */
+  pestana?: string;
+  /** Pestañas que pertenecen a OTRO item de la misma página: con ellas este item no se marca activo. */
+  sinPestanas?: string[];
 };
 
 export type NavSection = {
@@ -62,7 +66,9 @@ export const NAV_SECTIONS: NavSection[] = [
     roles: PLANIFICACION,
     links: [
       { href: "/planificacion/venta-stock", label: "Carga de venta y stock" },
-      { href: "/planificacion/curvas-estacionalidad", label: "Curvas de estacionalidad" },
+      { href: "/planificacion/curvas-estacionalidad", label: "Curvas de estacionalidad", sinPestanas: ["genero-mundo"] },
+      // 06d: el crecimiento por género × mundo vive en la página de curvas (pestaña propia) y tiene entrada propia en el menú.
+      { href: "/planificacion/curvas-estacionalidad", label: "Crecimiento por GM", pestana: "genero-mundo" },
       // M7: proyección anual de unidades (año en curso y año siguiente). Solo admin y planner, como toda la sección.
       { href: "/planificacion/proyeccion", label: "Proyección de unidades" },
       // M12: análisis de las marcas al barrer por GML y reparto aprobado de una compra de la marca. Solo admin y planner.
@@ -98,8 +104,22 @@ export function seccionesVisibles(rol: Rol): NavSection[] {
     .filter((s) => s.links.length > 0);
 }
 
-export function esActivo(pathname: string, link: NavLink): boolean {
-  return link.exact ? pathname === link.href : pathname.startsWith(link.href);
+/** Destino del item: la ruta y, si apunta a una pestaña, su `?pestana=`. */
+export function hrefDe(link: NavLink): string {
+  return link.pestana ? `${link.href}?pestana=${link.pestana}` : link.href;
+}
+
+/**
+ * `pestana` es el valor de `?pestana=` de la URL actual (o null) y `enDetalleGm` indica que la URL trae `?gm=` (el detalle de un
+ * género × mundo abre la pestaña de crecimiento aunque no diga `pestana`).
+ */
+export function esActivo(pathname: string, link: NavLink, pestana: string | null = null, enDetalleGm = false): boolean {
+  const enRuta = link.exact ? pathname === link.href : pathname.startsWith(link.href);
+  if (!enRuta) return false;
+  const efectiva = pestana ?? (enDetalleGm ? "genero-mundo" : null);
+  if (link.pestana) return efectiva === link.pestana;
+  if (link.sinPestanas && efectiva && link.sinPestanas.includes(efectiva)) return false;
+  return true;
 }
 
 /** ¿Este rol puede abrir esta ruta? Por prefijo: las subrutas heredan el permiso. */

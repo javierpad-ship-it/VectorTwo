@@ -2,6 +2,10 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.13.0 · M8 b — 2026-10-28
+
+Cambio de menú pedido por Javier, sin migración: **«Crecimiento por GM»** pasa a tener entrada propia en Planificación (abre `Curvas de estacionalidad` en la pestaña «Crecimiento por género × mundo»). El menú marca solo el item que corresponde a la pestaña abierta (`?pestana=` o el detalle `?gm=`). Sin cambios de permisos: solo admin y planner.
+
 ## 0.13.0 · M8 — 2026-10-28
 
 Ficha `docs/modulos/08-flujo-y-compras.md` (con su revisión independiente del `arquitecto-revisor`, QA y auditoría de `seguridad`). Migración `0025_flujo_y_compras.sql`, **aplicada completa en Vector2** (con `scripts/humo-0025.sql`). Sin cambio de `VERSION_METODO` (sigue en 4). Es la primera entrega de M8, recortada por Javier: flujo, IMI, conciliación, confirmar ingresos, cancelar e importador de carga inicial. La captura manual, la edición completa, aplicar reparto y el impacto llegan en `0.13.1`. Pruebas: **5 004 en 244 archivos**.

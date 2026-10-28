@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import type { PerfilCliente } from "@/lib/auth/roles";
@@ -23,7 +23,9 @@ export function AppShell({ perfil, children }: { perfil: PerfilCliente; children
 
   return (
     <div className="flex min-h-full flex-1">
-      <Sidebar perfil={perfil} abierto={menuAbierto} onCerrar={() => setMenuAbierto(false)} />
+      <Suspense fallback={null}>
+        <Sidebar perfil={perfil} abierto={menuAbierto} onCerrar={() => setMenuAbierto(false)} />
+      </Suspense>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center gap-3 border-b border-borde bg-superficie px-4 lg:hidden">
           <button

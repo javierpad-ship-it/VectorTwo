@@ -2,9 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ETIQUETA_ROL, type PerfilCliente } from "@/lib/auth/roles";
-import { esActivo, seccionesVisibles } from "@/lib/nav";
+import { esActivo, hrefDe, seccionesVisibles } from "@/lib/nav";
 import { APP_VERSION } from "@/lib/version";
 import { BotonSalir } from "./boton-salir";
 
@@ -18,6 +18,9 @@ export function Sidebar({
   onCerrar: () => void;
 }) {
   const pathname = usePathname();
+  const params = useSearchParams();
+  const pestana = params.get("pestana");
+  const enDetalleGm = params.has("gm");
   const secciones = seccionesVisibles(perfil.rol);
 
   return (
@@ -56,10 +59,10 @@ export function Sidebar({
               </div>
               <ul className="space-y-0.5">
                 {s.links.map((l) => {
-                  const activo = esActivo(pathname, l);
+                  const activo = esActivo(pathname, l, pestana, enDetalleGm);
                   if (l.pendiente) {
                     return (
-                      <li key={l.href}>
+                      <li key={hrefDe(l)}>
                         <span
                           className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm text-tinta-suave/60"
                           title={`Se construye en el módulo ${l.pendiente}`}
@@ -71,9 +74,9 @@ export function Sidebar({
                     );
                   }
                   return (
-                    <li key={l.href}>
+                    <li key={hrefDe(l)}>
                       <Link
-                        href={l.href}
+                        href={hrefDe(l)}
                         onClick={onCerrar}
                         className={`block rounded-md px-2 py-1.5 text-sm transition-colors ${
                           activo
