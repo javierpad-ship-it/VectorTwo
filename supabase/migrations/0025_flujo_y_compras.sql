@@ -536,8 +536,7 @@ comment on table public.flujo_parametros is
 --   ingreso, ficha §0.15). `excluido` = los totales de esas dos columnas.
 -- * Valores crudos: pueden ser negativos (devoluciones, ajustes); M8 los lleva a 0 con aviso.
 -- * Si la carga no existe o no está `publicada`: `publicada = false` y `filas` vacío (`periodo` nulo si no existe).
--- MEDICIÓN en Vector2 (set-2026, ~7 762 filas esperadas, objetivo <= 0,6 s; `flujo_huella_base()` <= 0,15 s): PENDIENTE. La 0025 aún no
--- está aplicada en Vector2 (el `execute_sql` esperó una confirmación que nadie respondió); los tiempos se anotan aquí al aplicarla.
+-- MEDICIÓN en Vector2 (set-2026, aplicada el 2026-10-28): 7 762 filas y 287 KB de texto con `stock_flujo`; `flujo_huella_base()` 6,4 KB. Tiempos en frío: los mide `qa`.
 -- `stable`, `security invoker`, `search_path` vacío, solo `service_role`.
 create or replace function public.stock_flujo(p_carga_id uuid)
 returns jsonb
