@@ -69,6 +69,7 @@ import {
   DESTINOS_COMPRA,
   ESTADOS_COMPRA,
   ESTADOS_QUE_CUENTAN,
+  MONEDAS,
   MOTIVOS_FUNCION_COMPRA,
   ORIGENES_COMPRA,
   ORIGENES_ENTREGA,
@@ -784,6 +785,8 @@ async function estadoImportacion(d: Db): Promise<Salida<EstadoImportacionCompras
     referencia: c.referencia,
     estado: elegir(ESTADOS_COMPRA, c.estado, "confirmada"),
     cancelada_at: c.cancelada_at,
+    fecha_compra: c.fecha_compra,
+    moneda: elegir(MONEDAS, c.moneda, "PEN"),
   }));
   const reglasBase: ReglaBase[] = reglas.data.reglas.map((r) => ({ id: r.id, marca_id: r.marca_id, genero_mundo_linea_id: r.genero_mundo_linea_id, equivalencia_id: r.equivalencia_id, vigente_desde: r.vigente_desde, activo: true }));
 

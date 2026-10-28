@@ -39,6 +39,11 @@ export type ClavesCache = {
   repartos: string;
   reglas: string;
   config: string;
+  /**
+   * Lo que `stock_flujo` lee ADEMÁS de la carga: `tiendas` (`activo` y `tipo` deciden CD / tiendas / inactivas) y `marcas` (la
+   * pertenencia a conjuntos, `marcas_unidad`). Una carga publicada no cambia, pero su agregación sí con estas dos tablas.
+   */
+  stock: string;
 };
 
 export function clavesCache(huellaBase: HuellaBaseJson): ClavesCache {
@@ -50,5 +55,6 @@ export function clavesCache(huellaBase: HuellaBaseJson): ClavesCache {
     repartos: sha(jsonCanonico(huellaBase.repartos)),
     reglas: sha(jsonCanonico(huellaBase.reglas)),
     config: sha(jsonCanonico(huellaBase.config)),
+    stock: sha(jsonCanonico({ tiendas: huellaBase.config.tiendas, marcas: huellaBase.config.marcas })),
   };
 }

@@ -210,6 +210,23 @@ describe("idempotencia por clave natural (regla 18, caso 28)", () => {
     expect(r.reporte.compras_a_crear[0]).toMatchObject({ referencia: "PO-2211", lineas_nuevas: 1, existente: { compra_id: COMPRA.c12, numero: "C-000012" } });
   });
 
+  it("una línea nueva con otra fecha u otra moneda que la compra existente → cabecera_inconsistente; con la misma, entra", () => {
+    const existente = { id: COMPRA.c12, numero: "C-000012", proveedor_id: PROVEEDOR.norte, referencia: "PO-2211", estado: "confirmada" as const, cancelada_at: null, fecha_compra: "2026-10-14", moneda: "PEN" as const };
+    const con = (p: Partial<FilaImportacionCompra>, compra: typeof existente | Record<string, unknown> = existente) =>
+      previsualizar([fila({ linea_ordinal: "9", llegada: "2026-12", unidades: "50", ...p })], conExistentes({ compras: [compra as typeof existente] }));
+    const misma = con({});
+    expect(motivos(misma)).toEqual([]);
+    expect(misma.reporte.compras_a_crear[0]).toMatchObject({ referencia: "PO-2211", lineas_nuevas: 1, existente: { numero: "C-000012" } });
+    const otraFecha = con({ fecha_compra: "2026-10-20" });
+    expect(otraFecha.reporte.omitidas.map((o) => [o.fila, o.motivo])).toEqual([[1, "cabecera_inconsistente"]]);
+    expect(otraFecha.reporte.omitidas[0].detalle).toContain("C-000012");
+    expect(otraFecha.reporte.compras_a_crear).toEqual([]);
+    expect(otraFecha.compras).toEqual([]);
+    expect(motivos(con({ moneda: "USD" }))).toEqual(["cabecera_inconsistente"]);
+    // sin fecha ni moneda en la compra existente (quien no las conoce) no se compara
+    expect(motivos(con({ fecha_compra: "2026-10-20", moneda: "USD" }, { ...existente, fecha_compra: undefined, moneda: undefined }))).toEqual([]);
+  });
+
   it("no se agregan líneas a una compra con el saldo cerrado", () => {
     const estado: EstadoImportacionCompras = {
       ...estadoImportacionBase(),

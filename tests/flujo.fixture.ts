@@ -2,6 +2,7 @@ import { CARACTER_SENAL, CARACTER_SENAL_K, ORDEN_SENAL } from "@/lib/flujo/tipos
 import type {
   AvisoConciliacion,
   CatalogoFlujoApi,
+  CatalogoHuecosApi,
   ConciliacionApi,
   ConciliacionFilaApi,
   DatosFlujoApi,
@@ -748,8 +749,6 @@ export function construirFlujo(op: OpcionesFlujo): FlujoApi {
     catalogo,
     filas,
     totales,
-    repartos_vigentes: repartosVigentesEjemplo(),
-    reglas_intercompany: reglasIntercompanyEjemplo(),
     mis_combinaciones: [{ genero_id: idDe("a", 1), mundo_id: idDe("b", 4) }],
   };
 }
@@ -757,10 +756,26 @@ export function construirFlujo(op: OpcionesFlujo): FlujoApi {
 /** Un flujo pequeño y legible (12 filas, `k' = 2026-09`, 15 meses de horizonte) para las pantallas. */
 export const flujoEjemplo = (): FlujoApi => construirFlujo({ filas: 12, horizonte: DEMANDA_DENIM.length });
 
-/** Tarjetas de Huecos a partir de la lista (ordenadas por saldo descendente), con los nombres del catálogo. */
+/**
+ * `HuecosApi` (contrato compacto: tarjetas con índices a un `catalogo`, sin campos en cero o nulos) a partir de la lista, ordenada por
+ * saldo descendente. Lo mismo que arma `armarHuecosApi` del servidor, escrito aparte para que las pruebas no se comparen contra sí mismas.
+ */
 export function huecosDesdeFlujo(flujo: FlujoApi, meses = flujo.datos.parametros.meses_tarjeta): HuecosApi {
   const periodos = flujo.datos.periodos;
-  const tarjetas: TarjetaHuecoApi[] = flujo.filas.map((f) => {
+  const catalogo: CatalogoHuecosApi = { generos: [], mundos: [], lineas: [], nodos: [], agrupaciones: [], responsables: {} };
+  const posicion = (lista: string[], nombre: string): number => {
+    const i = lista.indexOf(nombre);
+    if (i >= 0) return i;
+    lista.push(nombre);
+    return lista.length - 1;
+  };
+  const posicionAgrupacion = (id: string): number => {
+    const i = catalogo.agrupaciones.findIndex((x) => x.id === id);
+    if (i >= 0) return i;
+    catalogo.agrupaciones.push({ id, nombre: flujo.catalogo.agrupaciones[id] });
+    return catalogo.agrupaciones.length - 1;
+  };
+  const crudas = flujo.filas.map((f) => {
     const nodo = flujo.catalogo.nodos[f.equivalencia_id ?? f.gml_id];
     const s = f.serie;
     const idx = (pred: (i: number) => boolean) => {
@@ -781,30 +796,71 @@ export function huecosDesdeFlujo(flujo: FlujoApi, meses = flujo.datos.parametros
         }
       }
     }
+    const saldoN = s.saldo.slice(1, 1 + meses).reduce((a, b) => a + b, 0);
+    return { f, nodo, iFalta, iExceso, iCamino, faltaDesde, saldoN, ruta: `${nodo.genero}|${nodo.mundo}|${nodo.linea}|${nodo.equivalencia ?? ""}|${flujo.catalogo.agrupaciones[f.agrupacion_marca_id]}` };
+  });
+  crudas.sort((a, b) => b.saldoN - a.saldoN || (a.ruta < b.ruta ? -1 : a.ruta > b.ruta ? 1 : 0));
+  const tarjetas: TarjetaHuecoApi[] = crudas.map(({ f, nodo, iFalta, iExceso, iCamino, faltaDesde, saldoN }) => {
+    let iNodo = catalogo.nodos.findIndex((n) => n.gml_id === f.gml_id && (n.equivalencia_id ?? null) === f.equivalencia_id);
+    if (iNodo < 0) {
+      catalogo.nodos.push({
+        gml_id: f.gml_id,
+        ...(f.equivalencia_id === null ? {} : { equivalencia_id: f.equivalencia_id }),
+        genero: posicion(catalogo.generos, nodo.genero),
+        mundo: posicion(catalogo.mundos, nodo.mundo),
+        linea: posicion(catalogo.lineas, nodo.linea),
+        ...(nodo.equivalencia === null ? {} : { equivalencia: nodo.equivalencia }),
+      });
+      iNodo = catalogo.nodos.length - 1;
+      const resp = flujo.catalogo.responsables[`${nodo.genero_id}|${nodo.mundo_id}`];
+      if (resp) catalogo.responsables[`${catalogo.nodos[iNodo].genero}|${catalogo.nodos[iNodo].mundo}`] = resp;
+    }
+    const r = f.resumen;
+    const saldoPrimer = iFalta < 0 ? 0 : f.serie.saldo[iFalta];
+    const excesoPrimer = iExceso < 0 ? 0 : f.serie.exceso[iExceso];
     return {
-      gml_id: f.gml_id,
-      equivalencia_id: f.equivalencia_id,
-      agrupacion_marca_id: f.agrupacion_marca_id,
-      genero: nodo.genero,
-      mundo: nodo.mundo,
-      linea: nodo.linea,
-      equivalencia: nodo.equivalencia,
-      agrupacion_marca: flujo.catalogo.agrupaciones[f.agrupacion_marca_id],
-      mia: f.mia,
-      responsable: flujo.catalogo.responsables[`${nodo.genero_id}|${nodo.mundo_id}`] ?? null,
-      stock_k: f.stock_k,
-      resumen: { ...f.resumen, saldo_n_meses: s.saldo.slice(1, 1 + meses).reduce((a, b) => a + b, 0) },
-      subflujos_resumen: f.subflujos_resumen,
-      detalle: {
-        saldo_primer_mes: iFalta < 0 ? 0 : s.saldo[iFalta],
-        exceso_primer_mes: iExceso < 0 ? 0 : s.exceso[iExceso],
-        en_camino_primer_mes: iCamino < 0 ? null : { periodo: periodos[iCamino], unidades: s.ingresos[iCamino] },
-        falta_desde: faltaDesde,
+      nodo: iNodo,
+      agrupacion: posicionAgrupacion(f.agrupacion_marca_id),
+      ...(f.mia ? { mia: true as const } : {}),
+      stock_k: { cd: f.stock_k.cd, total: f.stock_k.total },
+      resumen: {
+        senal: r.senal,
+        saldo_n_meses: saldoN,
+        ...(r.imi_k === null ? {} : { imi_k: r.imi_k }),
+        ...(r.en_camino === 0 ? {} : { en_camino: r.en_camino }),
+        ...(iFalta < 0 ? {} : { primer_mes_falta: periodos[iFalta] }),
+        ...(iExceso < 0 ? {} : { exceso_desde: periodos[iExceso] }),
+        ...(r.por_confirmar === 0 ? {} : { por_confirmar: r.por_confirmar }),
+        ...(r.posible_doble_conteo === 0 ? {} : { posible_doble_conteo: r.posible_doble_conteo }),
       },
+      detalle: {
+        ...(saldoPrimer === 0 ? {} : { saldo_primer_mes: saldoPrimer }),
+        ...(excesoPrimer === 0 ? {} : { exceso_primer_mes: excesoPrimer }),
+        ...(iCamino < 0 ? {} : { en_camino_primer_mes: { periodo: periodos[iCamino], unidades: f.serie.ingresos[iCamino] } }),
+        ...(faltaDesde === null ? {} : { falta_desde: faltaDesde }),
+      },
+      ...(f.subflujos_resumen.length === 0 ? {} : { subflujos_resumen: f.subflujos_resumen }),
     };
   });
-  tarjetas.sort((a, b) => b.resumen.saldo_n_meses - a.resumen.saldo_n_meses);
-  return { datos: flujo.datos, meses, tarjetas, mis_combinaciones: flujo.mis_combinaciones };
+  return { datos: flujo.datos, meses, catalogo, tarjetas, mis_combinaciones: flujo.mis_combinaciones };
 }
 
 export const huecosEjemplo = (): HuecosApi => huecosDesdeFlujo(flujoEjemplo());
+
+/** Una tarjeta de Huecos con sus índices resueltos contra el catálogo (lo que la pantalla necesita: ids de enlace, nombres y responsable). */
+export function resolverTarjeta(h: Pick<HuecosApi, "catalogo">, t: TarjetaHuecoApi) {
+  const c = h.catalogo;
+  const nodo = c.nodos[t.nodo];
+  const agrupacion = c.agrupaciones[t.agrupacion];
+  return {
+    gml_id: nodo.gml_id,
+    equivalencia_id: nodo.equivalencia_id ?? null,
+    agrupacion_marca_id: agrupacion.id,
+    genero: c.generos[nodo.genero],
+    mundo: c.mundos[nodo.mundo],
+    linea: c.lineas[nodo.linea],
+    equivalencia: nodo.equivalencia ?? null,
+    agrupacion_marca: agrupacion.nombre,
+    responsable: c.responsables[`${nodo.genero}|${nodo.mundo}`] ?? null,
+  };
+}

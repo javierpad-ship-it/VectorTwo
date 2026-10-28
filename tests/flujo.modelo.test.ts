@@ -5,11 +5,10 @@ import {
   aFilaFlujoApi,
   aFilaListaApi,
   aSerieFlujoApi,
-  aTarjetaHuecoApi,
+  armarHuecosApi,
   aTotalesApi,
   armarConciliacionApi,
   calcularFlujo,
-  ordenarTarjetas,
   resumenTarjeta,
   rutaDe,
   type EntradaCalculoFlujo,
@@ -801,7 +800,12 @@ describe("determinismo y balance (regla 8)", () => {
 
   it("las tarjetas se ordenan por saldo descendente de forma estable", () => {
     const res = completo();
-    const tarjetas = ordenarTarjetas(res.filas.map((f) => aTarjetaHuecoApi(f, NOMBRES, 6)));
+    const { tarjetas, catalogo } = armarHuecosApi(res.filas, NOMBRES, 6);
+    expect(tarjetas).toHaveLength(res.filas.length);
+    for (const t of tarjetas) {
+      expect(catalogo.nodos[t.nodo]).toBeDefined();
+      expect(catalogo.agrupaciones[t.agrupacion]).toBeDefined();
+    }
     const saldos = tarjetas.map((t) => t.resumen.saldo_n_meses);
     expect(saldos).toEqual([...saldos].sort((a, b) => b - a));
     expect(tarjetas.map((t) => t.resumen.saldo_n_meses)).toEqual(saldos);

@@ -84,6 +84,7 @@ import type { ConciliacionApi, FilaFlujoDetalleApi, FlujoApi, HuecosApi, Paramet
 import type { CompraApi, EventoCompraApi, ProveedorApi, ReporteImportacionComprasApi } from "@/lib/compras/tipos-api";
 import { AGR_M8, COMPRA, EQ, GEN, LIN, LINEA, MARCA_M8, MUN, NODO_M8, PROVEEDOR, filasImportacionEjemplo } from "./compras.fixture";
 import { REGLA_JH, cerradaDeFila, entrada, mapaDeStock, participaciones, stockMes } from "./flujo.soporte";
+import { resolverTarjeta } from "./flujo.fixture";
 
 /**
  * Handlers de M8 con el servicio REAL y una base en memoria (`tests/compras.fake-db.ts`; la `0025` está aplicada en Vector2 solo a medias,
@@ -239,7 +240,13 @@ describe("GET /api/flujo", () => {
     expect(f.serie.saldo[1]).toBe(83);
     expect(f.serie.saldo[5]).toBe(134);
     expect(f.serie.ingresos.slice(0, 3)).toEqual([120, 0, 500]);
-    expect(f.resumen).toMatchObject({ senal: "falta", saldo_n_meses: 378, en_camino: 500, primer_mes_falta: "2026-10" });
+    expect(f.resumen).toMatchObject({ senal: "falta", saldo_n_meses: 378, en_camino: 500 });
+    // la lista no trae lo que solo usan el detalle y las tarjetas
+    expect(Object.keys(f.resumen).sort()).toEqual(["en_camino", "imi_k", "por_confirmar", "posible_doble_conteo", "saldo_n_meses", "senal", "vpm_k"]);
+    expect(f.serie.saldo.findIndex((x) => x > 0)).toBe(1);
+    expect(datos.periodos[1]).toBe("2026-10");
+    expect(cuerpo.data).not.toHaveProperty("repartos_vigentes");
+    expect(cuerpo.data).not.toHaveProperty("reglas_intercompany");
     expect(f.stock_k).toEqual({ cd: 300, tiendas: 400, total: 700 });
     expect(f.serie.senal).toHaveLength(16);
   });
@@ -324,8 +331,11 @@ describe("GET /api/flujo/huecos", () => {
     expect(data.datos.avisos).toContain("entregas_sin_confirmar");
     const saldos = data.tarjetas.map((t) => t.resumen.saldo_n_meses);
     expect(saldos).toEqual([...saldos].sort((a, b) => b - a));
-    const tarjeta = unico(data.tarjetas.filter((t) => t.gml_id === NODO_M8.urbano && t.agrupacion_marca_id === AGR_M8.reconocido), "tarjeta");
+    const tarjeta = unico(data.tarjetas.filter((t) => { const r = resolverTarjeta(data, t); return r.gml_id === NODO_M8.urbano && r.agrupacion_marca_id === AGR_M8.reconocido; }), "tarjeta");
     expect(tarjeta.resumen.saldo_n_meses).toBe(83);
+    expect(tarjeta.resumen.primer_mes_falta).toBe("2026-10");
+    expect(tarjeta).not.toHaveProperty("gml_id");
+    expect(resolverTarjeta(data, tarjeta)).toMatchObject({ genero: "HOMBRE", mundo: "URBANO", linea: "DENIM", agrupacion_marca: "RECONOCIDO" });
     expect(tarjeta.detalle).toMatchObject({ saldo_primer_mes: 83, en_camino_primer_mes: { periodo: "2026-11", unidades: 500 } });
     expect(JSON.stringify(data).length).toBeLessThan(TAMANO_HUECOS_MAXIMO);
   });
@@ -333,8 +343,8 @@ describe("GET /api/flujo/huecos", () => {
   it("sin meses usa los de Parámetros; con meses=3 el saldo de seis meses baja", async () => {
     const seis = (await leer<HuecosApi>(await huecos(get("/flujo/huecos")))).data;
     expect(seis.meses).toBe(6);
-    expect(seis.tarjetas.find((t) => t.gml_id === NODO_M8.urbano)?.resumen.saldo_n_meses).toBe(378);
-    expect(unico(seis.tarjetas.filter((t) => t.gml_id === NODO_M8.polo), "tarjeta").resumen.por_confirmar).toBe(500);
+    expect(seis.tarjetas.find((t) => resolverTarjeta(seis, t).gml_id === NODO_M8.urbano)?.resumen.saldo_n_meses).toBe(378);
+    expect(unico(seis.tarjetas.filter((t) => resolverTarjeta(seis, t).gml_id === NODO_M8.polo), "tarjeta").resumen.por_confirmar).toBe(500);
   });
 });
 
@@ -592,6 +602,8 @@ describe("POST /api/compras/[id]/recibir («Confirmar ingreso»)", () => {
     const cerrado = await recibirC12([{ linea_id: LINEA.c09, recibida_periodo: "2026-08", unidades: 100, ...hoyRecepcion }], revisionDe(C09), C09);
     expect(cerrado.r.status).toBe(200);
     expect(cerrado.cuerpo.data.lineas[0].recepciones[0].avisos).toEqual(["recepcion_en_mes_cerrado"]);
+    // la respuesta de la escritura trae la sugerencia de la conciliación (pasa por el flujo, igual que el GET de la compra)
+    expect(cerrado.cuerpo.data.lineas[0].entregas[0].sugerencia).toMatchObject({ periodo: "2026-09" });
     const futura = await recibirC12([ingresoC12(50, "2026-12")]);
     expect(futura.cuerpo.data.lineas[0].recepciones[0].avisos).toEqual(["recibida_futura"]);
     // en el flujo, lo de mes cerrado no suma (los 100 de ago ya están en el stock publicado); los 50 de dic sí
@@ -935,7 +947,24 @@ describe("caché del flujo por huella (regla 24)", () => {
     expect(despues.cuerpo.data.datos.avisos).toContain("config_cambiada");
     expect(contadores.configuracion).toBe(2);
     expect(contadores.cerrada).toBe(1);
+    // `stock_flujo` agrega con `marcas` (conjuntos): su caché por carga también se invalida
+    expect(llamadasA("stock_flujo")).toHaveLength(26);
+    expect(contadores.stock).toBe(26);
+  });
+
+  it("desactivar una tienda cambia config.tiendas: se vuelve a llamar a stock_flujo y aparece stock_en_tiendas_inactivas", async () => {
+    const antes = await leerFlujoHttp();
+    expect(antes.cuerpo.data.datos.avisos).not.toContain("stock_en_tiendas_inactivas");
     expect(llamadasA("stock_flujo")).toHaveLength(13);
+    escenario.tiendasInactivas = true;
+    escenario.config.tiendas = [3, "2026-10-20T12:00:00.000Z"];
+    const despues = await leerFlujoHttp();
+    expect(llamadasA("stock_flujo")).toHaveLength(26);
+    expect(despues.cuerpo.data.datos.avisos).toContain("stock_en_tiendas_inactivas");
+    expect(despues.cuerpo.data.datos.stock_excluido.unidades).toBeGreaterThan(0);
+    // sin otro cambio, la caché vuelve a servir
+    await leerFlujoHttp();
+    expect(llamadasA("stock_flujo")).toHaveLength(26);
   });
 
   it("un cambio de mes en Lima cambia la huella; los parámetros, solo su lectura", async () => {

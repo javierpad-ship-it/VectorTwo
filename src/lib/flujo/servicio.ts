@@ -24,12 +24,11 @@ import {
   aConciliacionFilaApi,
   aFilaDetalleApi,
   aFilaListaApi,
-  aTarjetaHuecoApi,
+  armarHuecosApi,
   aTotalesApi,
   armarConciliacionApi,
   calcularFlujo,
   meses12De,
-  ordenarTarjetas,
   resumenTarjeta,
   type EntradaCalculoFlujo,
   type FilaCalculada,
@@ -219,9 +218,13 @@ async function enParalelo<T, R>(items: readonly T[], limite: number, f: (x: T) =
   return salida;
 }
 
-/** El JSON de `stock_flujo` de una carga: inmutable mientras siga publicada (LRU de 26 meses por `carga_id`). */
-function stockDeCarga(d: Db, cargaId: string): Promise<Salida<StockFlujoJson>> {
-  return cacheStock.obtener(cargaId, async () => {
+/**
+ * El JSON de `stock_flujo` de una carga (LRU de 26 entradas). La carga publicada es inmutable, pero `stock_flujo` agrega con
+ * `tiendas` (activo, tipo) y `marcas` (conjuntos) al llamarse: la clave es `carga_id` + la huella de esas dos tablas (`claves.stock`),
+ * así que desactivar una tienda o mover una marca a un conjunto vuelve a llamarla.
+ */
+function stockDeCarga(d: Db, cargaId: string, claveStock: string): Promise<Salida<StockFlujoJson>> {
+  return cacheStock.obtener(`${cargaId}|${claveStock}`, async () => {
     contar("stock");
     const r = await leerStockFlujo(d, cargaId);
     if (r.error || !r.data) return fallaDb(r.error as NonNullable<typeof r.error>, "flujo: leer el stock del mes");
@@ -368,7 +371,7 @@ async function calcular(d: Db, huellaBase: HuellaBaseJson, huella: string, hoy: 
       contar("parametros");
       return leerParametros(d);
     }),
-    enParalelo(conCarga, PARALELO_STOCK, (m) => stockDeCarga(d, cargaDe.get(m) as string)),
+    enParalelo(conCarga, PARALELO_STOCK, (m) => stockDeCarga(d, cargaDe.get(m) as string, claves.stock)),
   ]);
   for (const r of [cerrada, configuracion, compras, reglas, repartos, parametros]) if (r.respuesta) return falla(r.respuesta);
   for (const r of stockCrudo) if (r.respuesta) return falla(r.respuesta);
@@ -595,8 +598,6 @@ export async function leerFlujo(d: Db, perfilId: string, q: FlujoQuery): Promise
     catalogo: catalogoDe(f, elegidas),
     filas: elegidas.map((x) => aFilaListaApi(x, f.configuracion.nombres, meses)),
     totales: aTotalesApi(totalesDeFilas(elegidas, n, f.resultado.parametros)),
-    repartos_vigentes: f.repartos,
-    reglas_intercompany: f.reglas,
     mis_combinaciones: combos,
   });
 }
@@ -610,12 +611,8 @@ export async function leerHuecos(d: Db, perfilId: string, q: FlujoQuery): Promis
   const combos = combinacionesDe(f, perfilId);
   const meses = q.meses ?? f.parametros.meses_tarjeta;
   const filas = f.resultado.filas.map((x) => conMia(f, x, combos)).filter((x) => pasaArbol(f, x, q) && pasaSolo(x, q.solo, meses));
-  return listo({
-    datos: datosDe(f),
-    meses,
-    tarjetas: ordenarTarjetas(filas.map((x) => aTarjetaHuecoApi(x, f.configuracion.nombres, meses))),
-    mis_combinaciones: combos,
-  });
+  const { catalogo, tarjetas } = armarHuecosApi(filas, f.configuracion.nombres, meses);
+  return listo({ datos: datosDe(f), meses, catalogo, tarjetas, mis_combinaciones: combos });
 }
 
 // ─── GET /api/flujo/fila ───

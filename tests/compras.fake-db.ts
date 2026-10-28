@@ -112,6 +112,8 @@ type Escenario = {
   publicados: string[];
   /** `true`: `flujo_huella_base()` no trae ninguna proyección cerrada (el flujo responde `404 sin_cerrada`). */
   sinCerrada: boolean;
+  /** `true`: `stock_flujo` devuelve stock y venta de tiendas desactivadas en `excluido` (lo que hace la base tras desactivar una tienda). */
+  tiendasInactivas: boolean;
 };
 
 export const escenario: Escenario = {
@@ -129,6 +131,7 @@ export const escenario: Escenario = {
   reloj: 0,
   publicados: [],
   sinCerrada: false,
+  tiendasInactivas: false,
 };
 
 const mesesDe = (desde: string, hasta: string): string[] => {
@@ -241,6 +244,7 @@ export function reiniciarEscenario(opciones: { sembrar?: boolean } = {}): void {
     responsables_genero_mundo: [2, "2026-01-01T00:00:00.000Z"],
   };
   escenario.betaMixta = false;
+  escenario.tiendasInactivas = false;
   escenario.asignaciones = [{ genero_id: estadoImportacionBase().nodos[0].genero_id, mundo_id: estadoImportacionBase().nodos[0].mundo_id, perfil_id: PERFIL.comprador1, activo: true }];
   escenario.fallarImportacion = null;
   escenario.claveExistente = null;
@@ -502,7 +506,7 @@ function stockFlujo(cargaId: string): StockFlujoJson {
       set ? [0, 0, 300, 400, 1410, 0, 0] : [0, 0, 1000, 990, 0, 0, 0],
       set ? [1, 1, 940, 0, 820, 0, 0] : [1, 1, 960, 0, 0, 0, 0],
     ],
-    excluido: { stock: 0, unidades: 0 },
+    excluido: escenario.tiendasInactivas ? { stock: 150, unidades: 30 } : { stock: 0, unidades: 0 },
   };
 }
 

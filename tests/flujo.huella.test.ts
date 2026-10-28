@@ -101,6 +101,21 @@ describe("clavesCache (regla 24)", () => {
   });
 });
 
+describe("clavesCache.stock (stock_flujo lee tiendas y marcas)", () => {
+  it("cambia con config.tiendas y config.marcas y con nada más de la configuración", () => {
+    const a = clavesCache(base());
+    const t = base();
+    t.config.tiendas = [9, "2026-10-20T00:00:00Z"];
+    expect(clavesCache(t).stock).not.toBe(a.stock);
+    const m = base();
+    m.config.marcas = [9, "2026-10-20T00:00:00Z"];
+    expect(clavesCache(m).stock).not.toBe(a.stock);
+    const e = base();
+    e.config.equivalencias = [9, "2026-10-20T00:00:00Z"];
+    expect(clavesCache(e).stock).toBe(a.stock);
+  });
+});
+
 describe("jsonCanonico", () => {
   it("ordena las claves y respeta los arreglos", () => {
     expect(jsonCanonico({ b: 1, a: [2, { d: 1, c: 2 }] })).toBe('{"a":[2,{"c":2,"d":1}],"b":1}');

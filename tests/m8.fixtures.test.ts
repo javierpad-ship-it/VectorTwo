@@ -24,6 +24,7 @@ import {
   filaDenimEjemplo,
   flujoEjemplo,
   huecosEjemplo,
+  resolverTarjeta,
   sumarMes,
 } from "./flujo.fixture";
 
@@ -267,10 +268,10 @@ describe("flujo de ejemplo y señales", () => {
     const h = huecosEjemplo();
     const saldos = h.tarjetas.map((t) => t.resumen.saldo_n_meses);
     expect(saldos).toEqual([...saldos].sort((a, b) => b - a));
-    const denim = h.tarjetas.find((t) => t.linea === "DENIM")!;
-    expect(denim).toMatchObject({ genero: "HOMBRE", mundo: "URBANO", agrupacion_marca: "RECONOCIDO" });
+    const denim = h.tarjetas.find((t) => resolverTarjeta(h, t).linea === "DENIM")!;
+    expect(resolverTarjeta(h, denim)).toMatchObject({ genero: "HOMBRE", mundo: "URBANO", agrupacion_marca: "RECONOCIDO" });
     expect(denim.detalle).toMatchObject({ saldo_primer_mes: 83, en_camino_primer_mes: { periodo: "2026-11", unidades: 500 }, falta_desde: "2027-02" });
-    expect(denim.responsable?.nombre).toBe("Comprador Uno");
+    expect(resolverTarjeta(h, denim).responsable?.nombre).toBe("Comprador Uno");
   });
 
   it("los caracteres de señal son únicos y se decodifican", () => {

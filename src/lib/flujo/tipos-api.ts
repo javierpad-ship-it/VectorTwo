@@ -266,11 +266,17 @@ export type FilaFlujoApi = {
   avisos: AvisoFila[];
 };
 
-/** Fila de la lista: `serie` en lugar de `meses` y sin nombres (van en `catalogo`). */
+/**
+ * El resumen de una fila de la LISTA: sin `vpm_real_k`, `primer_mes_fuera_de_rango`, `primer_mes_falta` ni `exceso_desde` (la lista
+ * no los usa; el detalle de la fila y las tarjetas de Huecos sí los traen). Es lo que mantiene `GET /api/flujo` bajo 1,5 MB.
+ */
+export type ResumenListaApi = Omit<ResumenFilaApi, "vpm_real_k" | "primer_mes_fuera_de_rango" | "primer_mes_falta" | "exceso_desde">;
+
+/** Fila de la lista: `serie` en lugar de `meses`, sin nombres (van en `catalogo`) y con `ResumenListaApi`. */
 export type FilaFlujoListaApi = Omit<
   FilaFlujoApi,
-  "meses" | "genero" | "mundo" | "linea" | "equivalencia" | "agrupacion_marca" | "nivel" | "responsable"
-> & { serie: SerieFlujoApi };
+  "meses" | "genero" | "mundo" | "linea" | "equivalencia" | "agrupacion_marca" | "nivel" | "responsable" | "resumen"
+> & { resumen: ResumenListaApi; serie: SerieFlujoApi };
 
 export type EntregaDetalleApi = {
   compra_id: string;
@@ -302,19 +308,74 @@ export type FilaFlujoDetalleApi = FilaFlujoApi & {
 
 // ─── Huecos ───
 
-/** Lo que la tarjeta muestra además del resumen (p. ej. «falta en oct (83) y desde feb», «En camino 500 u (nov)»). */
+/**
+ * Lo que la tarjeta muestra además del resumen (p. ej. «falta en oct (83) y desde feb», «En camino 500 u (nov)»). COMPACTO (tope de
+ * `GET /api/flujo/huecos`, 0,4 MB con 1 600 tarjetas): un campo en cero o nulo NO viaja; ausente = `0` / `null`.
+ */
 export type DetalleTarjetaApi = {
-  saldo_primer_mes: number;
-  exceso_primer_mes: number;
-  en_camino_primer_mes: { periodo: Mes; unidades: number } | null;
+  saldo_primer_mes?: number;
+  exceso_primer_mes?: number;
+  en_camino_primer_mes?: { periodo: Mes; unidades: number };
   /** Primer mes de un nuevo tramo de falta después de uno sin falta. */
-  falta_desde: Mes | null;
+  falta_desde?: Mes;
 };
 
-export type TarjetaHuecoApi = Pick<
-  FilaFlujoApi,
-  "gml_id" | "equivalencia_id" | "agrupacion_marca_id" | "genero" | "mundo" | "linea" | "equivalencia" | "agrupacion_marca" | "mia" | "responsable" | "stock_k" | "resumen" | "subflujos_resumen"
-> & { detalle: DetalleTarjetaApi };
+/** El resumen de la tarjeta: solo lo que la tarjeta usa (sin `vpm_k`, `vpm_real_k` ni `primer_mes_fuera_de_rango`, que sí trae la lista). Un campo en cero o nulo NO viaja. */
+export type ResumenTarjetaApi = {
+  senal: Senal;
+  saldo_n_meses: number;
+  /** Ausente = sin IMI (sin curva o sin demanda). */
+  imi_k?: number;
+  en_camino?: number;
+  primer_mes_falta?: Mes;
+  exceso_desde?: Mes;
+  por_confirmar?: number;
+  posible_doble_conteo?: number;
+};
+
+/**
+ * Una tarjeta de Huecos. Los nombres y los ids largos NO viajan aquí: `nodo` y `agrupacion` son índices en `HuecosApi.catalogo`
+ * (`nodos[nodo]`, `agrupaciones[agrupacion]`). `mia` solo viaja si es `true`; `subflujos_resumen` solo si hay subflujos.
+ */
+export type TarjetaHuecoApi = {
+  nodo: number;
+  agrupacion: number;
+  mia?: true;
+  stock_k: { cd: number; total: number };
+  resumen: ResumenTarjetaApi;
+  detalle: DetalleTarjetaApi;
+  subflujos_resumen?: FilaFlujoApi["subflujos_resumen"];
+};
+
+/** Una agrupación de marca del catálogo de Huecos (el id sirve para el enlace a la fila). */
+export type EntradaCatalogoHuecosApi = { id: string; nombre: string };
+
+/**
+ * Un nodo del árbol (GML o GMLE) del catálogo de Huecos: `genero`, `mundo` y `linea` son índices en las listas de nombres de
+ * `generos`, `mundos` y `lineas`. `equivalencia_id` y `equivalencia` solo viajan en filas de equivalencia (GMLE).
+ */
+export type NodoHuecosApi = {
+  gml_id: string;
+  equivalencia_id?: string;
+  genero: number;
+  mundo: number;
+  linea: number;
+  equivalencia?: string;
+};
+
+/**
+ * Los nombres de `GET /api/flujo/huecos`, una sola vez y solo de lo que aparece en las tarjetas devueltas. `generos`, `mundos` y
+ * `lineas` son listas de NOMBRES sin repetir (la pantalla filtra por nombre; no hay ids). `responsables` se indexa por
+ * `"<índice de género>|<índice de mundo>"` (p. ej. `"0|3"`), no por ids.
+ */
+export type CatalogoHuecosApi = {
+  generos: string[];
+  mundos: string[];
+  lineas: string[];
+  nodos: NodoHuecosApi[];
+  agrupaciones: EntradaCatalogoHuecosApi[];
+  responsables: Record<string, { perfil_id: string; nombre: string }>;
+};
 
 // ─── Reparto y reglas (proyecciones reducidas de M12 y M13) ───
 
@@ -413,16 +474,15 @@ export type FlujoApi = {
   filas: FilaFlujoListaApi[];
   /** El IMI sin las filas sin curva (§0.10). */
   totales: SerieFlujoApi;
-  repartos_vigentes: RepartoFlujoApi[];
-  reglas_intercompany: ReglaFlujoApi[];
   mis_combinaciones: CombinacionApi[];
 };
 
-/** `GET /api/flujo/huecos`: la cabecera de la lista más las tarjetas (la tarjeta no repite lo que ya está en `datos`). */
+/** `GET /api/flujo/huecos`: la cabecera de la lista, el catálogo de nombres y las tarjetas (compactas: ≤ 0,4 MB con 1 600). */
 export type HuecosApi = {
   datos: DatosFlujoApi;
   /** Los próximos `N` meses del saldo de las tarjetas (`?meses=`, por defecto `parametros.meses_tarjeta`). */
   meses: number;
+  catalogo: CatalogoHuecosApi;
   tarjetas: TarjetaHuecoApi[];
   mis_combinaciones: CombinacionApi[];
 };

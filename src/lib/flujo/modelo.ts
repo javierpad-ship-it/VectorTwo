@@ -37,17 +37,20 @@ import {
   type AvisoFila,
   type AvisoFlujo,
   type CatalogoFlujoApi,
+  type CatalogoHuecosApi,
   type ConciliacionApi,
   type ConciliacionFilaApi,
-  type DetalleTarjetaApi,
+  type EntradaCatalogoHuecosApi,
   type EntregaDetalleApi,
   type FilaFlujoApi,
   type FilaFlujoDetalleApi,
   type FilaFlujoListaApi,
   type MesFlujoApi,
+  type NodoHuecosApi,
   type ParametrosFlujoApi,
   type ReglaFlujoApi,
   type ResumenFilaApi,
+  type ResumenListaApi,
   type Senal,
   type SerieFlujoApi,
   type SoloConciliacion,
@@ -482,7 +485,15 @@ function totalesDe(filas: readonly FilaCalculada[], n: number, parametros: Param
  * `resumenTarjeta(fila, n)`: el resumen de la fila para una tarjeta de Huecos con los próximos `n` meses. La señal es la peor de esos
  * `n` meses; el saldo, `Σ C_m` de ellos; `en_camino`, `Σ I_m` de todo el horizonte; los «primer mes» recorren todo el horizonte.
  */
-export function resumenTarjeta(fila: FilaCalculada, n: number): { resumen: ResumenFilaApi; detalle: DetalleTarjetaApi } {
+/** El detalle de la tarjeta COMPLETO (con ceros y nulos); `tarjetaCompacta` le quita lo que no viaja. */
+export type DetalleTarjetaCalculado = {
+  saldo_primer_mes: number;
+  exceso_primer_mes: number;
+  en_camino_primer_mes: { periodo: Mes; unidades: number } | null;
+  falta_desde: Mes | null;
+};
+
+export function resumenTarjeta(fila: FilaCalculada, n: number): { resumen: ResumenFilaApi; detalle: DetalleTarjetaCalculado } {
   const meses = fila.proyeccion.meses;
   const tarjeta = meses.slice(0, n);
   const primero = (pred: (m: MesProyectado) => boolean): Mes | null => meses.find(pred)?.periodo ?? null;
@@ -634,6 +645,19 @@ function subflujosResumenApi(fila: FilaCalculada, nombres: NombresFlujo): FilaFl
   }));
 }
 
+/** El resumen de la lista: el de la fila sin los campos que solo usan el detalle y las tarjetas (ver `ResumenListaApi`). */
+function aResumenLista(r: ResumenFilaApi): ResumenListaApi {
+  return {
+    senal: r.senal,
+    imi_k: r.imi_k,
+    vpm_k: r.vpm_k,
+    saldo_n_meses: r.saldo_n_meses,
+    en_camino: r.en_camino,
+    por_confirmar: r.por_confirmar,
+    posible_doble_conteo: r.posible_doble_conteo,
+  };
+}
+
 /** La fila de la lista: `serie` en lugar de `meses`, sin nombres (van en el `catalogo`). */
 export function aFilaListaApi(fila: FilaCalculada, nombres: NombresFlujo, mesesTarjeta: number): FilaFlujoListaApi {
   return {
@@ -643,7 +667,7 @@ export function aFilaListaApi(fila: FilaCalculada, nombres: NombresFlujo, mesesT
     mia: fila.mia,
     stock_k: { cd: u(fila.stock_k.cd), tiendas: u(fila.stock_k.tiendas), total: u(fila.stock_k.total) },
     subflujos_resumen: subflujosResumenApi(fila, nombres),
-    resumen: resumenTarjeta(fila, mesesTarjeta).resumen,
+    resumen: aResumenLista(resumenTarjeta(fila, mesesTarjeta).resumen),
     avisos: fila.avisos,
     serie: aSerieFlujoApi(fila),
   };
@@ -672,32 +696,91 @@ export function aFilaFlujoApi(fila: FilaCalculada, nombres: NombresFlujo, kPrima
   };
 }
 
-/** Una tarjeta de Huecos (con los nombres del catálogo) para los próximos `n` meses. */
-export function aTarjetaHuecoApi(fila: FilaCalculada, nombres: NombresFlujo, n: number): TarjetaHuecoApi {
-  const nodo = nodoDe(nombres, fila);
-  const { resumen, detalle } = resumenTarjeta(fila, n);
+/** La tarjeta sin sus nombres: un campo en cero o nulo no viaja (ver `TarjetaHuecoApi`). */
+function tarjetaCompacta(fila: FilaCalculada, resumen: ResumenFilaApi, detalle: DetalleTarjetaCalculado, nombres: NombresFlujo, nodo: number, agrupacion: number): TarjetaHuecoApi {
+  const subflujos = subflujosResumenApi(fila, nombres);
   return {
-    gml_id: fila.gml_id,
-    equivalencia_id: fila.equivalencia_id,
-    agrupacion_marca_id: fila.agrupacion_marca_id,
-    genero: nodo?.genero ?? "—",
-    mundo: nodo?.mundo ?? "—",
-    linea: nodo?.linea ?? "—",
-    equivalencia: nodo?.equivalencia ?? null,
-    agrupacion_marca: nombres.agrupaciones[fila.agrupacion_marca_id] ?? "—",
-    mia: fila.mia,
-    responsable: nodo ? (nombres.responsables[`${nodo.genero_id}|${nodo.mundo_id}`] ?? null) : null,
-    stock_k: { cd: u(fila.stock_k.cd), tiendas: u(fila.stock_k.tiendas), total: u(fila.stock_k.total) },
-    resumen,
-    subflujos_resumen: subflujosResumenApi(fila, nombres),
-    detalle,
+    nodo,
+    agrupacion,
+    ...(fila.mia ? { mia: true as const } : {}),
+    stock_k: { cd: u(fila.stock_k.cd), total: u(fila.stock_k.total) },
+    resumen: {
+      senal: resumen.senal,
+      saldo_n_meses: resumen.saldo_n_meses,
+      ...(resumen.imi_k === null ? {} : { imi_k: resumen.imi_k }),
+      ...(resumen.en_camino === 0 ? {} : { en_camino: resumen.en_camino }),
+      ...(resumen.primer_mes_falta === null ? {} : { primer_mes_falta: resumen.primer_mes_falta }),
+      ...(resumen.exceso_desde === null ? {} : { exceso_desde: resumen.exceso_desde }),
+      ...(resumen.por_confirmar === 0 ? {} : { por_confirmar: resumen.por_confirmar }),
+      ...(resumen.posible_doble_conteo === 0 ? {} : { posible_doble_conteo: resumen.posible_doble_conteo }),
+    },
+    detalle: {
+      ...(detalle.saldo_primer_mes === 0 ? {} : { saldo_primer_mes: detalle.saldo_primer_mes }),
+      ...(detalle.exceso_primer_mes === 0 ? {} : { exceso_primer_mes: detalle.exceso_primer_mes }),
+      ...(detalle.en_camino_primer_mes ? { en_camino_primer_mes: detalle.en_camino_primer_mes } : {}),
+      ...(detalle.falta_desde ? { falta_desde: detalle.falta_desde } : {}),
+    },
+    ...(subflujos.length === 0 ? {} : { subflujos_resumen: subflujos }),
   };
 }
 
-/** Las tarjetas de Huecos ordenadas por saldo descendente (y, a igualdad, por ruta, para un orden estable). */
-export function ordenarTarjetas(tarjetas: readonly TarjetaHuecoApi[]): TarjetaHuecoApi[] {
-  const ruta = (t: TarjetaHuecoApi) => `${t.genero}|${t.mundo}|${t.linea}|${t.equivalencia ?? ""}|${t.agrupacion_marca}`;
-  return [...tarjetas].sort((a, b) => b.resumen.saldo_n_meses - a.resumen.saldo_n_meses || (ruta(a) < ruta(b) ? -1 : ruta(a) > ruta(b) ? 1 : 0));
+/**
+ * Las tarjetas de Huecos y su catálogo, ordenadas por saldo descendente (a igualdad, por ruta, para un orden estable) para los
+ * próximos `n` meses. El catálogo trae solo lo que aparece en las tarjetas; `generos`, `mundos`, `lineas`, `nodos` y `agrupaciones`
+ * se llenan en el orden de aparición, así que la salida es determinista.
+ */
+export function armarHuecosApi(filas: readonly FilaCalculada[], nombres: NombresFlujo, n: number): { catalogo: CatalogoHuecosApi; tarjetas: TarjetaHuecoApi[] } {
+  const items = filas.map((fila) => {
+    const nodo = nodoDe(nombres, fila);
+    const { resumen, detalle } = resumenTarjeta(fila, n);
+    const agrupacion = nombres.agrupaciones[fila.agrupacion_marca_id] ?? "—";
+    const ruta = `${nodo?.genero ?? "—"}|${nodo?.mundo ?? "—"}|${nodo?.linea ?? "—"}|${nodo?.equivalencia ?? ""}|${agrupacion}`;
+    return { fila, nodo, resumen, detalle, agrupacion, ruta };
+  });
+  items.sort((a, b) => b.resumen.saldo_n_meses - a.resumen.saldo_n_meses || (a.ruta < b.ruta ? -1 : a.ruta > b.ruta ? 1 : 0));
+
+  const generos: string[] = [];
+  const mundos: string[] = [];
+  const lineas: string[] = [];
+  const nodosCat: NodoHuecosApi[] = [];
+  const agrupaciones: EntradaCatalogoHuecosApi[] = [];
+  const responsables: CatalogoHuecosApi["responsables"] = {};
+  const indice = { nodos: new Map<string, number>(), agrupaciones: new Map<string, number>() };
+  const posicion = (lista: string[], nombre: string): number => {
+    const i = lista.indexOf(nombre);
+    if (i >= 0) return i;
+    lista.push(nombre);
+    return lista.length - 1;
+  };
+
+  const tarjetas = items.map(({ fila, nodo, resumen, detalle, agrupacion }) => {
+    const claveNodo = `${fila.gml_id}|${fila.equivalencia_id ?? ""}`;
+    let iNodo = indice.nodos.get(claveNodo);
+    if (iNodo === undefined) {
+      const iGenero = posicion(generos, nodo?.genero ?? "—");
+      const iMundo = posicion(mundos, nodo?.mundo ?? "—");
+      nodosCat.push({
+        gml_id: fila.gml_id,
+        ...(fila.equivalencia_id === null ? {} : { equivalencia_id: fila.equivalencia_id }),
+        genero: iGenero,
+        mundo: iMundo,
+        linea: posicion(lineas, nodo?.linea ?? "—"),
+        ...(nodo?.equivalencia ? { equivalencia: nodo.equivalencia } : {}),
+      });
+      iNodo = nodosCat.length - 1;
+      indice.nodos.set(claveNodo, iNodo);
+      const resp = nodo ? nombres.responsables[`${nodo.genero_id}|${nodo.mundo_id}`] : undefined;
+      if (resp) responsables[`${iGenero}|${iMundo}`] = resp;
+    }
+    let iAgr = indice.agrupaciones.get(fila.agrupacion_marca_id);
+    if (iAgr === undefined) {
+      agrupaciones.push({ id: fila.agrupacion_marca_id, nombre: agrupacion });
+      iAgr = agrupaciones.length - 1;
+      indice.agrupaciones.set(fila.agrupacion_marca_id, iAgr);
+    }
+    return tarjetaCompacta(fila, resumen, detalle, nombres, iNodo, iAgr);
+  });
+  return { catalogo: { generos, mundos, lineas, nodos: nodosCat, agrupaciones, responsables }, tarjetas };
 }
 
 function filaConciliacionApi(base: { gml_id: string; equivalencia_id: string | null; agrupacion_marca_id: string; ruta: string; agrupacion_marca: string; mia: boolean }, m: MesConciliado, marca: { id: string; nombre: string; pct_regla: number; pct_observado: number | null } | null): ConciliacionFilaApi {

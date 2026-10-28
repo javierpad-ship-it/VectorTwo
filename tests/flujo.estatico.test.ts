@@ -256,7 +256,7 @@ describe("caché por huella (regla 24): flujo_huella_base() gobierna todas las c
     expect(lecturas.map((m) => m[1]).sort()).toEqual(["cerrada", "compras", "configuracion", "parametros", "reglas", "repartos"]);
     for (const m of lecturas) expect(m[2], m[1]).toMatch(/claves\./);
     expect(servicio).toMatch(/claveStockFilas\(claves, kPrima\)/);
-    expect(servicio).toMatch(/cacheStock\.obtener\(cargaId/);
+    expect(servicio).toMatch(/cacheStock\.obtener\(`\$\{cargaId\}\|\$\{claveStock\}`/);
   });
 
   it("la caché no usa el reloj ni temporizadores: se invalida sola con la huella (single-flight, LRU de 26 meses por carga)", () => {

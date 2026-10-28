@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { compraApiC09Vencida, compraApiC12, compraApiC12Parcial, compraApiC12SaldoCerrado, comprasApiEjemplo } from "./compras.fixture";
-import { flujoEjemplo, huecosEjemplo } from "./flujo.fixture";
+import { flujoEjemplo, huecosEjemplo, resolverTarjeta } from "./flujo.fixture";
 import { fechaHora, fechaLima, imi, mesActualLima, mesCorto, mesesEntre, mesLargo, sumarMes, ultimoDiaDelMes, unidades } from "../src/components/compras/formato";
 import {
   alcanceEfectivo,
+  aplanarTarjetas,
   consultaHuecos,
   contarPorEstado,
   filtrarTarjetas,
@@ -102,7 +103,22 @@ describe("URLs de las lecturas (contratos de T0)", () => {
 
 describe("Huecos: parámetros, filtros y textos", () => {
   const huecos = huecosEjemplo();
-  const ts = huecos.tarjetas;
+  const ts = aplanarTarjetas(huecos);
+
+  it("el catálogo se resuelve una vez: cada tarjeta plana coincide con `resolverTarjeta` y lo ausente vale 0 o null", () => {
+    expect(ts).toHaveLength(huecos.tarjetas.length);
+    huecos.tarjetas.forEach((t, i) => {
+      expect(ts[i]).toMatchObject(resolverTarjeta(huecos, t));
+      expect(ts[i].mia).toBe(t.mia ?? false);
+      expect(ts[i].por_confirmar).toBe(t.resumen.por_confirmar ?? 0);
+      expect(ts[i].en_camino).toBe(t.resumen.en_camino ?? 0);
+      expect(ts[i].imi_k).toBe(t.resumen.imi_k ?? null);
+      expect(ts[i].subflujos).toEqual(t.subflujos_resumen ?? []);
+    });
+    expect(new Set(ts.map((t) => t.clave)).size).toBe(ts.length);
+    expect(ts.some((t) => t.responsable !== null)).toBe(true);
+    expect(ts.some((t) => !t.mia)).toBe(true);
+  });
 
   it("la URL se lee y se escribe sin perder nada; lo desconocido se ignora", () => {
     const p = leerParametrosHuecos(lector("alcance=mias&estado=falta&meses=9&genero=HOMBRE&mundo=URBANO&linea=DENIM&agrupacion=RECONOCIDO"));
@@ -127,12 +143,12 @@ describe("Huecos: parámetros, filtros y textos", () => {
     expect(mias.every((t) => t.mia)).toBe(true);
     expect(filtrarTarjetas(ts, PARAMETROS_HUECOS_VACIOS, "todas")).toHaveLength(ts.length);
     const falta = filtrarTarjetas(ts, { ...PARAMETROS_HUECOS_VACIOS, estado: "falta" }, "todas");
-    expect(falta.every((t) => t.resumen.senal === "falta" || t.resumen.senal === "quiebre")).toBe(true);
-    const quiebre = { ...ts[0], resumen: { ...ts[0].resumen, senal: "quiebre" as const } };
+    expect(falta.every((t) => t.senal === "falta" || t.senal === "quiebre")).toBe(true);
+    const quiebre = { ...ts[0], senal: "quiebre" as const };
     expect(filtrarTarjetas([quiebre], { ...PARAMETROS_HUECOS_VACIOS, estado: "falta" }, "todas")).toHaveLength(1);
     expect(filtrarTarjetas([quiebre], { ...PARAMETROS_HUECOS_VACIOS, estado: "exceso" }, "todas")).toHaveLength(0);
     const por = filtrarTarjetas(ts, { ...PARAMETROS_HUECOS_VACIOS, estado: "por_confirmar" }, "todas");
-    expect(por.every((t) => t.resumen.por_confirmar > 0)).toBe(true);
+    expect(por.every((t) => t.por_confirmar > 0)).toBe(true);
   });
 
   it("los conteos de los chips respetan el alcance y los selectores, pero no el estado", () => {
@@ -158,11 +174,11 @@ describe("Huecos: parámetros, filtros y textos", () => {
     expect(rotuloSaldo([], 6)).toBe("Saldo por comprar");
     const denim = ts.find((t) => t.linea === "DENIM")!;
     expect(fraseTarjeta(denim, 6)).toBe("falta en oct (83) y desde feb");
-    const exceso = { ...denim, resumen: { ...denim.resumen, senal: "exceso" as const, exceso_desde: "2026-11" }, detalle: { ...denim.detalle, exceso_primer_mes: 1127 } };
+    const exceso = { ...denim, senal: "exceso" as const, exceso_desde: "2026-11", exceso_primer_mes: 1127 };
     expect(fraseTarjeta(exceso, 6)).toBe("exceso desde nov: 1,127 u");
-    expect(fraseTarjeta({ ...denim, resumen: { ...denim.resumen, senal: "al_dia" } }, 6)).toContain("Sin faltas en los próximos 6 meses");
-    expect(fraseTarjeta({ ...denim, resumen: { ...denim.resumen, senal: "sin_curva" } }, 6)).toContain("sin repartir por mes");
-    expect(fraseTarjeta({ ...denim, resumen: { ...denim.resumen, senal: "quiebre" } }, 6)).toContain("quiebre");
+    expect(fraseTarjeta({ ...denim, senal: "al_dia" }, 6)).toContain("Sin faltas en los próximos 6 meses");
+    expect(fraseTarjeta({ ...denim, senal: "sin_curva" }, 6)).toContain("sin repartir por mes");
+    expect(fraseTarjeta({ ...denim, senal: "quiebre" }, 6)).toContain("quiebre");
   });
 });
 

@@ -6,7 +6,8 @@ import type { StockFlujoJson } from "./tipos";
 /**
  * Cachés en memoria del flujo de M8 (ficha 08, §0.6, regla 24). Railway corre UNA instancia: la caché vive en el proceso y se pierde en
  * cada deploy (el frío tras un deploy es el peor caso). Todo se cachea por IDENTIDAD o por HUELLA, nunca por tiempo:
- *   - el stock de un mes, por `carga_id` (una carga publicada no cambia nunca; LRU de `MESES_CACHE_STOCK` meses);
+ *   - el stock de un mes, por `carga_id` + huella de `tiendas` y `marcas` (una carga publicada no cambia, pero `stock_flujo` agrega con
+ *     esas dos tablas al llamarse; LRU de `MESES_CACHE_STOCK` entradas);
  *   - cada lectura (cerrada, configuración, compras, reglas, repartos, parámetros), por la parte de `flujo_huella_base()` que la
  *     gobierna (`clavesCache`); solo se conserva la última: al cambiar la clave, se relee solo esa lectura;
  *   - el resultado completo, por `huellaCalculoFlujo` (las dos últimas).
@@ -96,7 +97,7 @@ export const contar = (nombre: NombreContador): void => {
   contadores[nombre] += 1;
 };
 
-/** Stock de un mes por `carga_id`: inmutable mientras la carga siga publicada (un mes reemplazado en M5 es otra carga). */
+/** Stock de un mes por `carga_id|huella(tiendas, marcas)` (un mes reemplazado en M5 es otra carga; tiendas y marcas cambian la agregación). */
 export const cacheStock = new CacheLectura<StockFlujoJson>(MESES_CACHE_STOCK);
 
 /** Una caché de una sola entrada por lectura: la clave es la parte de la huella que la gobierna. */

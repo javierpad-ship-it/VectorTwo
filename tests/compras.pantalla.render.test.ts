@@ -20,6 +20,7 @@ import { PestanaConciliacion } from "../src/components/compras/pestana-conciliac
 import { MedidorImi, SelloSenal } from "../src/components/compras/senal";
 import { TablaMatriz } from "../src/components/compras/tabla-matriz";
 import { TarjetaHueco } from "../src/components/compras/tarjeta-hueco";
+import { aplanarTarjetas, type TarjetaVista } from "../src/components/compras/vista-huecos";
 import { columnasDetalle, columnasTotales, filasMatrizDetalle, filasMatrizTotales } from "../src/components/compras/matriz";
 import { unidades } from "../src/components/compras/formato";
 import { filasDeLista, ORDEN_INICIAL } from "../src/components/compras/vista-flujo";
@@ -43,8 +44,9 @@ const RANGO = { imi_min: 4, imi_max: 8, meses_tarjeta: 6 };
 
 describe("Huecos: tarjeta, sello y medidor", () => {
   const huecos = huecosEjemplo();
-  const tarjeta = (pred: (t: (typeof huecos.tarjetas)[number]) => boolean) => {
-    const t = huecos.tarjetas.find(pred);
+  const planas = aplanarTarjetas(huecos);
+  const tarjeta = (pred: (t: TarjetaVista) => boolean) => {
+    const t = planas.find(pred);
     if (!t) throw new Error("el fixture no trae la tarjeta esperada");
     return t;
   };
@@ -54,7 +56,7 @@ describe("Huecos: tarjeta, sello y medidor", () => {
     const t = tarjeta((x) => x.linea === "DENIM");
     const h = html(createElement(TarjetaHueco, { ...props, tarjeta: t }));
     for (const t of ["HOMBRE · URBANO", "DENIM", "RECONOCIDO", "Falta", "IMI a set", "4.4 m", "(4 · 8)", "Saldo oct–mar", "700 u", "CD 300", "500 u", "(nov)", "Ver flujo"]) expect(h, t).toContain(t);
-    expect(h).toContain(`${unidades(t.resumen.saldo_n_meses)} u`);
+    expect(h).toContain(`${unidades(t.saldo_n_meses)} u`);
     expect(h).toContain("falta en oct (83) y desde feb");
     expect(h).toContain('role="meter"');
   });
@@ -65,7 +67,7 @@ describe("Huecos: tarjeta, sello y medidor", () => {
   });
 
   it("la fila de JH muestra el subflujo con su rango; una equivalencia se escribe «línea › equivalencia»", () => {
-    const h = html(createElement(TarjetaHueco, { ...props, tarjeta: tarjeta((t) => t.subflujos_resumen.length > 0 && t.linea === "CAMISA") }));
+    const h = html(createElement(TarjetaHueco, { ...props, tarjeta: tarjeta((t) => t.subflujos.length > 0 && t.linea === "CAMISA") }));
     expect(h).toContain("CAMISA › MANGA LARGA");
     expect(h).toContain("JOHN HOLDEN");
     expect(h).toContain("rango 4–8");
@@ -73,17 +75,17 @@ describe("Huecos: tarjeta, sello y medidor", () => {
 
   it("una tarjeta con entregas por confirmar lleva la banda; con respaldo del inventario, «posible doble conteo»", () => {
     const base = tarjeta((t) => t.linea === "DENIM");
-    const sin = html(createElement(TarjetaHueco, { ...props, tarjeta: { ...base, resumen: { ...base.resumen, por_confirmar: 200, posible_doble_conteo: 0 } } }));
+    const sin = html(createElement(TarjetaHueco, { ...props, tarjeta: { ...base, por_confirmar: 200, posible_doble_conteo: 0 } }));
     expect(sin).toContain("200 u por confirmar");
     expect(sin).not.toContain("posible doble conteo");
-    const con = html(createElement(TarjetaHueco, { ...props, tarjeta: { ...base, resumen: { ...base.resumen, por_confirmar: 200, posible_doble_conteo: 200 } } }));
+    const con = html(createElement(TarjetaHueco, { ...props, tarjeta: { ...base, por_confirmar: 200, posible_doble_conteo: 200 } }));
     expect(con).toContain("⚠ 200 u por confirmar · posible doble conteo");
     expect(html(createElement(TarjetaHueco, { ...props, tarjeta: base }))).not.toContain("por confirmar");
   });
 
   it("una fila sin curva lo dice y no muestra IMI", () => {
     const base = tarjeta((t) => t.linea === "DENIM");
-    const h = html(createElement(TarjetaHueco, { ...props, tarjeta: { ...base, resumen: { ...base.resumen, senal: "sin_curva", imi_k: null } } }));
+    const h = html(createElement(TarjetaHueco, { ...props, tarjeta: { ...base, senal: "sin_curva", imi_k: null } }));
     expect(h).toContain("Sin curva");
     expect(h).toContain("sin repartir por mes");
     expect(h).toContain("— m");

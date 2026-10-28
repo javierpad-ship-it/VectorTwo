@@ -115,6 +115,12 @@ export type CompraExistente = {
   referencia: string | null;
   estado: EstadoCompra;
   cancelada_at: string | null;
+  /**
+   * Fecha y moneda de la cabecera. Si vienen, una línea nueva con otra fecha u otra moneda se omite (`cabecera_inconsistente`): la
+   * función de la base agrega la línea a la compra sin compararlas. Opcionales para quien no las conozca (no se compara).
+   */
+  fecha_compra?: string;
+  moneda?: Moneda;
 };
 
 export type RepartoVigenteParaImportar = RepartoParaLinea & { marca_id: string };
@@ -567,6 +573,19 @@ export function previsualizarImportacionCompras(
     if (clasificacion === "nueva" && compraExistente && compraExistente.cancelada_at !== null) {
       vistos.delete(d.clave);
       return omitir({ motivo: "cabecera_inconsistente", detalle: `La compra ${compraExistente.numero} ya cerró su saldo: no admite líneas nuevas.` });
+    }
+
+    // Una línea nueva que se agrega a una compra existente hereda su cabecera: otra fecha u otra moneda es otra compra.
+    if (clasificacion === "nueva" && compraExistente) {
+      const fechaExistente = compraExistente.fecha_compra?.slice(0, 10);
+      const difiereFecha = fechaExistente !== undefined && fechaExistente !== d.fecha_compra;
+      const difiereMoneda = compraExistente.moneda !== undefined && compraExistente.moneda !== d.moneda;
+      if (difiereFecha || difiereMoneda) {
+        vistos.delete(d.clave);
+        if (!cab) cabeceras.delete(d.compra_clave);
+        const que = difiereFecha ? `FECHA_COMPRA ${d.fecha_compra} ≠ ${fechaExistente}` : `MONEDA ${d.moneda} ≠ ${compraExistente.moneda}`;
+        return omitir({ motivo: "cabecera_inconsistente", detalle: `${que} de la compra ${compraExistente.numero}, que ya existe: una compra tiene una sola fecha y una sola moneda.` });
+      }
     }
 
     let grupo = grupos.get(d.compra_clave);

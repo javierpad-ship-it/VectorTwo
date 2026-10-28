@@ -17,7 +17,7 @@ import { mesLargo } from "@/components/compras/formato";
 import { TarjetaHueco } from "@/components/compras/tarjeta-hueco";
 import {
   alcanceEfectivo,
-  claveTarjeta,
+  aplanarTarjetas,
   consultaHuecos,
   contarPorEstado,
   ETIQUETA_ESTADO,
@@ -54,7 +54,8 @@ export function HuecosPanel({ rol }: { rol: Rol }) {
   const cambiar = (c: Partial<ParametrosHuecos>) => irA({ ...parametros, ...c });
 
   const datos = huecos.datos?.datos ?? null;
-  const tarjetas = useMemo(() => huecos.datos?.tarjetas ?? [], [huecos.datos]);
+  // El catálogo se resuelve una sola vez por respuesta; filtros, conteos y opciones trabajan sobre las tarjetas ya planas.
+  const tarjetas = useMemo(() => (huecos.datos ? aplanarTarjetas(huecos.datos) : []), [huecos.datos]);
   const combinaciones = huecos.datos?.mis_combinaciones.length ?? 0;
   const alcance = alcanceEfectivo(parametros, rol, combinaciones);
   const meses = huecos.datos?.meses ?? parametros.meses ?? 6;
@@ -204,7 +205,7 @@ export function HuecosPanel({ rol }: { rol: Rol }) {
             <>
               <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {mostradas.map((t) => (
-                  <li key={claveTarjeta(t)}>
+                  <li key={t.clave}>
                     <TarjetaHueco tarjeta={t} imiMin={huecos.datos!.datos.parametros.imi_min} imiMax={huecos.datos!.datos.parametros.imi_max} periodos={huecos.datos!.datos.periodos} meses={meses} kPrima={huecos.datos!.datos.k_prima} />
                   </li>
                 ))}

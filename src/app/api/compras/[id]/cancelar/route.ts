@@ -4,6 +4,7 @@ import { requirePlanner } from "@/lib/auth/guard";
 import { idDeRuta, leerCuerpo, ok } from "@/lib/api/respuestas";
 import { cancelarSchema } from "@/lib/compras/esquemas";
 import { cancelarCompra } from "@/lib/compras/servicio";
+import { contextoParaCompras } from "@/lib/flujo/servicio";
 
 /**
  * `POST /api/compras/[id]/cancelar` (`requirePlanner` en M8; `requireUser` desde M9a): cancela con motivo (con la función
@@ -18,7 +19,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (t.respuesta) return t.respuesta;
   const { datos, respuesta } = await leerCuerpo(request, cancelarSchema);
   if (respuesta) return respuesta;
-  const r = await cancelarCompra(supabaseAdmin(), { id: perfil.id, nombre: perfil.nombre ?? perfil.email, rol }, t.id, datos);
+  const d = supabaseAdmin();
+  const r = await cancelarCompra(d, { id: perfil.id, nombre: perfil.nombre ?? perfil.email, rol }, t.id, datos, () => contextoParaCompras(d));
   if (r.respuesta) return r.respuesta;
   return ok(r.data);
 }
