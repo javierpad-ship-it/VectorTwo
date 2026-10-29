@@ -10,7 +10,7 @@ import {
   tratamientoEfectivo,
   type ComparacionForma,
 } from "./atipicos";
-import { MESES_ANIO, clasificarAnio, mesDe, participacion, redondear, sumar } from "./anios";
+import { MESES_ANIO, anioDe, clasificarAnio, mesDe, participacion, redondear, sumar } from "./anios";
 import { backtest, eat as calcularEat, promediarPliegues, validacionParcial } from "./backtesting";
 import { calcularCandidatas, marcarIguales, curvaA, type AnioAjuste } from "./candidatas";
 import { armarExplicacionF, curvaF, explicarF, rhoDe } from "./avanzada";
@@ -655,6 +655,17 @@ function indexarPorTienda(entrada: EntradaAgrupacion): PorTiendaPorAnio {
   return salida;
 }
 
+/**
+ * Doce posiciones (enero primero): `true` en los meses de `anio` que están en `atipicos` (`aaaa-mm`). Se toma del conjunto completo de la
+ * temporada y no de `AnioPreparado.atipicos`, que en el año en curso se corta en el último mes cargado: el periodo (06e) cuenta también
+ * los meses por venir.
+ */
+function mascaraDeAnio(atipicos: ReadonlySet<string>, anio: number): boolean[] {
+  const mascara = Array.from({ length: MESES_ANIO }, () => false);
+  for (const p of atipicos) if (anioDe(p) === anio) mascara[mesDe(p) - 1] = true;
+  return mascara;
+}
+
 function seriePara(a: AnioPreparado, porTienda: PorTiendaPorAnio): SerieParaVolumen {
   return {
     anio: a.anio,
@@ -1143,6 +1154,7 @@ export function calcularCorrida(entrada: EntradaCorrida, parametros: ParametrosC
         ...seriePara(a, g.porTienda),
         clase: a.clase,
         meses_atipicos: a.atipicos.length,
+        mascara_atipicos: mascaraDeAnio(g.atipicos, a.anio),
       })),
     });
   }

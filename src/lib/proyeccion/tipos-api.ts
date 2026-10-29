@@ -46,6 +46,18 @@ export const VERSION_METODO = 4;
  * (`cerrada_metodo_anterior`). Constante FIJA (no `VERSION_METODO`): una subida futura del método no invalida en M8 cerradas válidas.
  */
 export const VERSION_METODO_MIN_M8 = 4;
+/**
+ * `0.14.0` (06e D8): umbral único de materialidad del Niño. Un GM (o el Resto) «tiene Niño» solo si `|Σ B' ÷ Σ B − 1| ≥ 0,5 %`
+ * (`correccionMaterial`, `factor-nino.ts`). Pantalla (`hay_nino`) y M7 (`gm_con_nino`) usan la misma función.
+ */
+export const UMBRAL_CORRECCION_NINO = 0.005;
+/** `0.14.0` (06e D4): meses del periodo con dato que hacen falta para que el sistema calcule un factor del Niño (con menos, lo escribe el planner). */
+export const MIN_MESES_FACTOR = 2;
+/** `0.14.0` (06e §2.1): sobre qué base se interpreta un %: `bruta` = `Y+1 ÷ Y real − 1` (versiones de antes de `0.14.0`), `corregida` = sobre `Y` corregido del Niño. */
+export const SOBRE_BASE = ["bruta", "corregida"] as const;
+export type SobreBase = (typeof SOBRE_BASE)[number];
+/** `0.14.0` (06e §5.2): fórmula con que se calcula `ratio_calculado` desde `0.14.0` (`factores_volumen_atipico.formula`). */
+export const FORMULA_FACTOR_RELATIVO = "relativo_periodo";
 /** `0.10.8` (07c §2.5): géneros que son columna de la matriz de crecimientos, en este orden (se resuelven por `upper(trim(nombre))`). */
 export const GENEROS_MATRIZ: readonly string[] = ["HOMBRE", "MUJER"];
 /** `0.10.8` (07c): un % fuera de ±50 es «extremo» (la pantalla avisa, no bloquea). */
@@ -78,7 +90,9 @@ export type MotivoDesactualizada =
    * M12 (`0.11.0`): cambió la configuración de 02b (marcas relevantes, modalidades o conjuntos) después de calcular
    * (`proyecciones.huella_flujo`); una calculada antes de M12 (huella nula) también. Una proyección cerrada no se toca.
    */
-  | "config_cambiada";
+  | "config_cambiada"
+  /** `0.14.0` (06e §3.3): cambió la agrupación de alguna línea con Niño y con ella su factor. No se puede saltar con `forzar` al cerrar. */
+  | "temporada_cambiada";
 
 export type MotivoBloqueo = "sin_meses" | "meses_faltantes" | "tienda_sin_apertura_con_venta" | "sin_mismas_tiendas";
 
@@ -185,7 +199,15 @@ export type ParametrosProyeccion = {
   /** `0.10.1`: por debajo de esta disponibilidad (0 a 1) una fila de cola larga tuvo un quiebre relevante. Por defecto `UMBRAL_DISPONIBILIDAD`. */
   umbral_disponibilidad: number;
   rampa_maduracion: number[];
-  factores_usados: { anio: number; temporada: TemporadaFactor; ratio: number | null; origen: "calculado" | "manual" | null }[];
+  factores_usados: {
+    anio: number;
+    temporada: TemporadaFactor;
+    ratio: number | null;
+    origen: "calculado" | "manual" | null;
+    /** `0.14.0` (06e §3.3): fórmula y huella de cargas del factor con que se calculó. */
+    formula?: string | null;
+    huella_cargas?: string | null;
+  }[];
   bloques: BloquesApi;
   /** `0.10.3`: historial de quién editó parámetros (umbrales, crecimiento, rampa) y qué cambió; las más recientes al final. */
   ediciones?: EdicionParametros[];
@@ -213,6 +235,8 @@ export type RestoUsadoApi = {
   version: number | null;
   por_nombre: string | null;
   at: string | null;
+  /** `0.14.0` (06e §2.2): sobre qué base se aplicó el Resto. Sin la clave (calculada antes de `0.14.0`) se lee `bruta`; el Resto provisional es `corregida`. */
+  sobre_base?: SobreBase;
 };
 
 /** `0.12.1` (06d §3.1): qué falta aprobar para cerrar (`ProyeccionApi.crecimientos_sin_aprobar`, detalle del `409 crecimientos_sin_aprobar`). */
@@ -220,7 +244,12 @@ export type CrecimientosSinAprobarApi = {
   faltan: { clave: string; nombre: string }[];
   /** Se exige el Resto y no hay uno aprobado (el provisional no basta). */
   resto_provisional: boolean;
+  /** `0.14.0` (06e §3.3): las vigentes `bruta` de GM con Niño material (y el Resto si es `bruta` y tiene Niño): hay que reaprobarlas para cerrar. */
+  reaprobar?: ReaprobarCierreApi[];
 };
+
+/** `0.14.0` (06e §3.3): un GM (o el Resto, `clave = "resto"`) cuya versión vigente es `bruta` y que tiene Niño material. */
+export type ReaprobarCierreApi = { clave: string; nombre: string; version: number; correccion_pct: number };
 
 /** `0.12.1` (06d §3.1): código del `409` que bloquea el cierre (no se puede forzar). */
 export const CODIGO_CRECIMIENTOS_SIN_APROBAR = "crecimientos_sin_aprobar";
@@ -239,6 +268,8 @@ export type CrecimientoEfectivoApi = {
   celda: string | null;
   /** `0.12.1` (06d): versión aprobada del GM o del Resto que dio el %; `null` si es el Resto provisional o un % propio de la fila. */
   version?: number | null;
+  /** `0.14.0` (06e §5.1): sobre qué base se aplicó el %. Fila con % propio y Resto provisional: `corregida`. */
+  sobre_base?: SobreBase;
   /** `0.12.1` (06d): el % es el Resto provisional de la proyección (`crecimiento_pct_defecto`), no uno aprobado. */
   provisional?: boolean;
 };
@@ -252,11 +283,13 @@ export type AgregadoCrecimientoApi = {
   /** `Σ B` de las filas que siguen la celda (sin % propio y sin total de `Y+1` decidido). */
   base_libre: number;
   /** `siguiente = Σ round(B × (1 + g_fila))`. */
-  pct_propio: { filas: number; base: number; siguiente: number };
+  pct_propio: { filas: number; base: number; siguiente: number; /** `0.14.0`: `Σ B'` de esas filas. */ base_corregida?: number };
   /** `siguiente = Σ decidido de Y+1` (una decidida con % propio cuenta aquí). */
-  decididas: { filas: number; base: number; siguiente: number };
-  /** `Σ B''` de las filas con base. */
+  decididas: { filas: number; base: number; siguiente: number; /** `0.14.0`: `Σ B'` de esas filas. */ base_corregida?: number };
+  /** `Σ B''` de las filas con base (método 5: `Σ B'`, la base corregida del Niño). */
   base_normalizada: number;
+  /** `0.14.0` (06e §3.3): `Σ B'` de las filas que siguen la celda (`base_libre` corregida). */
+  base_libre_corregida?: number;
   /** `Σ B'' ÷ Σ B − 1` en %; `null` sin filas con meses del Niño (o con `Σ B = 0`). Solo referencia. */
   rebote_nino_pct: number | null;
   /** `Σ vigente` de `Y+1` hoy. */
@@ -335,8 +368,10 @@ export type FilaResultadoPromedio = {
   pct_escrito: number;
   /** `S_c = pct_propio.siguiente + decididas.siguiente + base_libre × (1 + g_c)`. */
   siguiente: number;
-  /** `S_c ÷ B_c − 1` en %; `null` si `B_c = 0`. */
+  /** `S_c ÷ B_c − 1` en %; `null` si `B_c = 0`. Con `sobre = 'corregida'`, `base` es `Σ B'` y este es el % «sobre 2026 corregido». */
   pct_resultante: number | null;
+  /** `0.14.0`: solo con `sobre = 'corregida'`: `S_c ÷ Σ B − 1` en % («sobre 2026 real»). */
+  pct_resultante_real?: number | null;
 };
 
 export type ResultadoPromedio = {
@@ -706,6 +741,10 @@ export type NodoMatrizApi = {
     base_siguiente: number;
     /** `0.10.8`: `Σ vigente de Y+1 de las filas base ÷ Σ B − 1` en %; `null` si `Σ B = 0`. */
     crec_mismas_pct: number | null;
+    /** `0.14.0` (06e §3.3): `Σ B'` de las filas base de `Y+1` del nodo (la base corregida del Niño). */
+    base_corregida?: number;
+    /** `0.14.0`: `Σ vigente ÷ Σ B' − 1` en %; `null` si `Σ B' = 0`. */
+    crec_corregida_pct?: number | null;
   };
   variacion_pct: number | null;
   estado: EstadoLinea;
@@ -722,9 +761,37 @@ export type FilaMensualApi = {
   anios: { anio: number; total: number; meses: (number | null)[]; origen_meses: OrigenMes[]; sin_curva: number }[];
 };
 
+/** `0.14.0` (06e §5.2): diagnóstico mes a mes de un factor del Niño; es el `jsonb` `factores_volumen_atipico.diagnostico`. */
+export type DiagnosticoFactorApi = {
+  /** Los doce meses de `Y` (`m` = 1 a 12). `en_periodo`: atípico de la temporada y publicado en `Y` y en el año de referencia. */
+  meses: { m: number; en_periodo: boolean; u: number; u_ref: number; ratio: number | null; control: number | null; relativo: number | null }[];
+  /** Ratio de la temporada en los meses publicados fuera del periodo; `null` si no hay. */
+  ratio_fuera: number | null;
+  /** Meses atípicos de la temporada en `Y` (publicados o no). */
+  meses_periodo: number;
+  /** Meses del periodo con dato en ambos años (`≥ MIN_MESES_FACTOR` para que haya `ratio_calculado`). */
+  meses_periodo_con_dato: number;
+};
+
+export type EstadoFactorY = "ok" | "faltante" | "desfasado" | "sin_confirmar";
+export type MotivoDesfaseFactor = "formula" | "cargas" | "meses" | "composicion";
+
 export type FactorApi = {
   anio: number;
   temporada: TemporadaFactor;
+  /** `0.14.0` (06e §3.2): `relativo_periodo` o `null` (calculado con la fórmula anterior). */
+  formula?: string | null;
+  /** `0.14.0`: `ρ_P`, ratio de la temporada en los meses del periodo (solo se muestra). */
+  ratio_volumen?: number | null;
+  /** `0.14.0`: `κ_P`, ratio de la red de todo el año en los mismos meses y tiendas (solo se muestra). */
+  ratio_control?: number | null;
+  /** `0.14.0`: meses atípicos de la temporada en `Y` y cuántos tienen dato en ambos años. */
+  meses_periodo?: number;
+  meses_periodo_con_dato?: number;
+  diagnostico?: DiagnosticoFactorApi | null;
+  /** `0.14.0`: solo en los factores de `Y` (el año en curso). */
+  estado?: EstadoFactorY;
+  motivos_desfase?: MotivoDesfaseFactor[];
   ratio_calculado: number | null;
   ratio_aplicado: number | null;
   ratio_efectivo: number | null;
@@ -765,6 +832,13 @@ export type ResumenProyeccion = {
   huella_crecimientos?: string;
   /** `0.10.8`: `gml_id → "genero_id|mundo_id"` de los nodos con filas base al calcular. La API no lo entrega. */
   gm_gml?: Record<string, string>;
+  /**
+   * `0.14.0` (06e §3.3): claves `genero_id|mundo_id` y `resto` cuyas filas base de `Y+1` tienen Niño material
+   * (`correccionMaterial(Σ B, Σ B')`). Una versión `bruta` de uno de ellos hay que reaprobarla para cerrar.
+   */
+  gm_con_nino?: string[];
+  /** `0.14.0` (M8): por GM, filas base con `B` nulo (`sin_propuesta` o `sin_curva`) y su venta de `Y`: lo que queda fuera de la base de M7. */
+  gm_fuera_base?: Record<string, { filas: number; unidades: number }>;
 };
 
 export type ProyeccionApi = {
@@ -789,7 +863,19 @@ export type ProyeccionApi = {
   bloques: BloquesApi;
   /** `0.12.1` (06d §3.1): solo en trabajo; `null` si no falta nada. Deshabilita «Cerrar proyección» sin esperar al `409`. */
   crecimientos_sin_aprobar?: CrecimientosSinAprobarApi | null;
+  /** `0.14.0` (06e §3.3): lo que impide cerrar sin forzar por el Niño; solo en trabajo, `null` si nada. */
+  cierre_bloqueado_por?: { codigo: CodigoCierreBloqueadoNino; mensaje: string }[] | null;
 };
+
+export const CODIGOS_CIERRE_BLOQUEADO_NINO = [
+  "anio_siguiente_atipico",
+  "factor_faltante",
+  "factor_desfasado",
+  "factor_sin_confirmar",
+  "factores_cambiados",
+  "temporada_cambiada",
+] as const;
+export type CodigoCierreBloqueadoNino = (typeof CODIGOS_CIERRE_BLOQUEADO_NINO)[number];
 
 export type DatosProyeccionApi = {
   desde: string | null;

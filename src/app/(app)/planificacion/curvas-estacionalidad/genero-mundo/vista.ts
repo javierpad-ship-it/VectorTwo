@@ -138,6 +138,8 @@ export const TEXTO_MOTIVO_NULO: Record<MotivoNuloReferencia, string> = {
   sin_referencia: "elige una proyección de referencia",
   denominador_cero: "sin venta en el periodo anterior",
   sin_venta: "sin venta comparable",
+  sin_curva: "ninguna agrupación del GM tiene curva vigente",
+  meses_faltantes: "faltan meses publicados del año en curso",
 };
 
 export function textoMotivoNulo(m: MotivoNuloReferencia | null): string | null {
@@ -148,10 +150,13 @@ export const TEXTO_OBSOLETO: Record<MotivoObsoleto, string> = {
   base_movida: "la base elegida se movió 1 punto o más desde que se aprobó",
   base_no_calculable: "la base elegida ya no se puede calcular",
   composicion: "algún nodo salió de este género × mundo",
+  factor_cambiado: "cambió el factor del Niño con que se calculó",
+  metodo_anterior: "se aprobó sobre 2026 real, antes de 0.14.0",
 };
 
 export const ETIQUETA_TIPO_REFERENCIA: Record<TipoReferencia, string> = {
   acumulado: "Acumulado",
+  cierre_curva: "Cierre por curva",
   cierre_proyectado: "Cierre proyectado",
   anio_completo: "Año completo",
   aplicado_hoy: "Aplicado hoy",
@@ -537,7 +542,7 @@ export function idOpcionBase(tipo: TipoReferencia, anio: number | null, variante
   return `${tipo}|${tipo === "anio_completo" ? (anio ?? "") : ""}|${variante}`;
 }
 
-const NOMBRE_VARIANTE: Record<VarianteBase, string> = { bruto: "bruto", sin_nino_mas_rebote: "sin Niño + rebote" };
+const NOMBRE_VARIANTE: Record<VarianteBase, string> = { corregido: "corregido", bruto: "bruto", sin_nino_mas_rebote: "sin Niño + rebote" };
 
 export function nombreVariante(v: VarianteBase): string {
   return NOMBRE_VARIANTE[v];

@@ -7,6 +7,8 @@ import {
   type CrecimientoNormal,
   type EfectoAtipicoCorrida,
   type EfectoTemporadaAnio,
+  type MesPeriodoEfectoApi,
+  type PeriodoEfectoApi,
   type RedAnio,
   type TemporadaAgrupacion,
   type TemporadaORed,
@@ -86,7 +88,7 @@ export type VolumenMedido = {
   ratio_mensual: (number | null)[];
 };
 
-function sumaComunes(serie: SerieParaVolumen, comunes: ReadonlySet<string>): number[] {
+export function sumaComunes(serie: SerieParaVolumen, comunes: ReadonlySet<string>): number[] {
   const meses = Array.from({ length: MESES_ANIO }, () => 0);
   for (const id of comunes) {
     const u = serie.por_tienda.get(id);
@@ -148,12 +150,72 @@ export function medirVolumen(
   };
 }
 
+// ─── 06e §5.2: efecto medido solo en los meses del periodo ───
+
+export type EntradaPeriodo = {
+  y: SerieParaVolumen;
+  referencia: SerieParaVolumen;
+  /** Serie de `todo_el_ano` del mismo año y de la referencia; `null` si no hay (el control sale nulo). */
+  controlY: SerieParaVolumen | null;
+  controlReferencia: SerieParaVolumen | null;
+  redes: ReadonlyMap<number, RedAnio>;
+  /** Doce posiciones: el mes es atípico de la temporada en `y` (publicado o no). */
+  mesesPeriodo: readonly boolean[];
+};
+
+const cociente = (a: number | null, b: number | null): number | null => (a !== null && b !== null && b > 0 ? a / b : null);
+
+/**
+ * 06e §5.2. `ρ_P`, `κ_P`, su cociente, el ratio fuera del periodo y el desglose de los doce meses, sobre `Q = tiendasComunes(red(Y),
+ * red(N))`. `P` = `mesesPeriodo` ∩ publicados de ambos años. Con `P` igual a todos los meses publicados, `relativo` coincide con el
+ * `ratio_relativo` de `efectoAtipicoCorrida`. Sin tiendas comunes todos los ratios salen `null`.
+ */
+export function medirPeriodo(e: EntradaPeriodo): PeriodoEfectoApi {
+  const comunes = tiendasComunes(e.redes.get(e.y.anio), e.redes.get(e.referencia.anio));
+  const uY = sumaComunes(e.y, comunes);
+  const uN = sumaComunes(e.referencia, comunes);
+  const cY = e.controlY && e.controlReferencia ? sumaComunes(e.controlY, comunes) : null;
+  const cN = e.controlY && e.controlReferencia ? sumaComunes(e.controlReferencia, comunes) : null;
+
+  const ambos = Array.from({ length: MESES_ANIO }, (_, m) => e.y.publicados[m] && e.referencia.publicados[m]);
+  const periodo = Array.from({ length: MESES_ANIO }, (_, m) => Boolean(e.mesesPeriodo[m]) && ambos[m]);
+  const fuera = Array.from({ length: MESES_ANIO }, (_, m) => ambos[m] && !e.mesesPeriodo[m]);
+  const hay = comunes.size > 0;
+
+  const rho = hay ? ratioVolumen(uY, uN, periodo) : null;
+  const kappa = hay && cY && cN ? ratioVolumen(cY, cN, periodo) : null;
+  const mensual = ratioMensual(uY, uN, ambos);
+  const control = cY && cN ? ratioMensual(cY, cN, ambos) : null;
+
+  const meses: MesPeriodoEfectoApi[] = Array.from({ length: MESES_ANIO }, (_, m) => ({
+    m: m + 1,
+    en_periodo: periodo[m],
+    u: uY[m],
+    u_ref: uN[m],
+    ratio: mensual[m],
+    control: control?.[m] ?? null,
+    relativo: cociente(mensual[m], control?.[m] ?? null),
+  }));
+
+  return {
+    meses_periodo: e.mesesPeriodo.filter(Boolean).length,
+    meses_periodo_con_dato: periodo.filter((p, m) => p && uN[m] > 0).length,
+    ratio_volumen: rho,
+    ratio_control: kappa,
+    relativo: cociente(rho, kappa),
+    ratio_fuera: hay ? ratioVolumen(uY, uN, fuera) : null,
+    meses,
+  };
+}
+
 // ─── Regla 8f: efecto a nivel de corrida ───
 
 export type AnioDeGrupo = SerieParaVolumen & {
   clase: ClaseAnioCurva;
   /** Meses atípicos que aplican (en el año en curso, los cargados). */
   meses_atipicos: number;
+  /** 06e §5.2, opcional: doce posiciones, el mes es atípico de la temporada del grupo. Sin ella no hay bloque `periodo`. */
+  mascara_atipicos?: readonly boolean[];
 };
 
 /** Una temporada (o la red entera) con la serie agregada de sus agrupaciones. */
@@ -245,6 +307,18 @@ export function efectoAtipicoCorrida(
         const sn = control.anios.find((a) => a.anio === referencia);
         if (sy && sn) ratioControl = medirContra(sy, sn, redPorAnio).ratio;
       }
+      let periodo: PeriodoEfectoApi | undefined;
+      const referenciaSerie = referencia === null ? undefined : g.anios.find((a) => a.anio === referencia);
+      if ((g.temporada === "invierno" || g.temporada === "verano") && serie.mascara_atipicos && referenciaSerie) {
+        periodo = medirPeriodo({
+          y: serie,
+          referencia: referenciaSerie,
+          controlY: control?.anios.find((a) => a.anio === anio) ?? null,
+          controlReferencia: control?.anios.find((a) => a.anio === referencia) ?? null,
+          redes: redPorAnio,
+          mesesPeriodo: serie.mascara_atipicos,
+        });
+      }
       const relativo =
         medido.ratio_volumen !== null && ratioControl !== null && ratioControl > 0
           ? medido.ratio_volumen / ratioControl
@@ -264,6 +338,7 @@ export function efectoAtipicoCorrida(
         unidades: medido.unidades,
         unidades_referencia: medido.unidades_referencia,
         ratio_mensual: medido.ratio_mensual,
+        ...(periodo ? { periodo } : {}),
       });
     }
   }

@@ -759,6 +759,38 @@ export type ResultadoCorrida = { agrupaciones: AgrupacionResultado[]; temporadas
 
 export type TemporadaORed = TemporadaAgrupacion | "red";
 
+/** Un mes del diagnóstico del periodo (`m` = 1 a 12). `en_periodo`: atípico de la temporada y publicado en el año y en la referencia. */
+export type MesPeriodoEfectoApi = {
+  m: number;
+  en_periodo: boolean;
+  u: number;
+  u_ref: number;
+  ratio: number | null;
+  control: number | null;
+  relativo: number | null;
+};
+
+/**
+ * 06e §5.2: el efecto medido SOLO en los meses del periodo atípico (`P` = meses atípicos de la temporada en el año ∩ publicados del
+ * año ∩ publicados de la referencia), sobre las mismas tiendas comunes que las columnas de siempre. Aditivo: las columnas de
+ * «Años Niño» siguen midiendo todos los meses publicados.
+ */
+export type PeriodoEfectoApi = {
+  /** Meses atípicos de la temporada en el año (publicados o no). */
+  meses_periodo: number;
+  /** Meses de `P` con dato (venta de la referencia mayor que 0). */
+  meses_periodo_con_dato: number;
+  /** `ρ_P`: unidades de la temporada en `P` ÷ las de la referencia. */
+  ratio_volumen: number | null;
+  /** `κ_P`: lo mismo para `todo_el_ano`, con la misma referencia, tiendas y meses. */
+  ratio_control: number | null;
+  /** `ρ_P ÷ κ_P`; `null` si `κ_P` es nulo o 0. */
+  relativo: number | null;
+  /** Ratio de la temporada en los meses publicados en ambos años fuera de `P`; `null` si no hay. */
+  ratio_fuera: number | null;
+  meses: MesPeriodoEfectoApi[];
+};
+
 export type EfectoTemporadaAnio = {
   anio: number;
   temporada: TemporadaORed;
@@ -776,6 +808,8 @@ export type EfectoTemporadaAnio = {
   unidades: number;
   unidades_referencia: number;
   ratio_mensual: (number | null)[];
+  /** 06e §5.2: solo en las filas `invierno` y `verano` con año de referencia. */
+  periodo?: PeriodoEfectoApi;
 };
 
 export type CrecimientoNormal = {

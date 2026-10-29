@@ -1,5 +1,5 @@
 import { claveGM, type MatrizCrecimientos } from "@/lib/proyeccion/crecimientos";
-import type { RestoUsadoApi } from "@/lib/proyeccion/tipos-api";
+import type { ReaprobarCierreApi, RestoUsadoApi, SobreBase } from "@/lib/proyeccion/tipos-api";
 
 /**
  * Crecimientos aprobados vigentes y su lectura desde M7 (ficha 06d §3.1). Lógica PURA, sin I/O: la lectura de la base es
@@ -20,6 +20,8 @@ export type VigenteCrecimiento = {
   mundo_id: string | null;
   version: number;
   pct: number;
+  /** `0.14.0` (06e §2.1): sobre qué se interpreta `pct`. `null`/ausente (versión de antes de `0.14.0`) se lee `bruta`. */
+  sobre_base?: SobreBase | string | null;
   usuario_nombre: string | null;
   /** ISO. */
   aprobada_at: string;
@@ -29,8 +31,14 @@ export type VigenteCrecimiento = {
 export type MatrizDeVigentes = MatrizCrecimientos & {
   ids: ReadonlyMap<string, string>;
   versiones: ReadonlyMap<string, number>;
-  resto: { id: string | null; version: number | null };
+  resto: { id: string | null; version: number | null; sobre_base: SobreBase };
 };
+
+/** Lo que `faltantesDeCierre` necesita de un GM con Niño material (`resumen.gm_con_nino`): su nombre y `Σ B' ÷ Σ B − 1` en %. Clave: `genero_id|mundo_id` o `resto`. */
+export type GmConNino = ReadonlyMap<string, { nombre: string; correccion_pct: number }>;
+
+/** Una versión sin el dato, o con un valor desconocido, es `bruta`: es lo que significan las versiones de antes de `0.14.0`. */
+export const sobreBaseDe = (v: Pick<VigenteCrecimiento, "sobre_base"> | undefined): SobreBase => (v?.sobre_base === "corregida" ? "corregida" : "bruta");
 
 export type RestoUsado = RestoUsadoApi;
 
@@ -69,20 +77,23 @@ export function matrizDeVigentes(vigentes: readonly VigenteCrecimiento[], genero
   const celdas = new Map<string, number>();
   const ids = new Map<string, string>();
   const versiones = new Map<string, number>();
+  const sobre = new Map<string, SobreBase>();
   for (const [clave, v] of gmVigentes(delAnioDado, generos)) {
     celdas.set(clave, Number(v.pct));
     ids.set(clave, v.id);
     versiones.set(clave, v.version);
+    sobre.set(clave, sobreBaseDe(v));
   }
   const resto = restoVigente(delAnioDado);
-  return { celdas, generos, ids, versiones, resto: { id: resto?.id ?? null, version: resto?.version ?? null } };
+  // Sin Resto aprobado el Resto es el provisional de la proyección, que es `corregida`.
+  return { celdas, generos, ids, versiones, sobre, resto: { id: resto?.id ?? null, version: resto?.version ?? null, sobre_base: resto ? sobreBaseDe(resto) : "corregida" } };
 }
 
 /** El Resto que se aplica: el aprobado vigente o, sin él, el provisional (`crecimiento_pct_defecto`, que nunca se sobrescribe). */
 export function restoEfectivo(vigentes: readonly VigenteCrecimiento[], pctDefecto: number, anio?: number): RestoUsado {
   const v = restoVigente(delAnio(vigentes, anio));
-  if (!v) return { pct: pctDefecto, crecimiento_id: null, version: null, por_nombre: null, at: null };
-  return { pct: Number(v.pct), crecimiento_id: v.id, version: v.version, por_nombre: v.usuario_nombre, at: v.aprobada_at };
+  if (!v) return { pct: pctDefecto, crecimiento_id: null, version: null, por_nombre: null, at: null, sobre_base: "corregida" };
+  return { pct: Number(v.pct), crecimiento_id: v.id, version: v.version, por_nombre: v.usuario_nombre, at: v.aprobada_at, sobre_base: sobreBaseDe(v) };
 }
 
 /**
@@ -103,14 +114,43 @@ export function gmExigidos(gmGml: Readonly<Record<string, string>>, generosDetal
 
 /**
  * Lo que falta aprobar de lo exigido: los GM sin versión vigente y, si se exige el Resto, `resto_provisional = true` cuando no hay un
- * Resto aprobado (el provisional no basta). Sin faltantes: `{ gm: [], resto_provisional: false }`.
+ * Resto aprobado (el provisional no basta). Sin faltantes: `{ gm: [], resto_provisional: false, reaprobar: [] }`.
+ *
+ * 06e (R17): `gmConNino` son los GM (y `resto`) con Niño material de la proyección. Entran en `reaprobar` los que tienen una versión
+ * vigente `bruta` (el % significa «sobre 2026 real» y hay que reaprobarlo sobre corregido para cerrar); uno `bruta` fuera de `gmConNino`
+ * no, y la proyección cierra con él. El Resto solo se mira si se exige. Sin `gmConNino`, `reaprobar` sale vacío.
  */
-export function faltantesDeCierre(exigidos: ExigidosCierre, vigentes: readonly VigenteCrecimiento[], anio?: number): { gm: string[]; resto_provisional: boolean } {
+export function faltantesDeCierre(
+  exigidos: ExigidosCierre,
+  vigentes: readonly VigenteCrecimiento[],
+  anio?: number,
+  gmConNino?: GmConNino
+): { gm: string[]; resto_provisional: boolean; reaprobar: ReaprobarCierreApi[] } {
   const delAnioDado = delAnio(vigentes, anio);
   const aprobados = new Set<string>();
-  for (const v of delAnioDado) if (v.alcance === "gm" && v.genero_id !== null && v.mundo_id !== null) aprobados.add(claveGM(v.genero_id, v.mundo_id));
+  const porClave = new Map<string, VigenteCrecimiento>();
+  for (const v of delAnioDado) {
+    if (v.alcance !== "gm" || v.genero_id === null || v.mundo_id === null) continue;
+    const clave = claveGM(v.genero_id, v.mundo_id);
+    aprobados.add(clave);
+    porClave.set(clave, conMayorVersion(porClave.get(clave), v));
+  }
+  const reaprobar: ReaprobarCierreApi[] = [];
+  if (gmConNino) {
+    for (const clave of exigidos.gm) {
+      const v = porClave.get(clave);
+      const nino = gmConNino.get(clave);
+      if (v && nino && sobreBaseDe(v) === "bruta") reaprobar.push({ clave, nombre: nino.nombre, version: v.version, correccion_pct: nino.correccion_pct });
+    }
+    const vResto = restoVigente(delAnioDado);
+    const ninoResto = gmConNino.get("resto");
+    if (exigidos.resto && vResto && ninoResto && sobreBaseDe(vResto) === "bruta") {
+      reaprobar.push({ clave: "resto", nombre: ninoResto.nombre, version: vResto.version, correccion_pct: ninoResto.correccion_pct });
+    }
+  }
   return {
     gm: exigidos.gm.filter((clave) => !aprobados.has(clave)),
     resto_provisional: exigidos.resto && restoVigente(delAnioDado) === undefined,
+    reaprobar,
   };
 }

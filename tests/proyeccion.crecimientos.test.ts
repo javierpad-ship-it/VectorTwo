@@ -125,8 +125,8 @@ describe("regla 3: ejemplo de §5.3 (HOMBRE · FORMAL al 20 %)", () => {
   it("la celda tiene base 17 800, base libre 3 300 y resulta en 19 485 (+9,5 %); el rebote del Niño es +9,6 %", () => {
     const a = agregarFilas(filas);
     expect(a).toMatchObject({ filas: 3, filas_sin_base: 0, base: 17800, base_libre: 3300 });
-    expect(a.pct_propio).toEqual({ filas: 1, base: 4500, siguiente: 4725 });
-    expect(a.decididas).toEqual({ filas: 1, base: 10000, siguiente: 10800 });
+    expect(a.pct_propio).toMatchObject({ filas: 1, base: 4500, siguiente: 4725 });
+    expect(a.decididas).toMatchObject({ filas: 1, base: 10000, siguiente: 10800 });
     const resultante = a.pct_propio.siguiente + a.decididas.siguiente + a.base_libre * 1.2;
     expect(resultante).toBeCloseTo(19485, 6);
     expect((resultante / a.base - 1) * 100).toBeCloseTo(9.5, 1);
@@ -269,6 +269,89 @@ describe("regla 9: calcularPromedio (ejemplo sintético de §5.2)", () => {
     const vacia = calcularPromedio([], { pct: 5, agregado: ag({ filas: 0 }) }, 12, puente).resultado;
     expect(vacia).toMatchObject({ sin_base: true, ponderado_escrito_pct: null, resultante_pct: null });
     expect(vacia?.objetivo).toMatchObject({ faltan_unidades: null });
+  });
+});
+
+// ─── 06e · método 5: sobre_base ───
+
+describe("R4 (06e): sobre_base por fuente del %", () => {
+  const gmDe = (gml: string) => (gml === "n1" ? { genero_id: HOMBRE, mundo_id: URBANO, nombre: "HOMBRE · URBANO" } : undefined);
+  const base = matrizDeCeldas([{ genero_id: HOMBRE, mundo_id: URBANO, pct: 12 }], [HOMBRE, MUJER]);
+  const pctFilaDe = (cb: string) => (cb === "|n1||am-propio" ? 7 : null);
+
+  it("% propio y Resto provisional son corregida; GM y Resto aprobados, el de su versión; sin dato, bruta", () => {
+    const matriz = {
+      ...base,
+      sobre: new Map([[claveGM(HOMBRE, URBANO), "bruta" as const]]),
+      resto: { id: "r1", version: 3, sobre_base: "corregida" as const },
+    };
+    const f = crearCrecimientoDe({ matriz, resto: 4, gmDe, pctFilaDe });
+    expect(f("|n1||am-propio").sobre_base).toBe("corregida");
+    expect(f("|n1||am-x")).toMatchObject({ origen: "celda", sobre_base: "bruta" });
+    expect(f("|otro||am-x")).toMatchObject({ origen: "resto", provisional: false, sobre_base: "corregida" });
+    // Un Resto aprobado sin `sobre_base` (foto de antes de 0.14.0) se lee bruta.
+    const viejo = crearCrecimientoDe({ matriz: { ...base, resto: { id: "r1", version: 1 } }, resto: 4, gmDe });
+    expect(viejo("|otro||am-x")).toMatchObject({ provisional: false, sobre_base: "bruta" });
+    // Resto provisional (sin id): corregida; una celda sin `sobre` en la matriz: bruta.
+    const prov = crearCrecimientoDe({ matriz: { ...base, resto: { id: null, version: null } }, resto: 4, gmDe });
+    expect(prov("|otro||am-x")).toMatchObject({ provisional: true, sobre_base: "corregida" });
+    expect(prov("|n1||am-x").sobre_base).toBe("bruta");
+  });
+});
+
+describe("R5 (06e): ejemplo B, el GM sobre 2026 corregido", () => {
+  // ABRIGO (invierno, φ 0,80): B = 15 300, B' = 19 125 → 20 655. POLO (todo el año): B = B' = 40 800 → 44 064.
+  const filas = [
+    fc({ fila_id: "abrigo", base_siguiente: 15300, base_normalizada: 19125, propuesto: 20655, sobre_base: "corregida" }),
+    fc({ fila_id: "polo", base_siguiente: 40800, base_normalizada: 40800, propuesto: 44064, sobre_base: "corregida" }),
+  ];
+  const puente = { total_en_curso: 100000, nuevas_anterior: 0, aperturas: 0, cierres: 0, cierres_sin_decidir: 0 };
+  const resto = { pct: 5, agregado: agregarFilas([]) };
+
+  it("agregarFilas acumula Σ B' y la base libre corregida", () => {
+    const a = agregarFilas(filas);
+    expect(a.base).toBe(56100);
+    expect(a.base_normalizada).toBe(59925);
+    expect(a.base_libre).toBe(56100);
+    expect(a.base_libre_corregida).toBe(59925);
+    expect(a.rebote_nino_pct).toBeCloseTo(6.82, 2);
+  });
+
+  it("calcularPromedio con sobre = corregida: 64 719 u, +8,0 % sobre corregido y +15,4 % sobre real", () => {
+    const celda = { genero: "HOMBRE", mundo: "URBANO", pct: 8 as number | null, sin_filas: false, agregado: agregarFilas(filas) };
+    const { resultado: r } = calcularPromedio([celda], resto, null, puente, { sobre: "corregida" });
+    expect(r).not.toBeNull();
+    if (!r) return;
+    expect(r.filas[0].base).toBe(59925);
+    expect(r.filas[0].siguiente).toBeCloseTo(64719, 6);
+    expect(r.filas[0].pct_resultante).toBeCloseTo(8, 6);
+    expect(r.filas[0].pct_resultante_real).toBeCloseTo(15.36, 2);
+    expect(r.base_total).toBe(59925);
+    expect(r.ponderado_escrito_pct).toBeCloseTo(8, 6);
+  });
+
+  it("pondera por Σ B' (no por Σ B) cuando hay varios GM", () => {
+    const urbano = { genero: "HOMBRE", mundo: "URBANO", pct: 8 as number | null, sin_filas: false, agregado: agregarFilas(filas) };
+    const formal = { genero: "HOMBRE", mundo: "FORMAL", pct: 20 as number | null, sin_filas: false, agregado: agregarFilas([fc({ fila_id: "f", base_siguiente: 10000, base_normalizada: 10000, propuesto: 12000, sobre_base: "corregida" })]) };
+    const corregida = calcularPromedio([urbano, formal], resto, null, puente, { sobre: "corregida" }).resultado;
+    const bruta = calcularPromedio([urbano, formal], resto, null, puente).resultado;
+    expect(corregida?.ponderado_escrito_pct).toBeCloseTo((59925 * 8 + 10000 * 20) / 69925, 6);
+    expect(bruta?.ponderado_escrito_pct).toBeCloseTo((56100 * 8 + 10000 * 20) / 66100, 6);
+    expect(bruta?.filas[0].pct_resultante_real).toBeUndefined();
+  });
+
+  it("una fila con % propio corregida aplica el % sobre B'; sin sobre_base (método 4) sobre B", () => {
+    const propia = (sobre_base?: "corregida" | "bruta") => agregarFilas([fc({ fila_id: "p", base_siguiente: 15300, base_normalizada: 19125, crecimiento_pct: 8, ...(sobre_base ? { sobre_base } : {}) })]);
+    expect(propia("corregida").pct_propio).toMatchObject({ filas: 1, base: 15300, base_corregida: 19125, siguiente: 20655 });
+    expect(propia("bruta").pct_propio.siguiente).toBe(16524);
+    expect(propia().pct_propio.siguiente).toBe(16524);
+  });
+
+  it("R1 del agregado: sin Niño (B' = B) la base corregida es la base y no hay rebote", () => {
+    const a = agregarFilas([fc({ fila_id: "x", base_siguiente: 1000, base_normalizada: 1000 }), fc({ fila_id: "y", base_siguiente: 500, base_normalizada: null })]);
+    expect(a.base_normalizada).toBe(1500);
+    expect(a.base_libre_corregida).toBe(1500);
+    expect(a.rebote_nino_pct).toBeNull();
   });
 });
 

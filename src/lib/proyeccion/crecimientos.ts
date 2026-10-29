@@ -1,4 +1,4 @@
-import { GENEROS_MATRIZ } from "./tipos-api";
+import { GENEROS_MATRIZ, UMBRAL_CORRECCION_NINO, type SobreBase } from "./tipos-api";
 import type { AgregadoCrecimientoApi, CeldaParaPromedio, FilaResultadoPromedio, OrigenCrecimiento, RespuestaCrecimientosApi, ResultadoPromedio } from "./tipos-api";
 
 /**
@@ -6,10 +6,13 @@ import type { AgregadoCrecimientoApi, CeldaParaPromedio, FilaResultadoPromedio, 
  * servicio y también la pantalla (`calcularPromedio` corre en el navegador). Las huellas (que sí usan `node:crypto`) viven en
  * `huellas-crecimientos.ts`.
  *
- * El % es BRUTO (método 4): `P = round(B × (1 + g/100))`, con `B` = vigente de `Y` de las mismas tiendas de `Y+1`, sin normalizar por el
+ * Método 4 (06e: sigue vigente con `sobre_base = 'bruta'`): el % es BRUTO, `P = round(B × (1 + g/100))`, con `B` = vigente de `Y` de las mismas tiendas de `Y+1`, sin normalizar por el
  * Niño. Vale igual para el % propio de una fila, para una celda género × mundo y para el Resto (`crecimiento_pct_defecto`).
  * Precedencia: fila con % propio > celda GM > Resto.
  */
+
+export { UMBRAL_CORRECCION_NINO };
+export type { SobreBase };
 
 /** Clave de una celda de la matriz: `genero_id|mundo_id`. */
 export const claveGM = (generoId: string, mundoId: string): string => `${generoId}|${mundoId}`;
@@ -29,8 +32,10 @@ export type MatrizCrecimientos = {
   ids?: ReadonlyMap<string, string>;
   /** `claveGM → versión` de esa versión aprobada. */
   versiones?: ReadonlyMap<string, number>;
-  /** El Resto aprobado que se aplica (`id = null` = el Resto provisional). */
-  resto?: { id: string | null; version: number | null };
+  /** El Resto aprobado que se aplica (`id = null` = el Resto provisional). `sobre_base` (06e): sin él, `bruta`. */
+  resto?: { id: string | null; version: number | null; sobre_base?: SobreBase };
+  /** 06e: `claveGM → sobre_base` de la versión aprobada. Una celda sin entrada se lee `bruta` (versión de antes de `0.14.0`). */
+  sobre?: ReadonlyMap<string, SobreBase>;
 };
 
 export const MATRIZ_SIN_CELDAS: MatrizCrecimientos = { celdas: new Map(), generos: new Set() };
@@ -88,7 +93,14 @@ export type GMDeNodo = (gmlId: string) => { genero_id: string; mundo_id: string;
  * El % efectivo de una fila con su GM (`gm` = `claveGM`, `celda` = nombre del GM). `version` (`0.12.1`): versión aprobada del GM o del Resto
  * que dio el %; `null` en el % propio de la fila y en el Resto provisional. `provisional`: el % es el Resto provisional.
  */
-export type CrecimientoDeFila = CrecimientoEfectivo & { gm: string | null; celda: string | null; version?: number | null; provisional?: boolean };
+export type CrecimientoDeFila = CrecimientoEfectivo & {
+  gm: string | null;
+  celda: string | null;
+  version?: number | null;
+  provisional?: boolean;
+  /** 06e: sobre qué base se aplica el %. % propio de la fila y Resto provisional: `corregida`; GM y Resto aprobados: el de su versión (sin dato, `bruta`). Opcional en el tipo (los literales de `decision.ts` aún no lo traen), siempre presente en lo que arma `crearCrecimientoDe`. */
+  sobre_base?: SobreBase;
+};
 
 /** `gml_id` de una clave base (`|gml|equivalencia|agrupacion_marca`) o de una clave de fila (`tienda|gml|…`). */
 export const gmlDeClave = (clave: string): string => clave.split("|")[1] ?? "";
@@ -111,7 +123,10 @@ export function crearCrecimientoDe(args: {
     const clave = gm ? claveGM(gm.genero_id, gm.mundo_id) : null;
     const resto = args.matriz.resto;
     const version = e.origen === "celda" && clave !== null ? (args.matriz.versiones?.get(clave) ?? null) : e.origen === "resto" ? (resto?.version ?? null) : null;
-    return { ...e, gm: clave, celda: gm?.nombre ?? null, version, provisional: e.origen === "resto" && (resto === undefined || resto.id === null) };
+    const provisional = e.origen === "resto" && (resto === undefined || resto.id === null);
+    const sobre_base: SobreBase =
+      e.origen === "fila" || provisional ? "corregida" : e.origen === "celda" ? ((clave !== null ? args.matriz.sobre?.get(clave) : undefined) ?? "bruta") : (resto?.sobre_base ?? "bruta");
+    return { ...e, gm: clave, celda: gm?.nombre ?? null, version, provisional, sobre_base };
   };
 }
 
@@ -128,8 +143,10 @@ export type FilaCrecimiento = {
   propuesto: number | null;
   /** `B`. `null` = sin base. */
   base_siguiente: number | null;
-  /** `B''`. */
+  /** `B''` (método 5: `B'`, la base corregida del Niño). */
   base_normalizada: number | null;
+  /** 06e: con qué base se aplica el % propio de la fila. Sin él, `bruta` (método 4). El cálculo del método 5 pasa `corregida`. */
+  sobre_base?: SobreBase;
 };
 
 const vigenteDe = (f: Pick<FilaCrecimiento, "decidido" | "propuesto">): number => f.decidido ?? f.propuesto ?? 0;
@@ -142,8 +159,9 @@ export function agregadoVacio(): AgregadoCrecimientoApi {
     filas_sin_base: 0,
     base: 0,
     base_libre: 0,
-    pct_propio: { filas: 0, base: 0, siguiente: 0 },
-    decididas: { filas: 0, base: 0, siguiente: 0 },
+    base_libre_corregida: 0,
+    pct_propio: { filas: 0, base: 0, siguiente: 0, base_corregida: 0 },
+    decididas: { filas: 0, base: 0, siguiente: 0, base_corregida: 0 },
     base_normalizada: 0,
     rebote_nino_pct: null,
     siguiente_vigente: 0,
@@ -163,22 +181,25 @@ export function agregarFilas(filas: readonly FilaCrecimiento[]): AgregadoCrecimi
     const b = f.base_siguiente;
     if (b === null) a.filas_sin_base += 1;
     const base = b ?? 0;
+    const baseCorregida = b === null ? 0 : (f.base_normalizada ?? b);
     a.base += base;
     if (f.decidido !== null) {
       a.decididas.filas += 1;
       a.decididas.base += base;
+      a.decididas.base_corregida = (a.decididas.base_corregida ?? 0) + baseCorregida;
       a.decididas.siguiente += f.decidido;
     } else if (f.crecimiento_pct !== null) {
       a.pct_propio.filas += 1;
       a.pct_propio.base += base;
-      a.pct_propio.siguiente += b === null ? 0 : conCrecimiento(b, f.crecimiento_pct);
+      a.pct_propio.base_corregida = (a.pct_propio.base_corregida ?? 0) + baseCorregida;
+      a.pct_propio.siguiente += b === null ? 0 : conCrecimiento(f.sobre_base === "corregida" ? baseCorregida : b, f.crecimiento_pct);
     } else {
       a.base_libre += base;
+      a.base_libre_corregida = (a.base_libre_corregida ?? 0) + baseCorregida;
     }
     if (b !== null) {
-      const bn = f.base_normalizada ?? b;
-      a.base_normalizada += bn;
-      if (Math.abs(bn - b) > 0.005) hayNino = true;
+      a.base_normalizada += baseCorregida;
+      if (Math.abs(baseCorregida - b) > 0.005) hayNino = true;
     }
   }
   a.rebote_nino_pct = hayNino && a.base > 0 ? (a.base_normalizada / a.base - 1) * 100 : null;
@@ -201,12 +222,16 @@ export function celdasFaltantes<T extends { genero_id: string; mundo_id: string 
  * `calcularPromedio(celdas, resto, objetivo, puente)` (ficha 07c §5.2). Requiere la matriz completa: con alguna celda vacía (con filas)
  * devuelve `resultado = null` y la lista de las que faltan. Es una estimación: puede diferir del recálculo en ±0,5 u por fila por el
  * redondeo.
+ *
+ * 06e: con `opciones.sobre = 'corregida'` el % de cada conjunto se aplica sobre `Σ B'` (los GM libres siguen `base_libre_corregida`), se
+ * pondera por `Σ B'` y `pct_resultante` es «sobre 2026 corregido» (`pct_resultante_real`, sobre `Σ B`). Sin la opción, método 4 (`Σ B`).
  */
 export function calcularPromedio(
   celdas: readonly CeldaParaPromedio[],
   resto: { pct: number; agregado: AgregadoCrecimientoApi },
   objetivoPct: number | null,
-  puente: RespuestaCrecimientosApi["puente"]
+  puente: RespuestaCrecimientosApi["puente"],
+  opciones: { sobre?: SobreBase } = {}
 ): { resultado: ResultadoPromedio | null; faltan: { genero: string; mundo: string }[] } {
   const faltan = celdas.filter((c) => !c.sin_filas && c.pct === null).map((c) => ({ genero: c.genero, mundo: c.mundo }));
   if (faltan.length > 0) return { resultado: null, faltan };
@@ -215,6 +240,7 @@ export function calcularPromedio(
     ...celdas.filter((c) => !c.sin_filas && c.pct !== null).map((c) => ({ genero: c.genero, mundo: c.mundo, pct: c.pct as number, agregado: c.agregado })),
     { genero: null, mundo: null, pct: resto.pct, agregado: resto.agregado },
   ];
+  const corregida = opciones.sobre === "corregida";
   let baseTotal = 0;
   let escrito = 0;
   let siguienteTotal = 0;
@@ -222,13 +248,23 @@ export function calcularPromedio(
   let decididas = 0;
   const filas: FilaResultadoPromedio[] = conjuntos.map((c) => {
     const a = c.agregado;
-    const s = a.pct_propio.siguiente + a.decididas.siguiente + a.base_libre * (1 + c.pct / 100);
-    baseTotal += a.base;
-    escrito += a.base * c.pct;
+    const base = corregida ? a.base_normalizada : a.base;
+    const baseLibre = corregida ? (a.base_libre_corregida ?? a.base_libre) : a.base_libre;
+    const s = a.pct_propio.siguiente + a.decididas.siguiente + baseLibre * (1 + c.pct / 100);
+    baseTotal += base;
+    escrito += base * c.pct;
     siguienteTotal += s;
     propias += a.pct_propio.filas;
     decididas += a.decididas.filas;
-    return { genero: c.genero, mundo: c.mundo, base: a.base, pct_escrito: c.pct, siguiente: s, pct_resultante: a.base > 0 ? (s / a.base - 1) * 100 : null };
+    return {
+      genero: c.genero,
+      mundo: c.mundo,
+      base,
+      pct_escrito: c.pct,
+      siguiente: s,
+      pct_resultante: base > 0 ? (s / base - 1) * 100 : null,
+      ...(corregida ? { pct_resultante_real: a.base > 0 ? (s / a.base - 1) * 100 : null } : {}),
+    };
   });
   const sinBase = !(baseTotal > 0);
   const ponderado = sinBase ? null : escrito / baseTotal;

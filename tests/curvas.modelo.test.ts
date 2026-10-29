@@ -53,6 +53,29 @@ describe("caso 1 · clasificación", () => {
   });
 });
 
+describe("06e · bloque periodo del efecto (aditivo, sin cambio de cifras)", () => {
+  const filas = corridaFixture("base").efecto_atipico.por_temporada;
+  const fila = (anio: number, temporada: string) => filas.find((f) => f.anio === anio && f.temporada === temporada);
+  it("invierno 2023 (periodo de los doce meses): el relativo del periodo coincide con ratio_relativo y las columnas de siempre no cambian", () => {
+    const f = fila(2023, "invierno");
+    expect(f).toMatchObject({ ratio_volumen: 0.65, ratio_control: 1, ratio_relativo: 0.65, meses_comparados: 12 });
+    expect(f?.periodo).toMatchObject({ ratio_volumen: 0.65, ratio_control: 1, relativo: 0.65, meses_periodo: 12, meses_periodo_con_dato: 12 });
+  });
+  it("verano 2023 mide solo set–dic: el ratio del periodo es el de volumen del año completo porque el fixture escala todo el año", () => {
+    const f = fila(2023, "verano");
+    expect(f?.periodo?.meses_periodo).toBe(4);
+    expect(f?.periodo?.meses_periodo_con_dato).toBe(4);
+    expect(f?.periodo?.meses.filter((m) => m.en_periodo).map((m) => m.m)).toEqual([9, 10, 11, 12]);
+    expect(f?.ratio_volumen).toBe(1.46);
+  });
+  it("2026 en curso: 9 meses con dato y el resto sin publicar; todo_el_ano y la red no llevan periodo", () => {
+    expect(fila(2026, "invierno")?.periodo).toMatchObject({ meses_periodo: 12, meses_periodo_con_dato: 9, ratio_fuera: null });
+    expect(fila(2026, "verano")?.periodo).toMatchObject({ meses_periodo: 4, meses_periodo_con_dato: 1 });
+    expect(fila(2026, "todo_el_ano")?.periodo).toBeUndefined();
+    expect(fila(2026, "red")?.periodo).toBeUndefined();
+  });
+});
+
 describe("caso 1b · volumen y forma con el fixture base", () => {
   const a = agrupacionDe(corridaFixture("base"), ABRIGO_ID);
   it("ratio_volumen(2023) = 0,65 sobre {T1} frente a 2024; ratio_volumen(2026) = 0,65 frente a 2025 con 9 meses", () => {

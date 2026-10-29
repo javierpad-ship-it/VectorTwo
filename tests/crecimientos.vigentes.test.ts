@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { crearCrecimientoDe, claveGM } from "@/lib/proyeccion/crecimientos";
-import { faltantesDeCierre, gmExigidos, matrizDeVigentes, restoEfectivo, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
+import { faltantesDeCierre, gmExigidos, matrizDeVigentes, restoEfectivo, sobreBaseDe, type GmConNino, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
 
 /** 06d §3.1 (sintético; nada real): lectura de los crecimientos aprobados vigentes desde M7. */
 
@@ -36,7 +36,7 @@ describe("matrizDeVigentes", () => {
     expect(m.celdas.size).toBe(0);
     expect(m.ids.size).toBe(0);
     expect(m.versiones.size).toBe(0);
-    expect(m.resto).toEqual({ id: null, version: null });
+    expect(m.resto).toEqual({ id: null, version: null, sobre_base: "corregida" });
     expect([...m.generos].sort()).toEqual([HOMBRE, MUJER]);
   });
 
@@ -51,7 +51,7 @@ describe("matrizDeVigentes", () => {
     expect(m.ids.get(claveGM(HOMBRE, URBANO))).toBe(a.id);
     expect(m.versiones.get(claveGM(HOMBRE, URBANO))).toBe(2);
     expect(m.versiones.get(claveGM(MUJER, RI))).toBe(1);
-    expect(m.resto).toEqual({ id: r.id, version: 3 });
+    expect(m.resto).toEqual({ id: r.id, version: 3, sobre_base: "bruta" });
   });
 
   it("regla 6: un GM de un género no detallado no se aplica", () => {
@@ -87,18 +87,18 @@ describe("matrizDeVigentes", () => {
   it("ignora un alcance desconocido y un gm sin mundo", () => {
     const m = matrizDeVigentes([vigente({ alcance: "genero", pct: 9 }), vigente({ mundo_id: null })], DETALLADOS);
     expect(m.celdas.size).toBe(0);
-    expect(m.resto).toEqual({ id: null, version: null });
+    expect(m.resto).toEqual({ id: null, version: null, sobre_base: "corregida" });
   });
 });
 
 describe("restoEfectivo", () => {
   it("sin Resto aprobado: el provisional, sin id, versión ni autor", () => {
-    expect(restoEfectivo([vigente({})], 20)).toEqual({ pct: 20, crecimiento_id: null, version: null, por_nombre: null, at: null });
+    expect(restoEfectivo([vigente({})], 20)).toEqual({ pct: 20, crecimiento_id: null, version: null, por_nombre: null, at: null, sobre_base: "corregida" });
   });
 
   it("con Resto aprobado: su pct, id, versión, autor y fecha (el provisional no se usa)", () => {
     const r = resto({ pct: 6, version: 2, usuario_nombre: "Ana", aprobada_at: "2026-10-28T08:00:00.000Z" });
-    expect(restoEfectivo([r], 20)).toEqual({ pct: 6, crecimiento_id: r.id, version: 2, por_nombre: "Ana", at: "2026-10-28T08:00:00.000Z" });
+    expect(restoEfectivo([r], 20)).toEqual({ pct: 6, crecimiento_id: r.id, version: 2, por_nombre: "Ana", at: "2026-10-28T08:00:00.000Z", sobre_base: "bruta" });
   });
 
   it("respeta el año pedido", () => {
@@ -142,30 +142,30 @@ describe("faltantesDeCierre", () => {
 
   it("lista los GM sin versión vigente, en el orden de lo exigido", () => {
     const f = faltantesDeCierre({ gm: [a, b, c], resto: false }, [vigente({ genero_id: MUJER, mundo_id: RI })]);
-    expect(f).toEqual({ gm: [a, c], resto_provisional: false });
+    expect(f).toEqual({ gm: [a, c], resto_provisional: false, reaprobar: [] });
   });
 
   it("con todo aprobado no falta nada", () => {
     const f = faltantesDeCierre({ gm: [a, b], resto: true }, [vigente({}), vigente({ genero_id: MUJER, mundo_id: RI }), resto()]);
-    expect(f).toEqual({ gm: [], resto_provisional: false });
+    expect(f).toEqual({ gm: [], resto_provisional: false, reaprobar: [] });
   });
 
   it("el Resto exigido y sin aprobar queda como provisional (el provisional no basta)", () => {
     const f = faltantesDeCierre({ gm: [a], resto: true }, [vigente({})]);
-    expect(f).toEqual({ gm: [], resto_provisional: true });
+    expect(f).toEqual({ gm: [], resto_provisional: true, reaprobar: [] });
   });
 
   it("si no se exige el Resto, que sea provisional no bloquea", () => {
-    expect(faltantesDeCierre({ gm: [a], resto: false }, [vigente({})])).toEqual({ gm: [], resto_provisional: false });
+    expect(faltantesDeCierre({ gm: [a], resto: false }, [vigente({})])).toEqual({ gm: [], resto_provisional: false, reaprobar: [] });
   });
 
   it("sin vigentes falta todo lo exigido", () => {
-    expect(faltantesDeCierre({ gm: [a, b], resto: true }, [])).toEqual({ gm: [a, b], resto_provisional: true });
+    expect(faltantesDeCierre({ gm: [a, b], resto: true }, [])).toEqual({ gm: [a, b], resto_provisional: true, reaprobar: [] });
   });
 
   it("una aprobación de otro año no cuenta", () => {
     const f = faltantesDeCierre({ gm: [a], resto: true }, [vigente({ anio_aplicacion: 2026 }), resto({ anio_aplicacion: 2026 })], 2027);
-    expect(f).toEqual({ gm: [a], resto_provisional: true });
+    expect(f).toEqual({ gm: [a], resto_provisional: true, reaprobar: [] });
   });
 
   it("de punta a punta con gm_gml: 10 GM + Resto como en la medición de la ficha", () => {
@@ -183,7 +183,86 @@ describe("faltantesDeCierre", () => {
       const [genero_id, mundo_id] = clave.split("|");
       return vigente({ genero_id: genero_id as string, mundo_id: mundo_id as string });
     });
-    expect(faltantesDeCierre(exigidos, aprobados)).toEqual({ gm: [], resto_provisional: true });
-    expect(faltantesDeCierre(exigidos, [...aprobados, resto()])).toEqual({ gm: [], resto_provisional: false });
+    expect(faltantesDeCierre(exigidos, aprobados)).toEqual({ gm: [], resto_provisional: true, reaprobar: [] });
+    expect(faltantesDeCierre(exigidos, [...aprobados, resto()])).toEqual({ gm: [], resto_provisional: false, reaprobar: [] });
+  });
+});
+
+// ─── 06e · sobre_base y reaprobar ───
+
+describe("06e · sobre_base de lo vigente", () => {
+  it("sobreBaseDe: ausente, null o desconocido es bruta; corregida solo si lo dice la versión", () => {
+    expect(sobreBaseDe(undefined)).toBe("bruta");
+    expect(sobreBaseDe(vigente({}))).toBe("bruta");
+    expect(sobreBaseDe(vigente({ sobre_base: null }))).toBe("bruta");
+    expect(sobreBaseDe(vigente({ sobre_base: "rara" }))).toBe("bruta");
+    expect(sobreBaseDe(vigente({ sobre_base: "corregida" }))).toBe("corregida");
+  });
+
+  it("matrizDeVigentes lleva sobre por GM (sin dato = bruta) y el del Resto aprobado; sin Resto aprobado es corregida (provisional)", () => {
+    const nuevo = vigente({ sobre_base: "corregida", genero_id: MUJER, mundo_id: RI });
+    const viejo = vigente({ genero_id: HOMBRE, mundo_id: URBANO });
+    const m = matrizDeVigentes([viejo, nuevo], DETALLADOS);
+    expect(m.sobre?.get(claveGM(HOMBRE, URBANO))).toBe("bruta");
+    expect(m.sobre?.get(claveGM(MUJER, RI))).toBe("corregida");
+    expect(m.resto.sobre_base).toBe("corregida");
+    expect(matrizDeVigentes([resto()], DETALLADOS).resto.sobre_base).toBe("bruta");
+    expect(matrizDeVigentes([resto({ sobre_base: "corregida" })], DETALLADOS).resto.sobre_base).toBe("corregida");
+  });
+
+  it("R4 de punta a punta: la matriz alimenta crearCrecimientoDe con el sobre_base de cada fuente", () => {
+    const m = matrizDeVigentes([vigente({ pct: 15 }), resto({ pct: 6, sobre_base: "corregida" })], DETALLADOS);
+    const gmDe = (gml: string) => (gml === "n1" ? { genero_id: HOMBRE, mundo_id: URBANO, nombre: "HOMBRE · URBANO" } : undefined);
+    const f = crearCrecimientoDe({ matriz: m, resto: 5, gmDe, pctFilaDe: (cb) => (cb === "|n1||propio" ? 3 : null) });
+    expect(f("|n1||x")).toMatchObject({ origen: "celda", pct: 15, sobre_base: "bruta" });
+    expect(f("|n1||propio")).toMatchObject({ origen: "fila", sobre_base: "corregida" });
+    expect(f("|otro||x")).toMatchObject({ origen: "resto", pct: 5, provisional: false, sobre_base: "corregida" });
+  });
+});
+
+describe("R17 · faltantesDeCierre con gmConNino: reaprobar", () => {
+  const a = claveGM(HOMBRE, URBANO);
+  const b = claveGM(MUJER, RI);
+  const exigidos = { gm: [a, b], resto: true };
+  const conNino: GmConNino = new Map([
+    [a, { nombre: "HOMBRE · URBANO", correccion_pct: 6.8 }],
+    ["resto", { nombre: "Resto", correccion_pct: 1.2 }],
+  ]);
+
+  it("una vigente bruta de un GM con Niño material entra en reaprobar, con su versión y la corrección", () => {
+    const f = faltantesDeCierre(exigidos, [vigente({ version: 2 }), vigente({ genero_id: MUJER, mundo_id: RI }), resto({ sobre_base: "corregida" })], 2027, conNino);
+    expect(f.reaprobar).toEqual([{ clave: a, nombre: "HOMBRE · URBANO", version: 2, correccion_pct: 6.8 }]);
+    expect(f).toMatchObject({ gm: [], resto_provisional: false });
+  });
+
+  it("una bruta de un GM fuera de gmConNino no entra: la proyección cierra con ella (ejemplo E)", () => {
+    const f = faltantesDeCierre(exigidos, [vigente({}), vigente({ genero_id: MUJER, mundo_id: RI }), resto()], 2027, new Map());
+    expect(f.reaprobar).toEqual([]);
+    const soloUrbano = faltantesDeCierre(exigidos, [vigente({}), vigente({ genero_id: MUJER, mundo_id: RI }), resto({ sobre_base: "corregida" })], 2027, new Map([[a, { nombre: "HOMBRE · URBANO", correccion_pct: 6.8 }]]));
+    expect(soloUrbano.reaprobar.map((r) => r.clave)).toEqual([a]);
+  });
+
+  it("una versión corregida nunca se reaprueba, aunque el GM tenga Niño", () => {
+    const f = faltantesDeCierre(exigidos, [vigente({ sobre_base: "corregida" }), vigente({ genero_id: MUJER, mundo_id: RI }), resto({ sobre_base: "corregida" })], 2027, conNino);
+    expect(f.reaprobar).toEqual([]);
+  });
+
+  it("el Resto bruta con Niño material entra solo si se exige y hay uno aprobado", () => {
+    const vs = [vigente({ sobre_base: "corregida" }), vigente({ genero_id: MUJER, mundo_id: RI, sobre_base: "corregida" }), resto({ version: 4 })];
+    expect(faltantesDeCierre(exigidos, vs, 2027, conNino).reaprobar).toEqual([{ clave: "resto", nombre: "Resto", version: 4, correccion_pct: 1.2 }]);
+    expect(faltantesDeCierre({ gm: [a, b], resto: false }, vs, 2027, conNino).reaprobar).toEqual([]);
+    expect(faltantesDeCierre(exigidos, vs.slice(0, 2), 2027, conNino).reaprobar).toEqual([]);
+  });
+
+  it("un GM sin versión vigente va en gm (falta aprobar), no en reaprobar; sin gmConNino reaprobar sale vacío", () => {
+    const f = faltantesDeCierre(exigidos, [], 2027, conNino);
+    expect(f.gm).toEqual([a, b]);
+    expect(f.reaprobar).toEqual([]);
+    expect(faltantesDeCierre(exigidos, [vigente({})], 2027).reaprobar).toEqual([]);
+  });
+
+  it("solo cuentan las versiones del año pedido", () => {
+    const f = faltantesDeCierre(exigidos, [vigente({ anio_aplicacion: 2026 })], 2027, conNino);
+    expect(f.reaprobar).toEqual([]);
   });
 });

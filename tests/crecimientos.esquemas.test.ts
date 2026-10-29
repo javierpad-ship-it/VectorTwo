@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { aprobarCrecimientoSchema, leerClaveGeneroMundo, leerConsultaGeneroMundo } from "@/lib/crecimientos/esquemas";
+import { aprobarCrecimientoSchema, aprobarCrecimientoSchemaEstricto, esBaseRetirada, leerClaveGeneroMundo, leerConsultaGeneroMundo, MENSAJE_BASE_RETIRADA } from "@/lib/crecimientos/esquemas";
+import { BASES_APROBABLES, BASES_CRECIMIENTO, VARIANTES_APROBABLES, VARIANTES_BASE } from "@/lib/crecimientos/tipos-api";
 
 /** 06d §3 (sintético): el cuerpo del `POST`, la clave de ruta y la consulta del `GET`. */
 
@@ -121,5 +122,49 @@ describe("leerConsultaGeneroMundo", () => {
       expect(r.rechazo?.status).toBe(400);
       expect(r.rechazo?.mensaje.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("06e · bases aprobables y retiradas (R11)", () => {
+  const nueva = { tipo: "cierre_curva", anio: null, variante: "corregido" };
+
+  it("el esquema final acepta cierre_curva y la variante corregido (y las demás bases aprobables)", () => {
+    expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ base: nueva })).success).toBe(true);
+    for (const tipo of BASES_APROBABLES) {
+      const anio = tipo === "anio_completo" ? 2025 : null;
+      for (const variante of VARIANTES_APROBABLES) expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ base: { tipo, anio, variante } })).success).toBe(true);
+    }
+  });
+
+  it("el esquema final rechaza cierre_proyectado y sin_nino_mas_rebote", () => {
+    expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ base: { tipo: "cierre_proyectado", anio: null, variante: "bruto" } })).success).toBe(false);
+    expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ base: { tipo: "acumulado", anio: null, variante: "sin_nino_mas_rebote" } })).success).toBe(false);
+  });
+
+  it("el esquema de transición también acepta lo nuevo y deja pasar lo heredado para que el handler responda base_retirada", () => {
+    expect(aprobarCrecimientoSchema.safeParse(cuerpo({ base: nueva })).success).toBe(true);
+    const heredada = aprobarCrecimientoSchema.safeParse(cuerpo({ base: { tipo: "cierre_proyectado", anio: null, variante: "bruto" } }));
+    expect(heredada.success).toBe(true);
+    if (heredada.success) expect(esBaseRetirada(heredada.data.base)).toBe(true);
+  });
+
+  it("esBaseRetirada: cierre_proyectado y sin_nino_mas_rebote sí; el resto no", () => {
+    expect(esBaseRetirada({ tipo: "cierre_proyectado", variante: "bruto" })).toBe(true);
+    expect(esBaseRetirada({ tipo: "acumulado", variante: "sin_nino_mas_rebote" })).toBe(true);
+    for (const tipo of BASES_APROBABLES) for (const variante of VARIANTES_APROBABLES) expect(esBaseRetirada({ tipo, variante })).toBe(false);
+  });
+
+  it("las listas de lectura incluyen las heredadas y las de aprobar solo las vigentes", () => {
+    expect(BASES_CRECIMIENTO).toContain("cierre_proyectado");
+    expect(BASES_APROBABLES).not.toContain("cierre_proyectado");
+    expect(VARIANTES_BASE).toContain("sin_nino_mas_rebote");
+    expect(VARIANTES_APROBABLES).toEqual(["corregido", "bruto"]);
+    expect(MENSAJE_BASE_RETIRADA).toContain("Cierre por curva");
+  });
+
+  it("el esquema final conserva el resto de las validaciones (anio_completo exige año; cuerpo estricto)", () => {
+    expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ base: { tipo: "anio_completo", anio: null, variante: "corregido" } })).success).toBe(false);
+    expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ extra: 1 })).success).toBe(false);
+    expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ base: { ...nueva, otra: 1 } })).success).toBe(false);
   });
 });
