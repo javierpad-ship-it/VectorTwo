@@ -5,6 +5,8 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
+    // Ninguna prueba toca la red: un `fetch` a `anthropic.com` lanza (ficha 07e, §5.7).
+    setupFiles: ["tests/setup-sin-red.ts"],
   },
   resolve: {
     alias: {
