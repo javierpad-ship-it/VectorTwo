@@ -249,6 +249,7 @@ export function LineaTab({
                     onSeleccionar={(id) => onFila(id === filaId ? null : id)}
                     onDecidir={decidir}
                     onCsv={descargarCsvLinea}
+                    gmReaprobar={proyeccion.crecimientos_sin_aprobar?.reaprobar?.map((r) => r.nombre)}
                   />
                   <div className="mt-3 space-y-0.5 text-xs text-tinta-suave">
                     {resumenTiendasLinea(datos, y).map((t) => (

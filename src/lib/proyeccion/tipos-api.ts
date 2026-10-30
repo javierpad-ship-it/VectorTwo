@@ -379,25 +379,40 @@ export type FilaResultadoPromedio = {
 };
 
 export type ResultadoPromedio = {
-  /** `ḡ = Σ B_c g_c ÷ Σ B_c` (ponderado de lo que escribió) en %; `null` si `Σ B = 0`. */
+  /**
+   * `ḡ = Σ B_c g_c ÷ Σ B_c` (ponderado de lo que escribió) en %; `null` si `Σ B = 0`. Con `sobre = 'corregida'` (0.14.0) pondera por `Σ B'` y es
+   * «sobre 2026 corregido» (el equivalente sobre real es `ponderado_escrito_real_pct`).
+   */
   ponderado_escrito_pct: number | null;
   /** Una por celda con filas, más el Resto al final (`genero = null`). */
   filas: FilaResultadoPromedio[];
+  /** `Σ B` REAL de los conjuntos (también con `sobre = 'corregida'`: «sobre 2026 real»). La base corregida va en `base_corregida_total`. */
   base_total: number;
+  /** 0.14.0: `Σ B'` (la base corregida del Niño; con método 4, o sin Niño, es `base_total`). */
+  base_corregida_total: number;
   /** `Σ S` (mismas tiendas de `Y+1`, con las filas fijadas). */
   siguiente_total: number;
-  /** `Σ S ÷ Σ B − 1` en %; `null` si `Σ B = 0`. */
+  /** `Σ S ÷ Σ B − 1` en %; `null` si `Σ B = 0`. Con `sobre = 'corregida'` es `Σ S ÷ Σ B' − 1` («sobre 2026 corregido»); el real es `resultante_real_pct`. */
   resultante_pct: number | null;
+  /** 0.14.0: `Σ S ÷ Σ B − 1` en % sobre la base REAL; igual a `resultante_pct` con método 4. `null` si `Σ B = 0`. */
+  resultante_real_pct: number | null;
+  /** 0.14.0: lo escrito (`Σ B'_c (1 + g_c) ÷ Σ B − 1`) expresado sobre la base REAL; igual a `ponderado_escrito_pct` con método 4. `null` si `Σ B = 0`. */
+  ponderado_escrito_real_pct: number | null;
   filas_con_pct_propio: number;
   filas_decididas: number;
-  /** Comparación con el objetivo global; `null` sin objetivo. */
+  /**
+   * Comparación con el objetivo global; `null` sin objetivo. El objetivo es «% sobre 2026 real»: todos los `faltan_*` se miden sobre `Σ B` real
+   * (`sobre: "real"`), también con `sobre = 'corregida'`.
+   */
   objetivo: null | {
     pct: number;
-    /** pp que faltan para el objetivo con lo escrito (`objetivo − ḡ`); `null` sin base. */
+    /** Rótulo: la base del objetivo es siempre la venta REAL de `Y` de las mismas tiendas («sobre 2026 real»); el servidor siempre lo informa. */
+    sobre?: "real";
+    /** pp que faltan para el objetivo con lo escrito (`objetivo − ḡ_real`); `null` sin base. */
     faltan_pp_escrito: number | null;
-    /** pp que faltan con el resultado (`objetivo − resultante`). */
+    /** pp que faltan con el resultado (`objetivo − resultante_real`). */
     faltan_pp_resultado: number | null;
-    /** Unidades que faltan: `Σ B × (1 + objetivo) − Σ S`. */
+    /** Unidades que faltan: `Σ B real × (1 + objetivo) − Σ S`. */
     faltan_unidades: number | null;
   };
   /** Puente al Total de `Y+1` de la Matriz: `total = mismas + nuevas_anterior + aperturas + cierres` (los cierres SUMAN). */
@@ -499,8 +514,8 @@ export type FilaResumenCrecimientoApi = {
    * 0.14.0 = `bruta`, el Resto provisional y el % propio de una fila = `corregida`.
    */
   aplicado: { pct: number; version: number | null; provisional: boolean; sobre_base?: SobreBase; por_nombre: string | null; at: string | null };
-  /** Del global (`crecimientos_genero_mundo`); `null` si no hay versión vigente. */
-  vigente_hoy: { pct: number; version: number; por_nombre: string | null; aprobada_at: string } | null;
+  /** Del global (`crecimientos_genero_mundo`); `null` si no hay versión vigente. `sobre_base` (0.14.0): la de esa versión (una sin el dato es `bruta`); el servidor siempre lo informa. */
+  vigente_hoy: { pct: number; version: number; sobre_base?: SobreBase; por_nombre: string | null; aprobada_at: string } | null;
   /** 07c: `B`, `B''`, rebote, filas con % propio, decididas y `Σ vigente` de `Y+1`. */
   agregado: AgregadoCrecimientoApi;
   /** `Σ vigente de Y+1 ÷ Σ B − 1` en %; `null` sin base. */
@@ -781,6 +796,11 @@ export type DiagnosticoFactorApi = {
   meses_periodo: number;
   /** Meses del periodo con dato en ambos años (`≥ MIN_MESES_FACTOR` para que haya `ratio_calculado`). */
   meses_periodo_con_dato: number;
+  /**
+   * Año normal de referencia con que se calculó (el «frente a 2025» de la pantalla). Lo escribe `sincronizarFactores` dentro del `jsonb`
+   * `diagnostico` (sin columna nueva); `null`/ausente en un diagnóstico guardado antes de ese cambio (re-sincronizar lo pone).
+   */
+  anio_ref?: number | null;
 };
 
 export type EstadoFactorY = "ok" | "faltante" | "desfasado" | "sin_confirmar";
@@ -810,6 +830,12 @@ export type FactorApi = {
   tiendas_comunes: number | null;
   meses_comparados: number | null;
   calculado_at: string | null;
+  /**
+   * `0.14.0`: cuándo se escribió `ratio_aplicado`. No hay columna propia (sin migración nueva): es `updated_at` de la fila, y solo cuando
+   * `ratio_aplicado` no es nulo y la última escritura de la fila NO fue un «Sincronizar» (que también mueve `updated_at`). Si la última
+   * escritura fue un sincronizar, la fecha real del valor escrito no se conoce y viene `null` (la pantalla dice «confirmado» sin día).
+   */
+  aplicado_at?: string | null;
   nota: string | null;
   objetivo: boolean;
 };
@@ -975,8 +1001,9 @@ export type RespuestaLineasApi = {
    * `base_siguiente` (`0.10.8`): `Σ B` de las filas base de la línea en `Y+1` (0 en los demás años). `vigente_con_base`: el vigente de
    * ESAS mismas filas (las que tienen `B`), el numerador del «Crec. mismas tiendas» (= `vigente_con_base ÷ base_siguiente − 1`), igual que
    * en la Matriz. `vigente` es el de todas las filas (el total de la línea) y no sirve para ese %.
+   * `base_corregida` (`0.14.0`): `Σ B'` de las MISMAS filas (la base corregida del Niño; una fila sin `B'` aporta su `B`): el denominador del «% sobre 2026 corregido».
    */
-  totales_por_anio: { anio: number; vigente: number; propuesto: number; decididas: number; filas: number; base_siguiente: number; vigente_con_base: number }[];
+  totales_por_anio: { anio: number; vigente: number; propuesto: number; decididas: number; filas: number; base_siguiente: number; base_corregida?: number; vigente_con_base: number }[];
   historico_linea: { anio: number; unidades: number; clase: ClaseAnioFila; tiendas: number }[];
   tiendas_linea: TiendaLineaApi[];
   /** `0.10.7`: filas de apertura (bloque `nuevas`, activas), por año, código de tienda, equivalencia y orden de agrupación de marca. */

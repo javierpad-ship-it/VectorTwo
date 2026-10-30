@@ -369,6 +369,10 @@ describe("factores de Y para la pantalla", () => {
     expect(bueno.meses_periodo_con_dato).toBe(1);
     expect(comoDiagnostico({ meses: [] })).toBeNull();
     expect(comoDiagnostico(null)).toBeNull();
+    // El año de referencia que escribe sincronizarFactores viaja si está; si no, no aparece.
+    const doce = Array.from({ length: 12 }, (_, i) => ({ m: i + 1, en_periodo: false, u: 0, u_ref: 0, ratio: null, control: null, relativo: null }));
+    expect(comoDiagnostico({ meses: doce, anio_ref: 2025 })?.anio_ref).toBe(2025);
+    expect(comoDiagnostico({ meses: doce })).not.toHaveProperty("anio_ref");
     expect(comoDiagnostico({ meses: Array(12).fill({ m: "x" }) })).toBeNull();
   });
 

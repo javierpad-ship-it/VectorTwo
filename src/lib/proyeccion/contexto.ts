@@ -5,7 +5,7 @@ import { cargarEstadoNivel } from "@/lib/arbol/nivel/consultas";
 import { leerEquivalencias } from "@/lib/arbol/consultas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { hastaPorDefecto } from "@/lib/curvas/anios";
-import { huellaCargas, huellaTemporada } from "@/lib/curvas/huellas";
+import { huellaCargas } from "@/lib/curvas/huellas";
 import { aniosAtipicidad, type PeriodoParaClase } from "@/lib/curvas/atipicos";
 import {
   aPeriodoApi,
@@ -14,7 +14,7 @@ import {
   leerCargasPublicadas,
   leerCorridaPorId,
   leerCurvasVigentes,
-  leerAgrupacionesDeTemporada,
+  leerHuellaComposicionTemporada,
   leerPeriodos,
   leerTiendas as leerTiendasMaestro,
   leerVentaMensualTienda,
@@ -171,14 +171,14 @@ export const aFactorProy = (f: FactorDb): FactorProy => ({
 
 /**
  * Huella de composición de hoy de cada temporada con `φ` (`invierno`, `verano`): md5 de las agrupaciones activas de la temporada y de `todo_el_ano` (el control del
- * Niño) con la huella de sus equivalencias activas (`huellaTemporada`). La misma que `sincronizarFactores` escribe en `huella_composicion`: remapear una
+ * Niño) con la huella de sus equivalencias activas (`leerHuellaComposicionTemporada`, la ÚNICA función que la calcula). La misma que `sincronizarFactores` escribe en `huella_composicion`: remapear una
  * equivalencia mueve el factor y deja la fila `desfasada`.
  */
 export async function leerHuellasComposicion(db: Db): Promise<Leido<Record<TemporadaFactor, string>>> {
-  const composiciones = await Promise.all(TEMPORADAS_FACTOR.map((t) => leerAgrupacionesDeTemporada(db, t)));
+  const composiciones = await Promise.all(TEMPORADAS_FACTOR.map((t) => leerHuellaComposicionTemporada(db, t)));
   const fallo = composiciones.find((c) => c.error)?.error;
   if (fallo) return falla(traducirErrorDb(fallo, "proyección: leer la composición de las agrupaciones"));
-  return listo(Object.fromEntries(TEMPORADAS_FACTOR.map((t, i) => [t, huellaTemporada(composiciones[i].data)])) as Record<TemporadaFactor, string>);
+  return listo(Object.fromEntries(TEMPORADAS_FACTOR.map((t, i) => [t, composiciones[i].data])) as Record<TemporadaFactor, string>);
 }
 
 // ─── Contexto completo del cálculo ───

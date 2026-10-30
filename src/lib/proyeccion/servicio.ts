@@ -176,7 +176,7 @@ export function gmConNinoDe(
 export function ninoDeFilas(
   filas: readonly FilaConAnios[],
   anioEnCurso: number,
-  ctx: Pick<ContextoCalculo, "nodos" | "generosMatriz">
+  ctx: { nodos: readonly { gml_id: string; genero_id: string; mundo_id: string }[]; generosMatriz: readonly string[] }
 ): ReturnType<typeof ninoPorGM> {
   const nodos = new Map(ctx.nodos.map((n) => [n.gml_id, n]));
   const detallados = new Set(ctx.generosMatriz);
@@ -1305,7 +1305,7 @@ export async function sincronizarFactores(actor: Actor): Promise<Salida<FactorAp
     for (const a of anios) {
       if (a.clase !== "atipico" || (temporada !== "invierno" && temporada !== "verano")) continue;
       const fila = filasEfecto.find((f) => f.anio === a.anio && f.temporada === temporada);
-      const f = factorDePeriodo(fila?.periodo);
+      const f = factorDePeriodo(fila?.periodo, fila?.anio_referencia);
       salida.push({
         anio: a.anio,
         temporada,

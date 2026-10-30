@@ -44,6 +44,7 @@ import { avanceAcumulado } from "@/lib/proyeccion/cierre";
 import { estadosFactoresDeY, equivalenciasConTemporadaCambiada, motivosDesactualizada, temporadasDeEquivalencias, type EstadoActual, type ProyeccionParaEstado } from "@/lib/proyeccion/desactualizado";
 import { ninoPorGM } from "@/lib/proyeccion/calculo";
 import { correccionMaterial } from "@/lib/proyeccion/factor-nino";
+import { aFactorApi, aplicadoAtDe, diagnosticoDe } from "@/lib/proyeccion/servicio-base";
 import { normalizar } from "@/lib/proyeccion/nino";
 import { proponerSiguiente } from "@/lib/proyeccion/siguiente";
 import { maduroDeVigente, proponerFilaTienda, rampaMensual, sumaCurva } from "@/lib/proyeccion/tiendas-nuevas";
@@ -601,12 +602,12 @@ describe("R24 de servicio: sincronizar, confirmar y el ejemplo H", () => {
       nota: "mío",
     });
     expect((inv.diagnostico as { meses: unknown[]; meses_periodo: number; meses_periodo_con_dato: number }).meses).toHaveLength(12);
-    expect(inv.diagnostico).toMatchObject({ meses_periodo: 12, meses_periodo_con_dato: 9 });
+    expect(inv.diagnostico).toMatchObject({ meses_periodo: 12, meses_periodo_con_dato: 9, anio_ref: 2025 });
     expect(inv.calculado_at).not.toBeNull();
     // El verano de 2026 solo tiene un mes del periodo (setiembre): no hay calculado, lo escribe Javier, y el diagnóstico muestra el mes.
     const ver = filaFactor(2026, "verano");
     expect(ver).toMatchObject({ ratio_calculado: null, formula: "relativo_periodo", meses_comparados: 1, parcial: true });
-    expect(ver.diagnostico).toMatchObject({ meses_periodo: 4, meses_periodo_con_dato: 1, ratio_fuera: 1.2 });
+    expect(ver.diagnostico).toMatchObject({ meses_periodo: 4, meses_periodo_con_dato: 1, ratio_fuera: 1.2, anio_ref: 2025 });
     // Los años anteriores también se calculan con la fórmula relativa y no son parciales.
     expect(filaFactor(2023, "invierno")).toMatchObject({ ratio_calculado: 0.6321, formula: "relativo_periodo", parcial: false, meses_comparados: 12 });
   });
@@ -633,6 +634,9 @@ describe("R24 de servicio: sincronizar, confirmar y el ejemplo H", () => {
     contexto.factoresDesdeBase = true;
     expect((await sincronizar()).status).toBe(200);
     expect(await estadoDe(2026, "invierno")).toMatchObject({ estado: "sin_confirmar", motivos_desfase: [], formula: "relativo_periodo", ratio_volumen: 0.6612, ratio_control: 1, meses_periodo: 12, meses_periodo_con_dato: 9 });
+    // La API entrega el año de referencia dentro del diagnóstico («frente a 2025») y, sin nada escrito, aplicado_at es null.
+    expect((await estadoDe(2026, "invierno"))?.diagnostico?.anio_ref).toBe(2025);
+    expect((await estadoDe(2026, "invierno"))?.aplicado_at).toBeNull();
     expect(await estadoDe(2026, "verano")).toMatchObject({ estado: "faltante", ratio_calculado: null, meses_periodo: 4, meses_periodo_con_dato: 1 });
     // Los factores de otros años no traen estado.
     expect((await estadoDe(2023, "invierno"))?.estado).toBeUndefined();
@@ -652,6 +656,27 @@ describe("R24 de servicio: sincronizar, confirmar y el ejemplo H", () => {
     await guardarFactores(enviar("PUT", "/factores", { factores: [{ anio: 2026, temporada: "invierno", ratio_aplicado: null }] }));
     expect(filaFactor(2026, "invierno")).toMatchObject({ ratio_aplicado: null, aplicado_huella: null });
     expect((await estadoDe(2026, "invierno"))?.estado).toBe("sin_confirmar");
+  });
+
+  it("aplicado_at: updated_at de la fila solo con ratio_aplicado y cuando la última escritura no fue un Sincronizar; anio_ref viaja en el diagnóstico", () => {
+    const calc = "2026-10-20T10:00:00.000Z";
+    // Sin valor escrito: null, aunque la fila se haya movido.
+    expect(aplicadoAtDe({ ratio_aplicado: null, updated_at: "2026-10-25T10:00:00Z", calculado_at: calc })).toBeNull();
+    // Escrito después de sincronizar: la fecha de la fila.
+    expect(aplicadoAtDe({ ratio_aplicado: 0.7, updated_at: "2026-10-29T15:00:00Z", calculado_at: calc })).toBe("2026-10-29T15:00:00Z");
+    // La última escritura fue el sincronizar (updated_at pegado a calculado_at): la fecha del valor escrito no se conoce.
+    expect(aplicadoAtDe({ ratio_aplicado: 0.7, updated_at: "2026-10-20T10:00:02Z", calculado_at: calc })).toBeNull();
+    // Nunca sincronizada: solo hubo escrituras de Javier.
+    expect(aplicadoAtDe({ ratio_aplicado: 1.5, updated_at: "2026-10-22T09:00:00Z", calculado_at: null })).toBe("2026-10-22T09:00:00Z");
+    expect(aplicadoAtDe({ ratio_aplicado: 1.5, calculado_at: null })).toBeNull();
+    const fila = { anio: 2026, temporada: "invierno", ratio_calculado: 0.66, ratio_aplicado: 0.7, parcial: true, tiendas_comunes: 8, meses_comparados: 9, calculado_at: calc, nota: null };
+    expect(aFactorApi({ ...fila, updated_at: "2026-10-29T15:00:00Z" }, 2027).aplicado_at).toBe("2026-10-29T15:00:00Z");
+    expect(aFactorApi({ ...fila, ratio_aplicado: null, updated_at: "2026-10-29T15:00:00Z" }, 2027).aplicado_at).toBeNull();
+    // anio_ref: solo si el jsonb lo trae.
+    const meses = Array.from({ length: 12 }, (_, i) => ({ m: i + 1, en_periodo: false, u: 0, u_ref: 0, ratio: null, control: null, relativo: null }));
+    const base = { meses, ratio_fuera: null, meses_periodo: 12, meses_periodo_con_dato: 9 };
+    expect(diagnosticoDe(base)?.anio_ref).toBeUndefined();
+    expect(diagnosticoDe({ ...base, anio_ref: 2025 })?.anio_ref).toBe(2025);
   });
 
   it("ejemplo H: confirmado → se publica octubre (desfasado) → sincronizar (sin_confirmar) → escribir el valor (ok)", async () => {
@@ -751,6 +776,22 @@ describe("R19: decidir sin releer factores, con B' y el sobre_base de la foto", 
     // La explicación cuenta la corrección y el % sobre real.
     expect(String(registro(ABRIGO_REC, 2027).explicacion)).toContain("corregida del Niño de invierno (÷ 0.66, relativo)");
     expect(String(registro(ABRIGO_REC, 2027).explicacion)).toContain("20.0 % de HOMBRE · CASUAL v1, sobre 2026 corregido");
+  });
+
+  it("decidir una fila base de 2026 rehace gm_con_nino, gm_correccion_nino_pct y gm_fuera_base con las filas de ahora (refrescarResumen); decidir una tienda no los toca", async () => {
+    aprobarCrecimientosFalsos(2027, { pct: 5, resto: 5 });
+    const id = await nueva();
+    const claves = [`${GEN.hombre}|${MUN.casual}`, `${GEN.mujer}|${MUN.casual}`].sort();
+    const resumenDe = () => proyecciones().find((x) => x.id === id)?.resumen as unknown as { gm_con_nino: string[]; gm_correccion_nino_pct: Record<string, number>; gm_fuera_base: Record<string, unknown> };
+    // La foto del cálculo queda vieja a propósito (como si el Niño de esos GM se hubiera movido con decisiones anteriores).
+    const p = proyecciones().find((x) => x.id === id) as Fila;
+    p.resumen = { ...(p.resumen as Record<string, unknown>), gm_con_nino: [], gm_correccion_nino_pct: {}, gm_fuera_base: { viejo: { filas: 1, unidades: 1 } } };
+    expect((await decidirFila(enviar("PUT", "/x", { decidido: 1200, origen: "manual" }), ctx(id, { filaId: idFila(ABRIGO_REC), anio: "2026" }))).status).toBe(200);
+    expect(resumenDe().gm_con_nino).toEqual(claves);
+    expect(resumenDe().gm_correccion_nino_pct[`${GEN.hombre}|${MUN.casual}`]).toBeGreaterThan(50);
+    expect(resumenDe().gm_fuera_base).toEqual({});
+    // Y lo que lee la API sale de ahí: la lista de «reaprobar» no queda con la foto del cálculo.
+    expect((await leerProy(id)).resumen?.gm_con_nino).toEqual(claves);
   });
 
   it("con una versión bruta en la foto, decidir rehace 2027 como el método 4: P = round(B × (1 + g)); B' se sigue guardando", async () => {

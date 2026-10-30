@@ -157,7 +157,7 @@ export async function proyeccionOr404(db: Db, id: string): Promise<Salida<Proyec
 
 /** Lo que `aFactorApi` lee de una fila de `factores_volumen_atipico`; las columnas de 0.14.0 son opcionales (una fila sin escribir o de 0.13.x no las trae). */
 type FilaFactor = Pick<FactorDb, "anio" | "temporada" | "ratio_calculado" | "ratio_aplicado" | "parcial" | "tiendas_comunes" | "meses_comparados" | "calculado_at" | "nota"> &
-  Partial<Pick<FactorDb, "formula" | "ratio_volumen" | "ratio_control" | "diagnostico">>;
+  Partial<Pick<FactorDb, "formula" | "ratio_volumen" | "ratio_control" | "diagnostico" | "updated_at">>;
 
 /** `diagnostico` (jsonb) → `DiagnosticoFactorApi`; lo que no tiene la forma esperada (o `null`) es `null`. */
 export function diagnosticoDe(json: Json | null | undefined): DiagnosticoFactorApi | null {
@@ -169,7 +169,27 @@ export function diagnosticoDe(json: Json | null | undefined): DiagnosticoFactorA
     ratio_fuera: typeof d.ratio_fuera === "number" ? d.ratio_fuera : null,
     meses_periodo: typeof d.meses_periodo === "number" ? d.meses_periodo : 0,
     meses_periodo_con_dato: typeof d.meses_periodo_con_dato === "number" ? d.meses_periodo_con_dato : 0,
+    // El año de referencia lo escribe `sincronizarFactores` dentro del jsonb; un diagnóstico anterior no lo trae.
+    ...(typeof d.anio_ref === "number" ? { anio_ref: d.anio_ref } : {}),
   };
+}
+
+/** Holgura entre `calculado_at` (reloj del servidor) y `updated_at` (reloj de la base, que escribe el trigger) para saber que la última escritura fue un «Sincronizar». */
+const HOLGURA_SINCRONIZAR_MS = 60_000;
+
+/**
+ * Cuándo se escribió `ratio_aplicado`. No hay columna propia (sin migración nueva): se usa `updated_at` de la fila, pero solo si `ratio_aplicado` no es nulo y la
+ * última escritura NO fue un «Sincronizar» (que escribe `calculado_at` y también mueve `updated_at`: `updated_at ≤ calculado_at + 60 s`). En ese caso la fecha real del
+ * valor escrito no se conoce y es `null` (la pantalla dice «confirmado» sin día). Sin `ratio_aplicado` o sin `updated_at`, `null`.
+ */
+export function aplicadoAtDe(f: { ratio_aplicado: number | string | null; updated_at?: string | null; calculado_at: string | null }): string | null {
+  if (f.ratio_aplicado === null || !f.updated_at) return null;
+  if (f.calculado_at !== null) {
+    const u = Date.parse(f.updated_at);
+    const c = Date.parse(f.calculado_at);
+    if (Number.isFinite(u) && Number.isFinite(c) && u - c <= HOLGURA_SINCRONIZAR_MS) return null;
+  }
+  return f.updated_at;
 }
 
 const numeroONulo = (v: number | string | null | undefined): number | null => (v === null || v === undefined ? null : Number(v));
@@ -196,6 +216,7 @@ export function aFactorApi(f: FilaFactor, anioObjetivo: number, estado?: { estad
     tiendas_comunes: f.tiendas_comunes,
     meses_comparados: f.meses_comparados,
     calculado_at: f.calculado_at,
+    aplicado_at: aplicadoAtDe(f),
     nota: f.nota,
     objetivo: f.anio >= anioObjetivo,
   };

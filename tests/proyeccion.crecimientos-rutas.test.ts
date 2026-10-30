@@ -148,16 +148,19 @@ describe("permisos y GET", () => {
     const urbano = g.filas[0];
     expect(urbano.clave).toBe(claveGm(GEN.hombre, MUN.urbano));
     expect(urbano.aplicado).toMatchObject({ pct: 15, version: 1, provisional: false, sobre_base: "corregida", por_nombre: "Javier de prueba", at: "2026-10-10T12:00:00.000Z" });
-    expect(urbano.vigente_hoy).toMatchObject({ pct: 15, version: 1, por_nombre: "Javier de prueba" });
+    expect(urbano.vigente_hoy).toMatchObject({ pct: 15, version: 1, sobre_base: "corregida", por_nombre: "Javier de prueba" });
     expect(urbano.agregado).toMatchObject({ base_libre: 1860 + 60 });
     expect(urbano.resultante_pct).toBeCloseTo(15, 0);
     expect(urbano.enlace).toBe(`/planificacion/curvas-estacionalidad?gm=${urbano.clave}&anio=2027&proyeccion=${id}`);
     expect(g.filas[1].aplicado).toMatchObject({ pct: 10, version: 1, provisional: false });
     expect(g.filas[1].vigente_hoy).toBeNull();
-    expect(g.resto).toMatchObject({ clave: "resto", genero: null, mundo: null, aplicado: { pct: 10, version: 1, provisional: false }, vigente_hoy: { pct: 10, version: 1 } });
+    expect(g.resto).toMatchObject({ clave: "resto", genero: null, mundo: null, aplicado: { pct: 10, version: 1, provisional: false, sobre_base: "corregida" }, vigente_hoy: { pct: 10, version: 1, sobre_base: "corregida" } });
     expect(g.resto.enlace).toContain("gm=resto");
-    // Ninguna celda queda vacía: el Total se calcula.
+    // Ninguna celda queda vacía: el Total se calcula. `base_total` es Σ B real (el objetivo se mide sobre 2026 real) y `base_corregida_total` Σ B'.
     expect(g.total?.base_total).toBeGreaterThan(0);
+    expect(g.total?.base_total).toBe([...g.filas, g.resto].reduce((a, f) => a + f.agregado.base, 0));
+    expect(g.total?.base_corregida_total).toBeGreaterThanOrEqual(g.total?.base_total ?? Infinity);
+    expect(g.total?.puente.base).toBe(g.total?.base_total);
     expect(g.total?.resultante_pct).not.toBeNull();
     expect(g.puente.total_en_curso).toBeGreaterThan(0);
     expect(g.puente.cierres_sin_decidir).toBe(1); // T5 cierra en 2027 y no tiene total decidido
@@ -359,6 +362,9 @@ describe("07c, lecturas: matriz y líneas (con la versión aprobada)", () => {
     expect(abrigo.base_normalizada as number).toBeGreaterThan(abrigo.base_siguiente as number);
     expect(abrigo.pct_bruto as number).toBeGreaterThan(abrigo.pct_sobre_normalizada as number);
     expect(l.totales_por_anio.find((t) => t.anio === 2027)?.base_siguiente).toBe(abrigo.base_siguiente);
+    // `totales_por_anio` trae también la base corregida de la línea (Σ B' de las mismas filas), igual a la de sus filas.
+    expect(l.totales_por_anio.find((t) => t.anio === 2027)?.base_corregida).toBe(abrigo.base_normalizada);
+    expect(l.totales_por_anio.find((t) => t.anio === 2026)?.base_corregida).toBe(0);
     // La de DENIM tiene % propio: sin versión.
     const l2 = (await leer<RespuestaLineasApi>(await lineas(get("/l", `?genero_id=${GEN.hombre}&mundo_id=${MUN.urbano}&linea_id=${LIN.denim}`), ctx(id)))).data;
     const rec = l2.filas.find((f) => f.agrupacion_marca === "RECONOCIDO")!.anios.find((a) => a.anio === 2027)!;

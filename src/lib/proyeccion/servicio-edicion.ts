@@ -18,6 +18,8 @@ import {
 import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, crecimientoDeTienda, fraccionDeTienda, moverTotalTienda, recalcularBaseSiguiente, registroDe, unidadesMadurasDeTienda, type ContextoModelo, type ResultadoDecisionTienda, type TotalesOtrosAnios } from "./decision";
 import { notaMoverTotal, totalTiendaTrasMover } from "./apertura-linea";
 import { conteosResumen } from "./resumen";
+import { ninoDeFilas } from "./servicio";
+import { GENEROS_MATRIZ } from "./tipos-api";
 import { explicar, textoCurva } from "./explicar";
 import { anioMaduroSoles, mesesCompletos, unidadesMadurasEntero, ventaAnioApertura } from "./tiendas-nuevas";
 import { aAnioApi, aFilaModelo, aRegistro, conCamposBrutos, payloadAnioDecision, comoJson, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
@@ -90,8 +92,12 @@ async function guardarRegistros(d: Db, filas: readonly FilaModelo[], ids: Readon
  * del momento de calcular: tras cada decisión se rehacen desde las filas actuales (columnas ligeras, sin `historico`) para que la
  * cabecera, el modal de Cerrar y la lista de proyecciones no digan «0 decididas» después de decidir. Es un `UPDATE` condicional
  * (solo en trabajo y sin cálculo vivo); si falla no se pierde la decisión, que ya está guardada: el siguiente refresco lo repone.
+ *
+ * 0.14.0: con `catalogo` (quien llama ya lo leyó: decidir una fila base de `Y` mueve `B` y `B'` de `Y+1`) también se rehacen `gm_con_nino`, `gm_correccion_nino_pct` y
+ * `gm_fuera_base` con las filas de ahora (`ninoDeFilas`, la misma lectura que usa el cierre), para que la lista de «reaprobar» no quede con la foto del cálculo. Solo si
+ * el cálculo ya los escribió (método 5). Las decisiones de tienda y «aplicar curva nueva» no mueven `B`: no lo pasan.
  */
-export async function refrescarResumen(d: Db, p: ProyeccionDb): Promise<void> {
+export async function refrescarResumen(d: Db, p: ProyeccionDb, catalogo?: Catalogo): Promise<void> {
   const resumen = p.resumen as unknown as ResumenProyeccion | null;
   if (resumen === null || typeof resumen !== "object") return;
   const filas = await leerFilasConAnios(d, p.id, { columnas: "ligeras", soloActivas: true });
@@ -107,8 +113,26 @@ export async function refrescarResumen(d: Db, p: ProyeccionDb): Promise<void> {
   const fresco = await leerProyeccionDb(d, p.id);
   const actual = fresco.data?.resumen as unknown as ResumenProyeccion | null | undefined;
   if (fresco.error || !fresco.data || fresco.data.estado !== "en_trabajo" || !actual || typeof actual !== "object") return;
-  const nuevo: ResumenProyeccion = { ...actual, ...conteos };
+  const nino = catalogo !== undefined && Array.isArray(actual.gm_con_nino) ? ninoDeFilas(filas.data, Y, ctxNino(catalogo)) : null;
+  const nuevo: ResumenProyeccion = {
+    ...actual,
+    ...conteos,
+    ...(nino ? { gm_con_nino: nino.gm_con_nino, gm_correccion_nino_pct: nino.gm_correccion_nino_pct, gm_fuera_base: nino.gm_fuera_base } : {}),
+  };
   await cambiarEstadoProyeccion(d, p.id, "en_trabajo", { resumen: comoJson(nuevo) }, { sinCalculoDesde: limiteCalculoVivo(sello()) });
+}
+
+/**
+ * Lo que `ninoDeFilas` necesita del catálogo: sus nodos y los géneros de la matriz (HOMBRE y MUJER, por nombre como `generosDeMatriz`; los demás son el Resto).
+ */
+function ctxNino(catalogo: Catalogo): Parameters<typeof ninoDeFilas>[2] {
+  const nodos = [...catalogo.nodos].map(([gml_id, n]) => ({ gml_id, genero_id: n.genero_id, mundo_id: n.mundo_id }));
+  const generosMatriz = new Set<string>();
+  for (const nombre of GENEROS_MATRIZ) {
+    const n = [...catalogo.nodos.values()].find((x) => x.genero.trim().toUpperCase() === nombre);
+    if (n) generosMatriz.add(n.genero_id);
+  }
+  return { nodos, generosMatriz: [...generosMatriz] };
 }
 
 const idsDe = (filas: readonly FilaConAnios[]) => new Map(filas.map((f) => [f.clave, f.id]));
@@ -207,7 +231,7 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
     if (editable.respuesta) return falla(editable.respuesta);
     const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [Y, Y + 1], ahora, actor);
     if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
-    await refrescarResumen(d, p);
+    await refrescarResumen(d, p, cat.data.catalogo);
     const r = registroDe(nuevo, anio) as NonNullable<ReturnType<typeof registroDe>>;
     return listo(conCamposBrutos(aAnioApi(r), nuevo, Y, ctx.crecimientoDe));
   }

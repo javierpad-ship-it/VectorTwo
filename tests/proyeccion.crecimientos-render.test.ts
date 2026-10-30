@@ -134,7 +134,8 @@ describe("el resumen de la pestaña", () => {
     expect(s).toContain("Base 2026 corregida del Niño");
     expect(s).toContain("+7.9 % sobre 2026 corregido (+12.5 % sobre 2026 real)");
     expect(s).toContain("Objetivo global (% sobre 2026 real)");
-    expect(s).toContain("Objetivo +12.0 % → con lo aplicado te faltan 2.6 pp");
+    // El objetivo es «sobre 2026 real»: se mide sobre Σ B real (120 000), no sobre la base corregida (125 100).
+    expect(s).toContain("Objetivo +12.0 % → con lo aplicado te pasas por 2.0 pp; con el resultado, te pasas por 0.5 pp ≈ 610 u de más.");
     expect(s).toContain("llevan el total de +9.4 % a +7.9 %");
   });
 

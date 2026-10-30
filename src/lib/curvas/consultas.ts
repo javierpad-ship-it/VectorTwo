@@ -7,7 +7,7 @@ import { recortarPeriodo } from "@/lib/ventas/periodo";
 import { leerVentaEstacionalidad, type VentaEstacionalidad } from "./agregado";
 import { alcanceEspejo, temporadaSugerida, temporadasDePeriodo, temporadaSugeridaVisible } from "./atipicos";
 import { leerComposicion, type LecturaComposicion, type MaestroComposicion } from "./composicion";
-import { huellaComposicion } from "./huellas";
+import { huellaComposicion, huellaTemporada } from "./huellas";
 import { parametrosDeJson } from "./reglas";
 import { temporadaDeFila, type TiendaMaestro, type VentaTiendaMes } from "./tipos";
 import {
@@ -448,6 +448,16 @@ export async function leerAgrupacionesDeTemporada(
     })),
     error: null,
   };
+}
+
+/**
+ * LA huella de composición de una temporada con `φ` (06e B2): `huellaTemporada` de las agrupaciones activas de la temporada y de `todo_el_ano` con la huella de sus
+ * equivalencias activas. Es la ÚNICA función que la calcula: `sincronizarFactores` la escribe en `huella_composicion` y la evalúan igual el cierre de M7 y la pantalla
+ * de GM (`factor_desfasado`). Si dos sitios la calcularan por separado, un factor recién sincronizado saldría «desfasado».
+ */
+export async function leerHuellaComposicionTemporada(db: Db, temporada: TemporadaAgrupacion): Promise<{ data: string; error: PostgrestError | null }> {
+  const { data, error } = await leerAgrupacionesDeTemporada(db, temporada);
+  return { data: error ? "" : huellaTemporada(data), error };
 }
 
 /** Id, nombre y temporada de las agrupaciones ACTIVAS (lectura mínima para Años Niño y `/anios`). */

@@ -242,7 +242,9 @@ export function calcularPromedio(
   ];
   const corregida = opciones.sobre === "corregida";
   let baseTotal = 0;
+  let baseReal = 0;
   let escrito = 0;
+  let escritoReal = 0;
   let siguienteTotal = 0;
   let propias = 0;
   let decididas = 0;
@@ -252,7 +254,9 @@ export function calcularPromedio(
     const baseLibre = corregida ? (a.base_libre_corregida ?? a.base_libre) : a.base_libre;
     const s = a.pct_propio.siguiente + a.decididas.siguiente + baseLibre * (1 + c.pct / 100);
     baseTotal += base;
+    baseReal += a.base;
     escrito += base * c.pct;
+    escritoReal += base * (1 + c.pct / 100);
     siguienteTotal += s;
     propias += a.pct_propio.filas;
     decididas += a.decididas.filas;
@@ -269,28 +273,36 @@ export function calcularPromedio(
   const sinBase = !(baseTotal > 0);
   const ponderado = sinBase ? null : escrito / baseTotal;
   const resultante = sinBase ? null : (siguienteTotal / baseTotal - 1) * 100;
+  // El objetivo global es «% sobre 2026 real»: con `corregida` se mide sobre `Σ B` real (si no, `Σ B' = Σ B` y da lo mismo que antes).
+  const sinBaseReal = !(baseReal > 0);
+  const resultanteReal = sinBaseReal ? null : (siguienteTotal / baseReal - 1) * 100;
+  const ponderadoReal = sinBaseReal ? null : (escritoReal / baseReal - 1) * 100;
   const objetivo =
     objetivoPct === null
       ? null
       : {
           pct: objetivoPct,
-          faltan_pp_escrito: ponderado === null ? null : objetivoPct - ponderado,
-          faltan_pp_resultado: resultante === null ? null : objetivoPct - resultante,
-          faltan_unidades: sinBase ? null : baseTotal * (1 + objetivoPct / 100) - siguienteTotal,
+          sobre: "real" as const,
+          faltan_pp_escrito: ponderadoReal === null ? null : objetivoPct - ponderadoReal,
+          faltan_pp_resultado: resultanteReal === null ? null : objetivoPct - resultanteReal,
+          faltan_unidades: sinBaseReal ? null : baseReal * (1 + objetivoPct / 100) - siguienteTotal,
         };
   const totalSiguiente = siguienteTotal + puente.nuevas_anterior + puente.aperturas + puente.cierres;
   return {
     resultado: {
       ponderado_escrito_pct: ponderado,
       filas,
-      base_total: baseTotal,
+      base_total: baseReal,
+      base_corregida_total: baseTotal,
       siguiente_total: siguienteTotal,
       resultante_pct: resultante,
+      resultante_real_pct: resultanteReal,
+      ponderado_escrito_real_pct: ponderadoReal,
       filas_con_pct_propio: propias,
       filas_decididas: decididas,
       objetivo,
       puente: {
-        base: baseTotal,
+        base: baseReal,
         mismas_siguiente: siguienteTotal,
         nuevas_anterior: puente.nuevas_anterior,
         aperturas: puente.aperturas,
@@ -300,7 +312,7 @@ export function calcularPromedio(
         total_en_curso: puente.total_en_curso,
         var_pct: puente.total_en_curso > 0 ? (totalSiguiente / puente.total_en_curso - 1) * 100 : null,
       },
-      sin_base: sinBase,
+      sin_base: sinBase && sinBaseReal,
     },
     faltan: [],
   };

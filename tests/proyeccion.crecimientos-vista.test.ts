@@ -266,7 +266,11 @@ describe("pie: objetivo y puente al Total 2027 (sobre la foto)", () => {
   const total = resumenCrecimientos().total!;
 
   it("objetivo frente a lo aplicado y al resultado, en pp y en unidades", () => {
-    expect(textoObjetivo(total.objetivo!)).toBe("Objetivo +12.0 % → con lo aplicado te faltan 2.6 pp; con el resultado, te faltan 4.1 pp ≈ 5,102 u.");
+    // El objetivo es «sobre 2026 real»: Σ B real = 120 000 → 134 400 u para el 12 %; la foto da 135 010 (+12.5 % real).
+    expect(total.objetivo).toMatchObject({ sobre: "real", faltan_unidades: expect.closeTo(-610, 0) });
+    expect(total.base_total).toBe(120000);
+    expect(total.base_corregida_total).toBe(125100);
+    expect(textoObjetivo(total.objetivo!)).toBe("Objetivo +12.0 % → con lo aplicado te pasas por 2.0 pp; con el resultado, te pasas por 0.5 pp ≈ 610 u de más.");
     const o = { pct: 5, faltan_pp_escrito: -4.2, faltan_pp_resultado: -2.7, faltan_unidades: -3000 };
     expect(textoObjetivo(o)).toContain("te pasas por 4.2 pp");
     expect(textoObjetivo(o)).toContain("3,000 u de más");

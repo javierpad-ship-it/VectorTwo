@@ -6,9 +6,9 @@ import { error, errorConCodigo, ok } from "@/lib/api/respuestas";
 import { leerNodos } from "@/lib/arbol/consultas";
 import { anioDe, hastaPorDefecto, redondear } from "@/lib/curvas/anios";
 import { claseDeAnio } from "@/lib/curvas/atipicos";
-import { aPeriodoApi, leerAgrupacionesActivasBasicas, leerAgrupacionesDeTemporada, leerCargasPublicadas, leerCurvasVigentes, leerPeriodos, leerTiendas } from "@/lib/curvas/consultas";
+import { aPeriodoApi, leerAgrupacionesActivasBasicas, leerCargasPublicadas, leerHuellaComposicionTemporada, leerCurvasVigentes, leerPeriodos, leerTiendas } from "@/lib/curvas/consultas";
 import { referenciaVolumen } from "@/lib/curvas/efecto";
-import { huellaCargas, huellaRed, huellaTemporada } from "@/lib/curvas/huellas";
+import { huellaCargas, huellaRed } from "@/lib/curvas/huellas";
 import { curvaDeFila } from "@/lib/curvas/reglas";
 import { clasificarTienda } from "@/lib/proyeccion/bloques";
 import { calcularPromedio, claveGM, generosDeMatriz } from "@/lib/proyeccion/crecimientos";
@@ -340,15 +340,15 @@ export async function cargarContexto(db: Db, consulta: ConsultaGeneroMundo, hoy:
   for (const a of agrupaciones.data) nombresAgrupacion.set(a.id, a.nombre);
 
   // Lo de hoy contra lo que se juzga un factor de `Y` (B2): las mismas cargas y la misma composición con que se sincroniza
-  // (`huellaTemporada` de las agrupaciones activas de la temporada y de `todo_el_ano`). Solo se lee la composición de las temporadas que
+  // (`leerHuellaComposicionTemporada`: la misma función que usan `sincronizarFactores` y el contexto de M7). Solo se lee la composición de las temporadas que
   // tienen meses atípicos en `Y`: en un año sin Niño no hace falta (y ahorra las lecturas de equivalencias).
   const mesesAtipicosY = (temporada: TemporadaFactor): string[] => claseDeAnio(y, { temporada }, periodosApi, [...publicados]).meses_atipicos;
   const huellaComposicionDe: Record<TemporadaFactor, string> = { invierno: "", verano: "" };
   for (const temporada of ["invierno", "verano"] as const) {
     if (mesesAtipicosY(temporada).length === 0) continue;
-    const delaTemporada = await leerAgrupacionesDeTemporada(db, temporada);
-    if (delaTemporada.error) return falla(traducirErrorDb(delaTemporada.error, "crecimientos por género y mundo: leer la composición de las agrupaciones"));
-    huellaComposicionDe[temporada] = huellaTemporada(delaTemporada.data);
+    const composicion = await leerHuellaComposicionTemporada(db, temporada);
+    if (composicion.error) return falla(traducirErrorDb(composicion.error, "crecimientos por género y mundo: leer la composición de las agrupaciones"));
+    huellaComposicionDe[temporada] = composicion.data;
   }
   const hoyFactor = (temporada: TemporadaFactor): HoyFactor => ({
     huella_cargas: cargasHuella,
@@ -783,17 +783,11 @@ function proyeccionesDisponibles(ctx: ContextoGM): ListaGeneroMundoApi["proyecci
     .filter((p) => p.id === elegida || (p.calculado_at !== null && (p.version_metodo ?? 0) >= METODO_MIN_REFERENCIA));
 }
 
-/**
- * `total` de la lista (06e §4.1): ponderado por `Σ B'` y, aparte, su equivalente sobre 2026 real (`pct_real`, campo nuevo que `tipos-api.ts`
- * aún no declara). `total.base` es `Σ B'`. Una versión `bruta` entra con su equivalente sobre corregido; un GM sin aprobar sigue al Resto.
- */
-export type ListaConTotalReal = Omit<ListaGeneroMundoApi, "total"> & { total: ListaGeneroMundoApi["total"] & { pct_real: number | null } };
-
 /** El % sobre corregido equivalente a un % `bruto` en un agregado: `(1 + g) × Σ B ÷ Σ B' − 1`. */
 const corregidoDeBruto = (pctBruto: number, base: number, baseCorregida: number): number => (baseCorregida > 0 ? ((1 + pctBruto / 100) * base) / baseCorregida * 100 - 100 : pctBruto);
 
 /** `GET /api/curvas/genero-mundo`. */
-export function armarLista(ctx: ContextoGM): ListaConTotalReal {
+export function armarLista(ctx: ContextoGM): ListaGeneroMundoApi {
   const { gms, resto } = armarConjuntos(ctx);
   const calculados = gms.map((c) => calcularConjunto(ctx, c));
   const calculadoResto = calcularConjunto(ctx, resto);
@@ -829,8 +823,8 @@ export function armarLista(ctx: ContextoGM): ListaConTotalReal {
     );
     if (promedio.resultado) {
       pctPonderado = promedio.resultado.ponderado_escrito_pct === null ? null : r2(promedio.resultado.ponderado_escrito_pct);
-      base = promedio.resultado.base_total;
-      const baseReal = promedio.resultado.filas.length > 0 ? [...detallables.map((x) => agregadoDe(x.c.filas).base), aResto.base].reduce((a, b) => a + b, 0) : 0;
+      base = promedio.resultado.base_corregida_total;
+      const baseReal = promedio.resultado.base_total;
       pctReal = pctPonderado !== null && baseReal > 0 ? r2(((1 + pctPonderado / 100) * base / baseReal - 1) * 100) : null;
     }
   }

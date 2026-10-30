@@ -160,7 +160,7 @@ describe("GET /api/curvas/genero-mundo", () => {
     expect(data.total.base).toBe(63100 + 20000 + 30000 + 6000);
     expect(data.total.pct_ponderado).toBe(5);
     expect(data.total.sin_aprobar).toBe(3);
-    const real = (data.total as unknown as { pct_real: number | null }).pct_real;
+    const real = data.total.pct_real;
     expect(real).toBeCloseTo(((1.05 * (63100 + 20000 + 30000 + 6000)) / (58900 + 20000 + 30000 + 6000) - 1) * 100, 1);
   });
 

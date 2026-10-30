@@ -94,7 +94,7 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
     }
     // Mismo criterio que la Matriz (`baseDeAnio`): `Σ B` y el vigente de las MISMAS filas, las que tienen `B`; una fila sin `B` no cuenta en ninguno.
     const b = baseDeAnio(elegidas, anio);
-    return { anio, vigente, propuesto, decididas, filas, base_siguiente: b.base, vigente_con_base: b.vigente };
+    return { anio, vigente, propuesto, decididas, filas, base_siguiente: b.base, base_corregida: b.corregida, vigente_con_base: b.vigente };
   });
 
   const vacia: RespuestaLineasApi = {

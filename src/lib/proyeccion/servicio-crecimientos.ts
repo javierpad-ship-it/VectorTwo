@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { leerVigentes } from "@/lib/crecimientos/consultas-vigentes";
-import { faltantesDeCierre, gmExigidos, type GmConNino, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
+import { faltantesDeCierre, gmExigidos, sobreBaseDe, type GmConNino, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
 import { cargarCatalogo } from "./contexto";
 import { leerCrecimientos, leerFilasConAnios, leerGenerosMundos, leerTiendasProyeccion, type CrecimientoDb, type ProyeccionDb } from "./consultas";
 import { agregarFilas, calcularPromedio, claveGM, generosDeMatriz, type FilaCrecimiento } from "./crecimientos";
@@ -129,7 +129,7 @@ function resumenDe(dt: Datos): ResumenCrecimientosProyeccionApi {
   const resto = foto.resto;
   const enlace = (clave: string) => `/planificacion/curvas-estacionalidad?gm=${clave}&anio=${anioSig}&proyeccion=${p.id}`;
   const vigenteHoy = (v: VigenteCrecimiento | null | undefined): FilaResumenCrecimientoApi["vigente_hoy"] =>
-    v ? { pct: Number(v.pct), version: v.version, por_nombre: v.usuario_nombre, aprobada_at: v.aprobada_at } : null;
+    v ? { pct: Number(v.pct), version: v.version, sobre_base: sobreBaseDe(v), por_nombre: v.usuario_nombre, aprobada_at: v.aprobada_at } : null;
 
   // Los GM que se muestran: los de HOMBRE y MUJER con filas base de `Y+1` o con celda en la foto.
   const filasDe = new Map<string, FilaBase[]>();

@@ -419,6 +419,7 @@ export function comoDiagnostico(crudo: unknown): DiagnosticoFactorApi | null {
     ratio_fuera: numeroONulo(crudo.ratio_fuera),
     meses_periodo: numeroONulo(crudo.meses_periodo) ?? 0,
     meses_periodo_con_dato: numeroONulo(crudo.meses_periodo_con_dato) ?? 0,
+    ...(numeroONulo(crudo.anio_ref) !== null ? { anio_ref: numeroONulo(crudo.anio_ref) } : {}),
   };
 }
 

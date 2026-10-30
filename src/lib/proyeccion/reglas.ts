@@ -437,7 +437,8 @@ export type FactorDePeriodo = {
   diagnostico: DiagnosticoFactorApi | null;
 };
 
-export function factorDePeriodo(periodo: PeriodoEfectoApi | null | undefined): FactorDePeriodo {
+/** `anioRef`: el año normal de referencia con que se midió (`fila.anio_referencia` del efecto); va dentro del diagnóstico para que la pantalla diga «frente a 2025». */
+export function factorDePeriodo(periodo: PeriodoEfectoApi | null | undefined, anioRef?: number | null): FactorDePeriodo {
   if (!periodo) return { ratio_calculado: null, ratio_volumen: null, ratio_control: null, meses_comparados: 0, meses_periodo_con_dato: 0, diagnostico: null };
   const suficiente = periodo.relativo !== null && periodo.meses_periodo_con_dato >= MIN_MESES_FACTOR;
   return {
@@ -451,6 +452,7 @@ export function factorDePeriodo(periodo: PeriodoEfectoApi | null | undefined): F
       ratio_fuera: periodo.ratio_fuera,
       meses_periodo: periodo.meses_periodo,
       meses_periodo_con_dato: periodo.meses_periodo_con_dato,
+      ...(typeof anioRef === "number" ? { anio_ref: anioRef } : {}),
     },
   };
 }

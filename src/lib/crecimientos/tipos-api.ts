@@ -166,8 +166,11 @@ export type ListaGeneroMundoApi = {
   proyecciones_disponibles: (ProyeccionReferenciaApi & { estado: EstadoProyeccion })[];
   filas: FilaGMApi[];
   resto: FilaGMApi;
-  /** Ponderado por `B`; un GM sin aprobar pondera con el Resto que seguiría. `null` sin proyección de referencia válida. */
-  total: { pct_ponderado: number | null; base: number; sin_aprobar: number };
+  /**
+   * Ponderado por `Σ B'` (la base corregida del Niño; `base` es `Σ B'`); un GM sin aprobar pondera con el Resto que seguiría. `null` sin proyección de
+   * referencia válida. `pct_real` (0.14.0): el equivalente del ponderado sobre `Σ B` real de 2026 (`null` si no hay base real o no hay referencia válida).
+   */
+  total: { pct_ponderado: number | null; base: number; sin_aprobar: number; pct_real?: number | null };
   /** Bloqueo optimista: se devuelve tal cual en el `POST`. */
   huella_datos: string;
   /** `0.14.0` (D7): `Y+1` tiene meses atípicos marcados: aprobar y cerrar se bloquean. `null` si no. */

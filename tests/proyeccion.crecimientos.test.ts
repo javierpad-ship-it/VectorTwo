@@ -327,8 +327,29 @@ describe("R5 (06e): ejemplo B, el GM sobre 2026 corregido", () => {
     expect(r.filas[0].siguiente).toBeCloseTo(64719, 6);
     expect(r.filas[0].pct_resultante).toBeCloseTo(8, 6);
     expect(r.filas[0].pct_resultante_real).toBeCloseTo(15.36, 2);
-    expect(r.base_total).toBe(59925);
+    // `base_total` es Σ B REAL (56 100); la corregida (59 925) va aparte, y el objetivo se mide sobre la real.
+    expect(r.base_total).toBe(56100);
+    expect(r.base_corregida_total).toBe(59925);
     expect(r.ponderado_escrito_pct).toBeCloseTo(8, 6);
+    expect(r.resultante_pct).toBeCloseTo(8, 6);
+    expect(r.resultante_real_pct).toBeCloseTo(15.36, 2);
+    expect(r.ponderado_escrito_real_pct).toBeCloseTo(15.36, 2);
+    expect(r.puente.base).toBe(56100);
+  });
+
+  it("el objetivo (% sobre 2026 real) se mide sobre Σ B real también con sobre = corregida; con método 4 da lo mismo que antes", () => {
+    const celda = { genero: "HOMBRE", mundo: "URBANO", pct: 8 as number | null, sin_filas: false, agregado: agregarFilas(filas) };
+    const r = calcularPromedio([celda], resto, 20, puente, { sobre: "corregida" }).resultado;
+    expect(r?.objetivo).toMatchObject({ pct: 20, sobre: "real" });
+    // Σ S = 64 719 u; objetivo 20 % de 56 100 = 67 320 → faltan 2 601 u; en pp: 20 − 15,36.
+    expect(r?.objetivo?.faltan_unidades).toBeCloseTo(56100 * 1.2 - 64719, 6);
+    expect(r?.objetivo?.faltan_pp_resultado).toBeCloseTo(20 - 15.36, 2);
+    expect(r?.objetivo?.faltan_pp_escrito).toBeCloseTo(20 - 15.36, 2);
+    // Método 4 (sin la opción): base real = base del cálculo, el objetivo no cambia de significado.
+    const m4 = calcularPromedio([celda], resto, 20, puente).resultado;
+    expect(m4?.base_total).toBe(m4?.base_corregida_total);
+    expect(m4?.objetivo?.faltan_unidades).toBeCloseTo((m4?.base_total ?? 0) * 1.2 - (m4?.siguiente_total ?? 0), 6);
+    expect(m4?.resultante_real_pct).toBeCloseTo(m4?.resultante_pct ?? 0, 9);
   });
 
   it("pondera por Σ B' (no por Σ B) cuando hay varios GM", () => {
