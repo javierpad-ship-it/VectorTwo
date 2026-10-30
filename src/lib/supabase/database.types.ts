@@ -7,6 +7,10 @@
  * aun no esta aplicada en `Vector2` (el `execute_sql` espero una confirmacion que no llego); al aplicarla hay que compararlos con
  * `generate_typescript_types`.
  *
+ * Verificados el 2026-10-30 (0029 M6 06e: `crecimientos_genero_mundo.sobre_base` (text not null default 'bruta'),
+ * `proyeccion_crecimientos.sobre_base` (text null) y seis columnas nuevas de `factores_volumen_atipico`: `formula`, `ratio_volumen`,
+ * `ratio_control`, `huella_composicion`, `aplicado_huella` y `diagnostico`; `venta_genero_mundo` conserva firma `(p_desde) -> Json`).
+ *
  * Verificados el 2026-10-27 (0027 M6 06d: tabla `crecimientos_genero_mundo`, `proyeccion_crecimientos.crecimiento_id` y
  * `.version`, y la funcion `venta_genero_mundo`; antes, 0024 M12: `repartos_marca_barrido.temporadas_usadas`; y 0023 M7 07c:
  * `proyeccion_crecimientos`, `proyeccion_fila_anios.base_siguiente` y `.base_normalizada`) contra
@@ -829,6 +833,7 @@ export type Database = {
           perfil_id: string | null;
           proyeccion_referencia_id: string | null;
           referencia: Json;
+          sobre_base: string;
           updated_at: string;
           usuario_nombre: string | null;
           version: number;
@@ -850,6 +855,7 @@ export type Database = {
           perfil_id?: string | null;
           proyeccion_referencia_id?: string | null;
           referencia: Json;
+          sobre_base?: string;
           updated_at?: string;
           usuario_nombre?: string | null;
           version: number;
@@ -871,6 +877,7 @@ export type Database = {
           perfil_id?: string | null;
           proyeccion_referencia_id?: string | null;
           referencia?: Json;
+          sobre_base?: string;
           updated_at?: string;
           usuario_nombre?: string | null;
           version?: number;
@@ -1091,9 +1098,13 @@ export type Database = {
         Row: {
           activo: boolean;
           anio: number;
+          aplicado_huella: string | null;
           calculado_at: string | null;
           created_at: string;
+          diagnostico: Json | null;
+          formula: string | null;
           huella_cargas: string | null;
+          huella_composicion: string | null;
           id: string;
           meses_comparados: number | null;
           nota: string | null;
@@ -1101,6 +1112,8 @@ export type Database = {
           perfil_id: string | null;
           ratio_aplicado: number | null;
           ratio_calculado: number | null;
+          ratio_control: number | null;
+          ratio_volumen: number | null;
           temporada: string;
           tiendas_comunes: number | null;
           updated_at: string;
@@ -1109,9 +1122,13 @@ export type Database = {
         Insert: {
           activo?: boolean;
           anio: number;
+          aplicado_huella?: string | null;
           calculado_at?: string | null;
           created_at?: string;
+          diagnostico?: Json | null;
+          formula?: string | null;
           huella_cargas?: string | null;
+          huella_composicion?: string | null;
           id?: string;
           meses_comparados?: number | null;
           nota?: string | null;
@@ -1119,6 +1136,8 @@ export type Database = {
           perfil_id?: string | null;
           ratio_aplicado?: number | null;
           ratio_calculado?: number | null;
+          ratio_control?: number | null;
+          ratio_volumen?: number | null;
           temporada: string;
           tiendas_comunes?: number | null;
           updated_at?: string;
@@ -1127,9 +1146,13 @@ export type Database = {
         Update: {
           activo?: boolean;
           anio?: number;
+          aplicado_huella?: string | null;
           calculado_at?: string | null;
           created_at?: string;
+          diagnostico?: Json | null;
+          formula?: string | null;
           huella_cargas?: string | null;
+          huella_composicion?: string | null;
           id?: string;
           meses_comparados?: number | null;
           nota?: string | null;
@@ -1137,6 +1160,8 @@ export type Database = {
           perfil_id?: string | null;
           ratio_aplicado?: number | null;
           ratio_calculado?: number | null;
+          ratio_control?: number | null;
+          ratio_volumen?: number | null;
           temporada?: string;
           tiendas_comunes?: number | null;
           updated_at?: string;
@@ -1762,6 +1787,7 @@ export type Database = {
           pct: number;
           perfil_id: string | null;
           proyeccion_id: string;
+          sobre_base: string | null;
           updated_at: string;
           usuario_nombre: string | null;
           version: number | null;
@@ -1777,6 +1803,7 @@ export type Database = {
           pct: number;
           perfil_id?: string | null;
           proyeccion_id: string;
+          sobre_base?: string | null;
           updated_at?: string;
           usuario_nombre?: string | null;
           version?: number | null;
@@ -1792,6 +1819,7 @@ export type Database = {
           pct?: number;
           perfil_id?: string | null;
           proyeccion_id?: string;
+          sobre_base?: string | null;
           updated_at?: string;
           usuario_nombre?: string | null;
           version?: number | null;
