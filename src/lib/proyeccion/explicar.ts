@@ -1,5 +1,5 @@
 import { formatearDecimal, formatearNumero } from "@/lib/formato";
-import type { Metodo, OrigenComposicion } from "./tipos-api";
+import type { Metodo, OrigenComposicion, SobreBase } from "./tipos-api";
 
 /**
  * La frase de cada cifra (ficha 07, regla 27). Pura: recibe las entradas del cálculo y devuelve el texto con el
@@ -45,6 +45,38 @@ function tramosNino(phi: readonly number[], desde: number, hasta: number): { des
   return tramos;
 }
 
+
+/**
+ * Cómo se corrigió la base por el Niño de `Y`: «÷ 0,80, relativo» con `φ` constante (el invierno completo) o «set–dic ÷ 1,50» por tramos (el
+ * verano). «Relativo» solo en invierno: es la temporada cuyo factor sale de la fórmula relativa (el de verano lo escribe el planner).
+ */
+function textoFactorBase(phi: readonly number[] | undefined, temporada: string | null | undefined): string {
+  if (!phi || phi.every((f) => Math.abs(f - 1) < 1e-9)) return "";
+  const relativo = temporada === "invierno" ? ", relativo" : "";
+  const constante = phi.every((f) => Math.abs(f - phi[0]) < 1e-9);
+  if (constante) return `÷ ${formatearDecimal(phi[0], 2)}${relativo}`;
+  return `${tramosNino(phi, 1, 12).map((t) => `${rangoMeses(t.desde, t.hasta)} ÷ ${formatearDecimal(t.factor, 2)}`).join(", ")}${relativo}`;
+}
+
+/** «8 % de HOMBRE · URBANO v2, sobre 2026 corregido»: el % aplicado, su origen y sobre qué base se escribió. */
+function textoPctAplicado(g: number, o: EntradaExplicar["crecimientoOrigen"], sobre: SobreBase, anioEnCurso: number): string {
+  const gTexto = textoPctCrecimiento(g);
+  const version = (v: number | null | undefined) => (v === null || v === undefined ? "" : ` v${v}`);
+  const origen = !o
+    ? ""
+    : o.origen === "celda"
+      ? o.celda
+        ? ` de ${o.celda}${version(o.version)}`
+        : " de sus celdas"
+      : o.origen === "fila"
+        ? " propio de la fila"
+        : o.provisional
+          ? " del Resto provisional"
+          : ` del Resto${version(o.version)}`;
+  const base = sobre === "corregida" ? `sobre ${anioEnCurso} corregido` : `sobre ${anioEnCurso} real, aprobado antes de 0.14.0`;
+  return `${gTexto} %${origen}, ${base}`;
+}
+
 /** Explicación del Niño de un año para el cierre: qué meses se dividen y cuáles se multiplican. */
 export function textoNinoCierre(phi: readonly number[] | undefined, k: number): string | null {
   if (!phi || phi.every((f) => Math.abs(f - 1) < 1e-9)) return null;
@@ -83,16 +115,21 @@ export type EntradaExplicar = {
   referenciaTresMeses?: number | null;
   // Año siguiente (método `crecimiento`).
   baseVigente?: number | null;
-  /** `B`: base de las mismas tiendas de `Y+1`, sin normalizar. */
+  /** `B`: base de las mismas tiendas de `Y+1`, real (sin corregir por el Niño). */
   baseTotal?: number | null;
-  /** `B''`: lo que vendería con 0 % si `Y` hubiera sido normal (solo referencia). */
-  baseNormalizada?: number | null;
+  /** `B'` (método 5): `B` corregida del Niño de `Y`; es la base del % cuando `sobreBase` es `corregida`. */
+  baseCorregida?: number | null;
+  /** `0.14.0`: sobre qué base se escribió el % que se aplicó. Sin dato, `corregida` (método 5). */
+  sobreBase?: SobreBase;
   /** Temporada de la unidad («invierno», «verano»…) para decir en qué temporada fue Niño. */
   temporada?: string | null;
   /** Cuántas tiendas son las mismas de `Y+1` («de las 10 tiendas de 2027»). */
   tiendasSiguiente?: number;
-  /** `0.10.8` (07c): el % (bruto) que se aplicó, de dónde sale y, si es de una celda, su nombre. */
-  crecimientoOrigen?: { origen: "fila" | "celda" | "resto"; celda: string | null };
+  /**
+   * `0.10.8` (07c): de dónde sale el % que se aplicó y, si es de una celda, su nombre. `0.14.0`: la `version` aprobada del GM o del Resto y si el
+   * Resto es el provisional de la proyección.
+   */
+  crecimientoOrigen?: { origen: "fila" | "celda" | "resto"; celda: string | null; version?: number | null; provisional?: boolean };
   /** `0.10.8`: el % de una tienda `maduro_propio` es el ponderado de sus combinaciones (no un único % con origen). */
   crecimientoPonderado?: boolean;
   crecimiento?: number;
@@ -192,33 +229,34 @@ export function explicar(e: EntradaExplicar): string {
     case "crecimiento": {
       const aportes = (e.aportes ?? []).map((a) => `${a.signo > 0 ? "+" : "−"} ${a.tienda} ${u(a.total)}`).join(" ");
       const g = e.crecimiento ?? 0;
-      const gTexto = textoPctCrecimiento(g);
+      const sobre: SobreBase = e.sobreBase ?? "corregida";
       const objetivo =
         e.phiObjetivo && tramosNino(e.phiObjetivo, 1, 12).length > 0
-          ? ` ${e.anio} marcado como Niño: tu % es bruto y debe incluirlo; el reparto usa el factor.`
+          ? ` ${e.anio} marcado como Niño: por ahora el % no lo incluye (no se aprueba ni se cierra hasta decidirlo); el reparto usa el factor.`
           : "";
       const corregida =
         e.baseColaLarga !== null && e.baseColaLarga !== undefined
           ? ` La cifra de ${e.anioEnCurso} de esta fila es la venta corregida por quiebres de stock (${u(e.baseColaLarga)}), no el avance normal.`
           : "";
-      // Una fila con meses del Niño en `Y`: a 0 % sobre la base normalizada serían `B''`; el % bruto equivale a otro sobre esa base.
-      const bn = e.baseNormalizada;
-      const conNino = e.phi && tramosNino(e.phi, 1, 12).length > 0 && bn !== null && bn !== undefined && bn > 0 && e.baseTotal !== null && e.baseTotal !== undefined && Math.round(bn) !== Math.round(e.baseTotal);
-      const nino = conNino
-        ? ` ${e.anioEnCurso} fue Niño${e.temporada === "invierno" || e.temporada === "verano" ? ` en ${e.temporada}` : ""}: a 0 % sobre la base normalizada serían ${u(bn as number)}; tu ${gTexto} % bruto equivale a ${e.propuesto === null ? "—" : `${formatearDecimal(((e.propuesto as number) / (bn as number) - 1) * 100, 1)} %`} sobre esa base.`
-        : "";
-      const origen = e.crecimientoOrigen
-        ? e.crecimientoOrigen.origen === "celda" && e.crecimientoOrigen.celda
-          ? `crecimiento bruto de ${e.crecimientoOrigen.celda}`
-          : e.crecimientoOrigen.origen === "fila"
-            ? "crecimiento bruto propio de la fila"
-            : "crecimiento bruto del Resto"
-        : "crecimiento bruto";
+      // Una fila con meses del Niño en `Y`: `B'` es lo que habrían vendido sus mismas tiendas en un año normal.
+      const B = e.baseTotal ?? null;
+      const bc = e.baseCorregida ?? null;
+      const conNino = B !== null && bc !== null && bc > 0 && Math.round(bc) !== Math.round(B);
+      const factor = conNino ? textoFactorBase(e.phi, e.temporada) : "";
+      const temporada = e.temporada === "invierno" || e.temporada === "verano" ? ` de ${e.temporada}` : "";
+      const corrigeTexto = conNino ? `, corregida del Niño${temporada}${factor ? ` (${factor})` : ""} = ${u(bc as number)}` : "";
+      const sobreReal =
+        conNino && sobre === "corregida" && e.propuesto !== null && (B as number) > 0 ? ` (${formatearDecimal(((e.propuesto as number) / (B as number) - 1) * 100, 1)} % sobre ${e.anioEnCurso} real)` : "";
+      const equivale =
+        conNino && sobre === "bruta" && e.propuesto !== null && (bc as number) > 0
+          ? ` ${e.anioEnCurso} fue Niño${temporada}: este % es sobre ${e.anioEnCurso} real y equivale a ${formatearDecimal(((e.propuesto as number) / (bc as number) - 1) * 100, 1)} % sobre ${e.anioEnCurso} corregido (${u(bc as number)}).`
+          : "";
       const tiendas = e.tiendasSiguiente !== undefined ? `de las ${formatearNumero(e.tiendasSiguiente)} tiendas de ${e.anio}` : `de las mismas tiendas de ${e.anio}`;
       return (
-        `${e.anio} → base ${e.anioEnCurso} ${tiendas} = ${e.baseTotal === null || e.baseTotal === undefined ? "—" : u(e.baseTotal)}` +
+        `${e.anio} → base ${e.anioEnCurso} ${tiendas} = ${B === null ? "—" : u(B)}` +
         ` (vigente ${e.baseVigente === null || e.baseVigente === undefined ? "—" : u(e.baseVigente)}${aportes ? ` ${aportes}` : ""})` +
-        ` × (1 + ${gTexto} % ${origen}, sin corregir por el Niño) = ${e.propuesto === null ? "sin cifra" : u(e.propuesto)}, repartido con ${curva}.${nino}${objetivo}${corregida}`
+        `${sobre === "corregida" ? corrigeTexto : ""}` +
+        ` × (1 + ${textoPctAplicado(g, e.crecimientoOrigen, sobre, e.anioEnCurso)}) = ${e.propuesto === null ? "sin cifra" : u(e.propuesto)}${sobreReal}, repartido con ${curva}.${equivale}${objetivo}${corregida}`
       );
     }
     case "apertura": {
@@ -254,19 +292,10 @@ export function explicar(e: EntradaExplicar): string {
       const tienda = e.tienda ? `${e.tienda.codigo} ${e.tienda.nombre}` : "La tienda";
       const alt = e.referenciaAlternativa !== null && e.referenciaAlternativa !== undefined ? ` Por venta esperada saldrían ${u(e.referenciaAlternativa)}.` : "";
       const maduro = e.totalMaduro === null || e.totalMaduro === undefined ? "su total maduro" : `su total maduro ${u(e.totalMaduro)}`;
-      const g = textoPctCrecimiento(e.crecimiento ?? 0);
-      const o = e.crecimientoOrigen;
+      const sobre: SobreBase = e.sobreBase ?? "corregida";
       const crecimiento = e.crecimientoPonderado
-        ? `× (1 + crecimiento de sus combinaciones, ponderado ${g} %)`
-        : o?.origen === "celda" && o.celda
-          ? `× (1 + ${g} % crecimiento bruto de ${o.celda})`
-          : o?.origen === "celda"
-            ? `× (1 + ${g} % crecimiento bruto de sus celdas)`
-            : o?.origen === "fila"
-              ? `× (1 + ${g} % crecimiento bruto propio)`
-              : o?.origen === "resto"
-                ? `× (1 + ${g} % crecimiento bruto del Resto)`
-                : `× (1 + ${g} %)`;
+        ? `× (1 + crecimiento de sus combinaciones, ponderado ${textoPctCrecimiento(e.crecimiento ?? 0)} %)`
+        : `× (1 + ${textoPctAplicado(e.crecimiento ?? 0, e.crecimientoOrigen, sobre, e.anioEnCurso)})`;
       return (
         `${tienda}: abrió en ${e.anioEnCurso}; ${maduro} ${crecimiento} ` +
         `repartido con ${curva} → ${e.propuesto === null ? "sin cifra" : `${u(e.propuesto)} u en ${e.anio}`}.${alt}`

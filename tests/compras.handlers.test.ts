@@ -1,3 +1,4 @@
+import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { IDS, PERFILES, escenario, eventosDe, llamadasA, publicarMes, reiniciarEscenario, tablaDe } from "./compras.fake-db";
@@ -230,7 +231,7 @@ describe("GET /api/flujo", () => {
     expect(datos.k_prima).toBe("2026-09");
     expect(datos.horizonte).toEqual({ desde: "2026-10", hasta: "2027-12" });
     expect(datos.periodos).toHaveLength(16);
-    expect(datos.cerrada.version_metodo).toBe(4);
+    expect(datos.cerrada.version_metodo).toBe(VERSION_METODO_MIN_M8);
     expect(datos.avisos).toEqual(["entregas_sin_confirmar"]);
     expect(datos.por_confirmar).toEqual({ entregas: 1, unidades: 500, con_respaldo_entregas: 1, con_respaldo_unidades: 500 });
 
@@ -1153,7 +1154,7 @@ describe("orden de ConciliacionApi.filas", () => {
             ...cerradaDeFila({ ...CAMISA, agr: AGR_M8.reconocido, demanda: Array.from({ length: 15 }, () => 1200), partic: participaciones({ [MARCA_M8.jh]: 0.4 }) }),
             ...cerradaDeFila({ ...CAMISA, agr: AGR_M8.premium, demanda: Array.from({ length: 15 }, () => 100) }),
           ],
-          version_metodo: 4,
+          version_metodo: VERSION_METODO_MIN_M8,
           huella_flujo: "h",
           periodo_referencia: { desde: "2025-10", hasta: "2026-09" },
         },

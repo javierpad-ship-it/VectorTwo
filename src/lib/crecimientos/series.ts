@@ -11,11 +11,15 @@ import type { BandaNinoApi, OrigenMesGM, SerieAnioGMApi } from "./tipos-api";
  * mismas tiendas, con la versión «sin Niño» (`U' = U ÷ φ`, con `factoresMes` de M7) y la forma de cada año.
  */
 
-/** Una fila de `series` de `venta_genero_mundo`. `u` va por `aaaa-mm`. */
+/**
+ * Una fila de `series` de `venta_genero_mundo`. `u` va por `aaaa-mm`. `a` (0029, ficha 06e §2.5) es la agrupación de estacionalidad activa
+ * de la equivalencia; `null` o ausente = sin agrupación activa (`temp = sin_agrupacion`). La función de `0.12.1`/`0.13.x` no la traía.
+ */
 export type SerieGM = {
   g: string;
   m: string;
   temp: string;
+  a?: string | null;
   t: string;
   u: Readonly<Record<string, number>>;
 };
@@ -29,7 +33,10 @@ export type VentaGeneroMundo = {
 const MESES = 12;
 const esObjeto = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** `jsonb` de la función a su forma tipada; `null` si no tiene la forma esperada (el servicio responde 500 con un mensaje claro). */
+/**
+ * `jsonb` de la función a su forma tipada; `null` si no tiene la forma esperada (el servicio responde 500 con un mensaje claro). Con o
+ * sin `a` (R21): quien suma las entradas obtiene lo mismo; quien agrupa por `a` ve una agrupación por serie.
+ */
 export function comoVentaGeneroMundo(crudo: unknown): VentaGeneroMundo | null {
   if (!esObjeto(crudo) || !Array.isArray(crudo.series) || !esObjeto(crudo.cargas)) return null;
   const series: SerieGM[] = [];
@@ -41,7 +48,7 @@ export function comoVentaGeneroMundo(crudo: unknown): VentaGeneroMundo | null {
       if (!Number.isFinite(n)) return null;
       u[recortarPeriodo(mes)] = n;
     }
-    series.push({ g: f.g, m: f.m, temp: f.temp, t: f.t, u });
+    series.push({ g: f.g, m: f.m, temp: f.temp, a: typeof f.a === "string" ? f.a : null, t: f.t, u });
   }
   const cargas: Record<string, string> = {};
   for (const [mes, id] of Object.entries(crudo.cargas)) {
@@ -62,6 +69,18 @@ export function agruparPorGM(series: readonly SerieGM[]): Map<string, SerieGM[]>
     const g = grupos.get(k);
     if (g) g.push(s);
     else grupos.set(k, [s]);
+  }
+  return grupos;
+}
+
+/** Las series de un conjunto por agrupación de estacionalidad (`a`; `null` = sin agrupación activa), con su temporada. */
+export function agruparPorAgrupacion(series: readonly SerieGM[]): Map<string | null, { temporada: string; entradas: SerieGM[] }> {
+  const grupos = new Map<string | null, { temporada: string; entradas: SerieGM[] }>();
+  for (const s of series) {
+    const a = s.a ?? null;
+    const g = grupos.get(a);
+    if (g) g.entradas.push(s);
+    else grupos.set(a, { temporada: a === null ? "sin_agrupacion" : s.temp, entradas: [s] });
   }
   return grupos;
 }
@@ -163,8 +182,11 @@ export function tiendasConVenta(entradas: readonly SerieGM[]): Set<string> {
 
 // ─── Curva mensual por año ───
 
-/** Lo proyectado del año `Y` por las filas base de la proyección de referencia (sin escalar): doce meses, bruto y sin Niño. */
-export type ProyectadoAnio = { anio: number; meses: readonly number[]; mesesSinNino: readonly number[] };
+/**
+ * El cierre por curva de `Y` sobre las mismas tiendas (`cierre-curva.ts`): doce meses reales (≤ `k`) y proyectados (> `k`), reales y
+ * corregidos del Niño. Un mes `null` no se completa.
+ */
+export type CierreAnioGM = { meses: readonly (number | null)[]; corregidos: readonly (number | null)[] };
 
 export type EntradaSeries = {
   entradas: readonly SerieGM[];
@@ -178,25 +200,18 @@ export type EntradaSeries = {
   y: number;
   k: number | null;
   phi: Phi;
-  /** Lo proyectado de `Y` (de la proyección de referencia); `null` sin proyección válida o sin filas base del GM. */
-  proyectado: ProyectadoAnio | null;
+  /** 06e (D10): el cierre de `Y` por curva sobre `C(Y)`; completa los meses de `Y` posteriores a `k` (`origen = 'proyectado'`). `null` = no se completa. */
+  cierreY?: CierreAnioGM | null;
 };
 
 const r2 = (n: number) => redondear(n, 2);
 
 /**
  * Una serie por año. Un mes publicado lleva la suma de las mismas tiendas (puede ser 0: la tienda aún no abría); un mes sin publicar
- * es `null`, salvo los de `Y` posteriores a `k`, que se completan con lo proyectado de la referencia llevado a la base de las mismas
- * tiendas (se escala por `Σ real ene–k de C(Y) ÷ Σ de la proyección ene–k`). `forma` solo se calcula con los doce meses con dato.
+ * es `null`, salvo los de `Y` posteriores a `k`, que se completan con el cierre por curva (`cierreY`, 06e): `meses` con lo real
+ * proyectado y `meses_sin_nino` con lo corregido del Niño. `forma` solo se calcula con los doce meses con dato.
  */
 export function armarSeriesAnios(e: EntradaSeries): SerieAnioGMApi[] {
-  let escala: number | null = null;
-  if (e.proyectado && e.k !== null && e.k >= 1) {
-    const real = unidades(e.entradas, e.y, { tiendas: e.tiendas, hasta: e.k });
-    const proy = e.proyectado.meses.slice(0, e.k).reduce((a, b) => a + b, 0);
-    escala = proy > 0 ? real / proy : null;
-  }
-
   return e.anios.map((anio) => {
     const periodos = mesesDelAnio(anio);
     const meses: (number | null)[] = [];
@@ -207,9 +222,9 @@ export function armarSeriesAnios(e: EntradaSeries): SerieAnioGMApi[] {
         meses.push(r2(unidades(e.entradas, anio, { tiendas: e.tiendas, desde: m, hasta: m })));
         sinNino.push(r2(unidades(e.entradas, anio, { tiendas: e.tiendas, desde: m, hasta: m, phi: e.phi })));
         origen.push("real");
-      } else if (anio === e.y && e.proyectado && escala !== null && e.k !== null && m > e.k) {
-        meses.push(r2((e.proyectado.meses[m - 1] ?? 0) * escala));
-        sinNino.push(r2((e.proyectado.mesesSinNino[m - 1] ?? 0) * escala));
+      } else if (anio === e.y && e.cierreY && e.k !== null && m > e.k && e.cierreY.meses[m - 1] !== null && e.cierreY.meses[m - 1] !== undefined) {
+        meses.push(r2(e.cierreY.meses[m - 1] as number));
+        sinNino.push(r2((e.cierreY.corregidos[m - 1] ?? e.cierreY.meses[m - 1]) as number));
         origen.push("proyectado");
       } else {
         meses.push(null);

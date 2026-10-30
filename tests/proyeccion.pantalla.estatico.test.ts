@@ -68,7 +68,7 @@ describe("estructura de la pantalla /planificacion/proyeccion", () => {
     expect(p).toMatch(/confirm\(`¿Archivar[\s\S]*archivar/);
     expect(p).toContain("<AlertaError");
     expect(fuente(`${DIR}linea-tab.tsx`)).toMatch(/confirm\(`Se copiará el reparto con la curva nueva/);
-    expect(fuente(`${DIR}factores-tab.tsx`)).toMatch(/confirm\("Sincronizar con M6/);
+    expect(fuente(`${DIR}factores-tab.tsx`)).toMatch(/confirm\(\s*"Sincronizar vuelve a calcular el factor relativo/);
   });
 
   it("las mutaciones usan POST, PUT, PATCH o DELETE; ningún GET lleva efectos", () => {
@@ -112,6 +112,27 @@ describe("estructura de la pantalla /planificacion/proyeccion", () => {
 
   it("los textos de la pantalla no prometen una versión concreta para los cierres de tienda", () => {
     for (const f of archivos) expect(fuente(`${DIR}${f}`), f).not.toMatch(/llega en la 0\.10\.1/);
+  });
+
+  it("Factores del Niño: confirmar es escribir el valor (sin botón «usar el calculado»), los errores se muestran y todo va por /api", () => {
+    const f = fuente(`${DIR}factores-tab.tsx`);
+    expect(f.startsWith('"use client"')).toBe(true);
+    expect(f).toContain("useLectura<FactorApi[]>");
+    expect(f).toContain("api.put<FactorApi[]>");
+    expect(f).toContain("api.post<FactorApi[]>");
+    expect(f).toContain("<AlertaError");
+    expect(f).not.toMatch(/usar (este valor|el calculado)/i);
+    expect(f).not.toMatch(/@supabase|\bfetch\(/);
+    // La fórmula, los estados y el diagnóstico los arma `factores-vista.ts` (puro, sin React).
+    const v = fuente(`${DIR}factores-vista.ts`);
+    expect(v).not.toContain("react");
+    expect(v).toContain("MIN_MESES_FACTOR");
+  });
+
+  it("el cierre usa la constante `VERSION_METODO` y los códigos de `tipos-api`, no copias sueltas", () => {
+    expect(fuente(`${DIR}crecimientos-vista.ts`)).toContain("VERSION_METODO");
+    expect(fuente(`${DIR}vista.ts`)).toContain("CODIGOS_CIERRE_BLOQUEADO_NINO");
+    expect(fuente(`${DIR}cerrar-modal.tsx`)).toContain("CODIGOS_CIERRE_BLOQUEADO_NINO");
   });
 
   it("la versión vigente es 0.13.0 · M8 b", () => {

@@ -1,3 +1,4 @@
+import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import { CARACTER_SENAL, CARACTER_SENAL_K, ORDEN_SENAL } from "@/lib/flujo/tipos-api";
 import type {
   AvisoConciliacion,
@@ -717,7 +718,7 @@ export function construirFlujo(op: OpcionesFlujo): FlujoApi {
   const totales = serieDeLista(rTotal, { venta_real: sumas.venta_k, ingreso_inferido: Math.round(sumas.venta_k * 0.1) }, false, false);
 
   const datos: DatosFlujoApi = {
-    cerrada: { id: idDe("8", 1), nombre: "Proyección 2026–2027", hasta_periodo: "2026-09", anio_en_curso: 2026, version_metodo: 4, periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+    cerrada: { id: idDe("8", 1), nombre: "Proyección 2026–2027", hasta_periodo: "2026-09", anio_en_curso: 2026, version_metodo: VERSION_METODO_MIN_M8, periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
     k: "2026-09",
     k_prima: kPrima,
     horizonte: { desde: periodos[1], hasta: periodos[periodos.length - 1] },

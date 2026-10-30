@@ -84,24 +84,29 @@ const cero = (): Cifras => ({ venta_a_la_fecha: 0, mismas: 0, nuevas_anterior: 0
 
 /**
  * `0.10.8` (07c): `Σ B` (`base_siguiente`) de las filas base de un año y `Σ vigente` de esas mismas filas con base (el numerador del
- * «Crec. mismas tiendas» = vigente de `Y+1` ÷ `B` − 1; una fila sin `B` no cuenta en ninguno de los dos).
+ * «Crec. mismas tiendas» = vigente de `Y+1` ÷ `B` − 1; una fila sin `B` no cuenta en ninguno de los dos). `0.14.0` (06e): además `Σ B'`
+ * (`corregida`, la base de `Y` corregida del Niño; una fila con `B` y sin `B'` cuenta con `B' = B`), el denominador de «Crec. sobre 2026 corregido».
  */
-export function baseDeAnio(filas: readonly FilaPlana[], anio: number): { base: number; vigente: number } {
+export function baseDeAnio(filas: readonly FilaPlana[], anio: number): { base: number; vigente: number; corregida: number } {
   let base = 0;
   let vigente = 0;
+  let corregida = 0;
   for (const f of filas) {
     if (f.tienda_id !== null) continue;
     const r = registro(f, anio);
     if (!r || r.base_siguiente === null || r.base_siguiente === undefined) continue;
     base += r.base_siguiente;
+    corregida += r.base_normalizada ?? r.base_siguiente;
     vigente += vigenteDe(r);
   }
-  return { base, vigente };
+  return { base, vigente, corregida };
 }
 
 const crecMismas = (base: number, vigente: number): number | null => (base > 0 ? (vigente / base - 1) * 100 : null);
 
-function sumarCifras(destino: Cifras | Omit<CifrasSig, "base_siguiente" | "crec_mismas_pct">, origen: Cifras | Omit<CifrasSig, "base_siguiente" | "crec_mismas_pct">) {
+type SinBases = "base_siguiente" | "crec_mismas_pct" | "base_corregida" | "crec_corregida_pct";
+
+function sumarCifras(destino: Cifras | Omit<CifrasSig, SinBases>, origen: Cifras | Omit<CifrasSig, SinBases>) {
   destino.mismas += origen.mismas;
   destino.nuevas_anterior += origen.nuevas_anterior;
   destino.aperturas += origen.aperturas;
@@ -124,6 +129,8 @@ type Linea = {
   avisos: AvisoFila[];
   /** `Σ vigente` de `Y+1` de las filas base con `B` (para el «Crec. mismas tiendas» de los nodos que agrupan líneas). */
   vigenteConBase: number;
+  /** `Σ B'` de las filas base con `B` (el «Crec. sobre 2026 corregido» de los nodos que agrupan líneas). */
+  corregidaConBase: number;
   conTiendasNuevas: boolean;
   colaLarga: boolean;
   paraRevision: boolean;
@@ -217,8 +224,21 @@ function resumirLinea(filas: readonly FilaPlana[], anio: number, umbral: number)
     linea: primera.linea,
     agrupacion_marca: null,
     en_curso: en,
-    siguiente: { mismas: sg.mismas, nuevas_anterior: sg.nuevas_anterior, aperturas: sg.aperturas, cierres: sg.cierres, total: sg.total, decididas: sg.decididas, filas: sg.filas, base_siguiente: bs.base, crec_mismas_pct: crecMismas(bs.base, bs.vigente) },
+    siguiente: {
+      mismas: sg.mismas,
+      nuevas_anterior: sg.nuevas_anterior,
+      aperturas: sg.aperturas,
+      cierres: sg.cierres,
+      total: sg.total,
+      decididas: sg.decididas,
+      filas: sg.filas,
+      base_siguiente: bs.base,
+      crec_mismas_pct: crecMismas(bs.base, bs.vigente),
+      base_corregida: bs.corregida,
+      crec_corregida_pct: crecMismas(bs.corregida, bs.vigente),
+    },
     vigenteConBase: bs.vigente,
+    corregidaConBase: bs.corregida,
     estado: estadoLinea(filas, anio, umbral),
     avisos,
     conTiendasNuevas: filas.some((f) => f.anios.some((a) => a.bloque === "nuevas" && vigenteDe(a) > 0)),
@@ -279,19 +299,33 @@ function nodoDe(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMatrizAp
   const sg = cero();
   let baseSig = 0;
   let vigenteConBase = 0;
+  let corregida = 0;
   for (const h of hijos) {
     en.venta_a_la_fecha += h.en_curso.venta_a_la_fecha;
     sumarCifras(en, h.en_curso);
     sumarCifras(sg, h.siguiente);
     baseSig += h.siguiente.base_siguiente;
     vigenteConBase += h.vigenteConBase;
+    corregida += h.corregidaConBase;
   }
   return {
     nivel,
     ids,
     nombre,
     en_curso: en,
-    siguiente: { mismas: sg.mismas, nuevas_anterior: sg.nuevas_anterior, aperturas: sg.aperturas, cierres: sg.cierres, total: sg.total, decididas: sg.decididas, filas: sg.filas, base_siguiente: baseSig, crec_mismas_pct: crecMismas(baseSig, vigenteConBase) },
+    siguiente: {
+      mismas: sg.mismas,
+      nuevas_anterior: sg.nuevas_anterior,
+      aperturas: sg.aperturas,
+      cierres: sg.cierres,
+      total: sg.total,
+      decididas: sg.decididas,
+      filas: sg.filas,
+      base_siguiente: baseSig,
+      crec_mismas_pct: crecMismas(baseSig, vigenteConBase),
+      base_corregida: corregida,
+      crec_corregida_pct: crecMismas(corregida, vigenteConBase),
+    },
     variacion_pct: en.total > 0 ? (sg.total / en.total - 1) * 100 : null,
     estado: estadoDeHijos(hijos.map((h) => h.estado)),
     avisos: [...new Set(hijos.flatMap((h) => h.avisos))].sort(),

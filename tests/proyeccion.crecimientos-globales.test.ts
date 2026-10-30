@@ -122,17 +122,19 @@ describe("regla 9: cálculo y foto", () => {
     // El provisional nunca se sobrescribe; el Resto aplicado va en su clave.
     expect(parametrosDe(id)).toMatchObject({
       crecimiento_pct_defecto: 5,
-      crecimiento_resto_usado: { pct: 10, crecimiento_id: restoId, version: 1, por_nombre: "Javier de prueba", at: "2026-10-10T12:00:00.000Z" },
+      // 06e: el Resto aplicado también dice sobre qué base se escribió su %.
+      crecimiento_resto_usado: { pct: 10, crecimiento_id: restoId, version: 1, por_nombre: "Javier de prueba", at: "2026-10-10T12:00:00.000Z", sobre_base: "corregida" },
     });
-    // La foto: solo el GM aprobado (con su versión y quién); los otros siguen al Resto y no tienen celda.
+    // La foto: solo el GM aprobado (con su versión, quién y sobre_base explícito); los otros siguen al Resto y no tienen celda.
     expect(foto(id)).toHaveLength(1);
-    expect(foto(id)[0]).toMatchObject({ genero_id: GEN.hombre, mundo_id: MUN.urbano, pct: 15, crecimiento_id: urbanoId, version: 1, usuario_nombre: "Javier de prueba", nota: null });
-    // Las cifras: DENIM (HOMBRE · URBANO) al 15 % y SANDALIA (MUJER · CASUAL) al 10 % del Resto aprobado.
+    expect(foto(id)[0]).toMatchObject({ genero_id: GEN.hombre, mundo_id: MUN.urbano, pct: 15, sobre_base: "corregida", crecimiento_id: urbanoId, version: 1, usuario_nombre: "Javier de prueba", nota: null });
+    // Las cifras (método 5: el % es sobre B'): DENIM (HOMBRE · URBANO, sin Niño: B' = B) al 15 % y SANDALIA (MUJER · CASUAL) al 10 % del Resto aprobado sobre su B' (verano 2026 con Niño).
     expect(registro(DENIM_REC, 2027)).toMatchObject({ propuesto: Math.round(1860 * 1.15) });
     const sandalia = registro(SANDALIA_VAL, 2027);
-    expect(sandalia.propuesto).toBe(Math.round((sandalia.base_siguiente as number) * 1.1));
-    expect(registro(DENIM_REC, 2027).explicacion).toContain("crecimiento bruto de HOMBRE · URBANO");
-    expect(sandalia.explicacion).toContain("crecimiento bruto del Resto");
+    expect(sandalia.propuesto).toBe(Math.round(Number(sandalia.base_normalizada) * 1.1));
+    expect(Number(sandalia.base_normalizada)).toBeLessThan(Number(sandalia.base_siguiente));
+    expect(registro(DENIM_REC, 2027).explicacion).toContain("15.0 % de HOMBRE · URBANO v1, sobre 2026 corregido");
+    expect(sandalia.explicacion).toContain("10.0 % del Resto v1, sobre 2026 corregido");
     // Sin `crecimientos_cambiados`: la huella del cálculo es la de los vigentes de hoy (con ids).
     expect((await leerProy(id)).desactualizada).toEqual([]);
     expect((await leerProy(id)).resumen).not.toHaveProperty("huella_crecimientos");
@@ -226,8 +228,8 @@ describe("regla 10: B2 lee la foto (B1)", () => {
     const ruta = { filaId: idFila(SANDALIA_VAL), anio: "2026" };
     expect((await decidirFila(enviar("PUT", "/x", { decidido: 900, origen: "manual" }), ctx(id, ruta))).status).toBe(200);
     const sandalia = registro(SANDALIA_VAL, 2027);
-    expect(sandalia.propuesto).toBe(Math.round((sandalia.base_siguiente as number) * 1.1));
-    expect(sandalia.explicacion).toContain("crecimiento bruto del Resto");
+    expect(sandalia.propuesto).toBe(Math.round(Number(sandalia.base_normalizada) * 1.1));
+    expect(sandalia.explicacion).toContain("del Resto v1, sobre 2026 corregido");
     // Y la de HOMBRE · URBANO sigue al 15 % de su GM.
     expect((await decidirFila(enviar("PUT", "/x", { decidido: 1900, origen: "manual" }), ctx(id, { filaId: idFila(DENIM_REC), anio: "2026" }))).status).toBe(200);
     expect(registro(DENIM_REC, 2027)).toMatchObject({ base_siguiente: 1960, propuesto: Math.round(1960 * 1.15) });
@@ -239,7 +241,7 @@ describe("regla 10: B2 lee la foto (B1)", () => {
     // Alguien aprueba otro Resto después de calcular: las lecturas siguen con lo aplicado (10 %).
     (globales().find((g) => g.alcance === "resto") as Fila).pct = 33;
     const l = (await leer<RespuestaLineasApi>(await lineas(get("/l", `?genero_id=${GEN.mujer}&mundo_id=${MUN.casual}&linea_id=${LIN.sandalia}`), ctx(id)))).data;
-    expect(l.filas[0].anios.find((a) => a.anio === 2027)?.crecimiento_efectivo).toEqual({ pct: 10, origen: "resto", celda: "MUJER · CASUAL", version: 1, provisional: false });
+    expect(l.filas[0].anios.find((a) => a.anio === 2027)?.crecimiento_efectivo).toEqual({ pct: 10, origen: "resto", celda: "MUJER · CASUAL", version: 1, sobre_base: "corregida", provisional: false });
     const t = await decidirTienda(enviar("PUT", "/x", { rampa: [1, 1, 1] }), ctx(id, { tiendaId: "T4", anio: "2027" }));
     expect(t.status).toBe(200);
     const explicacion = (await leer<{ explicacion: string }>(t)).data.explicacion;
@@ -319,11 +321,11 @@ describe("regla 14: cierre", () => {
     expect(r.status).toBe(409);
     const c = await leer(r);
     expect(c.codigo).toBe("crecimientos_sin_aprobar");
-    expect(c.detalle).toEqual({ faltan: [], resto_provisional: true });
+    expect(c.detalle).toEqual({ faltan: [], resto_provisional: true, reaprobar: [] });
     expect(c.error).toContain("El Resto de 2027 es provisional");
     // Se aprueba el Resto y se recalcula: cierra. (El GM aprobado de MUJER · CASUAL no se aplica: ese género no es detallado.)
     sembrar("crecimientos_genero_mundo", [
-      { anio_aplicacion: 2027, alcance: "resto", genero_id: null, mundo_id: null, version: 1, estado: "vigente", pct: 5, base_tipo: "ninguna", referencia: {}, usuario_nombre: "Javier de prueba" },
+      { anio_aplicacion: 2027, alcance: "resto", genero_id: null, mundo_id: null, version: 1, estado: "vigente", pct: 5, sobre_base: "corregida", base_tipo: "ninguna", referencia: {}, usuario_nombre: "Javier de prueba" },
     ]);
     await recalcular(id);
     expect((await cerrarConQuery(id)).status).toBe(200);

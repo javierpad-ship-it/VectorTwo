@@ -10,11 +10,12 @@ import type { VigenteCrecimiento } from "./vigentes";
 
 type Db = SupabaseClient<Database>;
 
-const COLUMNAS = "id,anio_aplicacion,alcance,genero_id,mundo_id,version,pct,usuario_nombre,aprobada_at";
+const COLUMNAS = "id,anio_aplicacion,alcance,genero_id,mundo_id,version,pct,sobre_base,usuario_nombre,aprobada_at";
 
 /**
  * Las versiones vigentes de varios años en una sola lectura (M6). Orden estable por año, alcance, género, mundo e id. Sin años, no
- * lee nada. Los `numeric` de la base llegan como número desde PostgREST; se normalizan igual.
+ * lee nada. Los `numeric` de la base llegan como número desde PostgREST; se normalizan igual. `sobre_base` (06e §2.1) viaja tal cual; una fila
+ * sin el dato (un doble de antes de `0.14.0`) queda `null` y `sobreBaseDe` la lee `bruta`.
  */
 export async function leerVigentes(db: Db, anios: readonly number[]): Promise<{ data: VigenteCrecimiento[]; error: PostgrestError | null }> {
   const distintos = [...new Set(anios)].sort((a, b) => a - b);
@@ -32,5 +33,5 @@ export async function leerVigentes(db: Db, anios: readonly number[]): Promise<{ 
       .order("id")
       .range(d, h)
   );
-  return { data: r.data.map((f) => ({ ...f, pct: Number(f.pct) })), error: r.error };
+  return { data: r.data.map((f) => ({ ...f, pct: Number(f.pct), sobre_base: f.sobre_base ?? null })), error: r.error };
 }

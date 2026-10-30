@@ -5,13 +5,16 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { BadgeEstadoProyeccion } from "./comunes";
-import { crecimientosSinAprobarDe, enlaceCrecimientoGeneroMundo, formatearMomento, resumenCabecera, textoNoSePuedeCerrarPorCrecimientos, textoMotivoDesactualizada } from "./vista";
+import { textoCerradaMetodoAnterior } from "./crecimientos-vista";
+import { crecimientosSinAprobarDe, enlaceCrecimientoGeneroMundo, formatearMomento, motivosCierreBloqueado, resumenCabecera, textoNoSePuedeCerrarPorCrecimientos, textoMotivoDesactualizada } from "./vista";
 
 /**
  * Cabecera de la proyección abierta (ficha 07, pasos 0, 6 y 7): una línea con lo esencial (datos hasta, bloques de
  * tiendas por año, filas decididas, desvío del año anterior), el aviso de «desactualizada» con el motivo y Recalcular,
  * el aviso de cálculo en curso (las celdas no se editan mientras tanto) y las acciones sobre la proyección. Recalcular
- * rehace bloques, propuestas y curvas y conserva todas las decisiones.
+ * rehace bloques, propuestas y curvas y conserva todas las decisiones. Desde 0.14.0 (06e) «Cerrar proyección» también se deshabilita, sin esperar
+ * al `409`, mientras el Niño de `Y` no esté resuelto (`cierre_bloqueado_por`: 2027 marcado, factor faltante, desfasado o sin confirmar, factor o
+ * agrupación que cambió) o haya crecimientos por reaprobar, y una cerrada de un método anterior avisa que M8 la sigue usando hasta el nuevo cierre.
  */
 export function CabeceraProyeccion({
   proyeccion,
@@ -40,6 +43,10 @@ export function CabeceraProyeccion({
   // 06d: sin los crecimientos de HOMBRE y MUJER (y el Resto) aprobados no se puede cerrar, ni forzando: el botón se deshabilita con el motivo.
   const sinAprobar = crecimientosSinAprobarDe(proyeccion);
   const motivoSinAprobar = sinAprobar ? textoNoSePuedeCerrarPorCrecimientos(sinAprobar, proyeccion.anio_siguiente) : null;
+  // 06e: el Niño de `Y` sin resolver tampoco deja cerrar (ni forzando).
+  const motivosNino = motivosCierreBloqueado(proyeccion);
+  const tituloCerrar = motivoSinAprobar ?? (motivosNino.length > 0 ? `No se puede cerrar: ${motivosNino[0].mensaje}` : undefined);
+  const avisoMetodo = proyeccion.estado === "cerrada" ? textoCerradaMetodoAnterior(proyeccion.resumen?.version_metodo) : null;
   return (
     <div className="space-y-3 rounded-xl border border-borde bg-superficie px-5 py-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -62,7 +69,7 @@ export function CabeceraProyeccion({
               <Button variante="secundario" tamano="sm" disabled={ocupado || calculando} onClick={onParametros}>
                 Parámetros
               </Button>
-              <Button tamano="sm" disabled={ocupado || calculando || sinAprobar !== null} title={motivoSinAprobar ?? undefined} onClick={onCerrar}>
+              <Button tamano="sm" disabled={ocupado || calculando || sinAprobar !== null || motivosNino.length > 0} title={tituloCerrar} onClick={onCerrar}>
                 Cerrar proyección
               </Button>
               <Button variante="fantasma" tamano="sm" disabled={ocupado || calculando} onClick={onArchivar}>
@@ -95,6 +102,27 @@ export function CabeceraProyeccion({
         </p>
       )}
 
+      {enTrabajo && motivosNino.length > 0 && (
+        <ul className="space-y-1 text-xs text-alerta">
+          {motivosNino.map((m) => (
+            <li key={m.codigo}>
+              {m.mensaje}
+              {m.enlace && (
+                <>
+                  {" "}
+                  <Link href={m.enlace.href} className="font-medium underline underline-offset-2">
+                    {m.enlace.texto}
+                  </Link>
+                </>
+              )}
+              {m.recalcular && !m.enlace && <> Recalcula la proyección.</>}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {avisoMetodo && <Alert tono="info">{avisoMetodo}</Alert>}
+
       {calculando && (
         <Alert tono="info">
           La proyección se está calculando{proyeccion.calculando_desde ? ` (desde ${formatearMomento(proyeccion.calculando_desde)})` : ""}. Mientras tanto no se puede editar; esta pantalla se actualiza sola al terminar.
@@ -106,7 +134,7 @@ export function CabeceraProyeccion({
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {proyeccion.desactualizada.map((m, i) => (
               <li key={`${m.codigo}-${i}`}>
-                {textoMotivoDesactualizada(m)}
+                {textoMotivoDesactualizada(m, proyeccion.anio_en_curso)}
                 {m.codigo === "config_cambiada" && (
                   <>
                     {" "}

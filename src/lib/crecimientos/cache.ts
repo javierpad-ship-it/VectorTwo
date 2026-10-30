@@ -8,7 +8,8 @@ import type { VentaGeneroMundo } from "./series";
  * primero) y deja correr UNA lectura a la vez. Las lecturas en curso de la misma clave se juntan en una sola llamada a la base. Lo
  * guardado se congela en profundidad: quien lo lee no puede alterar lo que ve el siguiente.
  *
- * Clave (M1): `p_desde | huella de cargas | max(updated_at) de genero_mundo_linea | de equivalencias | de agrupaciones_estacionalidad`.
+ * Clave (M1): `v2|p_desde | huella de cargas | max(updated_at) de genero_mundo_linea | de equivalencias | de agrupaciones_estacionalidad`. El prefijo
+ * `v2|` (06e M4, `0.14.0`) separa lo guardado con la forma anterior de la función (sin la agrupación `a`).
  * Sin las tres marcas de tiempo, mover un nodo de mundo o cambiar la agrupación de una equivalencia serviría la lectura vieja
  * durante 120 s. Si la función devuelve cargas distintas de las de la clave (una publicación en medio) la entrada se guarda bajo la
  * clave REAL. No importa nada de `@supabase/*`: la lectura la inyecta quien llama (`consultas.ts` es el único que nombra la función).
@@ -26,8 +27,11 @@ export type ClaveCacheGM = {
   marcas: MarcasArbol;
 };
 
+/** Prefijo de versión de la clave: sube cuando cambia la forma de lo guardado. `v2`: las series traen la agrupación `a` (0029). */
+export const PREFIJO_CACHE_GM = "v2|";
+
 export function claveCacheGM(c: ClaveCacheGM): string {
-  return [c.desde, c.cargas_huella, c.marcas.nodos || "-", c.marcas.equivalencias || "-", c.marcas.agrupaciones || "-"].join(" | ");
+  return PREFIJO_CACHE_GM + [c.desde, c.cargas_huella, c.marcas.nodos || "-", c.marcas.equivalencias || "-", c.marcas.agrupaciones || "-"].join(" | ");
 }
 
 function congelarEnProfundidad<T>(valor: T): T {

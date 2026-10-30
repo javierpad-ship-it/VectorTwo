@@ -34,6 +34,8 @@ export function hojaBloques(bloques: BloquesApi): Hoja {
   return filas;
 }
 
+const redondear1 = (x: number | null | undefined): number | null => (x === null || x === undefined ? null : Math.round(x * 10) / 10);
+
 const textoFiltro = (v: string | null): Celda => (v === null || v === "" ? "—" : v);
 
 /** Hoja `FILTROS`: los filtros activos y la fecha de datos. */
@@ -85,8 +87,10 @@ export function hojasMatriz(args: {
     `CIERRES ${y + 1}`,
     `TOTAL ${y + 1}`,
     "VARIACIÓN %",
-    // 0.10.8 (07c): `Σ vigente de Y+1 de las filas base ÷ Σ B − 1` (lo que se escribe en Crecimientos), aparte de la variación del total.
-    "CREC. MISMAS TIENDAS %",
+    // 0.14.0 (06e): el % que se aprueba se aplica sobre `Y` corregido del Niño (`Σ vigente ÷ Σ B' − 1`); «real» compara con lo vendido (`Σ vigente ÷ Σ B − 1`).
+    // La variación (arriba) incluye además tiendas nuevas, aperturas y cierres.
+    `CREC. SOBRE ${y} CORREGIDO %`,
+    `CREC. SOBRE ${y} REAL %`,
     "ESTADO",
   ];
   const filas: Hoja = [cabecera];
@@ -106,7 +110,8 @@ export function hojasMatriz(args: {
       n.siguiente.cierres,
       n.siguiente.total,
       n.variacion_pct === null ? null : Math.round(n.variacion_pct * 10) / 10,
-      n.siguiente.crec_mismas_pct === null ? null : Math.round(n.siguiente.crec_mismas_pct * 10) / 10,
+      redondear1(n.siguiente.crec_corregida_pct),
+      redondear1(n.siguiente.crec_mismas_pct),
       n.estado,
     ]);
   }

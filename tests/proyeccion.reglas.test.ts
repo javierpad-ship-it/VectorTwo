@@ -4,15 +4,22 @@ import { explicar, textoCurva, textoNinoCierre } from "@/lib/proyeccion/explicar
 import { calcularProyeccion } from "@/lib/proyeccion/modelo";
 import { curvaCambio, curvaFila, detalleCambioCurva, agrupacionDominante } from "@/lib/proyeccion/curva-fila";
 import {
+  bloqueosNinoDeCierre,
   calculoEnCurso,
   cargasIguales,
+  factorDePeriodo,
+  mensajeAnioSiguienteAtipico,
+  mensajeSinAprobar,
   motivoRechazoAplicarCurva,
   motivoRechazoCerrar,
   motivoRechazoDecision,
   motivoRechazoHasta,
   puedeEliminar,
+  ratioGuardable,
+  type BloqueosNino,
   type SinAprobarCierre,
 } from "@/lib/proyeccion/reglas";
+import { periodoFalso } from "./proyeccion.contexto-falso";
 import { bloquesDeAnio } from "@/lib/proyeccion/bloques";
 import { crearSchema, decisionSchema, decisionTiendaSchema, aplicarCurvaSchema, editarSchema, factoresPutSchema, matrizQuerySchema, parametrosSchema, mensualQuerySchema } from "@/lib/proyeccion/esquemas";
 import { leerParticipaciones, participacionesFila } from "@/lib/proyeccion/participaciones";
@@ -174,6 +181,138 @@ describe("cerrar: crecimientos sin aprobar (06d regla 14)", () => {
     expect(codigo({ calculandoDesde: hace(2) })).toBe("calculo_en_curso");
     // `config_cambiada` (desactualizada) sigue siendo forzable cuando todo lo demás está aprobado.
     expect(motivoRechazoCerrar({ ...comunes, desactualizada: true, forzar: true, crecimientosSinAprobar: null }).ok).toBe(true);
+  });
+});
+
+describe("cerrar: lo que impide cerrar por el Niño (06e R16)", () => {
+  const s = calcularProyeccion(entrada());
+  const base = s.filas.filter((f) => f.tienda_id === null);
+  const todoDecidido = base.map((f) => ({ clave: f.clave, anios: Object.fromEntries(f.registros.map((r) => [r.anio, { clave: f.clave, propuesto: r.propuesto, decidido: r.propuesto ?? 0 }])) }));
+  const comunes = { estado: "en_trabajo" as const, calculandoDesde: null, ahora: AHORA, anioEnCurso: Y, desactualizada: false, forzar: false, filasBase: todoDecidido, tiendas: [] };
+  const todos: BloqueosNino = {
+    anioSiguienteAtipico: { meses: ["2027-03", "2027-04"] },
+    factorFaltante: [{ anio: 2026, temporada: "verano" }],
+    factorDesfasado: [{ anio: 2026, temporada: "invierno", motivos: ["cargas", "meses"] }],
+    factorSinConfirmar: [{ anio: 2026, temporada: "invierno", efectivo: 0.7 }],
+    factoresCambiadosY: ["invierno 2026"],
+    temporadaCambiada: true,
+  };
+  const codigos = (b: BloqueosNino) => bloqueosNinoDeCierre(b, Y).map((x) => x.codigo);
+
+  it("el orden de la ficha: anio_siguiente_atipico, factor_faltante, factor_desfasado, factor_sin_confirmar, factores_cambiados (de Y) y temporada_cambiada", () => {
+    expect(codigos(todos)).toEqual(["anio_siguiente_atipico", "factor_faltante", "factor_desfasado", "factor_sin_confirmar", "factores_cambiados", "temporada_cambiada"]);
+    expect(codigos({ ...todos, anioSiguienteAtipico: null })[0]).toBe("factor_faltante");
+    expect(codigos({ ...todos, anioSiguienteAtipico: null, factorFaltante: [] })[0]).toBe("factor_desfasado");
+    expect(codigos({})).toEqual([]);
+    expect(bloqueosNinoDeCierre(undefined, Y)).toEqual([]);
+  });
+
+  it("ninguno se puede forzar; cada uno responde 409 con su código y su detalle, y va antes de crecimientos_sin_aprobar y de las filas sin decidir", () => {
+    const sinAprobar = { anio: Y + 1, faltan: [{ clave: "g.m", nombre: "HOMBRE · URBANO" }], resto_provisional: false };
+    const uno = (extra: BloqueosNino) => {
+      const r = motivoRechazoCerrar({ ...comunes, forzar: true, desactualizada: true, crecimientosSinAprobar: sinAprobar, bloqueosNino: extra });
+      return r.ok ? null : r;
+    };
+    for (const [clave, b] of [
+      ["anio_siguiente_atipico", { anioSiguienteAtipico: { meses: ["2027-03"] } }],
+      ["factor_faltante", { factorFaltante: [{ anio: 2026, temporada: "verano" }] }],
+      ["factor_desfasado", { factorDesfasado: [{ anio: 2026, temporada: "invierno", motivos: ["cargas"] }] }],
+      ["factor_sin_confirmar", { factorSinConfirmar: [{ anio: 2026, temporada: "invierno", efectivo: 0.7 }] }],
+      ["factores_cambiados", { factoresCambiadosY: ["invierno 2026"] }],
+      ["temporada_cambiada", { temporadaCambiada: true }],
+    ] as [string, BloqueosNino][]) {
+      const r = uno(b);
+      expect(r?.rechazo, clave).toMatchObject({ status: 409, codigo: clave });
+      expect(r?.crecimientos_sin_aprobar).toBeUndefined();
+    }
+    // Sin lo del Niño, sigue mandando lo de siempre.
+    expect(uno({})?.rechazo.codigo).toBe("crecimientos_sin_aprobar");
+    // Después de version_metodo y crecimientos_cambiados.
+    expect(motivoRechazoCerrar({ ...comunes, metodoViejo: true, bloqueosNino: todos })).toMatchObject({ rechazo: { codigo: "version_metodo" } });
+    expect(motivoRechazoCerrar({ ...comunes, crecimientosCambiados: true, bloqueosNino: todos })).toMatchObject({ rechazo: { codigo: "crecimientos_cambiados" } });
+    expect(motivoRechazoCerrar({ ...comunes, bloqueosNino: todos })).toMatchObject({ rechazo: { codigo: "anio_siguiente_atipico" }, detalle: { meses: ["2027-03", "2027-04"] } });
+    // Y antes de las filas sin decidir.
+    const sinDecidir = [{ clave: "x", anios: { [Y + 1]: { clave: "x", propuesto: 500, decidido: null } } }];
+    expect(motivoRechazoCerrar({ ...comunes, filasBase: sinDecidir, bloqueosNino: { temporadaCambiada: true } })).toMatchObject({ rechazo: { codigo: "temporada_cambiada" } });
+    expect(motivoRechazoCerrar({ ...comunes, filasBase: sinDecidir })).toMatchObject({ rechazo: { codigo: "filas_sin_decidir" } });
+    // Con la lista vacía, nada del Niño estorba.
+    expect(motivoRechazoCerrar({ ...comunes, bloqueosNino: { factorFaltante: [], factorDesfasado: [], factorSinConfirmar: [], factoresCambiadosY: [], temporadaCambiada: false, anioSiguienteAtipico: null } }).ok).toBe(true);
+  });
+
+  it("mensajes en castellano llano: el faltante dice dónde escribirlo, el sin confirmar el valor, el de 2027 qué hacer", () => {
+    const m = (b: BloqueosNino) => bloqueosNinoDeCierre(b, Y)[0].mensaje;
+    expect(m({ factorFaltante: [{ anio: 2026, temporada: "verano" }] })).toBe("Falta el factor del Niño de verano 2026: sin él la base de 2027 no se corrige. Escríbelo en Factores del Niño (1,00 si no hubo efecto) y recalcula.");
+    expect(m({ factorFaltante: [{ anio: 2026, temporada: "invierno" }, { anio: 2026, temporada: "verano" }] })).toContain("Faltan los factores del Niño de invierno 2026 y verano 2026");
+    expect(m({ factorSinConfirmar: [{ anio: 2026, temporada: "invierno", efectivo: 0.7 }] })).toBe(
+      "El factor de invierno 2026 (0.70) es parcial y nadie lo confirmó con los datos de hoy: escríbelo en Factores del Niño (el mismo valor lo confirma)."
+    );
+    expect(m({ factoresCambiadosY: ["invierno 2026"] })).toBe("Cambió el factor del Niño de invierno 2026, que corrige la base de 2027: recalcula (no se puede forzar).");
+    expect(m({ temporadaCambiada: true })).toBe("Cambió la agrupación de alguna línea con Niño y con ella su factor: recalcula.");
+    expect(mensajeAnioSiguienteAtipico(2027, "aprobar")).toContain("hay que decidir cómo modelarlo antes de aprobar");
+    expect(mensajeAnioSiguienteAtipico(2027, "cerrar")).toContain("no puedes cerrar");
+  });
+});
+
+describe("cerrar: reaprobar (06e R16 y R17)", () => {
+  const s = calcularProyeccion(entrada());
+  const base = s.filas.filter((f) => f.tienda_id === null);
+  const todoDecidido = base.map((f) => ({ clave: f.clave, anios: Object.fromEntries(f.registros.map((r) => [r.anio, { clave: f.clave, propuesto: r.propuesto, decidido: r.propuesto ?? 0 }])) }));
+  const comunes = { estado: "en_trabajo" as const, calculandoDesde: null, ahora: AHORA, anioEnCurso: Y, desactualizada: false, forzar: true, filasBase: todoDecidido, tiendas: [] };
+  const reaprobar = [{ clave: "g1.m1", nombre: "HOMBRE · URBANO", version: 1, correccion_pct: 6.8 }];
+
+  it("una vigente bruta de un GM con Niño bloquea sin excepción y su detalle lleva reaprobar", () => {
+    const r = motivoRechazoCerrar({ ...comunes, crecimientosSinAprobar: { anio: Y + 1, faltan: [], resto_provisional: false, reaprobar } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.rechazo).toMatchObject({ status: 409, codigo: "crecimientos_sin_aprobar" });
+      expect(r.rechazo.mensaje).toBe("HOMBRE · URBANO v1 se aprobó sobre 2026 real antes de 0.14.0 y este GM tuvo Niño en 2026 (+6.8 %): reapruébalo.");
+      expect(r.crecimientos_sin_aprobar).toEqual({ faltan: [], resto_provisional: false, reaprobar });
+    }
+    // Sin reaprobar (la bruta de un GM sin Niño material no entra) cierra.
+    expect(motivoRechazoCerrar({ ...comunes, crecimientosSinAprobar: { anio: Y + 1, faltan: [], resto_provisional: false, reaprobar: [] } }).ok).toBe(true);
+  });
+
+  it("el mensaje junta lo que falta aprobar con lo que hay que reaprobar, y con varios los lista", () => {
+    const sin: SinAprobarCierre = { anio: Y + 1, faltan: [{ clave: "g2.m2", nombre: "MUJER · RI" }], resto_provisional: true, reaprobar };
+    expect(mensajeSinAprobar(sin)).toBe(
+      "Faltan 1 crecimiento aprobado para 2027 (MUJER · RI) y el Resto es provisional: apruébalos en Curvas de estacionalidad → Crecimiento por género × mundo. HOMBRE · URBANO v1 se aprobó sobre 2026 real antes de 0.14.0 y este GM tuvo Niño en 2026 (+6.8 %): reapruébalo."
+    );
+    const dos = mensajeSinAprobar({ anio: Y + 1, faltan: [], resto_provisional: false, reaprobar: [...reaprobar, { clave: "resto", nombre: "Resto", version: 2, correccion_pct: 1.2 }] });
+    expect(dos).toBe("Se aprobaron sobre 2026 real, antes de 0.14.0, 2 crecimientos de GM con Niño en 2026 (HOMBRE · URBANO v1 +6.8 %, Resto v2 +1.2 %): reapruébalos.");
+  });
+});
+
+describe("el factor relativo a partir del bloque `periodo` de M6 (06e §5.2, R23 del servicio)", () => {
+  const todo = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+  it("con al menos 2 meses del periodo con dato: ratio_calculado = round4(ρ_P ÷ κ_P); con menos, null y lo escribe el planner", () => {
+    const inv = factorDePeriodo(periodoFalso({ rho: 0.6609, kappa: 0.9414, mesesPeriodo: todo, publicados: todo.slice(0, 9) }));
+    expect(inv.ratio_calculado).toBe(0.702);
+    expect(inv.ratio_volumen).toBe(0.6609);
+    expect(inv.ratio_control).toBe(0.9414);
+    expect(inv.meses_comparados).toBe(9);
+    expect(inv.meses_periodo_con_dato).toBe(9);
+    expect(inv.diagnostico?.meses).toHaveLength(12);
+    expect(inv.diagnostico?.meses_periodo).toBe(12);
+    const ver = factorDePeriodo(periodoFalso({ rho: 1.9, kappa: 0.95, mesesPeriodo: [9, 10, 11, 12], publicados: todo.slice(0, 9), fuera: 1.2 }));
+    expect(ver.ratio_calculado).toBeNull();
+    expect(ver.meses_comparados).toBe(1);
+    expect(ver.meses_periodo_con_dato).toBe(1);
+    expect(ver.ratio_volumen).toBe(1.9);
+    expect(ver.diagnostico).toMatchObject({ meses_periodo: 4, meses_periodo_con_dato: 1, ratio_fuera: 1.2 });
+    // Dos meses del periodo ya alcanzan.
+    expect(factorDePeriodo(periodoFalso({ rho: 1.5, kappa: 1, mesesPeriodo: [9, 10, 11, 12], publicados: todo.slice(0, 10) })).ratio_calculado).toBe(1.5);
+  });
+
+  it("sin bloque periodo (año sin referencia) todo queda nulo; un ratio nulo, cero o que no cabe en numeric(6,4) no se guarda", () => {
+    expect(factorDePeriodo(undefined)).toMatchObject({ ratio_calculado: null, ratio_volumen: null, ratio_control: null, meses_comparados: 0, diagnostico: null });
+    expect(factorDePeriodo(periodoFalso({ rho: 0.8, kappa: null, mesesPeriodo: todo, publicados: todo })).ratio_calculado).toBeNull();
+    expect(ratioGuardable(0)).toBeNull();
+    expect(ratioGuardable(-1)).toBeNull();
+    expect(ratioGuardable(100)).toBeNull();
+    expect(ratioGuardable(99.99999)).toBeNull();
+    expect(ratioGuardable(0.70215)).toBe(0.7022);
+    expect(ratioGuardable(null)).toBeNull();
   });
 });
 
@@ -457,8 +596,9 @@ describe("explicaciones (regla 27)", () => {
     const abrigo = s.filas.find((f) => f.clave === clave("abrigo", AM.rec, EQ.parka))!.registros;
     expect(abrigo[0].explicacion).toContain("HO INVIERNO v1");
     expect(abrigo[0].explicacion).toContain("se cancela");
-    expect(abrigo[1].explicacion).toContain("a 0 % sobre la base normalizada serían");
-    expect(abrigo[1].explicacion).toContain("sin corregir por el Niño");
+    expect(abrigo[1].explicacion).toContain("corregida del Niño de invierno (÷ 0.66, relativo)");
+    expect(abrigo[1].explicacion).toContain("sobre 2026 corregido");
+    expect(abrigo[1].explicacion).toContain("% sobre 2026 real)");
     const san = s.filas.find((f) => f.clave === clave("sandalia", AM.val))!.registros[0].explicacion;
     expect(san).toContain("set ÷ 1.24");
     expect(san).toContain("oct–dic × 1.24");

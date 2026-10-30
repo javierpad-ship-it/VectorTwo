@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { calcularReferencias, equivalenteDe, estadoDeProyeccion, proyectadoDeFilas, reboteDe, valorDeBase, type EntradaReferencias, type FilaBase, type ProyeccionParaReferencias } from "@/lib/crecimientos/referencias";
+import { baseCorregidaDe, calcularReaprobar, calcularReferencias, equivalenteDe, equivalenteReal, estadoDeProyeccion, METODO_MIN_REFERENCIA, periodoTocaNino, reboteDe, valorDeBase, type EntradaReferencias, type FilaBase, type ProyeccionParaReferencias } from "@/lib/crecimientos/referencias";
 import { crearPhi, type SerieGM } from "@/lib/crecimientos/series";
+import type { CierreGMApi } from "@/lib/crecimientos/tipos-api";
 import { MESES_Y_HU, TOTAL_HU, repartir } from "./crecimientos.fixture";
 
 /**
- * Regla 12 (ficha 06d §5.2): el ejemplo de §5.1 debe dar 3,0 / 10,5 / 18,4 / 5,0 / 12,5 / −2,0 y cobertura 74 %. HOMBRE · URBANO
- * (invierno, Niño de 2026 con φ = 0,80 en junio a agosto; 2025 normal). Una referencia de método 3 da `null` con `metodo_anterior`.
- * Sintético: `Y = 2026`, `k = setiembre`, tres tiendas (T1, T2, T3) con pesos 50 / 30 / 20.
+ * R10 y R28 (ficha 06e §5.4): las referencias dan su `equivalente.corregido` y `equivalente.bruto`; `sin_nino_mas_rebote` es siempre `null`; la
+ * variante por defecto es `corregido`; «Aplicado hoy» de una `bruta` da 7,66 en el ejemplo D (dos decimales) y «Reaprobar» deja quieto el
+ * total del GM. HOMBRE · URBANO (invierno, Niño de 2026 con φ = 0,80 en junio a agosto; 2025 normal). Sintético: `Y = 2026`, `k = setiembre`,
+ * tres tiendas (T1, T2, T3) con pesos 50 / 30 / 20.
  */
 
 const TIENDAS = ["T1", "T2", "T3"];
@@ -73,73 +75,105 @@ function entrada(extra: Partial<EntradaReferencias> = {}): EntradaReferencias {
     proyeccion: p,
     filas: p.filas,
     pctAplicado: 5,
+    sobreAplicado: "bruta",
     ...extra,
   };
 }
 
-describe("regla 12 · el ejemplo de la ficha (§5.1)", () => {
-  const r = calcularReferencias(entrada());
+const CIERRE: CierreGMApi = {
+  k: 9,
+  tiendas: 3,
+  vendido: 41200,
+  vendido_corregido: 44200,
+  cierre: 55000,
+  cierre_corregido: 58750,
+  anterior: 54000,
+  anterior_corregido: 54000,
+  pct: 1.85,
+  pct_corregido: 8.8,
+  base_curva: { tiendas: 4, tiendas_fuera_cy: ["T10"], real: 56100, corregida: 59925 },
+  avance: 0.8,
+  avance_bajo: false,
+  agrupaciones_avance_bajo: [],
+  sin_curva_pct: null,
+  hay_nino: true,
+  correccion_curva_pct: 6.82,
+  factor_parcial: true,
+  sin_factor: false,
+  motivo_nulo: null,
+};
 
-  it("Acumulado: +3,0 % bruto, +10,5 % sin Niño, +18,4 % equivalente y cobertura 74 %", () => {
+describe("R10 · las referencias con equivalente corregido y real", () => {
+  const r = calcularReferencias(entrada({ cierre: CIERRE }));
+
+  it("Acumulado: +3,0 % real, +10,5 % corregido, cobertura 74 %; el equivalente corregido es el % sin Niño y la variante por defecto, corregido", () => {
     const a = r.acumulado;
-    expect(a).toMatchObject({ tipo: "acumulado", anio: 2026, tiendas: 3, anterior: 40000, actual: 41200, fragil: false, extremo: false, motivo_nulo: null, variante_defecto: "sin_nino_mas_rebote" });
+    expect(a).toMatchObject({ tipo: "acumulado", anio: 2026, tiendas: 3, anterior: 40000, actual: 41200, fragil: false, extremo: false, motivo_nulo: null, variante_defecto: "corregido" });
     expect(a.pct_bruto).toBe(3);
     expect(a.pct_sin_nino).toBe(10.5);
-    expect(a.equivalente.bruto).toBe(3);
-    expect(a.equivalente.sin_nino_mas_rebote).toBeCloseTo(18.4, 1);
+    expect(a.equivalente).toEqual({ corregido: 10.5, bruto: 3, sin_nino_mas_rebote: null });
     expect(a.cobertura_pct).toBeCloseTo(74, 0);
     expect(a.etiqueta).toBe("Acumulado ene–set 2026");
     expect(a.periodo).toBe("ene–set 2026 frente a ene–set 2025");
   });
 
-  it("ρ = 63 100 ÷ 58 900 − 1 = +7,1 %", () => {
-    expect(r.rebote_nino_pct).toBeCloseTo(7.13, 2);
-    expect(reboteDe([fila()])).toBeCloseTo(7.13, 2);
-    expect(r.base_siguiente).toBe(58900);
+  it("Cierre por curva: 55 000 contra 54 000 (+1,9 % real), 58 750 corregido (+8,8 %) y equivalente corregido 8,8", () => {
+    const c = r.cierre_curva;
+    expect(c).toMatchObject({ tipo: "cierre_curva", anio: 2026, tiendas: 3, anterior: 54000, actual: 55000, motivo_nulo: null, variante_defecto: "corregido", etiqueta: "Cierre 2026 por curva" });
+    expect(c.pct_bruto).toBe(1.85);
+    expect(c.pct_sin_nino).toBe(8.8);
+    expect(c.equivalente).toEqual({ corregido: 8.8, bruto: 1.85, sin_nino_mas_rebote: null });
   });
 
-  it("Cierre proyectado: +3,0 % bruto, +10,4 % sin Niño, +18,3 % equivalente", () => {
-    const c = r.cierre_proyectado;
-    expect(c).toMatchObject({ tipo: "cierre_proyectado", tiendas: 3, anterior: 54000, actual: 55620, motivo_nulo: null });
-    expect(c.pct_bruto).toBe(3);
-    expect(c.pct_sin_nino).toBeCloseTo(10.4, 1);
-    expect(c.equivalente.sin_nino_mas_rebote).toBeCloseTo(18.3, 1);
-    expect(c.cobertura_pct).toBeNull();
-  });
-
-  it("Año completo 2025: +5,0 % (años normales) y equivalente +12,5 % con rebote", () => {
+  it("Año completo 2025: +5,0 % (años normales) y el equivalente corregido es el mismo; 2024 frente a 2023 (Niño): el real es mayor que el corregido", () => {
     const a = r.anios_completos.find((x) => x.anio === 2025)!;
     expect(a.pct_bruto).toBeCloseTo(5, 1);
-    expect(a.pct_sin_nino).toBeCloseTo(5, 1);
-    expect(a.equivalente.sin_nino_mas_rebote).toBeCloseTo(12.5, 1);
-    expect(a.variante_defecto).toBe("bruto");
+    expect(a.equivalente.corregido).toBeCloseTo(5, 1);
+    expect(a.variante_defecto).toBe("corregido");
     expect(r.anios_completos.map((x) => x.anio)).toEqual([2025, 2024]);
+    const b = r.anios_completos.find((x) => x.anio === 2024)!;
+    expect(b.pct_bruto).toBeCloseTo((51429 / 48000 - 1) * 100, 1);
+    expect(b.pct_sin_nino).toBeLessThan(b.pct_bruto as number);
+    expect(b.equivalente.corregido).toBe(b.pct_sin_nino);
   });
 
-  it("Año completo 2024 frente a 2023 (Niño): el bruto es mayor que el sin Niño", () => {
-    const a = r.anios_completos.find((x) => x.anio === 2024)!;
-    expect(a.pct_bruto).toBeCloseTo(((51429 / 48000 - 1) * 100), 1);
-    expect(a.pct_sin_nino).toBeLessThan(a.pct_bruto as number);
-    expect(a.variante_defecto).toBe("sin_nino_mas_rebote");
+  it("la corrección del Niño es Σ B' ÷ Σ B − 1 = +7,1 % y la base corregida 63 100", () => {
+    expect(r.correccion_nino_pct).toBeCloseTo(7.13, 2);
+    expect(r.rebote_nino_pct).toBe(r.correccion_nino_pct);
+    expect(reboteDe([fila()])).toBeCloseTo(7.13, 2);
+    expect(r.base_siguiente).toBe(58900);
+    expect(r.base_corregida).toBe(63100);
+    expect(baseCorregidaDe([fila(), fila({ fila_id: "x", b: null, bn: null })])).toBe(63100);
   });
 
-  it("Aplicado hoy: 5 % sobre 58 900 = 61 845 y −2,0 % sin Niño", () => {
+  it("Aplicado hoy de una versión bruta (5 % sobre 58 900): 61 845 real, equivalente corregido −2,0 y el bruto, el mismo 5", () => {
     const a = r.aplicado_hoy;
-    expect(a).toMatchObject({ tipo: "aplicado_hoy", anterior: 58900, actual: 61845, pct_bruto: 5, motivo_nulo: null });
-    expect(a.pct_sin_nino).toBeCloseTo(-2, 1);
+    expect(a).toMatchObject({ tipo: "aplicado_hoy", anterior: 58900, actual: 61845, pct_bruto: 5, motivo_nulo: null, variante_defecto: "corregido" });
+    expect(a.pct_sin_nino).toBeCloseTo(-1.99, 1);
     expect(a.equivalente.bruto).toBe(5);
-    expect(a.equivalente.sin_nino_mas_rebote).toBeCloseTo(5, 1);
+    expect(a.equivalente.corregido).toBeCloseTo(-1.99, 1);
+    expect(a.equivalente.sin_nino_mas_rebote).toBeNull();
   });
 
-  it("el orden de la pantalla: acumulado, cierre proyectado, años completos y aplicado hoy", () => {
-    expect(r.todas.map((x) => x.tipo)).toEqual(["acumulado", "cierre_proyectado", "anio_completo", "anio_completo", "aplicado_hoy"]);
+  it("Aplicado hoy de una versión corregida: el % aplicado es el corregido y el real se calcula contra Σ B", () => {
+    const c = calcularReferencias(entrada({ cierre: CIERRE, sobreAplicado: "corregida", pctAplicado: 8 })).aplicado_hoy;
+    expect(c).toMatchObject({ anterior: 63100, pct_sin_nino: 8, motivo_nulo: null });
+    expect(c.actual).toBeCloseTo(63100 * 1.08, 1);
+    expect(c.pct_bruto).toBeCloseTo((63100 * 1.08) / 58900 * 100 - 100, 1);
+    expect(c.equivalente.corregido).toBe(8);
+    expect(c.equivalente.bruto).toBe(c.pct_bruto);
+  });
+
+  it("el orden de la pantalla: cierre por curva, acumulado, años completos y aplicado hoy; «cierre proyectado» ya no está", () => {
+    expect(r.todas.map((x) => x.tipo)).toEqual(["cierre_curva", "acumulado", "anio_completo", "anio_completo", "aplicado_hoy"]);
     expect(r.unidades_anterior).toBe(54000);
   });
 
-  it("valorDeBase elige la variante pedida; con una referencia ausente da null", () => {
+  it("valorDeBase: corregido y bruto; la variante retirada y la referencia ausente dan null", () => {
+    expect(valorDeBase(r.acumulado, "corregido")).toBe(10.5);
     expect(valorDeBase(r.acumulado, "bruto")).toBe(3);
-    expect(valorDeBase(r.acumulado, "sin_nino_mas_rebote")).toBeCloseTo(18.4, 1);
-    expect(valorDeBase(undefined, "bruto")).toBeNull();
+    expect(valorDeBase(r.acumulado, "sin_nino_mas_rebote")).toBeNull();
+    expect(valorDeBase(undefined, "corregido")).toBeNull();
   });
 });
 
@@ -180,42 +214,45 @@ describe("marcas: frágil, extremo, tienda mayor y cobertura", () => {
     expect(a.pct_bruto).toBe(10);
   });
 
-  it("sin Niño con φ = 1 es idéntico al bruto (todo el año)", () => {
+  it("sin Niño con φ = 1 el corregido es idéntico al real (todo el año)", () => {
     const a = calcularReferencias(entrada({ entradas: serieDeAnios({ 2025: Array(12).fill(1000), 2026: Array(9).fill(1100) }, "todo_el_ano") })).acumulado;
     expect(a.pct_sin_nino).toBe(a.pct_bruto);
-    expect(a.variante_defecto).toBe("bruto");
+    expect(a.equivalente.corregido).toBe(a.equivalente.bruto);
   });
 });
 
-describe("referencias que dependen de la proyección: motivos nulos", () => {
-  it("método anterior: cierre proyectado, aplicado hoy, B y ρ son null y la variante con rebote también", () => {
+describe("referencias que dependen de la proyección o del cierre: motivos nulos", () => {
+  it("método anterior: aplicado hoy, B y la corrección son null; el cierre por curva y el acumulado siguen", () => {
     const p = proyeccion({ estado: "metodo_anterior", filas: [] });
-    const r = calcularReferencias(entrada({ proyeccion: p, filas: [], pctAplicado: null }));
-    for (const ref of [r.cierre_proyectado, r.aplicado_hoy]) {
-      expect(ref.motivo_nulo).toBe("metodo_anterior");
-      expect(ref.pct_bruto).toBeNull();
-      expect(ref.anterior).toBeNull();
-    }
+    const r = calcularReferencias(entrada({ proyeccion: p, filas: [], pctAplicado: null, cierre: CIERRE }));
+    expect(r.aplicado_hoy).toMatchObject({ motivo_nulo: "metodo_anterior", pct_bruto: null, anterior: null });
     expect(r.base_siguiente).toBeNull();
-    expect(r.rebote_nino_pct).toBeNull();
+    expect(r.base_corregida).toBeNull();
+    expect(r.correccion_nino_pct).toBeNull();
     expect(r.acumulado.pct_bruto).toBe(3);
-    expect(r.acumulado.equivalente.sin_nino_mas_rebote).toBeNull();
-    expect(r.acumulado.variante_defecto).toBe("bruto");
-    expect(r.anios_completos[0]?.equivalente.sin_nino_mas_rebote).toBeNull();
+    expect(r.cierre_curva.pct_sin_nino).toBe(8.8);
   });
 
-  it("sin proyección elegida: sin_referencia; sin base: sin_base; GM sin filas base: sin_base", () => {
-    expect(calcularReferencias(entrada({ proyeccion: null, filas: [], pctAplicado: null })).cierre_proyectado.motivo_nulo).toBe("sin_referencia");
+  it("sin proyección elegida: aplicado hoy sin_referencia; sin base: sin_base; GM sin filas base: sin_base", () => {
+    expect(calcularReferencias(entrada({ proyeccion: null, filas: [], pctAplicado: null })).aplicado_hoy.motivo_nulo).toBe("sin_referencia");
     const sinBase = proyeccion({ estado: "sin_base", filas: [fila({ b: null, bn: null })] });
     expect(calcularReferencias(entrada({ proyeccion: sinBase, filas: sinBase.filas })).aplicado_hoy.motivo_nulo).toBe("sin_base");
-    expect(calcularReferencias(entrada({ filas: [] })).cierre_proyectado.motivo_nulo).toBe("sin_base");
+    expect(calcularReferencias(entrada({ filas: [] })).aplicado_hoy.motivo_nulo).toBe("sin_base");
   });
 
-  it("un año normal da rebote 0 y el equivalente sin Niño es el mismo número", () => {
+  it("el cierre por curva sin cierre o con su motivo nulo queda vacío con ese motivo", () => {
+    expect(calcularReferencias(entrada()).cierre_curva.motivo_nulo).toBe("sin_curva");
+    expect(calcularReferencias(entrada({ k: null })).cierre_curva.motivo_nulo).toBe("sin_venta");
+    const r = calcularReferencias(entrada({ cierre: { ...CIERRE, cierre: null, cierre_corregido: null, pct: null, pct_corregido: null, motivo_nulo: "meses_faltantes" } }));
+    expect(r.cierre_curva).toMatchObject({ motivo_nulo: "meses_faltantes", pct_bruto: null, actual: null, variante_defecto: "corregido" });
+    expect(r.cierre_curva.equivalente.corregido).toBeNull();
+  });
+
+  it("un año normal da corrección 0 y el equivalente corregido de una referencia es el mismo número", () => {
     const f = fila({ bn: 58900 });
     const r = calcularReferencias(entrada({ filas: [f], proyeccion: proyeccion({ filas: [f] }) }));
-    expect(r.rebote_nino_pct).toBe(0);
-    expect(r.acumulado.equivalente.sin_nino_mas_rebote).toBe(r.acumulado.pct_sin_nino);
+    expect(r.correccion_nino_pct).toBe(0);
+    expect(r.acumulado.equivalente.corregido).toBe(r.acumulado.pct_sin_nino);
   });
 
   it("denominador cero o sin venta: cifras null con su motivo", () => {
@@ -229,29 +266,83 @@ describe("referencias que dependen de la proyección: motivos nulos", () => {
     expect(sinK.motivo_nulo).toBe("sin_venta");
   });
 
-  it("estadoDeProyeccion: método ≥ 4 y Σ B positiva", () => {
-    expect(estadoDeProyeccion(4, [{ b: 10 }])).toBe("valida");
-    expect(estadoDeProyeccion(3, [{ b: 10 }])).toBe("metodo_anterior");
+  it("estadoDeProyeccion: método ≥ 5 y Σ B positiva", () => {
+    expect(METODO_MIN_REFERENCIA).toBe(5);
+    expect(estadoDeProyeccion(5, [{ b: 10 }])).toBe("valida");
+    expect(estadoDeProyeccion(4, [{ b: 10 }])).toBe("metodo_anterior");
     expect(estadoDeProyeccion(null, [{ b: 10 }])).toBe("metodo_anterior");
-    expect(estadoDeProyeccion(4, [{ b: null }, { b: 0 }])).toBe("sin_base");
-    expect(estadoDeProyeccion(4, [])).toBe("sin_base");
+    expect(estadoDeProyeccion(5, [{ b: null }, { b: 0 }])).toBe("sin_base");
+    expect(estadoDeProyeccion(5, [])).toBe("sin_base");
   });
 });
 
-describe("equivalencias y lo proyectado", () => {
-  it("equivalenteDe: la bruta se queda; la sin Niño suma el rebote; sin rebote es null", () => {
-    expect(equivalenteDe(3, 10.5, 7.13)).toEqual({ bruto: 3, sin_nino_mas_rebote: 18.38 });
-    expect(equivalenteDe(3, 10.5, null)).toEqual({ bruto: 3, sin_nino_mas_rebote: null });
-    expect(equivalenteDe(null, null, 7)).toEqual({ bruto: null, sin_nino_mas_rebote: null });
+describe("equivalencias", () => {
+  it("equivalenteDe lleva corregido y bruto y nunca sin_nino_mas_rebote", () => {
+    expect(equivalenteDe(3, 10.5)).toEqual({ corregido: 10.5, bruto: 3, sin_nino_mas_rebote: null });
+    expect(equivalenteDe(null, null)).toEqual({ corregido: null, bruto: null, sin_nino_mas_rebote: null });
   });
 
-  it("proyectadoDeFilas suma los meses de Y de las filas y su versión sin Niño por la temporada de cada fila", () => {
-    const p = proyectadoDeFilas([fila(), fila({ fila_id: "f2", temporada: "todo_el_ano", meses_y: Array(12).fill(100), vigente_y: 1200 })], 2026, phi)!;
-    expect(p.anio).toBe(2026);
-    expect(p.meses[0]).toBe(4500);
-    expect(p.mesesSinNino[5]).toBeCloseTo(5333 / 0.8 + 100, 2);
-    expect(p.mesesSinNino[0]).toBe(4500);
-    expect(proyectadoDeFilas([fila({ meses_y: null })], 2026, phi)).toBeNull();
+  it("equivalenteReal: (1 + g) × B' ÷ B − 1; sin bases, null", () => {
+    expect(equivalenteReal(8, 56100, 59925)).toBeCloseTo(15.36, 2);
+    expect(equivalenteReal(8, null, 59925)).toBeNull();
+    expect(equivalenteReal(8, 0, 1)).toBeNull();
+  });
+});
+
+// El ejemplo D: ABRIGO B = 15 300 (B' = 19 125) y POLO B = 40 800 (sin Niño), versión bruta de 15 %.
+const ABRIGO = fila({ fila_id: "abrigo", temporada: "invierno", b: 15300, bn: 19125 });
+const POLO = fila({ fila_id: "polo", temporada: "todo_el_ano", b: 40800, bn: 40800 });
+
+describe("R10 y R28 · «Aplicado hoy» de una bruta y reaprobar (ejemplo D)", () => {
+  it("el equivalente corregido de una bruta de 15 % es 7,66 con dos decimales", () => {
+    const p = proyeccion({ filas: [ABRIGO, POLO] });
+    const a = calcularReferencias(entrada({ proyeccion: p, filas: p.filas, pctAplicado: 15, sobreAplicado: "bruta" })).aplicado_hoy;
+    expect(a.equivalente.corregido).toBe(7.66);
+    expect(a.equivalente.bruto).toBe(15);
+    expect(a.pct_sin_nino).toBeCloseTo(7.66, 2);
+  });
+
+  it("reaprobar conserva el total del GM, sube el invierno y baja el todo el año", () => {
+    const r = calcularReaprobar([ABRIGO, POLO], 15)!;
+    expect(r.pct_equivalente).toBe(7.66);
+    expect(r.total_antes).toBe(17595 + 46920);
+    expect(r.total_despues).toBe(20590 + 43925);
+    expect(r.total_despues).toBe(r.total_antes);
+    expect(r).toMatchObject({ filas_suben: 1, filas_bajan: 1, unidades_movidas: 2995, decididas_con_propuesta_cambio: 0 });
+  });
+
+  it("con un decimal (7,7) el GM daría 64 540 (+25): por eso el equivalente lleva dos", () => {
+    expect(Math.round(19125 * 1.077) + Math.round(40800 * 1.077)).toBe(64540);
+  });
+
+  it("una fila decidida no se mueve: cuenta como «propuesta cambió» y no entra en los totales", () => {
+    const decidida = { ...ABRIGO, fila_id: "abrigo-decidida", decidido: 21000, propuesto: 17595 };
+    const r = calcularReaprobar([decidida, POLO, fila({ fila_id: "otra", b: 10000, bn: 10000 })], 15)!;
+    expect(r.decididas_con_propuesta_cambio).toBe(1);
+    // F = POLO y la otra fila (las que siguen al GM): la decidida queda fuera.
+    expect(r.total_antes).toBe(46920 + 11500);
+    expect(r.pct_equivalente).toBe(15);
+    expect(r.total_despues).toBe(r.total_antes);
+    expect(r.filas_suben + r.filas_bajan).toBe(0);
+  });
+
+  it("una fila con % propio no sigue al GM; sin filas que sigan, se mide con todas; sin base, null", () => {
+    const propia = { ...ABRIGO, fila_id: "propia", crecimiento_pct: 20 };
+    const r = calcularReaprobar([propia, POLO], 15)!;
+    expect(r.pct_equivalente).toBe(15);
+    expect(calcularReaprobar([propia], 15)?.pct_equivalente).toBe(-8);
+    expect(calcularReaprobar([], 15)).toBeNull();
+    expect(calcularReaprobar([fila({ b: null, bn: null })], 15)).toBeNull();
+  });
+});
+
+describe("R12 · el periodo de una referencia toca un año Niño", () => {
+  const entradas = serieDeAnios(POR_ANIO);
+  it("2026 (Niño de invierno) sí; 2025 frente a 2024 (normales) no; 2024 frente a 2023 (Niño de 2023) sí", () => {
+    expect(periodoTocaNino({ tipo: "acumulado", anio: 2026 }, entradas, phi)).toBe(true);
+    expect(periodoTocaNino({ tipo: "cierre_curva", anio: 2026 }, entradas, phi)).toBe(true);
+    expect(periodoTocaNino({ tipo: "anio_completo", anio: 2025 }, entradas, phi)).toBe(false);
+    expect(periodoTocaNino({ tipo: "anio_completo", anio: 2024 }, entradas, phi)).toBe(true);
   });
 });
 

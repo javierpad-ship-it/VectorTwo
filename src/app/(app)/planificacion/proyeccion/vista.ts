@@ -7,6 +7,7 @@ import { formatearDecimal, formatearNumero, plural } from "@/lib/formato";
 import { colorAnio, escalaBonita, MESES_CORTOS } from "@/lib/reportes/histograma";
 import type { SerieGrafico } from "@/lib/curvas/grafico";
 import {
+  CODIGOS_CIERRE_BLOQUEADO_NINO,
   RAMPA_MAX,
   RATIO_MAX,
   RATIO_MIN,
@@ -27,6 +28,7 @@ import {
   type NodoMatrizApi,
   type OrigenMes,
   type ProyeccionApi,
+  type ReaprobarCierreApi,
   type RespuestaLineasApi,
   type RespuestaDecidirFilaApi,
   type SoloMatriz,
@@ -199,8 +201,8 @@ export const TEXTO_AVISO: Record<AvisoFila, { texto: string; tono: TonoAviso }> 
   plan_anterior: { texto: "Con poco avance se propone el total de la última proyección cerrada; el cálculo por avance va al lado.", tono: "info" },
   sin_venta_anio: { texto: "Sin venta en el año en curso, aunque hubo venta el año anterior.", tono: "alerta" },
   sin_base: { texto: "Sin total vigente en el año en curso: no hay base para el año siguiente.", tono: "alerta" },
-  sin_factor: { texto: "Hay meses del Niño sin factor calculado: se usó 1. Revisa la pestaña Factores del Niño.", tono: "alerta" },
-  objetivo_atipico: { texto: "El año siguiente está marcado como Niño en M6: tu % es bruto y debe incluirlo; el reparto usa el factor.", tono: "info" },
+  sin_factor: { texto: "Falta el factor del Niño de esta temporada: la base del año siguiente no se corrigió (se usó 1.00) y no podrás cerrar. Escríbelo en Factores del Niño (1.00 si no hubo efecto) y recalcula.", tono: "alerta" },
+  objetivo_atipico: { texto: "El año siguiente está marcado como Niño en Curvas: se puede calcular, pero no aprobar su crecimiento ni cerrar hasta quitar la marca o decidir cómo modelarlo.", tono: "alerta" },
   temporadas_mezcladas: { texto: "El GML mezcla temporadas: el factor del Niño se pondera mes a mes.", tono: "info" },
   mes_negativo: { texto: "Un mes tenía venta neta negativa; se truncó a 0.", tono: "info" },
   quiebre: { texto: "Hay meses con quiebre de stock: la venta pudo quedar por debajo de la demanda.", tono: "info" },
@@ -251,6 +253,9 @@ export function accionParaCodigo(codigo: string | null): AccionError {
       return "recalcular";
     case "crecimientos_cambiados":
     case "version_metodo":
+    // 0.14.0 (06e): cambió el factor de `Y` o la agrupación de una línea con Niño después de calcular: se resuelve recalculando.
+    case "factores_cambiados":
+    case "temporada_cambiada":
       return "recalcular";
     case "calculo_en_curso":
     case "conflicto":
@@ -432,18 +437,27 @@ export function motivoCifraInvalida(texto: string, minimo: number): string | nul
   return null;
 }
 
-// ─── Matriz: «Var.» y «Crec. mismas tiendas» (07c) ───
+// ─── Matriz: «Var.», «Crec. sobre 2026 corregido» y «Crec. sobre 2026 real» (06e) ───
 
 /**
- * Los títulos de las dos columnas de variación de la Matriz. `Var.` compara los totales (con tiendas nuevas, aperturas y cierres);
- * `Crec. mismas tiendas` es el % aprobado en Curvas → Crecimiento por género × mundo (o el % propio de la fila): el año siguiente
- * de las mismas tiendas frente a su año en curso (06d).
+ * Los títulos de las columnas de variación de la Matriz. `Var.` compara los totales (con tiendas nuevas, aperturas y cierres). Desde
+ * `0.14.0` (06e §4.2) el crecimiento de las mismas tiendas se parte en dos: «sobre 2026 corregido» es el % que se aprueba en Curvas →
+ * Crecimiento por género × mundo (o el % propio de la fila) y «sobre 2026 real» compara con lo vendido.
  */
-export function textoColumnasVariacion(anioEnCurso: number): { var: string; crec: string; nota: string } {
+export function textoColumnasVariacion(anioEnCurso: number): { var: string; crec: string; real: string; nota: string } {
   const s = anioEnCurso + 1;
   const v = `Var. = Total ${s} ÷ Total ${anioEnCurso} (incluye tiendas nuevas, aperturas y cierres).`;
-  const c = `Crec. mismas tiendas = ${s} de las mismas tiendas ÷ su ${anioEnCurso}: es el % aprobado en Curvas → Crecimiento por género × mundo (o el % propio de la fila).`;
-  return { var: v, crec: c, nota: `${v} ${c}` };
+  const c = `Crec. sobre ${anioEnCurso} corregido = ${s} de las mismas tiendas ÷ su ${anioEnCurso} corregido del Niño: es el % que apruebas en Curvas → Crecimiento por género × mundo (o el % propio de la fila). Sin Niño, corregido = real.`;
+  const r = `Crec. sobre ${anioEnCurso} real = ${s} de las mismas tiendas ÷ lo que vendieron en ${anioEnCurso}. Compara con lo vendido; no es el % que apruebas.`;
+  return { var: v, crec: c, real: r, nota: `El % que apruebas se aplica sobre ${anioEnCurso} corregido del Niño; «real» compara con lo vendido. Var. incluye además tiendas nuevas, aperturas y cierres.` };
+}
+
+/** `15,300 u real · 19,125 u corregida (+25.0 %)` para el título de la celda de la Matriz; `null` si el nodo no trae la base corregida. */
+export function textoBasesNodo(n: Pick<NodoMatrizApi["siguiente"], "base_siguiente" | "base_corregida">): string | null {
+  if (n.base_corregida === undefined || n.base_corregida === null || !(n.base_siguiente > 0)) return null;
+  const corr = (n.base_corregida / n.base_siguiente - 1) * 100;
+  const sufijo = Math.round(n.base_corregida) === Math.round(n.base_siguiente) ? "" : ` (${formatearPct(corr)})`;
+  return `Base ${unidades(n.base_siguiente)} u real · ${unidades(n.base_corregida)} u corregida${sufijo}`;
 }
 
 // ─── Cerrar ───
@@ -467,19 +481,100 @@ export function lineasDeCierre(p: Pick<ProyeccionApi, "anio_en_curso" | "resumen
     const cambio = r.avisos?.propuesta_cambio ?? 0;
     if (cambio > 0) lineas.push(cambio === 1 ? "1 decisión con la propuesta distinta (se cierra con tu cifra)" : `${formatearNumero(cambio)} decisiones con la propuesta distinta (se cierran con tu cifra)`);
   }
-  if (p.desactualizada.length > 0) lineas.push(`Desactualizada: ${p.desactualizada.map(textoMotivoDesactualizada).join("; ")}`);
+  if (p.desactualizada.length > 0) lineas.push(`Desactualizada: ${p.desactualizada.map((m) => textoMotivoDesactualizada(m, y)).join("; ")}`);
   return lineas;
 }
 
 /**
  * Los motivos que `cerrar?forzar=1` NO salta: el método viejo, los crecimientos aprobados que cambiaron después de calcular (0.10.8 /
- * 0.12.1) y los crecimientos sin aprobar (0.12.1, decisión de Javier: se bloquea sin excepción).
+ * 0.12.1), los crecimientos sin aprobar (0.12.1, decisión de Javier: se bloquea sin excepción) y, desde 0.14.0 (06e §3.3 y §4.2), todo lo
+ * que toca el Niño de `Y`: 2027 marcado como atípico, factor faltante, desfasado o sin confirmar, y la agrupación de una línea con Niño
+ * que cambió (`temporada_cambiada`). `factores_cambiados` solo es no forzable cuando es un factor de `Y` (el de otro año sí se fuerza):
+ * eso lo decide `factoresCambiadosDeAnioEnCurso`.
  */
-export const MOTIVOS_NO_FORZABLES: readonly string[] = ["version_metodo", "crecimientos_cambiados", "crecimientos_sin_aprobar"];
+export const MOTIVOS_NO_FORZABLES: readonly string[] = [
+  "version_metodo",
+  "crecimientos_cambiados",
+  "crecimientos_sin_aprobar",
+  "temporada_cambiada",
+  "anio_siguiente_atipico",
+  "factor_faltante",
+  "factor_desfasado",
+  "factor_sin_confirmar",
+  "reaprobar",
+];
+
+type ParaCierre = Pick<ProyeccionApi, "desactualizada"> & Partial<Pick<ProyeccionApi, "anio_en_curso" | "cierre_bloqueado_por">>;
+
+/**
+ * ¿Cambió un factor del Niño del año en curso (el que corrige la base del siguiente)? Lo dice el servidor en `cierre_bloqueado_por` o, sin
+ * él, el detalle del motivo `factores_cambiados` («invierno 2026»). El de otro año no cuenta: ese sí se puede forzar.
+ */
+export function factoresCambiadosDeAnioEnCurso(p: ParaCierre): boolean {
+  if (p.cierre_bloqueado_por?.some((m) => m.codigo === "factores_cambiados")) return true;
+  if (p.anio_en_curso === undefined) return false;
+  const y = String(p.anio_en_curso);
+  return p.desactualizada.some((m) => m.codigo === "factores_cambiados" && (m.detalle ?? []).some((d) => d.trim().endsWith(y)));
+}
 
 /** ¿Hay un motivo de desactualización que obliga a recalcular antes de cerrar (no se puede forzar)? */
-export function cierreExigeRecalcular(p: Pick<ProyeccionApi, "desactualizada">): boolean {
-  return p.desactualizada.some((m) => MOTIVOS_NO_FORZABLES.includes(m.codigo));
+export function cierreExigeRecalcular(p: ParaCierre): boolean {
+  return p.desactualizada.some((m) => MOTIVOS_NO_FORZABLES.includes(m.codigo)) || factoresCambiadosDeAnioEnCurso(p);
+}
+
+/** Dónde se arregla cada motivo del Niño que bloquea el cierre (`null` = se arregla recalculando). */
+export type EnlaceMotivo = { href: string; texto: string };
+
+/** Pestaña «Factores del Niño» de la proyección (la pantalla lee `proyeccion` y `pestana` de la URL). */
+export const enlaceFactoresNino = (proyeccionId: string): string => `/planificacion/proyeccion?proyeccion=${encodeURIComponent(proyeccionId)}&pestana=factores`;
+
+/** Curvas de estacionalidad (la pestaña «Periodos atípicos» es local de esa pantalla, no tiene URL propia). */
+export const RUTA_PERIODOS_ATIPICOS = "/planificacion/curvas-estacionalidad";
+
+export function enlaceDeMotivoNino(codigo: string, proyeccionId: string): EnlaceMotivo | null {
+  switch (codigo) {
+    case "anio_siguiente_atipico":
+      return { href: RUTA_PERIODOS_ATIPICOS, texto: "Curvas → Periodos atípicos" };
+    case "factor_faltante":
+    case "factor_desfasado":
+    case "factor_sin_confirmar":
+      return { href: enlaceFactoresNino(proyeccionId), texto: "Ir a Factores del Niño" };
+    default:
+      return null;
+  }
+}
+
+/**
+ * «Antes de proyectar» (06e §3.3, prerrequisitos): los avisos del Niño que no bloquean el cálculo pero sí el cierre. Se muestran con tono de
+ * alerta y con el enlace de dónde se arreglan (sin id de proyección: todavía puede no haber ninguna abierta).
+ */
+export const CODIGOS_AVISO_NINO: readonly string[] = ["factor_sin_calcular", "factor_desfasado", "factor_sin_confirmar", "anio_siguiente_atipico"];
+
+export function enlaceDeAvisoNino(codigo: string): EnlaceMotivo | null {
+  if (codigo === "anio_siguiente_atipico") return { href: RUTA_PERIODOS_ATIPICOS, texto: "Curvas → Periodos atípicos" };
+  if (CODIGOS_AVISO_NINO.includes(codigo)) return { href: "/planificacion/proyeccion?pestana=factores", texto: "Ir a Factores del Niño" };
+  return null;
+}
+
+export type MotivoCierreNino = { codigo: string; mensaje: string; enlace: EnlaceMotivo | null; recalcular: boolean };
+
+const CODIGOS_NINO: readonly string[] = CODIGOS_CIERRE_BLOQUEADO_NINO;
+
+/**
+ * Lo que impide cerrar por el Niño (06e §3.3): la lista que trae la proyección (`cierre_bloqueado_por`, solo en trabajo) y, si el servidor
+ * acaba de rechazar el cierre con uno de esos códigos, ese rechazo. Cada uno con su enlace (Factores del Niño o Curvas) o, si se arregla
+ * recalculando (`factores_cambiados` de `Y`, `temporada_cambiada`), con `recalcular`. Ninguno se puede forzar.
+ */
+export function motivosCierreBloqueado(
+  p: Pick<ProyeccionApi, "id" | "estado" | "cierre_bloqueado_por">,
+  rechazo?: { codigo: string | null; mensaje: string } | null
+): MotivoCierreNino[] {
+  const lista = p.estado === "en_trabajo" ? (p.cierre_bloqueado_por ?? []) : [];
+  const out: MotivoCierreNino[] = lista.map((m) => ({ codigo: m.codigo, mensaje: m.mensaje, enlace: enlaceDeMotivoNino(m.codigo, p.id), recalcular: m.codigo === "factores_cambiados" || m.codigo === "temporada_cambiada" }));
+  if (rechazo?.codigo && CODIGOS_NINO.includes(rechazo.codigo) && !out.some((m) => m.codigo === rechazo.codigo)) {
+    out.push({ codigo: rechazo.codigo, mensaje: rechazo.mensaje, enlace: enlaceDeMotivoNino(rechazo.codigo, p.id), recalcular: rechazo.codigo === "factores_cambiados" || rechazo.codigo === "temporada_cambiada" });
+  }
+  return out;
 }
 
 /** Máximo de filas sin decidir que lista el diálogo de cierre (el resto se cuenta). */
@@ -503,11 +598,19 @@ export function enlaceCrecimientoGeneroMundo(anioSiguiente: number, proyeccionId
   return `/planificacion/curvas-estacionalidad?pestana=genero-mundo&anio=${anioSiguiente}&proyeccion=${encodeURIComponent(proyeccionId)}`;
 }
 
-/** Lo que falta aprobar para cerrar, solo en una proyección en trabajo; `null` si no falta nada (o si no está en trabajo). */
+/** Enlace al detalle de un GM en Curvas (`?gm=<género>.<mundo>|resto`), con el año y la proyección de referencia; acepta la clave `genero|mundo` de la API. */
+export function enlaceDetalleGeneroMundo(anioSiguiente: number, proyeccionId: string, clave: string): string {
+  return `/planificacion/curvas-estacionalidad?gm=${encodeURIComponent(clave.replace("|", "."))}&anio=${anioSiguiente}&proyeccion=${encodeURIComponent(proyeccionId)}`;
+}
+
+/**
+ * Lo que falta aprobar para cerrar, solo en una proyección en trabajo; `null` si no falta nada (o si no está en trabajo). Desde 0.14.0 también
+ * cuenta lo que hay que reaprobar: una versión de antes de `0.14.0` (sobre 2026 real) de un GM con Niño material.
+ */
 export function crecimientosSinAprobarDe(p: Pick<ProyeccionApi, "estado" | "crecimientos_sin_aprobar">): CrecimientosSinAprobarApi | null {
   if (p.estado !== "en_trabajo") return null;
   const s = p.crecimientos_sin_aprobar;
-  return s && (s.faltan.length > 0 || s.resto_provisional) ? s : null;
+  return s && (s.faltan.length > 0 || s.resto_provisional || (s.reaprobar?.length ?? 0) > 0) ? s : null;
 }
 
 /** Cuántos crecimientos faltan, contando el Resto si es provisional. */
@@ -517,7 +620,7 @@ export function cuantosFaltanCrecimientos(s: CrecimientosSinAprobarApi): number 
 
 /**
  * «Faltan 3 crecimientos aprobados para 2027 (HOMBRE · URBANO, MUJER · RI, MUJER · DEPORTIVO) y el Resto es provisional». Con `lista = false`
- * omite los nombres (para la alerta corta de la pestaña y la cabecera).
+ * omite los nombres (para la alerta corta de la pestaña y la cabecera). Solo habla de lo que falta; lo de reaprobar va en `textoReaprobarCierre`.
  */
 export function textoFaltanCrecimientos(s: CrecimientosSinAprobarApi, anioSiguiente: number, lista = true): string {
   const n = s.faltan.length;
@@ -528,14 +631,36 @@ export function textoFaltanCrecimientos(s: CrecimientosSinAprobarApi, anioSiguie
   return gm || (resto ? resto.charAt(0).toUpperCase() + resto.slice(1) : "");
 }
 
-/** El título del botón «Cerrar proyección» deshabilitado y el aviso de la cabecera. */
-export function textoNoSePuedeCerrarPorCrecimientos(s: CrecimientosSinAprobarApi, anioSiguiente: number): string {
-  return `No se puede cerrar: ${textoFaltanCrecimientos(s, anioSiguiente, false).replace(/^[A-Z]/, (c) => c.toLowerCase())}. Apruébalos en ${RUTA_APROBAR_CRECIMIENTOS}.`;
+/** «HOMBRE · URBANO v1 se aprobó sobre 2026 real antes de 0.14.0 y este GM tuvo Niño en 2026 (+6.8 %): reapruébalo». */
+export function textoReaprobarUno(r: ReaprobarCierreApi, anioEnCurso: number): string {
+  const resto = r.clave === "resto";
+  return `${r.nombre} v${r.version} se aprobó sobre ${anioEnCurso} real antes de 0.14.0 y ${resto ? "tuvo" : "este GM tuvo"} Niño en ${anioEnCurso} (${formatearPct(r.correccion_pct)}): reapruébalo`;
 }
 
 /**
- * Lee del cuerpo del `409 crecimientos_sin_aprobar` lo que falta (`detalle = { faltan, resto_provisional }`, que puede venir en la raíz del
- * cuerpo o dentro de `detalle`). `null` si no trae la forma esperada.
+ * Lo que hay que reaprobar para cerrar (06e §3.3 punto 9), en una frase: con uno, el texto completo; con varios, cuántos y la lista.
+ * Cadena vacía si no hay ninguno.
+ */
+export function textoReaprobarCierre(rs: readonly ReaprobarCierreApi[] | undefined, anioEnCurso: number): string {
+  if (!rs || rs.length === 0) return "";
+  if (rs.length === 1) return textoReaprobarUno(rs[0], anioEnCurso);
+  const lista = rs.map((r) => `${r.nombre} v${r.version} ${formatearPct(r.correccion_pct)}`).join(", ");
+  return `${formatearNumero(rs.length)} crecimientos se aprobaron sobre ${anioEnCurso} real antes de 0.14.0 y esos GM tuvieron Niño en ${anioEnCurso} (${lista}): reapruébalos`;
+}
+
+/** El título del botón «Cerrar proyección» deshabilitado y el aviso de la cabecera. */
+export function textoNoSePuedeCerrarPorCrecimientos(s: CrecimientosSinAprobarApi, anioSiguiente: number): string {
+  const partes: string[] = [];
+  const falta = textoFaltanCrecimientos(s, anioSiguiente, false);
+  if (falta) partes.push(`${falta.replace(/^[A-Z]/, (c) => c.toLowerCase())}. Apruébalos en ${RUTA_APROBAR_CRECIMIENTOS}.`);
+  const rea = textoReaprobarCierre(s.reaprobar, anioSiguiente - 1);
+  if (rea) partes.push(`${rea}. Reaprueba en ${RUTA_APROBAR_CRECIMIENTOS} (un clic: «Reaprobar»).`);
+  return `No se puede cerrar: ${partes.join(" ")}`;
+}
+
+/**
+ * Lee del cuerpo del `409 crecimientos_sin_aprobar` lo que falta (`detalle = { faltan, resto_provisional, reaprobar }`, que puede venir en la
+ * raíz del cuerpo o dentro de `detalle`). `null` si no trae la forma esperada.
  */
 export function leerCrecimientosSinAprobar(cuerpo: Record<string, unknown> | null | undefined): CrecimientosSinAprobarApi | null {
   if (!cuerpo) return null;
@@ -545,19 +670,34 @@ export function leerCrecimientosSinAprobar(cuerpo: Record<string, unknown> | nul
   const lista = faltan
     .filter((f): f is { clave: string; nombre: string } => typeof f === "object" && f !== null && typeof (f as { nombre?: unknown }).nombre === "string")
     .map((f) => ({ clave: String((f as { clave?: unknown }).clave ?? f.nombre), nombre: f.nombre }));
-  return { faltan: lista, resto_provisional: candidato.resto_provisional === true };
+  const crudas = Array.isArray(candidato.reaprobar) ? candidato.reaprobar : [];
+  const reaprobar: ReaprobarCierreApi[] = crudas
+    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null && typeof (r as { nombre?: unknown }).nombre === "string")
+    .map((r) => ({ clave: String(r.clave ?? r.nombre), nombre: String(r.nombre), version: Number(r.version), correccion_pct: Number(r.correccion_pct) }));
+  return { faltan: lista, resto_provisional: candidato.resto_provisional === true, ...(reaprobar.length > 0 ? { reaprobar } : {}) };
 }
 
 /** `0.11.0` (M12): cambió la configuración de marcas (modalidad, GML relevantes o conjuntos) después de calcular. Se puede forzar al cerrar solo si el servidor lo permite. */
 export const TEXTO_CONFIG_CAMBIADA =
   "Cambió la configuración de marcas (modalidades, GML relevantes o conjuntos) después de calcular: recalcula para que las marcas al barrer, mixtas y relevantes se cuenten como están hoy. Tus decisiones se conservan.";
 
-/** Motivo de «desactualizada» en palabras: el del método nuevo se explica aparte; el resto, tal como lo dice el servidor. */
-export function textoMotivoDesactualizada(m: { codigo: string; mensaje: string }): string {
-  if (m.codigo === "version_metodo") return "El método de cálculo cambió (método nuevo): recalcula para aplicarlo. Tus decisiones se conservan.";
+/** «invierno 2026» y «verano 2026» → «invierno 2026 y verano 2026». */
+const unirConY = (xs: readonly string[]): string => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`);
+
+/**
+ * Motivo de «desactualizada» en palabras: el del método nuevo se explica aparte; el resto, tal como lo dice el servidor. Con el año en curso,
+ * `factores_cambiados` distingue el factor de `Y` (corrige la base del año siguiente y no se puede forzar) de los de otros años.
+ */
+export function textoMotivoDesactualizada(m: { codigo: string; mensaje: string; detalle?: string[] }, anioEnCurso?: number): string {
+  if (m.codigo === "version_metodo") return "El método de cálculo cambió (método nuevo: la base del año siguiente se corrige del Niño): recalcula para aplicarlo. Tus decisiones se conservan.";
   if (m.codigo === "crecimientos_cambiados") return TEXTO_CRECIMIENTOS_CAMBIADOS;
   if (m.codigo === "crecimientos_sin_aprobar") return m.mensaje;
   if (m.codigo === "config_cambiada") return TEXTO_CONFIG_CAMBIADA;
+  if (m.codigo === "temporada_cambiada") return "Cambió la agrupación de alguna línea con Niño y con ella su factor: recalcula. No se puede cerrar hasta entonces.";
+  if (m.codigo === "factores_cambiados" && anioEnCurso !== undefined) {
+    const deY = (m.detalle ?? []).filter((d) => d.trim().endsWith(String(anioEnCurso)));
+    if (deY.length > 0) return `Cambió el factor del Niño de ${unirConY(deY)}, que corrige la base de ${anioEnCurso + 1}: recalcula (no se puede cerrar forzando).`;
+  }
   return m.mensaje;
 }
 

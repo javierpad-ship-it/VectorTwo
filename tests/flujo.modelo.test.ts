@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { TEXTO_AVISO_FLUJO } from "@/lib/flujo/tipos-api";
+import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import { claveDeFila, mesesEntre } from "@/lib/flujo/filas";
 import {
   aFilaDetalleApi,
@@ -61,7 +63,7 @@ function stockDenim(extra: SemillaStock[] = []) {
   return mapaDeStock(...meses);
 }
 
-const calcular = (op: Partial<EntradaCalculoFlujo> = {}): ResultadoFlujo => calcularFlujo(entrada({ cerrada: { filas: cerradaDenim(), version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } }, stock: stockDenim(), ...op }));
+const calcular = (op: Partial<EntradaCalculoFlujo> = {}): ResultadoFlujo => calcularFlujo(entrada({ cerrada: { filas: cerradaDenim(), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } }, stock: stockDenim(), ...op }));
 const filaDe = (res: ResultadoFlujo, clave: string): FilaCalculada => {
   const f = res.filas.find((x) => x.clave === clave);
   if (!f) throw new Error(`falta la fila ${clave}`);
@@ -207,7 +209,7 @@ describe("caso 9: recepción (B3) y anti-duplicación", () => {
       entrada({
         kPrima: "2026-10",
         horizonte: { desde: "2026-11", hasta: "2027-12" },
-        cerrada: { filas: cerradaDenim(), version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+        cerrada: { filas: cerradaDenim(), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
         // el inventario de oct trae +200: S_oct = 700 − 150 + 200 = 750
         stock: mapaDeStock(
           stockMes("2026-09", [{ ...DENIM, cd: 700, tiendas: 0, venta: 1410 }]),
@@ -229,7 +231,7 @@ describe("caso 9: recepción (B3) y anti-duplicación", () => {
       entrada({
         kPrima: "2026-10",
         horizonte: { desde: "2026-11", hasta: "2027-12" },
-        cerrada: { filas: cerradaDenim(), version_metodo: 4, huella_flujo: "h", periodo_referencia: null },
+        cerrada: { filas: cerradaDenim(), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: null },
         stock: mapaDeStock(stockMes("2026-09", [{ ...DENIM, cd: 700, tiendas: 0, venta: 1410 }]), stockMes("2026-10", [{ ...DENIM, cd: 550, tiendas: 0, venta: 150 }])),
         compras: r,
       })
@@ -250,7 +252,7 @@ describe("caso 24 y regla 4c: llegó y nadie lo confirmó", () => {
       entrada({
         kPrima: "2026-10",
         horizonte: { desde: "2026-11", hasta: "2027-12" },
-        cerrada: { filas: cerradaDeFila({ ...DENIM, demanda: [150, ...DEMANDA_CASO1] }), version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+        cerrada: { filas: cerradaDeFila({ ...DENIM, demanda: [150, ...DEMANDA_CASO1] }), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
         stock: mapaDeStock(stockMes("2026-09", [{ ...DENIM, cd: 700, tiendas: 0, venta: 1410 }]), stockMes("2026-10", [{ ...DENIM, cd: stockOct, tiendas: 0, venta: 150 }])),
         compras,
       })
@@ -346,7 +348,7 @@ describe("caso 9b: conciliación de set", () => {
     ...cerradaDeFila({ ...POLO_PREMIUM, demanda: DEMANDA_CASO1 }),
     ...cerradaDeFila({ ...CAMISA, demanda: DEMANDA_CASO1.map(() => 1200) }),
   ];
-  const res = calcular({ cerrada: { filas: cerrada, version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } }, stock, compras: unirCompras(poloConRecepcion(), camisaRecibida()) });
+  const res = calcular({ cerrada: { filas: cerrada, version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } }, stock, compras: unirCompras(poloConRecepcion(), camisaRecibida()) });
   const set = armarConciliacionApi(res, "2026-09", NOMBRES)!;
   const fila = (ruta: string) => set.filas.find((f) => f.ruta === ruta && f.marca_id === null)!;
 
@@ -368,7 +370,7 @@ describe("caso 9b: conciliación de set", () => {
     const c = poloConRecepcion();
     c.recepciones.push({ id: "r9b", linea_id: LINEA.c09, recibida_periodo: "2026-09", unidades: 500, fecha_recepcion: "2026-09-30", origen: "sugerencia" });
     c.lineas[0].unidades_recibidas = 800;
-    const r = calcular({ cerrada: { filas: cerrada, version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } }, stock, compras: unirCompras(c) });
+    const r = calcular({ cerrada: { filas: cerrada, version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } }, stock, compras: unirCompras(c) });
     const f = armarConciliacionApi(r, "2026-09", NOMBRES)!.filas.find((x) => x.ruta === "HOMBRE · CASUAL · POLO")!;
     expect(f.sin_registrar).toBe(0);
     expect(f.sugerencias).toEqual([]);
@@ -437,7 +439,7 @@ describe("caso 9b: conciliación de set", () => {
 describe("caso 8 y 25: CAMISA × RECONOCIDO con el subflujo de JH", () => {
   const camisa = (op: Partial<EntradaCalculoFlujo> = {}, partic = participaciones({ [MARCA_M8.jh]: 0.4 })) =>
     calcular({
-      cerrada: { filas: cerradaDeFila({ ...CAMISA, demanda: DEMANDA_CASO1.map(() => 1200), partic }), version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+      cerrada: { filas: cerradaDeFila({ ...CAMISA, demanda: DEMANDA_CASO1.map(() => 1200), partic }), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
       stock: mapaDeStock(
         stockMes("2026-09", [{ ...CAMISA, cd: 1400, tiendas: 900, venta: 1200, marcas: { [MARCA_M8.jh]: { cd: 300, tiendas: 600, venta: 480 }, [MARCA_M8.alfa]: { cd: 1100, tiendas: 300, venta: 720 } } }])
       ),
@@ -586,7 +588,7 @@ describe("caso 8 y 25: CAMISA × RECONOCIDO con el subflujo de JH", () => {
 
   it("fila sin participaciones (sin fila base) → sin_participaciones y sin subflujo", () => {
     const r = camisa({
-      cerrada: { filas: cerradaDeFila({ ...CAMISA, demanda: DEMANDA_CASO1.map(() => 1200), tienda: "t-nueva" }), version_metodo: 4, huella_flujo: "h", periodo_referencia: null },
+      cerrada: { filas: cerradaDeFila({ ...CAMISA, demanda: DEMANDA_CASO1.map(() => 1200), tienda: "t-nueva" }), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: null },
     });
     const g = filaDe(r, claveCamisaLarga);
     expect(g.proyeccion.subflujos).toHaveLength(0);
@@ -623,7 +625,7 @@ describe("filas sin curva (regla 29, caso 27) y sin proyección (caso 16)", () =
     ...cerradaDeFila({ ...DENIM, demanda: DEMANDA_CASO1.map(() => 0), tienda: "t-nueva", sinMeses: true, total: 0 }),
   ];
   const res = calcular({
-    cerrada: { filas: [...cerradaDenim(), ...sinCurva()], version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+    cerrada: { filas: [...cerradaDenim(), ...sinCurva()], version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
     stock: mapaDeStock(stockMes("2026-09", [{ ...DENIM, cd: 300, tiendas: 400, venta: 1410 }, { ...POLO_PREMIUM, cd: 400, venta: 100 }])),
   });
   const polo = filaDe(res, claveDeFila({ gml_id: NODO_M8.polo, equivalencia_id: null, agrupacion_marca_id: AGR_M8.premium }));
@@ -675,7 +677,7 @@ describe("filas sin curva (regla 29, caso 27) y sin proyección (caso 16)", () =
 
   it("una base con curva y una de tienda sin curva con total 120 → demanda sin esos 120 y demanda_parcial_sin_curva", () => {
     const r = calcular({
-      cerrada: { filas: [...cerradaDenim(), ...cerradaDeFila({ ...DENIM, demanda: DEMANDA_CASO1.map(() => 0), tienda: "t-nueva", sinMeses: true, total: 120 })], version_metodo: 4, huella_flujo: "h", periodo_referencia: null },
+      cerrada: { filas: [...cerradaDenim(), ...cerradaDeFila({ ...DENIM, demanda: DEMANDA_CASO1.map(() => 0), tienda: "t-nueva", sinMeses: true, total: 120 })], version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: null },
     });
     const g = filaDe(r, claveDenim);
     expect(g.avisos).toContain("demanda_parcial_sin_curva");
@@ -696,15 +698,29 @@ describe("avisos de cabecera y contratos reales (regla 26)", () => {
     expect(r.filas).toHaveLength(1);
   });
 
+  it("R20 (06e): una cerrada de método 4 avisa con el texto nuevo, no bloquea y da las MISMAS cifras que una del método vigente para M8; con el mínimo vigente no hay aviso", () => {
+    const con = (version: number) => calcular({ cerrada: { filas: cerradaDenim(), version_metodo: version, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } } });
+    const metodo4 = con(4);
+    expect(metodo4.avisos).toEqual(["cerrada_metodo_anterior"]);
+    expect(con(VERSION_METODO_MIN_M8).avisos).toEqual([]);
+    // Las cifras (series, resúmenes y totales) no dependen de la versión del método.
+    expect(metodo4.filas).toEqual(con(VERSION_METODO_MIN_M8).filas);
+    expect(metodo4.filas).toHaveLength(1);
+    // El texto dice qué falta (los meses de 2027 de las líneas con Niño) sin quitarle la cerrada a Javier.
+    expect(TEXTO_AVISO_FLUJO.cerrada_metodo_anterior).toBe(
+      "La cerrada se calculó con el método 4 (antes de 0.14.0): los meses de 2027 de las líneas con Niño no están corregidos. Sirve para trabajar; cuando cierres una proyección con 0.14.0, la reemplazará."
+    );
+  });
+
   it("huella_flujo de la cerrada nula o distinta de la de hoy → config_cambiada", () => {
-    const cerrada = (huella: string | null) => ({ filas: cerradaDenim(), version_metodo: 4, huella_flujo: huella, periodo_referencia: { desde: "2025-10", hasta: "2026-09" } });
+    const cerrada = (huella: string | null) => ({ filas: cerradaDenim(), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: huella, periodo_referencia: { desde: "2025-10", hasta: "2026-09" } });
     expect(base({ cerrada: cerrada(null) })).toEqual(["config_cambiada"]);
     expect(base({ cerrada: cerrada("otra") })).toEqual(["config_cambiada"]);
     expect(base({ cerrada: cerrada("h") })).toEqual([]);
   });
 
   it("sin periodo de referencia → cerrada_sin_periodo; con la cerrada siguiente → horizonte_corto", () => {
-    expect(base({ cerrada: { filas: cerradaDenim(), version_metodo: 4, huella_flujo: "h", periodo_referencia: null } })).toEqual(["cerrada_sin_periodo"]);
+    expect(base({ cerrada: { filas: cerradaDenim(), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: null } })).toEqual(["cerrada_sin_periodo"]);
     expect(base({ cubre: "siguiente" })).toEqual(["horizonte_corto"]);
   });
 
@@ -721,7 +737,7 @@ describe("avisos de cabecera y contratos reales (regla 26)", () => {
       entrada({
         kPrima: "2026-10",
         horizonte: { desde: "2026-11", hasta: "2027-12" },
-        cerrada: { filas: cerradaDeFila({ ...DENIM, demanda: [150, ...DEMANDA_CASO1] }), version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+        cerrada: { filas: cerradaDeFila({ ...DENIM, demanda: [150, ...DEMANDA_CASO1] }), version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
         stock: mapaDeStock(stockMes("2026-09", [{ ...DENIM, cd: 700, venta: 1410 }]), stockMes("2026-10", [{ ...DENIM, cd: 550, venta: 150 }])),
       })
     );
@@ -748,7 +764,7 @@ describe("determinismo y balance (regla 8)", () => {
     calcular({
       cerrada: {
         filas: [...cerradaDenim(), ...cerradaDeFila({ ...CAMISA, demanda: DEMANDA_CASO1.map(() => 1200), partic: participaciones({ [MARCA_M8.jh]: 0.4 }) }), ...cerradaDeFila({ ...POLO_PREMIUM, demanda: DEMANDA_CASO1.map((d) => d + 40) })],
-        version_metodo: 4,
+        version_metodo: VERSION_METODO_MIN_M8,
         huella_flujo: "h",
         periodo_referencia: { desde: "2025-10", hasta: "2026-09" },
       },
@@ -848,7 +864,7 @@ describe("volumen real", () => {
     const cerradaFilas = unicas.flatMap((f) => cerradaDeFila({ gml: f.gml, eq: f.eq, agr: f.agr, demanda: DEMANDA_CASO1.map((d, j) => d + ((f.i + j) % 40)) }));
     const meses = ["2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"];
     const stock = mapaDeStock(...meses.map((m, k) => stockMes(m, unicas.map((f) => ({ gml: f.gml, eq: f.eq, agr: f.agr, cd: 200 + ((f.i * 7 + k * 13) % 900), tiendas: 100, venta: 120 + (f.i % 50) })))));
-    const op = { cerrada: { filas: cerradaFilas, version_metodo: 4, huella_flujo: "h", periodo_referencia: null }, stock };
+    const op = { cerrada: { filas: cerradaFilas, version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: null }, stock };
     const t0 = Date.now();
     const r = calcular(op);
     const ms = Date.now() - t0;

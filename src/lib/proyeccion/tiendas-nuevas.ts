@@ -1,6 +1,6 @@
 import { diasDelMes, indiceMes, partesDeFecha } from "./calendario";
 import { repartirEntero } from "./reparto";
-import { MAX_TOTAL, MESES_MIN_AVANCE, RAMPA_MAX, type AvisoFila, type Metodo, type Subbloque } from "./tipos-api";
+import { MAX_TOTAL, MESES_MIN_AVANCE, RAMPA_MAX, type AvisoFila, type Metodo, type SobreBase, type Subbloque } from "./tipos-api";
 
 /**
  * Tiendas nuevas (ficha 07, paso 4 y reglas 19 a 23; venta esperada de la ficha 07d, método 4 de la 0.10.8). Puro.
@@ -17,7 +17,8 @@ import { MAX_TOTAL, MESES_MIN_AVANCE, RAMPA_MAX, type AvisoFila, type Metodo, ty
  *   P_f  = round(Md_f × A_f)             propuesta del año de apertura: Σ_f P_f × p_f ≈ 12 V F (± Σ p_f ÷ 2)
  *
  * La rampa multiplica la venta en régimen y SÍ mueve el total del año de apertura (con el método 3 no lo movía). `φ_{Z_0}` está dentro de
- * `A_f` y por eso mueve el nivel de una apertura; en mismas tiendas el % es bruto y `φ_{Y+1}` solo da forma (07c §2.4).
+ * `A_f` y por eso mueve el nivel de una apertura. En el año siguiente de una tienda que abrió en `Y`, `P = round(A' × (1 + g) × Σ_{Y+1} c r)` con
+ * `A'` el total maduro sin el Niño de `Y` (método 5, 06e; con `bruta`, `A^b` de 07c) y `φ_{Y+1}` solo da forma al reparto.
  */
 
 /** Una fila de la composición con lo que hace falta para `F`: su `s_f`, su curva y el `φ` de `Z_0`. */
@@ -201,7 +202,10 @@ export type EntradaFilaTienda = {
   phi: readonly number[];
   /** `Md_f`: unidades maduras por fila (`null` sin venta esperada). */
   maduras: number | null;
-  /** `A^b_{t,f}` bruto implícito del año `Y` (`maduroDeVigente`; solo año siguiente de una tienda que abrió en `Y`); `null` si no hay. */
+  /**
+   * Total maduro implícito del año `Y` (`maduroDeVigente`; solo año siguiente de una tienda que abrió en `Y`); `null` si no hay. Es `A'` (sin el Niño de `Y`) si
+   * el % se escribe sobre `Y` corregido y `A^b` si es bruto: quien llama pasa el que corresponde al `sobre_base` del %.
+   */
   maduroPrevio: number | null;
   /** `g_f` en porcentaje. */
   crecimiento: number;
@@ -261,7 +265,7 @@ function proponerFilaTiendaSinCota(e: EntradaFilaTienda): ResultadoFilaTienda {
 
   if (!e.esAnioEnCurso) {
     if (e.subbloque === "nuevas_anterior" && e.maduroPrevio !== null) {
-      // Método 4: el % es bruto y `φ_{Y+1}` solo da forma al reparto: `P = round(A^b × (1 + g) × Σ_{Y+1} c r)`.
+      // El % es sobre el total maduro de `Y` (`A'` corregida, método 5; `A^b` bruta, método 4) y `φ_{Y+1}` solo da forma al reparto: `P = round(A × (1 + g) × Σ_{Y+1} c r)`.
       const propuesto = redondear(e.maduroPrevio * (1 + e.crecimiento / 100) * sumaCurva(curva, e.rampa, null, 0, 12));
       return { vendido, propuesto, metodo: "maduro_propio", referencia_alternativa: porEsperada, referencia_tres_meses: null, maduro_propio: e.maduroPrevio, vendido_normalizado: null, denominador: null, avisos: [] };
     }
@@ -294,24 +298,28 @@ function proponerFilaTiendaSinCota(e: EntradaFilaTienda): ResultadoFilaTienda {
 }
 
 /**
- * Regla 22, la cuenta inversa (método 4): `A^b_{t,f} = (vigente_{t,f,Y} ÷ Σ_{m∈Y} c_m r_m φ_{Y,m}) × Σ_{m=1..12} c_m φ_{Y,m}`: el total
- * maduro anualizado de la fila con el Niño de `Y` repartido en los doce meses. NO es `vigente ÷ Σ c r`: esa fórmula anualiza solo con los
- * meses abiertos y, si esos meses tienen Niño, pesan de más (la apertura de mayo con invierno a `φ = 0,66` saldría deprimida entera).
- * Con `φ` de unos coincide con `vigente ÷ Σ c r`.
+ * Regla 22, la cuenta inversa. Con `sobreBase = 'corregida'` (método 5, ficha 06e §5.1, por defecto): `A'_{t,f} = vigente_{t,f,Y} ÷ Σ_{m∈Y} c_m r_m φ_{Y,m}`,
+ * el total maduro de la fila SIN el Niño de `Y` (lo que habría vendido una tienda madura en un año normal); es la base del % «sobre `Y` corregido».
+ * Con `'bruta'` (método 4, versiones de antes de 0.14.0): `A^b_{t,f} = A' × Σ_{m=1..12} c_m φ_{Y,m}`: el total maduro anualizado con el Niño de `Y`
+ * repartido en los doce meses. NO es `vigente ÷ Σ c r`: esa fórmula anualiza solo con los meses abiertos y, si esos meses tienen Niño, pesan de más
+ * (la apertura de mayo con invierno a `φ = 0,66` saldría deprimida entera). Con `φ` de unos las dos coinciden con `vigente ÷ Σ c r` (R6).
  */
 export function maduroDeVigente(args: {
   vigente: number | null;
   curva: readonly number[] | null;
   rampa: readonly number[];
   phi: readonly number[];
+  sobreBase?: SobreBase;
 }): number | null {
   if (args.vigente === null || args.curva === null) return null;
   const den = sumaCurva(args.curva, args.rampa, args.phi, 0, 12);
   if (!(den > 0)) return null;
-  return (args.vigente / den) * sumaCurva(args.curva, RAMPA_PLANA, args.phi, 0, 12);
+  const corregido = args.vigente / den;
+  if ((args.sobreBase ?? "corregida") === "corregida") return corregido;
+  return corregido * sumaCurva(args.curva, RAMPA_PLANA, args.phi, 0, 12);
 }
 
-/** Regla 22 (método 4). `maduroSiguiente` = `A^b_{t,f} × (1 + g) × Σ_m c_m r_m` del año siguiente (bruto: sin `φ_{Y+1}`). */
+/** Regla 22. `maduroSiguiente` = `A_{t,f} × (1 + g) × Σ_m c_m r_m` del año siguiente (`A'` o `A^b` según `maduroDeVigente`; sin `φ_{Y+1}`). */
 export function maduroSiguiente(args: {
   maduro: number;
   crecimiento: number;

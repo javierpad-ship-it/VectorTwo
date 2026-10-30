@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   claveCacheGM,
+  PREFIJO_CACHE_GM,
   leerVentaGMCacheada,
   MAX_ENTRADAS_CACHE_GM,
   tamanioCacheGM,
@@ -27,6 +28,13 @@ const clave = (extra: Partial<ClaveCacheGM> = {}): ClaveCacheGM => ({
 });
 
 beforeEach(() => vaciarCacheGM());
+
+describe("06e M4 · prefijo de versión de la clave", () => {
+  it("la clave empieza con v2| (las series traen la agrupación a) y el prefijo es parte de la clave", () => {
+    expect(PREFIJO_CACHE_GM).toBe("v2|");
+    expect(claveCacheGM(clave()).startsWith("v2|2023-01-01 | ")).toBe(true);
+  });
+});
 
 describe("regla 17 · la clave", () => {
   it("cambia con p_desde, las cargas y cada una de las tres marcas de tiempo", () => {

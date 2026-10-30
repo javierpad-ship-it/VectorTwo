@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { useRecurso } from "../use-recurso";
 import { formatearFechaHora } from "../vista";
 import { AprobarGM } from "./aprobar-gm";
+import { CierreGM } from "./cierre-gm";
 import { GraficoGM } from "./grafico-gm";
 import { ReferenciasGM } from "./referencias-gm";
 import { TablaGM } from "./tabla-gm";
@@ -23,9 +24,14 @@ import {
   consultaApiGM,
   errorDeAprobarGM,
   formatearPctPlano,
+  leerPct,
+  pctInicialTexto,
+  sobreBaseDe,
+  textoAnioSiguienteAtipico,
   textoAprobadoOk,
   textoEstadoGM,
   textoLeyendaTiendas,
+  textoSobreBase,
   tituloGM,
   type ModoGM,
 } from "./vista";
@@ -43,6 +49,7 @@ export function DetalleGMVista({
   enTrabajo,
   ocupado,
   bloqueo,
+  anioSiguienteAtipico = null,
   errorAprobar,
   exito,
   onCerrarError,
@@ -57,6 +64,8 @@ export function DetalleGMVista({
   enTrabajo: { id: string; nombre: string }[] | null;
   ocupado: boolean;
   bloqueo?: string | null;
+  /** `0.14.0` (D7): el año siguiente tiene meses del Niño marcados: aprobar y cerrar están bloqueados (viene de la lista). */
+  anioSiguienteAtipico?: { meses: string[] } | null;
   errorAprobar: string | null;
   exito: string | null;
   onCerrarError: () => void;
@@ -66,10 +75,18 @@ export function DetalleGMVista({
   onIrAResto: () => void;
 }) {
   const [modo, setModo] = useState<ModoGM>("unidades");
+  // El % que se escribe en «Aprobar» vive aquí para mover la línea «vista previa» del gráfico y de la tabla. Se reinicia cuando cambia
+  // el detalle (otra huella o versión): derivado de las props, sin efectos.
+  const claveFormulario = `${detalle.huella_datos}|${detalle.vigente?.version ?? 0}`;
+  const [escrito, setEscrito] = useState<{ clave: string; texto: string } | null>(null);
+  const pctTexto = escrito !== null && escrito.clave === claveFormulario ? escrito.texto : pctInicialTexto(detalle);
+  const pct = leerPct(pctTexto);
   const titulo = tituloGM(detalle);
   const esResto = detalle.clave === CLAVE_RESTO;
   const anioEnCurso = anioEnCursoDe(detalle.series) ?? anio - 1;
   const v = detalle.vigente;
+  const mensajeAtipico = anioSiguienteAtipico ? textoAnioSiguienteAtipico(anio, anioSiguienteAtipico.meses) : null;
+  const bloqueoAprobar = bloqueo ?? (mensajeAtipico ? `${mensajeAtipico}` : null);
 
   return (
     <div className="space-y-6">
@@ -88,7 +105,8 @@ export function DetalleGMVista({
             : `Curva de venta y crecimiento de ${anio} de este género × mundo, sobre las mismas tiendas.`}{" "}
           {v ? (
             <>
-              Aprobado: <strong className="text-tinta">{formatearPctPlano(v.pct)}</strong> (v{v.version}, {v.por_nombre ?? "—"}, {formatearFechaHora(v.aprobada_at)}).
+              Aprobado: <strong className="text-tinta">{formatearPctPlano(v.pct, 2)}</strong> {textoSobreBase(v, anio - 1)} (v{v.version}, {v.por_nombre ?? "—"}, {formatearFechaHora(v.aprobada_at)}).
+              {sobreBaseDe(v) === "bruta" && " Se aprobó antes de 0.14.0."}
             </>
           ) : detalle.detallable ? (
             "Todavía sin crecimiento aprobado."
@@ -100,6 +118,12 @@ export function DetalleGMVista({
           </Alert>
         )}
       </div>
+
+      {mensajeAtipico && (
+        <Alert tono="alerta">
+          {mensajeAtipico} Aprobar está deshabilitado; calcular y mirar las cifras sigue funcionando.
+        </Alert>
+      )}
 
       {exito && (
         <Alert tono="exito" onCerrar={onCerrarExito}>
@@ -120,7 +144,7 @@ export function DetalleGMVista({
         </Alert>
       ))}
 
-      <Card titulo="Curva de venta" descripcion="La venta mensual de las mismas tiendas, un año contra otro. El año en curso se completa con la proyección de referencia.">
+      <Card titulo="Curva de venta" descripcion={`La venta mensual de las mismas tiendas, un año contra otro. El año en curso se completa con el cierre por curva; ${anio} es una vista previa con el % que escribes en «Aprobar».`}>
         <div className="space-y-4">
           <p className="text-sm text-tinta">{textoLeyendaTiendas(detalle, anioEnCurso)}</p>
           {detalle.tiendas.fuera.length > 0 && (
@@ -135,12 +159,16 @@ export function DetalleGMVista({
               </ul>
             </details>
           )}
-          <GraficoGM detalle={detalle} modo={modo} onModo={setModo} idTabla={ID_TABLA} />
-          <TablaGM id={ID_TABLA} detalle={detalle} modo={modo} nombreArchivo={`curva-${esResto ? "resto" : titulo.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/g, "-")}.csv`} />
+          <GraficoGM detalle={detalle} modo={modo} onModo={setModo} idTabla={ID_TABLA} pct={pct} />
+          <TablaGM id={ID_TABLA} detalle={detalle} modo={modo} pct={pct} nombreArchivo={`curva-${esResto ? "resto" : titulo.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/g, "-")}.csv`} />
         </div>
       </Card>
 
-      <Card titulo="Cómo crece" descripcion={`Lo que dicen las cifras para decidir el crecimiento bruto de ${anio}. Solo informan: tú decides el %.`}>
+      <Card titulo={`Cómo se cierra ${anio - 1}`} descripcion={`El cierre de ${anio - 1} por agrupación, con su curva vigente y el factor del Niño, y la base de ${anio} con las tiendas de ${anio}. Solo informa: el factor se cambia en Proyección.`}>
+        <CierreGM detalle={detalle} />
+      </Card>
+
+      <Card titulo="Cómo crece" descripcion={`Lo que dicen las cifras para decidir el crecimiento de ${anio} sobre ${anio - 1} corregido. Solo informan: tú decides el %.`}>
         <ReferenciasGM detalle={detalle} />
       </Card>
 
@@ -152,10 +180,12 @@ export function DetalleGMVista({
           proyeccionId={proyeccionId}
           enTrabajo={enTrabajo}
           ocupado={ocupado}
-          bloqueo={bloqueo}
+          bloqueo={bloqueoAprobar}
           error={errorAprobar}
           onCerrarError={onCerrarError}
           onAprobar={onAprobar}
+          pctTexto={pctTexto}
+          onPctTexto={(texto) => setEscrito({ clave: claveFormulario, texto })}
         />
       ) : (
         <Card titulo={`Aprobar ${anio}`}>
@@ -187,6 +217,7 @@ export function DetalleGM({
   proyeccionId,
   enTrabajo,
   referenciaCargando,
+  anioSiguienteAtipico = null,
   onVolver,
   onIrAResto,
   onCambio,
@@ -199,6 +230,8 @@ export function DetalleGM({
   enTrabajo: { id: string; nombre: string }[] | null;
   /** La lista aún carga: no se sabe qué proyección de referencia se usa. */
   referenciaCargando: boolean;
+  /** Viene de la lista (`anio_siguiente_atipico`): bloquea aprobar. */
+  anioSiguienteAtipico?: { meses: string[] } | null;
   onVolver: () => void;
   onIrAResto: () => void;
   onCambio: () => Promise<void> | void;
@@ -251,6 +284,7 @@ export function DetalleGM({
         enTrabajo={enTrabajo}
         ocupado={ocupado || recurso.cargando}
         bloqueo={referenciaCargando ? "Espera: se está leyendo la proyección de referencia." : null}
+        anioSiguienteAtipico={anioSiguienteAtipico}
         errorAprobar={errorAprobar}
         exito={exito}
         onCerrarError={() => setErrorAprobar(null)}

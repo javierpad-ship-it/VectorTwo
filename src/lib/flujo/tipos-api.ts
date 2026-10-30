@@ -70,7 +70,8 @@ export const TEXTO_AVISO_FLUJO: Record<AvisoFlujo, string> = {
   cerrada_atrasada: "La proyección cerrada es más antigua que el último mes publicado: la demanda puede estar vieja. Cierra una nueva.",
   horizonte_corto: "Solo hay una proyección cerrada del año anterior: el horizonte llega hasta diciembre de ese año.",
   cerrada_sin_periodo: "La proyección cerrada no trae el periodo de referencia: el desglose por marca puede no coincidir con el del stock.",
-  cerrada_metodo_anterior: "La cerrada se calculó antes de 0.10.8: aperturas y crecimientos con el método anterior; cierra una nueva.",
+  cerrada_metodo_anterior:
+    "La cerrada se calculó con el método 4 (antes de 0.14.0): los meses de 2027 de las líneas con Niño no están corregidos. Sirve para trabajar; cuando cierres una proyección con 0.14.0, la reemplazará.",
   config_cambiada:
     "Cambiaron marcas relevantes, modalidades o conjuntos después de cerrar: el desglose por marca de la demanda puede no coincidir con el del stock.",
   stock_en_tiendas_inactivas: "Hay stock en tiendas desactivadas: no cuenta en el flujo futuro.",

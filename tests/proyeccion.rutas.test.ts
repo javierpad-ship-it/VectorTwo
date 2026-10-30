@@ -47,6 +47,7 @@ import { GET as leerFactores, PUT as guardarFactores } from "@/app/api/proyeccio
 import { POST as sincronizar } from "@/app/api/proyeccion/factores/sincronizar/route";
 import { GET as cerrada } from "@/app/api/proyeccion/cerrada/route";
 import { construirVenta, lineaDenimValor, AG, AM, EQ, GEN, LIN, MUN, N, tiendas as tiendasFixture, vigentes } from "./proyeccion.fixture";
+import { VERSION_METODO } from "@/lib/proyeccion/tipos-api";
 import type { AnioFilaApi, FilaApi, FilaDetalleApi, FactorApi, ProyeccionApi, RespuestaCerradaApi, RespuestaFilasTiendaApi, RespuestaLineasApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaProyeccionApi, RespuestaTiendasApi, TiendaProyeccionApi } from "@/lib/proyeccion/tipos-api";
 
 const URL_BASE = "http://localhost/api/proyeccion";
@@ -162,7 +163,7 @@ describe("crear y calcular", () => {
     expect(p).toMatchObject({ anio_en_curso: 2026, anio_siguiente: 2027, estado: "en_trabajo", hasta_periodo: "2026-09", calculando: false });
     expect(p.parametros.crecimiento_pct_defecto).toBe(5);
     expect(p.bloques[2026].nuevas.map((t) => t.codigo).sort()).toEqual(["T2", "T3", "T9"]);
-    expect(p.resumen?.version_metodo).toBe(4);
+    expect(p.resumen?.version_metodo).toBe(VERSION_METODO);
     expect(p.resumen?.duracion_ms).not.toBeNull();
     expect(p.desactualizada).toEqual([]);
     expect(proyecciones()[0].calculando_desde).toBeNull();
@@ -529,7 +530,7 @@ describe("cierre: carrera, método viejo y auditoría (0.10.3)", () => {
     const r = (proyecciones().find((x) => x.id === id) as Fila).resumen as Record<string, unknown>;
     expect(r.huella_cargas).toBe("huella-nueva");
     expect(r.duracion_ms).toBe(4321);
-    expect(r.version_metodo).toBe(4);
+    expect(r.version_metodo).toBe(VERSION_METODO);
     expect((r.decididas as Record<string, number>)[2026]).toBe(0);
     // Una proyección que ya no está en trabajo no se toca.
     actual.estado = "archivada";
@@ -592,7 +593,7 @@ describe("umbral de disponibilidad (0.10.1)", () => {
     expect((await calcular(enviar("POST", "/x"), ctx(id as string))).status).toBe(201);
     const nueva_ = (await leer<ProyeccionApi>(await leerUna(get("/p"), ctx(id as string)))).data;
     expect(nueva_.desactualizada).toEqual([]);
-    expect(nueva_.resumen?.version_metodo).toBe(4);
+    expect(nueva_.resumen?.version_metodo).toBe(VERSION_METODO);
     expect(filasDe("proyeccion_fila_anios").find((a) => a.fila_id === idFila(DENIM_REC) && a.anio === 2026)).toMatchObject({ decidido: 1900 });
   });
 });
@@ -928,7 +929,7 @@ describe("M12: huella_flujo y el motivo config_cambiada (regla 17 de la ficha 12
   it("calcular escribe huella_flujo con la huella de la configuración de 02b y no cambia version_metodo", async () => {
     const { id, cuerpo } = await nueva();
     expect(proyecciones().find((p) => p.id === id)?.huella_flujo).toBe("huella-flujo-de-prueba");
-    expect(cuerpo.data.resumen?.version_metodo).toBe(4);
+    expect(cuerpo.data.resumen?.version_metodo).toBe(VERSION_METODO);
     expect(cuerpo.data.desactualizada).toEqual([]);
   });
 
@@ -973,7 +974,7 @@ describe("M12: huella_flujo y el motivo config_cambiada (regla 17 de la ficha 12
     expect(await motivos(id as string)).toEqual([]);
     const c = await cerrada(get("/cerrada", "?anio=2026"));
     expect(c.status).toBe(200);
-    expect((await leer<RespuestaCerradaApi>(c)).data.proyeccion.resumen?.version_metodo).toBe(4);
+    expect((await leer<RespuestaCerradaApi>(c)).data.proyeccion.resumen?.version_metodo).toBe(VERSION_METODO);
   });
 
   it("cerrar una proyección en trabajo con configuración cambiada pide forzar (desactualizada)", async () => {

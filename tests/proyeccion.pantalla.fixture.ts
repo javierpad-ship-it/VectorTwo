@@ -18,7 +18,9 @@ import type {
   TiendaProyeccionApi,
   FactorApi,
   ColaLargaApi,
+  DiagnosticoFactorApi,
 } from "../src/lib/proyeccion/tipos-api";
+import { VERSION_METODO } from "../src/lib/proyeccion/tipos-api";
 
 /**
  * Datos sintéticos de la pantalla de M7 (docs/modulos/07-proyeccion-anual.md, sección 4: las cifras de la maqueta de
@@ -95,7 +97,7 @@ export function proyeccion(extra: Partial<ProyeccionApi> = {}): ProyeccionApi {
       perfiles_apertura: [{ tienda: "T05", ratios: [2.9, 1.8, 1.2, 1, 1, 1] }],
       filas_para_revision: 12,
       fuera_bloque: 0,
-      version_metodo: 2,
+      version_metodo: VERSION_METODO,
       duracion_ms: 18000,
     },
     calculando: false,
@@ -391,7 +393,7 @@ export function nodo(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMat
     nombre,
     ids,
     en_curso: { venta_a_la_fecha: 35400, mismas: 45204, nuevas_anterior: 4797, aperturas: 0, cierres: 0, total: 50001, decididas: 2, filas: 5 },
-    siguiente: { mismas: 52724, nuevas_anterior: 0, aperturas: 484, cierres: 0, total: 53208, decididas: 1, filas: 5, base_siguiente: 48000, crec_mismas_pct: 9.8 },
+    siguiente: { mismas: 52724, nuevas_anterior: 0, aperturas: 484, cierres: 0, total: 53208, decididas: 1, filas: 5, base_siguiente: 48000, crec_mismas_pct: 9.8, base_corregida: 51000, crec_corregida_pct: 3.4 },
     variacion_pct: 6.4,
     estado: "parcial",
     avisos: [],
@@ -447,13 +449,42 @@ export function respuestaMensual(extra: Partial<RespuestaMensualApi> = {}): Resp
   };
 }
 
+/** Diagnóstico de invierno 2026 (06e): periodo ene–dic, 9 meses publicados en los dos años; sin meses fuera del periodo con dato (`ratio_fuera` nulo). */
+export function diagnosticoInvierno(): DiagnosticoFactorApi {
+  const meses = Array.from({ length: 12 }, (_, i) => {
+    const m = i + 1;
+    const publicado = m <= 9;
+    return { m, en_periodo: publicado, u: publicado ? 6600 : 0, u_ref: publicado ? 10000 : 0, ratio: publicado ? 0.66 : null, control: publicado ? 0.94 : null, relativo: publicado ? 0.7021 : null };
+  });
+  return { meses, ratio_fuera: null, meses_periodo: 12, meses_periodo_con_dato: 9 };
+}
+
+/** Diagnóstico de verano 2026 (ejemplo G): periodo set–dic, solo setiembre con dato; ene–ago crece ×1,20 y la red ×0,95. */
+export function diagnosticoVerano(): DiagnosticoFactorApi {
+  const meses = Array.from({ length: 12 }, (_, i) => {
+    const m = i + 1;
+    if (m <= 8) return { m, en_periodo: false, u: 7500, u_ref: 6250, ratio: 1.2, control: 0.95, relativo: 1.2632 };
+    if (m === 9) return { m, en_periodo: true, u: 13300, u_ref: 7000, ratio: 1.9, control: 0.95, relativo: 2 };
+    return { m, en_periodo: false, u: 0, u_ref: 0, ratio: null, control: null, relativo: null };
+  });
+  return { meses, ratio_fuera: 1.2, meses_periodo: 4, meses_periodo_con_dato: 1 };
+}
+
+/** Los factores de la pestaña (06e): 2023 con fórmula anterior, invierno 2026 sin confirmar (tu valor 0,72 · calculado 0,70), verano 2026 sin factor y 2027 objetivo. */
 export function factores(): FactorApi[] {
+  const nuevo = { formula: "relativo_periodo" };
   return [
-    { anio: 2023, temporada: "invierno", ratio_calculado: 0.63, ratio_aplicado: null, ratio_efectivo: 0.63, origen: "calculado", parcial: false, tiendas_comunes: 7, meses_comparados: 12, calculado_at: "2026-10-14T15:00:00Z", nota: null, objetivo: false },
-    { anio: 2026, temporada: "invierno", ratio_calculado: 0.66, ratio_aplicado: 0.7, ratio_efectivo: 0.7, origen: "manual", parcial: true, tiendas_comunes: 9, meses_comparados: 9, calculado_at: "2026-10-14T15:00:00Z", nota: "ajustado por Javier", objetivo: false },
-    { anio: 2026, temporada: "verano", ratio_calculado: 1.24, ratio_aplicado: null, ratio_efectivo: 1.24, origen: "calculado", parcial: true, tiendas_comunes: 9, meses_comparados: 1, calculado_at: "2026-10-14T15:00:00Z", nota: null, objetivo: false },
+    { anio: 2023, temporada: "invierno", formula: null, ratio_calculado: 0.63, ratio_aplicado: null, ratio_efectivo: 0.63, origen: "calculado", parcial: false, tiendas_comunes: 7, meses_comparados: 12, calculado_at: "2026-10-14T15:00:00Z", nota: null, objetivo: false },
+    { anio: 2026, temporada: "invierno", ...nuevo, ratio_volumen: 0.66, ratio_control: 0.94, meses_periodo: 12, meses_periodo_con_dato: 9, diagnostico: diagnosticoInvierno(), estado: "sin_confirmar", motivos_desfase: [], ratio_calculado: 0.7, ratio_aplicado: 0.72, ratio_efectivo: 0.72, origen: "manual", parcial: true, tiendas_comunes: 9, meses_comparados: 9, calculado_at: "2026-10-29T15:00:00Z", nota: "ajustado por Javier", objetivo: false },
+    { anio: 2026, temporada: "verano", ...nuevo, ratio_volumen: 1.9, ratio_control: 0.95, meses_periodo: 4, meses_periodo_con_dato: 1, diagnostico: diagnosticoVerano(), estado: "faltante", motivos_desfase: [], ratio_calculado: null, ratio_aplicado: null, ratio_efectivo: null, origen: null, parcial: true, tiendas_comunes: 9, meses_comparados: 1, calculado_at: "2026-10-29T15:00:00Z", nota: null, objetivo: false },
     { anio: 2027, temporada: "invierno", ratio_calculado: null, ratio_aplicado: null, ratio_efectivo: null, origen: null, parcial: false, tiendas_comunes: null, meses_comparados: null, calculado_at: null, nota: null, objetivo: true },
   ];
+}
+
+/** Invierno 2026 confirmado: lo escribió Javier con los datos de hoy (`estado = ok`); el servidor puede añadir `aplicado_at`. */
+export function factorInviernoConfirmado(): FactorApi & { aplicado_at: string } {
+  const f = factores()[1];
+  return { ...f, ratio_aplicado: 0.7, ratio_efectivo: 0.7, estado: "ok", aplicado_at: "2026-10-29T20:00:00Z" };
 }
 
 export function colaLarga(extra: Partial<ColaLargaApi> = {}): ColaLargaApi {

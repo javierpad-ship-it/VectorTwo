@@ -10,6 +10,7 @@ import { MiniCurva } from "@/components/curvas/mini-curva";
 import { formatearDecimal, formatearNumero, plural } from "@/lib/formato";
 import type { FilaDetalleApi, ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { BloqueDecision } from "./bloque-decision";
+import { filaConNino } from "./crecimientos-vista";
 import type { DecisionFila } from "./celda-decision";
 import { AlertaError, Avisos, Cargando, NUM } from "./comunes";
 import { ColaLargaDetalle } from "./cola-larga";
@@ -22,6 +23,7 @@ import {
   seriesMensualesDeFila,
   tablaAnioMes,
   textoCurvaOrigen,
+  textoFactoresMes,
   textoPruebaAnterior,
   formatearPct,
   unidades,
@@ -78,6 +80,9 @@ export function DetalleFila({
   const pa = d?.historico?.prueba_anterior ?? null;
   const colaLarga = d?.anios.find((a) => a.anio === y)?.cola_larga ?? d?.historico?.cola_larga ?? null;
   const tendencia = d?.historico?.tendencia ?? null;
+  // 0.14.0 (06e): la base de Y+1 se corrige con el factor del Niño de Y, mes a mes (relativo: la temporada frente a la red).
+  const registroSiguiente = d?.anios.find((a) => a.anio === y + 1);
+  const factorCorrige = d && registroSiguiente && filaConNino(registroSiguiente) ? textoFactoresMes(d.factores_mes?.[y]) : null;
 
   return (
     <Card
@@ -219,6 +224,11 @@ export function DetalleFila({
                   onDecidir={(c) => decidir(y + 1, c)}
                   onAplicarCurva={aplicarCurva}
                 />
+                {factorCorrige && (
+                  <p className="text-xs text-tinta-suave">
+                    La base de {y + 1} se corrigió del Niño con el factor de {y} por mes: <span className="font-mono">{factorCorrige}</span> (relativo: la temporada frente a la red).
+                  </p>
+                )}
                 <MesesDeRegistro registro={d.anios.find((a) => a.anio === y + 1)} titulo={`${y + 1} · proyectado con la curva vigente`} />
               </div>
             </div>

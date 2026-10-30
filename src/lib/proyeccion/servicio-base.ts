@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { NextResponse } from "next/server";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database, Json } from "@/lib/supabase/database.types";
 import { error } from "@/lib/api/respuestas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { errorConCodigo } from "@/lib/curvas/lectura";
@@ -17,8 +17,13 @@ import {
   UMBRAL_DISPONIBILIDAD,
   claveBaseDe,
   type BloquesApi,
+  type CodigoCierreBloqueadoNino,
+  type DiagnosticoFactorApi,
+  type EstadoFactorY,
   type FactorApi,
   type FilaModelo,
+  type MotivoDesfaseFactor,
+  type SobreBase,
   type Motivo,
   type CrecimientosSinAprobarApi,
   type ParametrosProyeccion,
@@ -93,13 +98,14 @@ export const kDe = (p: Pick<ProyeccionDb, "hasta_periodo">): number => Number(p.
 
 /**
  * El `resumen` sin las fotos internas: `niveles_gml` (pesa lo que un nodo por cada GML) y, desde la 0.10.8, `huella_crecimientos` y
- * `gm_gml` (el GM de cada nodo). El frontend no las usa.
+ * `gm_gml` (el GM de cada nodo) y, desde 0.14.0, `temporada_equivalencias`. El frontend no las usa.
  */
 function sinFotoInterna(r: ResumenProyeccion): ResumenProyeccion {
-  const { niveles_gml: _foto, gm_gml: _gm, huella_crecimientos: _huella, ...resto } = r;
+  const { niveles_gml: _foto, gm_gml: _gm, huella_crecimientos: _huella, temporada_equivalencias: _equivalencias, ...resto } = r;
   void _foto;
   void _gm;
   void _huella;
+  void _equivalencias;
   return resto;
 }
 
@@ -107,7 +113,14 @@ function sinFotoInterna(r: ResumenProyeccion): ResumenProyeccion {
  * `sinAprobar` (`0.12.1`, 06d §3.1): lo que falta aprobar para cerrar, solo de una proyección en trabajo; `undefined` = quien llama no lo midió (la
  * clave no viaja) y `null` = no falta nada.
  */
-export function aProyeccionApi(p: ProyeccionDb, desactualizada: Motivo[], ahora: string, sinAprobar?: CrecimientosSinAprobarApi | null): ProyeccionApi {
+export function aProyeccionApi(
+  p: ProyeccionDb,
+  desactualizada: Motivo[],
+  ahora: string,
+  sinAprobar?: CrecimientosSinAprobarApi | null,
+  /** `0.14.0` (06e): lo que impide cerrar por el Niño (solo en trabajo); `undefined` = quien llama no lo midió y `null` = nada lo impide. */
+  cierreBloqueadoPor?: { codigo: CodigoCierreBloqueadoNino; mensaje: string }[] | null
+): ProyeccionApi {
   const parametros = parametrosDe(p.parametros);
   return {
     id: p.id,
@@ -130,6 +143,7 @@ export function aProyeccionApi(p: ProyeccionDb, desactualizada: Motivo[], ahora:
     desactualizada,
     bloques: parametros.bloques,
     ...(sinAprobar !== undefined && p.estado === "en_trabajo" ? { crecimientos_sin_aprobar: sinAprobar } : {}),
+    ...(cierreBloqueadoPor !== undefined && p.estado === "en_trabajo" ? { cierre_bloqueado_por: cierreBloqueadoPor } : {}),
   };
 }
 
@@ -141,12 +155,39 @@ export async function proyeccionOr404(db: Db, id: string): Promise<Salida<Proyec
   return listo(data);
 }
 
-export function aFactorApi(f: Pick<FactorDb, "anio" | "temporada" | "ratio_calculado" | "ratio_aplicado" | "parcial" | "tiendas_comunes" | "meses_comparados" | "calculado_at" | "nota">, anioObjetivo: number): FactorApi {
+/** Lo que `aFactorApi` lee de una fila de `factores_volumen_atipico`; las columnas de 0.14.0 son opcionales (una fila sin escribir o de 0.13.x no las trae). */
+type FilaFactor = Pick<FactorDb, "anio" | "temporada" | "ratio_calculado" | "ratio_aplicado" | "parcial" | "tiendas_comunes" | "meses_comparados" | "calculado_at" | "nota"> &
+  Partial<Pick<FactorDb, "formula" | "ratio_volumen" | "ratio_control" | "diagnostico">>;
+
+/** `diagnostico` (jsonb) → `DiagnosticoFactorApi`; lo que no tiene la forma esperada (o `null`) es `null`. */
+export function diagnosticoDe(json: Json | null | undefined): DiagnosticoFactorApi | null {
+  if (json === null || json === undefined || typeof json !== "object" || Array.isArray(json)) return null;
+  const d = json as unknown as Partial<DiagnosticoFactorApi>;
+  if (!Array.isArray(d.meses)) return null;
+  return {
+    meses: d.meses,
+    ratio_fuera: typeof d.ratio_fuera === "number" ? d.ratio_fuera : null,
+    meses_periodo: typeof d.meses_periodo === "number" ? d.meses_periodo : 0,
+    meses_periodo_con_dato: typeof d.meses_periodo_con_dato === "number" ? d.meses_periodo_con_dato : 0,
+  };
+}
+
+const numeroONulo = (v: number | string | null | undefined): number | null => (v === null || v === undefined ? null : Number(v));
+
+export function aFactorApi(f: FilaFactor, anioObjetivo: number, estado?: { estado: EstadoFactorY; motivos_desfase: MotivoDesfaseFactor[] }): FactorApi {
   const calculado = f.ratio_calculado === null ? null : Number(f.ratio_calculado);
   const aplicado = f.ratio_aplicado === null ? null : Number(f.ratio_aplicado);
+  const diagnostico = diagnosticoDe(f.diagnostico);
   return {
     anio: f.anio,
     temporada: f.temporada === "verano" ? "verano" : "invierno",
+    formula: f.formula ?? null,
+    ratio_volumen: numeroONulo(f.ratio_volumen),
+    ratio_control: numeroONulo(f.ratio_control),
+    meses_periodo: diagnostico?.meses_periodo ?? 0,
+    meses_periodo_con_dato: diagnostico?.meses_periodo_con_dato ?? 0,
+    diagnostico,
+    ...(estado ? { estado: estado.estado, motivos_desfase: estado.motivos_desfase } : {}),
     ratio_calculado: calculado,
     ratio_aplicado: aplicado,
     ratio_efectivo: aplicado ?? calculado,
@@ -271,18 +312,23 @@ export function fotoDe(p: Pick<ProyeccionDb, "parametros">, celdas: readonly Cre
   const mapa = new Map<string, number>();
   const ids = new Map<string, string>();
   const versiones = new Map<string, number>();
+  const sobre = new Map<string, SobreBase>();
   for (const c of celdas) {
     if (!generos.has(c.genero_id)) continue;
     const clave = claveGM(c.genero_id, c.mundo_id);
     mapa.set(clave, Number(c.pct));
     if (c.crecimiento_id) ids.set(clave, c.crecimiento_id);
     if (c.version !== null && c.version !== undefined) versiones.set(clave, c.version);
+    // 06e: una foto sin `sobre_base` (escrita antes de 0.14.0) se lee `bruta`.
+    sobre.set(clave, c.sobre_base === "corregida" ? "corregida" : "bruta");
   }
   const usado = parametros.crecimiento_resto_usado;
+  // 06e: el Resto de una proyección calculada antes de 0.14.0 no trae `sobre_base` y se lee `bruta` (así se calculó); el de 0.14.0 lo trae explícito.
+  const sobreResto: SobreBase = usado?.sobre_base === "corregida" ? "corregida" : "bruta";
   const resto: RestoUsadoApi = usado
-    ? { pct: usado.pct, crecimiento_id: usado.crecimiento_id ?? null, version: usado.version ?? null, por_nombre: usado.por_nombre ?? null, at: usado.at ?? null }
-    : { pct: parametros.crecimiento_pct_defecto, crecimiento_id: null, version: null, por_nombre: null, at: null };
-  return { matriz: { celdas: mapa, generos, ids, versiones, resto: { id: resto.crecimiento_id, version: resto.version } }, resto };
+    ? { pct: usado.pct, crecimiento_id: usado.crecimiento_id ?? null, version: usado.version ?? null, por_nombre: usado.por_nombre ?? null, at: usado.at ?? null, sobre_base: sobreResto }
+    : { pct: parametros.crecimiento_pct_defecto, crecimiento_id: null, version: null, por_nombre: null, at: null, sobre_base: "bruta" };
+  return { matriz: { celdas: mapa, generos, ids, versiones, sobre, resto: { id: resto.crecimiento_id, version: resto.version, sobre_base: sobreResto } }, resto };
 }
 
 /** Clave base de una fila (misma GML-AM, sin tienda). */

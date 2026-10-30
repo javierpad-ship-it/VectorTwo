@@ -28,6 +28,7 @@ import {
   claveGenero,
   claveMundo,
   type FiltroVista,
+  textoBasesNodo,
   textoColumnasVariacion,
 } from "./vista";
 
@@ -50,7 +51,8 @@ export function nombresDeFiltro(indice: readonly IndiceLineaApi[], marcas: reado
  * Parte 2: la matriz (ficha 07, paso 5). Una fila por género · mundo · línea (desplegable por género y mundo; fila
  * Compañía arriba), siempre en unidades y sin solapes: venta a la fecha, mismas tiendas, nuevas del año anterior,
  * aperturas y total de cada año, con la variación y el estado de la línea. Con los mismos filtros que la vista Mensual y
- * exportación a Excel (SheetJS en el navegador) que respeta los filtros activos. En la matriz no se decide nada.
+ * exportación a Excel (SheetJS en el navegador) que respeta los filtros activos. En la matriz no se decide nada. Desde 0.14.0 (06e) el crecimiento de
+ * las mismas tiendas va en dos columnas: sobre el año en curso corregido del Niño (el % que se aprueba) y sobre el real (lo vendido).
  */
 export function MatrizTab({
   proyeccion,
@@ -208,7 +210,7 @@ export function TablaMatriz({
                     <th colSpan={5 + (conCierresY ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
                       {y}
                     </th>
-                    <th colSpan={6 + (conCierresS ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
+                    <th colSpan={7 + (conCierresS ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
                       {y + 1}
                     </th>
                     <th rowSpan={2} className="px-3 py-2 text-left font-medium">
@@ -241,14 +243,17 @@ export function TablaMatriz({
                       Var.
                     </th>
                     <th className={TH} title={titulos.crec}>
-                      Crec. mismas tiendas
+                      Crec. sobre {y} corregido
+                    </th>
+                    <th className={TH} title={titulos.real}>
+                      Crec. sobre {y} real
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borde">
                   {visibles.length === 0 && (
                     <tr>
-                      <td colSpan={13 + (conCierresY ? 1 : 0) + (conCierresS ? 1 : 0)} className="px-3 py-6 text-center text-tinta-suave">
+                      <td colSpan={14 + (conCierresY ? 1 : 0) + (conCierresS ? 1 : 0)} className="px-3 py-6 text-center text-tinta-suave">
                         Ninguna línea coincide con los filtros.
                       </td>
                     </tr>
@@ -288,7 +293,10 @@ export function TablaMatriz({
                         {conCierresS && <td className={`px-2 py-2 ${NUM}`}>{unidades(n.siguiente.cierres)}</td>}
                         <td className={`px-2 py-2 ${NUM} font-semibold`}>{unidades(n.siguiente.total)}</td>
                         <td className={`px-2 py-2 ${NUM}`}>{formatearPct(n.variacion_pct)}</td>
-                        <td className={`px-2 py-2 ${NUM}`} title={titulos.crec}>
+                        <td className={`px-2 py-2 ${NUM}`} title={textoBasesNodo(n.siguiente) ?? titulos.crec}>
+                          {formatearPct(n.siguiente.crec_corregida_pct)}
+                        </td>
+                        <td className={`px-2 py-2 ${NUM}`} title={titulos.real}>
                           {formatearPct(n.siguiente.crec_mismas_pct)}
                         </td>
                         <td className="px-3 py-2">

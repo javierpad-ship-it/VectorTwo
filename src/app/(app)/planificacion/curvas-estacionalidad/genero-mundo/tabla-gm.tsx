@@ -25,17 +25,20 @@ export function TablaGM({
   detalle,
   modo,
   nombreArchivo,
+  pct = null,
 }: {
   id: string;
-  detalle: Pick<DetalleGeneroMundoApi, "series" | "forma_tipica">;
+  detalle: Pick<DetalleGeneroMundoApi, "series" | "forma_tipica" | "acumulado"> & Partial<Pick<DetalleGeneroMundoApi, "serie_corregida" | "serie_base_curva" | "cierre" | "hay_nino">>;
   modo: ModoGM;
   nombreArchivo: string;
+  /** El % que se está escribiendo en «Aprobar» (sobre 2026 corregido): llena la fila «vista previa». */
+  pct?: number | null;
 }) {
-  const filas = useMemo(() => filasTablaAnioMes(detalle, modo), [detalle, modo]);
+  const filas = useMemo(() => filasTablaAnioMes(detalle, modo, { pct }), [detalle, modo, pct]);
   const celda = (v: number | null) => (v === null ? "—" : modo === "forma" ? formatearDecimal(v, 1) : formatearUds(v));
 
   function descargar() {
-    const { campos, datos } = filasCsvSeries(detalle);
+    const { campos, datos } = filasCsvSeries(detalle, { pct });
     descargarCsv(campos, datos, nombreArchivo);
   }
 
@@ -69,10 +72,10 @@ export function TablaGM({
           </thead>
           <tbody className="divide-y divide-borde tabular-nums">
             {filas.map((f) => (
-              <tr key={f.anio} className="hover:bg-fondo/60">
-                <th scope="row" className="sticky left-0 z-10 bg-superficie px-3 py-1.5 text-left font-semibold text-tinta">
-                  {f.anio}
-                  {f.incompleto && (
+              <tr key={f.clave} className={f.tipo === "anio" ? "hover:bg-fondo/60" : "bg-neutro-suave/40 hover:bg-fondo/60"}>
+                <th scope="row" className={`sticky left-0 z-10 px-3 py-1.5 text-left ${f.tipo === "anio" ? "bg-superficie font-semibold" : "min-w-56 bg-neutro-suave font-medium"} text-tinta`}>
+                  {f.etiqueta}
+                  {f.tipo === "anio" && f.incompleto && (
                     <span className="mt-0.5 block">
                       <Badge tono="neutro">con meses proyectados</Badge>
                     </span>
@@ -85,11 +88,14 @@ export function TablaGM({
                     title={v === null ? "Sin dato" : f.origen[i] === "proyectado" ? "Mes proyectado (no es venta real)" : undefined}
                   >
                     {celda(v)}
+                    {f.origen[i] === "proyectado" && v !== null && modo !== "forma" && (
+                      <sup className="ml-0.5 text-[10px] not-italic">p</sup>
+                    )}
                   </td>
                 ))}
                 <td className="px-3 py-1.5 text-right font-semibold">{modo === "forma" ? "100 %" : formatearUds(f.total)}</td>
-                <td className="px-3 py-1.5 text-right" title={f.incompleto && f.variacion !== null ? "El total incluye meses proyectados" : undefined}>
-                  {f.variacion === null ? "—" : `${formatearPctSigno(f.variacion)}${f.incompleto ? "*" : ""}`}
+                <td className="px-3 py-1.5 text-right" title={f.notaVariacion ?? (f.incompleto && f.variacion !== null ? "El total incluye meses proyectados" : undefined)}>
+                  {f.variacion === null ? "—" : `${formatearPctSigno(f.variacion, f.tipo === "previa" ? 2 : 1)}${f.incompleto && f.tipo === "anio" ? "*" : ""}`}
                 </td>
               </tr>
             ))}
@@ -118,8 +124,9 @@ export function TablaGM({
         </table>
       </div>
       <p className="text-xs text-tinta-suave">
-        {TITULO_MODO[modo]}. En cursiva, los meses proyectados con la proyección de referencia; «—», mes sin dato. El total de un año con meses proyectados no es venta real
-        completa (*). La forma típica es el promedio de la forma de los años completos normales.
+        {TITULO_MODO[modo]}. En cursiva y con «p», los meses proyectados (cierre por curva); «—», mes sin dato. El total de un año con meses proyectados no es venta real
+        completa (*). «Corregido» quita el efecto del Niño; la base y la vista previa de 2027 usan las tiendas de 2027, así que no se comparan con el año anterior. La forma típica es el
+        promedio de la forma de los años completos normales.
       </p>
     </div>
   );

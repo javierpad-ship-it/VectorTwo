@@ -1,20 +1,25 @@
 import { redondear } from "@/lib/curvas/anios";
 import { agregarFilas, type FilaCrecimiento } from "@/lib/proyeccion/crecimientos";
-import type { AgregadoCrecimientoApi } from "@/lib/proyeccion/tipos-api";
-import { VERSION_METODO } from "@/lib/proyeccion/tipos-api";
+import type { AgregadoCrecimientoApi, SobreBase } from "@/lib/proyeccion/tipos-api";
 import { hayNino, unidades, unidadesPorTienda, type OpcionesSuma, type Phi, type SerieGM } from "./series";
-import type { MotivoNuloReferencia, ReferenciaApi, TipoReferencia, VarianteBase } from "./tipos-api";
+import type { CierreGMApi, MotivoNuloReferencia, ReaprobarApi, ReferenciaApi, TipoReferencia, VarianteBase } from "./tipos-api";
 
 /**
- * Cifras de referencia de «Cómo crece» (ficha 06d §5.1, fórmulas exactas). Lógica PURA. Todo en unidades y en % BRUTO salvo donde
- * se dice «sin Niño». Ninguna cifra sugiere un %: el planner decide (decisión 33).
+ * Cifras de referencia de «Cómo crece» (ficha 06d §5.1 y 06e §5.1, fórmulas exactas). Lógica PURA. Desde `0.14.0` un % nuevo es «sobre
+ * 2026 corregido del Niño»: cada referencia lleva su `equivalente.corregido` (lo que se escribiría) y su `equivalente.bruto` (lo que
+ * da sobre lo vendido). Ninguna cifra sugiere un %: el planner decide (decisión 33).
  *
- *   Acumulado          Σ_{m≤k} U(Y) ÷ Σ_{m≤k} U(Y−1) − 1  sobre C(Y)
- *   Cierre proyectado  Σ vigente_Y de las filas base del GM ÷ U(Y−1) de sus mismas tiendas de Y − 1
- *   Año completo Z     U(Z) ÷ U(Z−1) − 1  sobre C(Z)
- *   Aplicado hoy       % efectivo de la foto de la proyección de referencia
- *   Sin Niño           U' = U ÷ φ (los dos años), equivalente para Y+1: (1 + g_sin)(1 + ρ) − 1
+ *   Cierre por curva   K ÷ U(Y−1) − 1 (real) y K' ÷ U'(Y−1) − 1 (corregido) sobre C(Y), de `cierre-curva.ts`
+ *   Acumulado          Σ_{m≤k} U(Y) ÷ Σ_{m≤k} U(Y−1) − 1  sobre C(Y), real y con U' = U ÷ φ
+ *   Año completo Z     U(Z) ÷ U(Z−1) − 1  sobre C(Z), real y con U' = U ÷ φ
+ *   Aplicado hoy       % efectivo de la foto de la proyección de referencia (≥ método 5), con su `sobre_base`
+ *
+ * «Cierre proyectado» y «Sin Niño + rebote» ya no son bases elegibles (D11): la cifra de la proyección queda como dato
+ * (`cierre_proyeccion`, `base_corregida`).
  */
+
+/** Versión mínima del método de la proyección que sirve de referencia (06e: `B'` en `base_normalizada`). */
+export const METODO_MIN_REFERENCIA = 5;
 
 export const UMBRAL_FRAGIL_TIENDAS = 3;
 export const UMBRAL_FRAGIL_UNIDADES = 120;
@@ -57,14 +62,22 @@ export type ProyeccionParaReferencias = {
   pctPorGM: ReadonlyMap<string, number>;
   /** El Resto aplicado: `crecimiento_resto_usado.pct` o, sin él, `crecimiento_pct_defecto`. */
   restoPct: number;
+  /** 06e: `claveGM → sobre_base` de la foto (`null` = escrita antes de `0.14.0`: `bruta`). Sin entrada se lee `bruta`. */
+  sobrePorGM?: ReadonlyMap<string, SobreBase>;
+  /** 06e: `sobre_base` del Resto aplicado (`crecimiento_resto_usado.sobre_base`); el provisional es `corregida`. Sin dato, `bruta`. */
+  restoSobre?: SobreBase;
+  /** 06e: `resumen.gm_con_nino` (claves `genero_id|mundo_id` y `resto`); `null` si la proyección no lo trae. */
+  gmConNino?: ReadonlySet<string> | null;
+  /** 06e (M8): `resumen.gm_fuera_base`. */
+  gmFueraBase?: ReadonlyMap<string, { filas: number; unidades: number }>;
 };
 
 /**
- * Referencia de proyección válida (I1): `version_metodo ≥ 4` y `Σ B` de las filas base de `Y+1` no nulo y positivo. Si no, B, ρ,
- * «Cierre proyectado» y «Aplicado hoy» son `null` con su motivo.
+ * Referencia de proyección válida (I1): `version_metodo ≥ 5` y `Σ B` de las filas base de `Y+1` no nulo y positivo. Si no, B, B',
+ * la corrección del Niño y «Aplicado hoy» son `null` con su motivo.
  */
 export function estadoDeProyeccion(versionMetodo: number | null, filas: readonly Pick<FilaBase, "b">[]): EstadoProyeccionReferencia {
-  if (versionMetodo === null || versionMetodo < VERSION_METODO) return "metodo_anterior";
+  if (versionMetodo === null || versionMetodo < METODO_MIN_REFERENCIA) return "metodo_anterior";
   const total = filas.reduce((a, f) => a + (f.b ?? 0), 0);
   return total > 0 ? "valida" : "sin_base";
 }
@@ -80,6 +93,8 @@ export function filasCrecimiento(filas: readonly FilaBase[]): FilaCrecimiento[] 
     propuesto: f.propuesto,
     base_siguiente: f.b,
     base_normalizada: f.bn,
+    // Método 5: el % propio de una fila es «sobre corregido» (R4).
+    sobre_base: "corregida" as const,
   }));
 }
 
@@ -91,32 +106,84 @@ export function baseSiguienteDe(filas: readonly FilaBase[]): number | null {
   return conBase.length === 0 ? null : conBase.reduce((a, f) => a + (f.b as number), 0);
 }
 
-/** `ρ = Σ B'' ÷ Σ B − 1` en %, sobre las filas con base; `null` sin base. Con un año normal da 0. */
+/** `Σ B'` de las filas con base (`bn`, y `b` si la fila no trae `bn`); `null` sin base. */
+export function baseCorregidaDe(filas: readonly FilaBase[]): number | null {
+  const conBase = filas.filter((f) => f.b !== null);
+  return conBase.length === 0 ? null : conBase.reduce((a, f) => a + (f.bn ?? (f.b as number)), 0);
+}
+
+/** La corrección del Niño `Σ B' ÷ Σ B − 1` en %, sobre las filas con base; `null` sin base. Con un año normal da 0. */
 export function reboteDe(filas: readonly FilaBase[]): number | null {
-  let b = 0;
-  let bn = 0;
-  for (const f of filas) {
-    if (f.b === null) continue;
-    b += f.b;
-    bn += f.bn ?? f.b;
-  }
-  return b > 0 ? r2((bn / b - 1) * 100) : null;
+  const b = baseSiguienteDe(filas);
+  const bc = baseCorregidaDe(filas);
+  return b !== null && bc !== null && b > 0 ? r2((bc / b - 1) * 100) : null;
 }
 
 // ─── Equivalencias ───
 
-/** Lo que una cifra significa para `Y+1`: la bruta, igual; la «sin Niño», con el rebote `ρ` (en %). */
-export function equivalenteDe(bruto: number | null, sinNino: number | null, rebotePct: number | null): ReferenciaApi["equivalente"] {
-  return {
-    bruto,
-    sin_nino_mas_rebote: sinNino !== null && rebotePct !== null ? r2(((1 + sinNino / 100) * (1 + rebotePct / 100) - 1) * 100) : null,
-  };
+/** Lo que una cifra significa para `Y+1`: `corregido` (lo que se escribiría) y `bruto` (sobre lo vendido). `sin_nino_mas_rebote` ya no existe. */
+export function equivalenteDe(bruto: number | null, corregido: number | null): ReferenciaApi["equivalente"] {
+  return { corregido, bruto, sin_nino_mas_rebote: null };
 }
 
-/** El valor bruto-equivalente de una referencia en la variante elegida; `null` si no se pudo calcular. */
+/** El % de la referencia en la variante elegida (`corregido` o `bruto`); `null` si no se pudo calcular o la variante está retirada. */
 export function valorDeBase(ref: ReferenciaApi | undefined, variante: VarianteBase): number | null {
   if (!ref) return null;
-  return variante === "bruto" ? ref.equivalente.bruto : ref.equivalente.sin_nino_mas_rebote;
+  if (variante === "corregido") return ref.equivalente.corregido ?? null;
+  if (variante === "bruto") return ref.equivalente.bruto;
+  return null;
+}
+
+/** El % equivalente sobre 2026 real de un % escrito sobre 2026 corregido: `(1 + g) × B' ÷ B − 1`. `null` sin bases. */
+export function equivalenteReal(pctCorregido: number, base: number | null, baseCorregida: number | null): number | null {
+  if (base === null || baseCorregida === null || !(base > 0)) return null;
+  return r2(((1 + pctCorregido / 100) * baseCorregida / base - 1) * 100);
+}
+
+const redondearUnidades = (x: number): number => Math.max(0, Math.round(x));
+
+/**
+ * I3 · Reaprobar una versión `bruta` en un GM con Niño material. `F` = las filas base del GM que siguen al GM (con base, sin % propio y sin
+ * total de `Y+1` decidido; si no queda ninguna, todas las que tienen base). `pct_equivalente` es el % sobre corregido que deja quieto el
+ * total de `F` (`round2(((1 + g) × Σ_F B ÷ Σ_F B' − 1) × 100)`, el que precarga «Reaprobar»). El impacto compara, fila a fila, lo que da hoy la
+ * versión `bruta` (`round(B (1+g))`) con lo que daría la corregida con ese equivalente (`round(B' (1+eq))`). Una fila decidida no se mueve:
+ * se cuenta aparte si su propuesta cambiaría. `null` sin base o con `Σ_F B' = 0`.
+ */
+export function calcularReaprobar(filas: readonly FilaBase[], pctBruta: number): NonNullable<ReaprobarApi> | null {
+  const conBase = filas.filter((f) => f.b !== null);
+  const siguen = conBase.filter((f) => f.decidido === null && f.crecimiento_pct === null);
+  const base = siguen.length > 0 ? siguen : conBase;
+  const sumaB = base.reduce((a, f) => a + (f.b as number), 0);
+  const sumaBc = base.reduce((a, f) => a + (f.bn ?? (f.b as number)), 0);
+  if (!(sumaB > 0) || !(sumaBc > 0)) return null;
+  const equivalente = r2(((1 + pctBruta / 100) * (sumaB / sumaBc) - 1) * 100);
+
+  const antes = (f: FilaBase) => redondearUnidades((f.b as number) * (1 + pctBruta / 100));
+  const despues = (f: FilaBase) => redondearUnidades((f.bn ?? (f.b as number)) * (1 + equivalente / 100));
+  let totalAntes = 0;
+  let totalDespues = 0;
+  let suben = 0;
+  let bajan = 0;
+  let movidas = 0;
+  for (const f of siguen) {
+    const a = antes(f);
+    const d = despues(f);
+    totalAntes += a;
+    totalDespues += d;
+    if (d > a) suben += 1;
+    else if (d < a) bajan += 1;
+    movidas += Math.abs(d - a);
+  }
+  const decididas = conBase.filter((f) => f.decidido !== null && antes(f) !== despues(f)).length;
+  return {
+    pct_equivalente: equivalente,
+    total_antes: totalAntes,
+    total_despues: totalDespues,
+    filas_suben: suben,
+    filas_bajan: bajan,
+    unidades_movidas: Math.round(movidas / 2),
+    decididas_con_propuesta_cambio: decididas,
+  };
 }
 
 // ─── Una referencia ───
@@ -139,18 +206,27 @@ export type EntradaReferencias = {
   filas: readonly FilaBase[];
   /** El % que la foto aplica a este GM (o el Resto); `null` sin proyección. */
   pctAplicado: number | null;
+  /** 06e: sobre qué base se aplicó `pctAplicado` (la foto). Sin dato, `bruta`. */
+  sobreAplicado?: SobreBase;
+  /** 06e: el cierre por curva sobre `C(Y)` (`cierre-curva.ts`); sin él no hay referencia «Cierre por curva». */
+  cierre?: CierreGMApi | null;
 };
 
 export type ResultadoReferencias = {
+  cierre_curva: ReferenciaApi;
   acumulado: ReferenciaApi;
-  cierre_proyectado: ReferenciaApi;
   anios_completos: ReferenciaApi[];
   aplicado_hoy: ReferenciaApi;
-  /** En el orden de la pantalla: acumulado, cierre proyectado, años completos y aplicado hoy. */
+  /** En el orden de la pantalla: cierre por curva, acumulado, años completos y aplicado hoy. */
   todas: ReferenciaApi[];
   /** `U(Y−1)` de las mismas tiendas `C(Y)` (año completo). */
   unidades_anterior: number | null;
+  /** `Σ B` y `Σ B'` de las filas base de la proyección de referencia (≥ 5); `null` sin ella. */
   base_siguiente: number | null;
+  base_corregida: number | null;
+  /** `Σ B' ÷ Σ B − 1` en %: la corrección del Niño de la proyección de referencia. */
+  correccion_nino_pct: number | null;
+  /** Mismo valor que `correccion_nino_pct` (el campo conserva su nombre en la API). */
   rebote_nino_pct: number | null;
 };
 
@@ -160,7 +236,7 @@ function vacia(tipo: TipoReferencia, anio: number, etiqueta: string, periodo: st
   return {
     tipo,
     anio,
-    variante_defecto: "bruto",
+    variante_defecto: "corregido",
     etiqueta,
     periodo,
     tiendas,
@@ -168,7 +244,7 @@ function vacia(tipo: TipoReferencia, anio: number, etiqueta: string, periodo: st
     actual: null,
     pct_bruto: null,
     pct_sin_nino: null,
-    equivalente: { bruto: null, sin_nino_mas_rebote: null },
+    equivalente: { corregido: null, bruto: null, sin_nino_mas_rebote: null },
     fragil: false,
     extremo: false,
     tienda_mayor: null,
@@ -188,7 +264,6 @@ type Cifras = {
   fragil: boolean;
   extremo: boolean;
   mayor: ReferenciaApi["tienda_mayor"];
-  nino: boolean;
   motivo: MotivoNuloReferencia | null;
 };
 
@@ -227,17 +302,15 @@ function cifrasComparadas(e: EntradaReferencias, z: number, hasta: number, tiend
     fragil: conVenta.size < UMBRAL_FRAGIL_TIENDAS || anterior < UMBRAL_FRAGIL_UNIDADES,
     extremo: bruto !== null && Math.abs(bruto) > UMBRAL_EXTREMO_PCT,
     mayor,
-    nino: hayNino(e.entradas, z, e.phi, o) || hayNino(e.entradas, z - 1, e.phi, o),
     motivo: sinVenta ? "sin_venta" : bruto === null ? "denominador_cero" : null,
   };
 }
 
-function aReferencia(tipo: TipoReferencia, anio: number, etiqueta: string, periodo: string, c: Cifras, rebote: number | null, cobertura: number | null): ReferenciaApi {
-  const equivalente = equivalenteDe(c.bruto, c.sin, rebote);
+function aReferencia(tipo: TipoReferencia, anio: number, etiqueta: string, periodo: string, c: Cifras, cobertura: number | null): ReferenciaApi {
   return {
     tipo,
     anio,
-    variante_defecto: c.nino && equivalente.sin_nino_mas_rebote !== null ? "sin_nino_mas_rebote" : "bruto",
+    variante_defecto: "corregido",
     etiqueta,
     periodo,
     tiendas: c.tiendas,
@@ -245,7 +318,7 @@ function aReferencia(tipo: TipoReferencia, anio: number, etiqueta: string, perio
     actual: c.motivo === "sin_venta" ? null : c.actual,
     pct_bruto: c.bruto,
     pct_sin_nino: c.sin,
-    equivalente,
+    equivalente: equivalenteDe(c.bruto, c.sin),
     fragil: c.fragil,
     extremo: c.extremo,
     tienda_mayor: c.mayor,
@@ -261,43 +334,32 @@ function motivoDeProyeccion(e: EntradaReferencias): MotivoNuloReferencia | null 
   return null;
 }
 
-/** Lo proyectado de `Y` por las filas base, mes a mes, bruto y sin Niño (para dibujar la curva de `Y`). */
-export function proyectadoDeFilas(filas: readonly FilaBase[], y: number, phi: Phi): { anio: number; meses: number[]; mesesSinNino: number[] } | null {
-  const conMeses = filas.filter((f) => f.meses_y !== null && f.meses_y.length === 12);
-  if (conMeses.length === 0) return null;
-  const meses = Array.from({ length: 12 }, () => 0);
-  const sin = Array.from({ length: 12 }, () => 0);
-  for (const f of conMeses) {
-    const f12 = phi.de(f.temporada, y);
-    (f.meses_y as readonly number[]).forEach((v, m) => {
-      meses[m] = (meses[m] as number) + v;
-      const fi = f12[m] as number;
-      sin[m] = (sin[m] as number) + (fi > 0 ? v / fi : v);
-    });
-  }
-  return { anio: y, meses, mesesSinNino: sin };
-}
-
-/** `Σ vigente_Y` de las filas y la misma suma con cada mes ÷ el φ de `Y` de su temporada (la fila escalada a su vigente). */
-function cierreDeFilas(filas: readonly FilaBase[], y: number, phi: Phi): { actual: number; actualSin: number | null } {
-  let actual = 0;
-  let actualSin: number | null = 0;
-  for (const f of filas) {
-    const v = f.vigente_y ?? 0;
-    actual += v;
-    const meses = f.meses_y;
-    if (actualSin === null) continue;
-    if (v === 0) continue;
-    const suma = meses ? meses.reduce((a, b) => a + b, 0) : 0;
-    if (!meses || meses.length !== 12 || !(suma > 0)) {
-      actualSin = null;
-      continue;
-    }
-    const f12 = phi.de(f.temporada, y);
-    const normalizada = meses.reduce((a, mes, m) => a + (f12[m] as number > 0 ? mes / (f12[m] as number) : mes), 0);
-    actualSin += normalizada * (v / suma);
-  }
-  return { actual, actualSin };
+/** «Cierre por curva» (D10, D11) a partir del cierre del GM sobre `C(Y)`. Sin cierre, o con un motivo de `null`, queda vacía con su motivo. */
+function referenciaCierreCurva(e: EntradaReferencias): ReferenciaApi {
+  const etiqueta = `Cierre ${e.y} por curva`;
+  const periodo = `${e.y} cerrado con la curva frente a ${e.y - 1} de las mismas tiendas`;
+  const c = e.cierre ?? null;
+  if (c === null) return vacia("cierre_curva", e.y, etiqueta, periodo, e.k === null ? "sin_venta" : "sin_curva");
+  if (c.motivo_nulo !== null || c.cierre === null || c.anterior === null) return vacia("cierre_curva", e.y, etiqueta, periodo, c.motivo_nulo ?? "sin_venta", c.tiendas);
+  const bruto = c.pct;
+  return {
+    tipo: "cierre_curva",
+    anio: e.y,
+    variante_defecto: "corregido",
+    etiqueta,
+    periodo,
+    tiendas: c.tiendas,
+    anterior: c.anterior,
+    actual: c.cierre,
+    pct_bruto: bruto,
+    pct_sin_nino: c.pct_corregido,
+    equivalente: equivalenteDe(bruto, c.pct_corregido),
+    fragil: c.tiendas < UMBRAL_FRAGIL_TIENDAS || c.anterior < UMBRAL_FRAGIL_UNIDADES,
+    extremo: bruto !== null && Math.abs(bruto) > UMBRAL_EXTREMO_PCT,
+    tienda_mayor: null,
+    cobertura_pct: null,
+    motivo_nulo: bruto === null ? "denominador_cero" : null,
+  };
 }
 
 /** Todas las referencias de un GM (o del Resto) con sus dos variantes. */
@@ -306,7 +368,11 @@ export function calcularReferencias(e: EntradaReferencias): ResultadoReferencias
   const valida = motivoProy === null && e.proyeccion !== null;
   const rebote = valida ? reboteDe(e.filas) : null;
   const base = valida ? baseSiguienteDe(e.filas) : null;
+  const baseCorregida = valida ? baseCorregidaDe(e.filas) : null;
   const k = e.k;
+
+  // Cierre por curva.
+  const cierreCurva = referenciaCierreCurva(e);
 
   // Acumulado.
   const cy = e.comparables(e.y);
@@ -318,43 +384,8 @@ export function calcularReferencias(e: EntradaReferencias): ResultadoReferencias
     const c = cifrasComparadas(e, e.y, k, cy);
     const anual = unidades(e.entradas, e.y - 1, { tiendas: cy });
     const cobertura = anual > 0 ? r2((c.anterior / anual) * 100) : null;
-    acumulado = aReferencia("acumulado", e.y, `Acumulado ${rangoTexto(k)} ${e.y}`, `${rangoTexto(k)} ${e.y} frente a ${rangoTexto(k)} ${e.y - 1}`, c, rebote, cobertura);
+    acumulado = aReferencia("acumulado", e.y, `Acumulado ${rangoTexto(k)} ${e.y}`, `${rangoTexto(k)} ${e.y} frente a ${rangoTexto(k)} ${e.y - 1}`, c, cobertura);
     unidadesAnterior = anual > 0 ? r2(anual) : null;
-  }
-
-  // Cierre proyectado.
-  let cierre: ReferenciaApi;
-  const etiquetaCierre = `Cierre proyectado ${e.y}`;
-  const periodoCierre = `${e.y} proyectado frente a ${e.y - 1}`;
-  if (motivoProy !== null || e.proyeccion === null) {
-    cierre = vacia("cierre_proyectado", e.y, etiquetaCierre, periodoCierre, motivoProy ?? "sin_referencia");
-  } else {
-    const mismas = e.proyeccion.mismas;
-    const o: OpcionesSuma = { tiendas: mismas };
-    const anteriorPorTienda = unidadesPorTienda(e.entradas, e.y - 1, o);
-    const conVenta = [...anteriorPorTienda.entries()].filter(([, u]) => u > 0);
-    const anterior = conVenta.reduce((a, [, u]) => a + u, 0);
-    const anteriorSin = unidades(e.entradas, e.y - 1, { ...o, phi: e.phi });
-    const { actual, actualSin } = cierreDeFilas(e.filas, e.y, e.phi);
-    const bruto = pct(actual, anterior);
-    let mayor: ReferenciaApi["tienda_mayor"] = null;
-    if (conVenta.length > 0 && anterior > 0) {
-      const [id, u] = conVenta.reduce((m, x) => (x[1] > m[1] || (x[1] === m[1] && x[0] < m[0]) ? x : m));
-      mayor = { codigo: e.tiendas.get(id) ?? id, aporte_pct: r2((u / anterior) * 100), pct_sin_ella: null };
-    }
-    const c: Cifras = {
-      tiendas: conVenta.length,
-      anterior: r2(anterior),
-      actual: r2(actual),
-      bruto,
-      sin: actualSin === null ? null : pct(actualSin, anteriorSin),
-      fragil: conVenta.length < UMBRAL_FRAGIL_TIENDAS || anterior < UMBRAL_FRAGIL_UNIDADES,
-      extremo: bruto !== null && Math.abs(bruto) > UMBRAL_EXTREMO_PCT,
-      mayor,
-      nino: hayNino(e.entradas, e.y, e.phi, o),
-      motivo: conVenta.length === 0 ? "sin_venta" : bruto === null ? "denominador_cero" : null,
-    };
-    cierre = aReferencia("cierre_proyectado", e.y, etiquetaCierre, periodoCierre, c, rebote, null);
   }
 
   // Años completos.
@@ -362,32 +393,38 @@ export function calcularReferencias(e: EntradaReferencias): ResultadoReferencias
     .sort((a, b) => b - a)
     .map((z) => {
       const c = cifrasComparadas(e, z, 12, e.comparables(z));
-      return aReferencia("anio_completo", z, `Año completo ${z}`, `${z} frente a ${z - 1}`, c, rebote, null);
+      return aReferencia("anio_completo", z, `Año completo ${z}`, `${z} frente a ${z - 1}`, c, null);
     });
 
   // Aplicado hoy.
   let aplicado: ReferenciaApi;
   const etiquetaAplicado = "Aplicado hoy";
   const periodoAplicado = `${e.y + 1} aplicado en la proyección frente a ${e.y} de las mismas tiendas`;
-  if (motivoProy !== null || e.proyeccion === null || e.pctAplicado === null || base === null) {
+  if (motivoProy !== null || e.proyeccion === null || e.pctAplicado === null || base === null || baseCorregida === null) {
     aplicado = vacia("aplicado_hoy", e.y, etiquetaAplicado, periodoAplicado, motivoProy ?? "sin_base");
   } else {
     const g = e.pctAplicado;
-    const sin = rebote === null ? null : r2(((1 + g / 100) / (1 + rebote / 100) - 1) * 100);
+    const sobre = e.sobreAplicado ?? "bruta";
+    const baseDelPct = sobre === "corregida" ? baseCorregida : base;
+    const total = baseDelPct * (1 + g / 100);
+    const real = sobre === "corregida" ? r2((total / base - 1) * 100) : r2(g);
+    const corregido = sobre === "corregida" ? r2(g) : baseCorregida > 0 ? r2((total / baseCorregida - 1) * 100) : null;
+    // Una bruta: el % sobre corregido que deja quieto el total de las filas que siguen al GM (el que precarga «Reaprobar»).
+    const reaprobar = sobre === "bruta" ? calcularReaprobar(e.filas, g) : null;
     aplicado = {
       tipo: "aplicado_hoy",
       anio: e.y,
-      variante_defecto: "bruto",
+      variante_defecto: "corregido",
       etiqueta: etiquetaAplicado,
       periodo: periodoAplicado,
       tiendas: e.proyeccion.mismas.size,
-      anterior: r2(base),
-      actual: r2(base * (1 + g / 100)),
-      pct_bruto: r2(g),
-      pct_sin_nino: sin,
-      equivalente: equivalenteDe(r2(g), sin, rebote),
+      anterior: r2(baseDelPct),
+      actual: r2(total),
+      pct_bruto: real,
+      pct_sin_nino: corregido,
+      equivalente: equivalenteDe(real, reaprobar ? reaprobar.pct_equivalente : corregido),
       fragil: base < UMBRAL_FRAGIL_UNIDADES,
-      extremo: Math.abs(g) > UMBRAL_EXTREMO_PCT,
+      extremo: Math.abs(real) > UMBRAL_EXTREMO_PCT,
       tienda_mayor: null,
       cobertura_pct: null,
       motivo_nulo: null,
@@ -395,13 +432,43 @@ export function calcularReferencias(e: EntradaReferencias): ResultadoReferencias
   }
 
   return {
+    cierre_curva: cierreCurva,
     acumulado,
-    cierre_proyectado: cierre,
     anios_completos: completos,
     aplicado_hoy: aplicado,
-    todas: [acumulado, cierre, ...completos, aplicado],
+    todas: [cierreCurva, acumulado, ...completos, aplicado],
     unidades_anterior: unidadesAnterior,
     base_siguiente: base,
+    base_corregida: baseCorregida,
+    correccion_nino_pct: rebote,
     rebote_nino_pct: rebote,
   };
+}
+
+// ─── Base por defecto y R-N ───
+
+/**
+ * La base que se precarga al aprobar (D11, M2): «Cierre por curva · corregido» o, con avance bajo, «Año completo `Y−1` · corregido». Si la
+ * elegida no se pudo calcular se cae a la siguiente que sí: año completo más reciente, acumulado, aplicado hoy. `null` si ninguna.
+ */
+export function baseDefectoDe(referencias: readonly ReferenciaApi[], avanceBajo: boolean): { tipo: TipoReferencia; anio: number | null; variante: "corregido" } | null {
+  const calculable = (r: ReferenciaApi) => r.motivo_nulo === null && r.equivalente.corregido !== null;
+  const cierre = referencias.find((r) => r.tipo === "cierre_curva" && calculable(r));
+  const completo = [...referencias].filter((r) => r.tipo === "anio_completo" && calculable(r)).sort((a, b) => b.anio - a.anio)[0];
+  const acumulado = referencias.find((r) => r.tipo === "acumulado" && calculable(r));
+  const aplicado = referencias.find((r) => r.tipo === "aplicado_hoy" && calculable(r));
+  const elegida = (avanceBajo ? [completo, cierre] : [cierre, completo]).concat([acumulado, aplicado]).find((r): r is ReferenciaApi => r !== undefined);
+  if (!elegida) return null;
+  return { tipo: elegida.tipo, anio: elegida.tipo === "anio_completo" ? elegida.anio : null, variante: "corregido" };
+}
+
+/**
+ * R-N con variante `bruto` (R12): ¿el periodo que mide la referencia toca un año Niño del GM? El cierre, el acumulado y «Aplicado hoy»
+ * miden `Y` (y `Y−1`, sin Niño o con el suyo, solo por comparar); un año completo `Z` mide `Z` y `Z−1`. Toca si algún mes con venta de esos
+ * años lleva un factor distinto de 1.
+ */
+export function periodoTocaNino(ref: Pick<ReferenciaApi, "tipo" | "anio">, entradas: readonly SerieGM[], phi: Phi, tiendas?: ReadonlySet<string>): boolean {
+  const anios = [ref.anio, ref.anio - 1];
+  const opciones = tiendas ? { tiendas } : {};
+  return anios.some((z) => hayNino(entradas, z, phi, opciones));
 }

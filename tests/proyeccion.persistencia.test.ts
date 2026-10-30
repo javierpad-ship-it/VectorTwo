@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { calcularProyeccion } from "@/lib/proyeccion/modelo";
 import {
+  aAniosApi,
   aFilaApi,
   aFilaModelo,
   aFilaPlana,
@@ -125,6 +126,39 @@ describe("del modelo a la base y de vuelta", () => {
     const r = aRegistro(a, null, 9, Y);
     expect(r.vigente).toBe(1900);
     expect(r.origen_meses?.[1]).toBe("proyectado");
+  });
+});
+
+describe("06e: base corregida del Niño en el registro de Y+1", () => {
+  const abrigo = `|${N.abrigo}|e-parka|${AM.rec}`;
+
+  it("base_normalizada guarda B' (con dos decimales) y sobrevive al viaje; pct_bruto es «sobre real» y pct_sobre_normalizada «sobre corregido»; el % efectivo lleva su sobre_base", () => {
+    const g = comoBase(abrigo);
+    const sig = g.proyeccion_fila_anios.find((a) => a.anio === Y + 1)!;
+    expect(Number(sig.base_normalizada)).toBeCloseTo(Number(sig.base_siguiente) / 0.66, 1);
+    const modelo = aFilaModelo(g, 9, Y);
+    const regSig = modelo.registros.find((r) => r.anio === Y + 1)!;
+    expect(regSig.base_normalizada).toBe(Number(sig.base_normalizada));
+    const efectivo = (sobre: "bruta" | "corregida") => () => ({ pct: 20, origen: "celda" as const, celda: "HOMBRE · CASUAL", gm: "g|m", version: 2, provisional: false, sobre_base: sobre });
+    const api = aAniosApi(modelo, Y, efectivo("corregida")).find((a) => a.anio === Y + 1)!;
+    expect(api.crecimiento_efectivo).toEqual({ pct: 20, origen: "celda", celda: "HOMBRE · CASUAL", version: 2, provisional: false, sobre_base: "corregida" });
+    const v = regSig.vigente as number;
+    expect(api.pct_bruto).toBeCloseTo((v / (regSig.base_siguiente as number) - 1) * 100, 8);
+    expect(api.pct_sobre_normalizada).toBeCloseTo((v / (regSig.base_normalizada as number) - 1) * 100, 8);
+    // Con Niño, lo que se escribe sobre corregido equivale a más sobre real.
+    expect(api.pct_bruto as number).toBeGreaterThan(api.pct_sobre_normalizada as number);
+    expect(aAniosApi(modelo, Y, efectivo("bruta")).find((a) => a.anio === Y + 1)?.crecimiento_efectivo?.sobre_base).toBe("bruta");
+    // Sin crecimientoDe no hay % efectivo, pero los dos % siguen.
+    expect(aAniosApi(modelo, Y).find((a) => a.anio === Y + 1)).toMatchObject({ crecimiento_efectivo: null });
+  });
+
+  it("sin B' (nulo) pct_sobre_normalizada es null; sin Niño (DENIM) B' = B y los dos % coinciden", () => {
+    const sinNino = aAniosApi(aFilaModelo(comoBase(clave("denim", AM.rec)), 9, Y), Y, () => ({ pct: 5, origen: "resto", celda: null, gm: null, sobre_base: "corregida" })).find((a) => a.anio === Y + 1)!;
+    expect(sinNino.base_normalizada).toBe(sinNino.base_siguiente);
+    expect(sinNino.pct_sobre_normalizada).toBeCloseTo(sinNino.pct_bruto as number, 8);
+    const modelo = aFilaModelo(comoBase(abrigo), 9, Y);
+    const sinBc = { ...modelo, registros: modelo.registros.map((r) => ({ ...r, base_normalizada: null })) };
+    expect(aAniosApi(sinBc, Y, () => ({ pct: 5, origen: "resto", celda: null, gm: null })).find((a) => a.anio === Y + 1)?.pct_sobre_normalizada).toBeNull();
   });
 });
 

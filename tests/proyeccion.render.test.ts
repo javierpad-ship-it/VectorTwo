@@ -10,7 +10,8 @@ import { ArchivarModal } from "../src/app/(app)/planificacion/proyeccion/archiva
 import { CerrarModal, GrupoLista } from "../src/app/(app)/planificacion/proyeccion/cerrar-modal";
 import { AlertaError } from "../src/app/(app)/planificacion/proyeccion/comunes";
 import { ComposicionBloques } from "../src/app/(app)/planificacion/proyeccion/composicion-bloques";
-import { TablaFactores } from "../src/app/(app)/planificacion/proyeccion/factores-tab";
+import { ListaFactores } from "../src/app/(app)/planificacion/proyeccion/factores-tab";
+import type { FactorVista } from "../src/app/(app)/planificacion/proyeccion/factores-vista";
 import { FiltrosVista } from "../src/app/(app)/planificacion/proyeccion/filtros-vista";
 import { FormularioProyeccion } from "../src/app/(app)/planificacion/proyeccion/formulario-proyeccion";
 import { GraficoBarras } from "../src/app/(app)/planificacion/proyeccion/grafico-barras";
@@ -30,6 +31,7 @@ import {
   detalleFila,
   filaRevision,
   factores,
+  factorInviernoConfirmado,
   filasDenim,
   INDICE,
   nodo,
@@ -193,6 +195,37 @@ describe("tabla de filas de la línea", () => {
     expect(salida).toContain("1 de 5");
   });
 
+  it("la columna «Crec.» se escribe sobre 2026 corregido y el pie de la línea dice el % sobre corregido y sobre real", () => {
+    expect(salida).toContain("% de 2027 sobre la venta de 2026 corregida del Niño de la fila.");
+    expect(salida).not.toContain("sin corregir por el Niño");
+    // Sin la base corregida de las filas, solo el % sobre real (con la base que trae `totales_por_anio`: 52 724 ÷ 48 000).
+    expect(salida).toContain("+9.8 % sobre 2026 real (52,724 ÷ 48,000)");
+    // Con ella (Σ B' = 51 000 de 48 000): +3.4 % corregido y +9.8 % real.
+    const filas = filasDenim().map((f, i) => ({ ...f, anios: f.anios.map((a) => (a.anio === 2027 ? { ...a, base_siguiente: [10000, 10000, 10000, 10000, 8000][i], base_normalizada: [10600, 10600, 10600, 10600, 8600][i] } : a)) }));
+    const conBase = respuestaLineas({ filas });
+    const t = html(createElement(TablaFilas, { filas: conBase.filas, lineas: conBase, secciones: [], anioEnCurso: Y, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    expect(t).toContain("+3.4 % sobre 2026 corregido (52,724 ÷ 51,000) · +9.8 % sobre 2026 real (52,724 ÷ 48,000)");
+    expect(t).toContain("+9.8 % real");
+    // Sin Niño (base corregida = real) el pie lo dice.
+    const sinNino = respuestaLineas({ filas: filasDenim().map((f, i) => ({ ...f, anios: f.anios.map((a) => (a.anio === 2027 ? { ...a, base_siguiente: [10000, 10000, 10000, 10000, 8000][i], base_normalizada: [10000, 10000, 10000, 10000, 8000][i] } : a)) })) });
+    const u = html(createElement(TablaFilas, { filas: sinNino.filas, lineas: sinNino, secciones: [], anioEnCurso: Y, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop }));
+    expect(u).toContain("sin corrección del Niño");
+    expect(u).toContain("real = corregido");
+  });
+
+  it("una fila cuyo % es de una versión de antes de 0.14.0 en un GM por reaprobar lleva el badge «reaprobar» y dice «bruto»", () => {
+    const efectivo = { pct: 15, origen: "celda" as const, celda: "HOMBRE · URBANO", version: 1, sobre_base: "bruta" as const };
+    const filas = filasDenim().map((f) => ({ ...f, anios: f.anios.map((a) => (a.anio === 2027 ? { ...a, crecimiento_efectivo: efectivo } : a)) }));
+    const d = respuestaLineas({ filas });
+    const props = { filas: d.filas, lineas: d, secciones: [], anioEnCurso: Y, bloqueada: false, ocupado: false, filaSeleccionada: null, onSeleccionar: noop, onDecidir: sinAsync, onCsv: noop };
+    const con = html(createElement(TablaFilas, { ...props, gmReaprobar: ["HOMBRE · URBANO"] }));
+    expect(con.match(/>reaprobar</g)).toHaveLength(5);
+    expect(con).toContain("15 % bruto · HOMBRE · URBANO v1");
+    // Otro GM por reaprobar, o ninguno: sin badge (el marcador sigue diciendo «bruto»).
+    expect(html(createElement(TablaFilas, { ...props, gmReaprobar: ["MUJER · RI"] }))).not.toContain(">reaprobar<");
+    expect(html(createElement(TablaFilas, props))).not.toContain(">reaprobar<");
+  });
+
   it("ofrece Ver meses y CSV, y una fila sin filas avisa", () => {
     expect(salida).toContain("Ver meses");
     expect(salida).toContain("CSV");
@@ -228,6 +261,50 @@ describe("bloque «Tu decisión»", () => {
     expect(s).toContain("Crecimiento (%)");
     expect(s).toContain("Base 19,424 × 1.05");
     expect(s).toContain("set 1.24, oct 1.24");
+  });
+
+  it("2027 con Niño: el % se escribe sobre 2026 corregido y el bloque dice la base real y corregida, y el equivalente sobre lo vendido", () => {
+    const r = registro(2027, {
+      crecimiento_pct: 8,
+      base_siguiente: 15300,
+      base_normalizada: 19125,
+      vigente: 20655,
+      pct_bruto: 35,
+      pct_sobre_normalizada: 8,
+      crecimiento_efectivo: { pct: 8, origen: "celda", celda: "HOMBRE · URBANO", version: 2, sobre_base: "corregida" },
+    });
+    const s = html(createElement(BloqueDecision, { ...base, anio: 2027, registro: r }));
+    expect(s).toContain("Crecimiento (%) sobre 2026 corregido");
+    expect(s).toContain("% de 2027 sobre la venta de 2026 corregida del Niño de esta fila. Vacío = el aprobado de HOMBRE · URBANO (8 %).");
+    expect(s).toContain("Crecimiento +8.0 % sobre 2026 corregido (HOMBRE · URBANO v2)");
+    expect(s).toContain("15,300 u real · 19,125 u corregida del Niño (+25.0 %)");
+    expect(s).toContain("+8.0 % sobre 2026 corregido (19,125) · +35.0 % sobre 2026 real (15,300)");
+    expect(s).toContain("2026 vendió de menos por el Niño");
+    // El % escrito (8) da 20,655 u, que son +35.0 % sobre lo vendido: el «pongo 8 y veo 35» ya viene explicado.
+    expect(s).toContain("= 20,655 u en 2027 (+35.0 % sobre 2026 real)");
+  });
+
+  it("2027 en verano con Niño: la base corregida baja y lo dice («2026 vendió de más por el Niño»)", () => {
+    const r = registro(2027, { crecimiento_pct: 8, base_siguiente: 12000, base_normalizada: 10000, vigente: 10800, pct_bruto: -10, pct_sobre_normalizada: 8 });
+    const s = html(createElement(BloqueDecision, { ...base, anio: 2027, registro: r }));
+    expect(s).toContain("2026 vendió de más por el Niño");
+    expect(s).toContain("= 10,800 u en 2027 (-10.0 % sobre 2026 real)");
+  });
+
+  it("2027 de una versión de antes de 0.14.0: se dice sobre el año real y avisa que así se aplica hasta reaprobar", () => {
+    const r = registro(2027, { base_siguiente: 15300, base_normalizada: 19125, vigente: 17595, pct_bruto: 15, pct_sobre_normalizada: -8, crecimiento_efectivo: { pct: 15, origen: "celda", celda: "HOMBRE · URBANO", version: 1, sobre_base: "bruta" } });
+    const s = html(createElement(BloqueDecision, { ...base, anio: 2027, registro: r }));
+    expect(s).toContain("Crecimiento +15.0 % sobre 2026 real (HOMBRE · URBANO v1, aprobado antes de 0.14.0)");
+    expect(s).toContain("Ojo: ese % se aprobó antes de 0.14.0 sobre 2026 real");
+  });
+
+  it("2027 sin Niño: no inventa una base corregida ni el sentido de la corrección, y sin % escrito no hay equivalente", () => {
+    const r = registro(2027, { base_siguiente: 19424, base_normalizada: 19424, vigente: 20395, pct_bruto: 5, pct_sobre_normalizada: 5 });
+    const s = html(createElement(BloqueDecision, { ...base, anio: 2027, registro: r }));
+    expect(s).toContain("(sin corrección del Niño)");
+    expect(s).not.toContain("vendió de más");
+    expect(s).not.toContain("vendió de menos");
+    expect(s).not.toContain("= 20,395 u en 2027");
   });
 
   it("decidida: ofrece volver a la propuesta; la propuesta alternativa se rotula «por avance saldrían»", () => {
@@ -414,28 +491,107 @@ describe("vista mensual", () => {
   });
 });
 
-describe("factores del Niño", () => {
-  it("año × temporada con el calculado, el aplicado, el origen y los avisos", () => {
-    const s = html(createElement(TablaFactores, { filas: factores(), soloLectura: false, ocupado: false, onGuardar: sinAsync }));
-    expect(s).toContain("0.63");
-    expect(s).toContain("0.66");
-    expect(s).toContain("1.24");
-    expect(s).toContain("Manual");
-    expect(s).toContain("Calculado");
-    expect(s).toContain("Sin factor");
-    expect(s).toContain("Parcial");
-    expect(s).toContain("Año objetivo");
-    expect(s).toContain("9 tiendas · 9 meses");
+describe("factores del Niño (06e §4.2)", () => {
+  const lista = (filas: readonly FactorVista[] = factores(), extra: Partial<Parameters<typeof ListaFactores>[0]> = {}) => html(createElement(ListaFactores, { filas, soloLectura: false, ocupado: false, onGuardar: sinAsync, ...extra }));
+  const s = lista();
+
+  it("una tarjeta por año atípico y temporada, con el volumen, el control y el calculado relativo", () => {
+    for (const t of ["Invierno 2023", "Invierno 2026", "Verano 2026", "Invierno 2027"]) expect(s).toContain(t);
+    for (const rotulo of ["Volumen", "Control (red)", "Calculado (relativo)", "Efectivo (el que se usa)"]) expect(s).toContain(rotulo);
+    expect(s).toContain("0.66"); // volumen de invierno 2026
+    expect(s).toContain("0.94"); // control
+    expect(s).toContain("0.70"); // calculado relativo
+    expect(s).toContain("0.63"); // 2023
     expect(s).toContain("ajustado por Javier");
   });
 
-  it("solo lectura quita los botones Guardar", () => {
-    const s = html(createElement(TablaFactores, { filas: factores(), soloLectura: true, ocupado: false, onGuardar: sinAsync }));
-    expect(s).not.toContain(">Guardar<");
+  it("los meses del periodo se dicen «9 de 12 del periodo» y la fila de verano con un mes del periodo no tiene calculado: «escríbelo tú»", () => {
+    expect(s).toContain("9 de 12 del periodo");
+    expect(s).toContain("1 de 4 del periodo");
+    expect(s).toContain("1 mes del periodo, escríbelo tú");
+    // Un año calculado antes de 0.14.0 sigue diciendo sus meses a la antigua.
+    expect(s).toContain("12 meses");
   });
 
-  it("sin años atípicos lo explica", () => {
-    expect(html(createElement(TablaFactores, { filas: [], soloLectura: false, ocupado: false, onGuardar: sinAsync }))).toContain("Todavía no hay años atípicos");
+  it("badges: parcial, fórmula anterior, por confirmar, sin factor y año objetivo", () => {
+    expect(s).toContain(">parcial<");
+    expect(s).toContain(">fórmula anterior<");
+    expect(s).toContain(">por confirmar<");
+    expect(s).toContain(">Sin factor<");
+    expect(s).toContain(">Año objetivo<");
+    // Solo 2023 trae la fórmula anterior.
+    expect(s.match(/>fórmula anterior</g)).toHaveLength(1);
+  });
+
+  it("si lo aplicado no es lo calculado, dice los dos: «tu valor 0.72 · calculado hoy 0.70»", () => {
+    expect(s).toContain("tu valor 0.72 · calculado hoy 0.70");
+    expect(lista([factorInviernoConfirmado()])).not.toContain("tu valor");
+  });
+
+  it("un factor parcial confirmado dice «confirmado el 29/10» (o «confirmado» sin la fecha) y no pide confirmar", () => {
+    const ok = lista([factorInviernoConfirmado()]);
+    expect(ok).toContain(">confirmado el 29/10<");
+    expect(ok).not.toContain(">por confirmar<");
+    const sinFecha = lista([{ ...factorInviernoConfirmado(), aplicado_at: null }]);
+    expect(sinFecha).toContain(">confirmado<");
+  });
+
+  it("confirmar es escribir el valor: la fila por confirmar ofrece «Confirmar» deshabilitado hasta que haya un valor, y no hay botón «usar el calculado»", () => {
+    // Invierno 2026 trae 0.72 escrito (con la huella vieja): el mismo valor, escrito otra vez, lo confirma.
+    expect(s).toContain(">Confirmar<");
+    expect(s).toContain("Parcial y sin confirmar: escribe el valor.");
+    expect(s).not.toMatch(/usar (este valor|el calculado)/i);
+    const sinValor = lista([{ ...factores()[1], ratio_aplicado: null, ratio_efectivo: 0.7, origen: "calculado" }]);
+    expect(sinValor).toMatch(/<button[^>]*disabled[^>]*>Guardar<\/button>/);
+    // Una fila al día solo guarda cambios.
+    const alDia = lista([factorInviernoConfirmado()]);
+    expect(alDia).toContain(">Guardar<");
+    expect(alDia).not.toContain(">Confirmar<");
+    expect(alDia).toMatch(/<button[^>]*disabled[^>]*>Guardar<\/button>/);
+  });
+
+  it("desfasado: badge «desfasado: sincroniza» y el aviso con el porqué", () => {
+    const f = { ...factores()[1], estado: "desfasado" as const, motivos_desfase: ["cargas", "meses"] as ("cargas" | "meses")[] };
+    const d = lista([f]);
+    expect(d).toContain(">desfasado: sincroniza<");
+    expect(d).toContain("Desfasado: se cargaron datos nuevos después de calcular y hay más meses publicados del periodo que cuando se calculó. Pulsa «Sincronizar» y revisa el valor.");
+  });
+
+  it("«Cómo crece el verano atípicamente»: los doce meses con los del periodo marcados y la línea de resumen con los dos excesos", () => {
+    expect(s).toContain("Cómo crece el verano atípicamente");
+    expect(s).toContain("Cómo crece el invierno atípicamente");
+    expect(s).toContain("Ratio ÷ red");
+    expect(s).toContain("Fondo marcado = mes del periodo del Niño con dato en los dos años.");
+    // Verano (ejemplo G): setiembre ×1.90, tendencia ene–ago ×1.20, red ×0.95 → ×1.58 sobre su tendencia y ×2.00 sobre la red; dato frágil.
+    expect(s).toContain("Setiembre: ×1.90 frente al año normal de referencia; su tendencia ene–ago ×1.20; la red ×0.95 → crece ×1.58 sobre su tendencia y ×2.00 sobre la red.");
+    expect(s).toContain("1 solo mes del periodo, y es el de inicio de temporada: dato frágil.");
+    // Tres decimales en la tabla; los meses del periodo resaltados.
+    expect(s).toContain("1.900");
+    expect(s).toContain("2.000");
+    expect(s.match(/<tr class="bg-marca-suave font-medium"/g)?.length).toBe(9 + 1); // invierno 2026 (9 meses) + setiembre de verano
+    // Invierno: sin «tendencia propia».
+    expect(s).toContain("Enero a setiembre: ×0.66 frente al año normal de referencia; la red ×0.94 → ×0.70 frente a la red (el factor relativo).");
+  });
+
+  it("con el año de referencia que entrega el servidor, la tabla y el resumen lo nombran (2025)", () => {
+    const f = { ...factores()[2], diagnostico: { ...factores()[2].diagnostico!, anio_ref: 2025 } };
+    const d = lista([f]);
+    expect(d).toContain(">2025<");
+    expect(d).toContain("Setiembre: ×1.90 frente a 2025;");
+  });
+
+  it("solo lectura quita Guardar, Confirmar y los campos; sin años atípicos lo explica", () => {
+    const l = lista(factores(), { soloLectura: true });
+    expect(l).not.toContain(">Guardar<");
+    expect(l).not.toContain(">Confirmar<");
+    expect((l.match(/<input[^>]*>/g) ?? []).every((i) => /\sdisabled/.test(i))).toBe(true);
+    expect(lista([])).toContain("Todavía no hay años atípicos");
+  });
+
+  it("es una lista de tarjetas que se acomoda a 390 px: sin tabla ancha, con los campos en filas que parten y la tabla del diagnóstico con su propio scroll", () => {
+    expect(s).not.toContain("<table class=\"w-full text-sm\">");
+    expect(s).toContain("flex flex-wrap items-end gap-3");
+    expect(s).toContain("overflow-x-auto");
   });
 });
 
@@ -484,6 +640,26 @@ describe("cabecera, antes de proyectar y composición de los bloques", () => {
     expect(s).toContain("2026-05");
     expect(s).toContain("T06 no vendió en enero de 2025.");
     expect(s).toContain("<details open");
+  });
+
+  it("antes de proyectar: los avisos del Niño (factor sin calcular, desfasado, sin confirmar, 2027 marcado) van con tono de alerta y su enlace", () => {
+    const avisos = [
+      { codigo: "factor_sin_calcular", mensaje: "Falta el factor del Niño de verano 2026: la base de 2027 de esa temporada no se corregirá y no podrás cerrar." },
+      { codigo: "factor_desfasado", mensaje: "El factor de invierno 2026 se calculó con datos de setiembre y hoy hay octubre." },
+      { codigo: "factor_sin_confirmar", mensaje: "El factor de invierno 2026 (0.70) es parcial y nadie lo confirmó con los datos de hoy." },
+      { codigo: "anio_siguiente_atipico", mensaje: "2027 está marcado como año del Niño: puedes calcular, pero no aprobar crecimientos de 2027 ni cerrar hasta quitar la marca o decidir cómo modelarlo." },
+      { codigo: "apertura_dudosa", mensaje: "T06 no vendió en enero de 2025." },
+    ];
+    const r = respuestaProyeccion({ prerrequisitos: { bloquea: [], avisa: avisos } });
+    const s = html(createElement(AntesDeProyectar, { datos: r.datos, prerrequisitos: r.prerrequisitos, abierta: true }));
+    for (const a of avisos) expect(s).toContain(a.mensaje);
+    expect(s.match(/>Ir a Factores del Niño</g)).toHaveLength(3);
+    expect(s).toContain('href="/planificacion/proyeccion?pestana=factores"');
+    expect(s).toContain("Curvas → Periodos atípicos");
+    // Los cuatro del Niño van en tono de alerta y el aviso corriente sigue en tono informativo.
+    expect(s.match(/border-alerta\/30/g)).toHaveLength(4);
+    expect(s.match(/border-marca\/30/g)).toHaveLength(1);
+    expect(s).toContain("5 avisos");
   });
 
   it("antes de proyectar sin bloqueos queda plegado y dice que nada bloquea", () => {
@@ -702,7 +878,8 @@ describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => 
   it("«Tu decisión» de Y+1 en una fila para revisión no repite la frase de Y: usa la base de Y × (1 + crecimiento bruto)", () => {
     const f = filaRevision();
     const s = html(createElement(BloqueDecision, { ...base, anio: 2027, registro: f.anios[1] }));
-    expect(s).toContain("la propuesta es la base de 2026 de las mismas tiendas × (1 + crecimiento bruto)");
+    expect(s).toContain("la propuesta es la base de 2026 de las mismas tiendas, corregida del Niño, × (1 + crecimiento)");
+    expect(s).not.toContain("crecimiento bruto");
     expect(s).not.toContain("normalizada por el Niño");
     expect(s).not.toContain("la propuesta es la demanda corregida por disponibilidad");
     expect(s).not.toContain("el avance normal (—)");

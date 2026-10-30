@@ -1,3 +1,4 @@
+import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import { describe, expect, it } from "vitest";
 import { aFilaListaApi, aTotalesApi, armarHuecosApi, calcularFlujo, type EntradaCalculoFlujo, type NombresFlujo } from "@/lib/flujo/modelo";
 import { totalesDeFilas } from "@/lib/flujo/servicio";
@@ -74,7 +75,7 @@ function construir(nFilas: number, nAgrupaciones: number, hasta: string) {
     horizonte: { desde: "2026-10", hasta },
     cubre: "en_curso",
     parametros: { imi_min: 4, imi_max: 8, meses_tarjeta: 6, extender_horizonte: true, umbral_conciliacion_u: 10, umbral_conciliacion_pct: 20 },
-    cerrada: { filas: cerrada, version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+    cerrada: { filas: cerrada, version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
     huella_flujo_hoy: "h",
     stock,
     compras: { compras: [], lineas: [], entregas: [], repartos: [], recepciones: [] },

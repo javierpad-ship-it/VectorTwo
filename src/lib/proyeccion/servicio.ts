@@ -3,15 +3,15 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { mesesFaltantes } from "@/lib/curvas/anios";
 import { aniosAtipicidad } from "@/lib/curvas/atipicos";
 import { calcularEfectoNino } from "@/lib/curvas/lectura";
-import type { TemporadaAgrupacion, VolumenAnioApi } from "@/lib/curvas/tipos-api";
+import type { TemporadaAgrupacion } from "@/lib/curvas/tipos-api";
 import { enTandas } from "@/lib/arbol/importar";
 import { leerVigentes } from "@/lib/crecimientos/consultas-vigentes";
-import { faltantesDeCierre, gmExigidos, matrizDeVigentes, restoEfectivo, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
+import { faltantesDeCierre, gmExigidos, matrizDeVigentes, restoEfectivo, type GmConNino, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
 import type { Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { aPeriodo } from "@/lib/ventas/periodo";
 import { bloquesDeAnio, clavesPertenencia, idsDe } from "./bloques";
 import { indiceMes } from "./calendario";
-import { calcularProyeccion } from "./calculo";
+import { calcularProyeccion, ninoPorGM } from "./calculo";
 import {
   actualizarRampaTienda,
   cambiarEstadoProyeccion,
@@ -50,7 +50,9 @@ import {
   cargarContextoCalculo,
   contarCurvasObsoletas,
   estadoActualDe,
+  estadosFactoresY,
   factoresPendientes,
+  leerHuellasComposicion,
   leerVentaTiendaMeses,
   type ContextoCalculo,
 } from "./contexto";
@@ -59,7 +61,9 @@ import {
   dudasDeRed,
   motivosDesactualizada,
   nivelesCambiados,
+  mesesAtipicosDeAnio,
   prerrequisitos,
+  temporadasConNinoEnAnio,
   type CrecimientosActuales,
   type DatosPrerrequisitos,
 } from "./desactualizado";
@@ -79,8 +83,10 @@ import {
 import {
   MENSAJE_CALCULO_EN_CURSO_PROYECCION,
   MENSAJE_CALCULO_EN_CURSO_SISTEMA,
+  bloqueosNinoDeCierre,
   calculoEnCurso,
   cargasIguales,
+  factorDePeriodo,
   motivoRechazoArchivarCerrada,
   motivoRechazoCerrar,
   motivoRechazoEdicion,
@@ -88,6 +94,7 @@ import {
   motivoRechazoTopeEnTrabajo,
   periodoADate,
   puedeEliminar,
+  type BloqueosNino,
   type SinAprobarCierre,
 } from "./reglas";
 import {
@@ -112,6 +119,7 @@ import type { CrearProyeccionCuerpo, EditarProyeccionCuerpo } from "./esquemas";
 import { tendenciaUltimoAnioPct } from "./tendencia";
 import { filtrarUniverso } from "./universo";
 import {
+  FORMULA_FACTOR_RELATIVO,
   PARALELO,
   TANDA_GML,
   MAX_EDICIONES_PARAMETROS,
@@ -119,6 +127,7 @@ import {
   claveFila,
   type AvisoFila,
   type BloquesApi,
+  type CodigoCierreBloqueadoNino,
   type EdicionParametros,
   type FactorApi,
   type FilaCerradaApi,
@@ -146,15 +155,68 @@ const db = (): Db => supabaseAdmin();
 // ─── Estado inicial: GET /api/proyeccion ───
 
 /**
+ * `0.14.0` (06e R15, R16): los GM (clave `genero_id|mundo_id`) y el Resto (`resto`) con Niño material de una proyección, con su nombre y `Σ B' ÷ Σ B − 1` en %. Sale del `resumen`
+ * del cálculo (`gm_con_nino` y `gm_correccion_nino_pct`) o, si quien llama ya leyó las filas (cerrar), de las filas de hoy (`ninoVivo`: las decisiones sobre `Y` mueven `B`).
+ */
+export function gmConNinoDe(
+  resumen: Partial<ResumenProyeccion> | null,
+  ctx: Pick<ContextoCalculo, "nodos">,
+  ninoVivo?: Pick<ReturnType<typeof ninoPorGM>, "gm_con_nino" | "gm_correccion_nino_pct">
+): GmConNino {
+  const claves = ninoVivo?.gm_con_nino ?? resumen?.gm_con_nino ?? [];
+  const pcts = ninoVivo?.gm_correccion_nino_pct ?? resumen?.gm_correccion_nino_pct ?? {};
+  const nombres = new Map(ctx.nodos.map((n) => [claveGM(n.genero_id, n.mundo_id), `${n.genero} · ${n.mundo}`]));
+  return new Map(claves.map((clave) => [clave, { nombre: clave === "resto" ? "Resto" : (nombres.get(clave) ?? clave), correccion_pct: pcts[clave] ?? 0 }]));
+}
+
+/**
+ * `0.14.0`: lo que hay que decidir de las filas de hoy para saber qué GM tienen Niño material (`ninoPorGM`): `B` y `B'` de `Y+1` y lo vendido de `Y` de cada
+ * fila base activa (columnas ligeras). `claveDe`: el GM de un nodo si su género es de la matriz y `resto` si no.
+ */
+export function ninoDeFilas(
+  filas: readonly FilaConAnios[],
+  anioEnCurso: number,
+  ctx: Pick<ContextoCalculo, "nodos" | "generosMatriz">
+): ReturnType<typeof ninoPorGM> {
+  const nodos = new Map(ctx.nodos.map((n) => [n.gml_id, n]));
+  const detallados = new Set(ctx.generosMatriz);
+  return ninoPorGM(
+    filas
+      .filter((f) => f.tienda_id === null && f.activo)
+      .flatMap((f) => {
+        const sig = f.proyeccion_fila_anios.find((a) => a.anio === anioEnCurso + 1 && a.activo);
+        if (!sig) return [];
+        const y = f.proyeccion_fila_anios.find((a) => a.anio === anioEnCurso && a.activo);
+        return [
+          {
+            gml_id: f.gml_id,
+            base_siguiente: sig.base_siguiente === null || sig.base_siguiente === undefined ? null : Number(sig.base_siguiente),
+            base_normalizada: sig.base_normalizada === null || sig.base_normalizada === undefined ? null : Number(sig.base_normalizada),
+            vendido: y?.vendido ?? 0,
+          },
+        ];
+      }),
+    (gml) => {
+      const n = nodos.get(gml);
+      return n ? (detallados.has(n.genero_id) ? claveGM(n.genero_id, n.mundo_id) : "resto") : null;
+    }
+  );
+}
+
+/**
  * Lo que hoy valen los crecimientos aprobados para una proyección en trabajo (06d §3.1): la huella de lo que se aplicaría ahora (matriz
  * de los GM vigentes del año siguiente y Resto efectivo, con sus ids), la matriz y el Resto, y lo que falta aprobar para cerrar (I4: los GM de
  * HOMBRE o MUJER con filas base —`resumen.gm_gml`— sin versión vigente, y el Resto si hay filas de otros géneros). `vigentes` puede traer
  * varios años: solo cuentan los de `Y+1`. Puro.
+ *
+ * `0.14.0` (06e R16): además, `reaprobar`: las vigentes `bruta` de GM (y del Resto) con Niño material (`resumen.gm_con_nino`, o `ninoVivo` si se pasa). Sus claves
+ * van con punto (`genero_id.mundo_id`), como las de `faltan`.
  */
 export function crecimientosDeHoy(
   p: Pick<ProyeccionDb, "anio_en_curso" | "parametros" | "resumen">,
   ctx: Pick<ContextoCalculo, "generosMatriz" | "nodos">,
-  vigentes: readonly VigenteCrecimiento[]
+  vigentes: readonly VigenteCrecimiento[],
+  ninoVivo?: Pick<ReturnType<typeof ninoPorGM>, "gm_con_nino" | "gm_correccion_nino_pct">
 ): { actuales: CrecimientosActuales; sinAprobar: SinAprobarCierre | null } {
   const anio = p.anio_en_curso + 1;
   const parametros = parametrosDe(p.parametros);
@@ -165,17 +227,53 @@ export function crecimientosDeHoy(
     huella: huellaDeMatriz(matriz, resto.pct),
     gm_por_nodo: new Map(ctx.nodos.map((n) => [n.gml_id, claveGM(n.genero_id, n.mundo_id)])),
   };
-  const faltan = faltantesDeCierre(gmExigidos(resumen?.gm_gml ?? {}, ctx.generosMatriz), vigentes, anio);
-  if (faltan.gm.length === 0 && !faltan.resto_provisional) return { actuales, sinAprobar: null };
+  const faltan = faltantesDeCierre(gmExigidos(resumen?.gm_gml ?? {}, ctx.generosMatriz), vigentes, anio, gmConNinoDe(resumen, ctx, ninoVivo));
+  if (faltan.gm.length === 0 && !faltan.resto_provisional && faltan.reaprobar.length === 0) return { actuales, sinAprobar: null };
   const nombres = new Map(ctx.nodos.map((n) => [claveGM(n.genero_id, n.mundo_id), `${n.genero} · ${n.mundo}`]));
   return {
     actuales,
-    sinAprobar: { anio, faltan: faltan.gm.map((clave) => ({ clave: clave.replace("|", "."), nombre: nombres.get(clave) ?? clave })), resto_provisional: faltan.resto_provisional },
+    sinAprobar: {
+      anio,
+      faltan: faltan.gm.map((clave) => ({ clave: clave.replace("|", "."), nombre: nombres.get(clave) ?? clave })),
+      resto_provisional: faltan.resto_provisional,
+      reaprobar: faltan.reaprobar.map((r) => ({ ...r, clave: r.clave.replace("|", ".") })),
+    },
   };
 }
 
 /** `ProyeccionApi.crecimientos_sin_aprobar`: lo que falta aprobar, sin el año (que viaja en el mensaje); `null` si nada falta. */
-const sinAprobarApi = (s: SinAprobarCierre | null): CrecimientosSinAprobarApi | null => (s ? { faltan: s.faltan, resto_provisional: s.resto_provisional } : null);
+const sinAprobarApi = (s: SinAprobarCierre | null): CrecimientosSinAprobarApi | null =>
+  s ? { faltan: s.faltan, resto_provisional: s.resto_provisional, ...(s.reaprobar !== undefined ? { reaprobar: s.reaprobar } : {}) } : null;
+
+/**
+ * `0.14.0` (06e D5, D7, R16): lo que impide cerrar por el Niño, evaluado con lo que se sabe hoy (`ctx`) y los motivos de desactualización ya calculados. Ninguno se salta
+ * con `forzar`. El ámbito de los factores de `Y` son las temporadas con meses atípicos en `Y` que entran en la composición de alguna fila base (`resumen.temporadas_filas`;
+ * sin esa foto, todas las que tienen meses atípicos). Puro.
+ */
+export function bloqueosNinoDe(p: Pick<ProyeccionDb, "anio_en_curso" | "resumen">, ctx: ContextoCalculo, desactualizada: readonly Motivo[]): BloqueosNino {
+  const Y = p.anio_en_curso;
+  const resumen = p.resumen as unknown as Partial<ResumenProyeccion> | null;
+  const activas = new Set(ctx.agrupaciones.map((a) => a.temporada as string));
+  // D7: 2027 no es Niño. Los meses atípicos de `Y+1` de las temporadas con `φ` (con alguna agrupación activa).
+  const siguiente = temporadasConNinoEnAnio(Y + 1, ctx.periodosClase, ctx.publicados).filter((t) => activas.has(t));
+  const enFilas = resumen?.temporadas_filas ? new Set(resumen.temporadas_filas) : null;
+  const estados = estadosFactoresY(ctx, Y).filter((e) => enFilas === null || enFilas.has(e.temporada));
+  const factoresCambiados = desactualizada.find((m) => m.codigo === "factores_cambiados")?.detalle ?? [];
+  return {
+    anioSiguienteAtipico: siguiente.length > 0 ? { meses: mesesAtipicosDeAnio(Y + 1, siguiente, ctx.periodosClase) } : null,
+    factorFaltante: estados.filter((e) => e.estado === "faltante").map((e) => ({ anio: e.anio, temporada: e.temporada })),
+    factorDesfasado: estados.filter((e) => e.estado === "desfasado").map((e) => ({ anio: e.anio, temporada: e.temporada, motivos: e.motivos_desfase })),
+    factorSinConfirmar: estados.filter((e) => e.estado === "sin_confirmar").map((e) => ({ anio: e.anio, temporada: e.temporada, efectivo: e.efectivo })),
+    factoresCambiadosY: factoresCambiados.filter((d) => d.endsWith(` ${Y}`)),
+    temporadaCambiada: desactualizada.some((m) => m.codigo === "temporada_cambiada"),
+  };
+}
+
+/** `ProyeccionApi.cierre_bloqueado_por`: la lista de lo que impide cerrar por el Niño (vacía = `null`). */
+export function cierreBloqueadoPorDe(b: BloqueosNino, anioEnCurso: number): { codigo: CodigoCierreBloqueadoNino; mensaje: string }[] | null {
+  const lista = bloqueosNinoDeCierre(b, anioEnCurso).map((x) => ({ codigo: x.codigo as CodigoCierreBloqueadoNino, mensaje: x.mensaje }));
+  return lista.length > 0 ? lista : null;
+}
 
 /** Los vigentes del global de los años que se pidan, o `respuesta` si la lectura falla. */
 async function vigentesDe(d: Db, anios: readonly number[]): Promise<Salida<VigenteCrecimiento[]>> {
@@ -219,12 +317,18 @@ export async function desactualizadaDe(d: Db, p: ProyeccionDb, ctx: ContextoCalc
         recalculo_pendiente: parametros.recalculo_pendiente,
         huella_flujo: p.huella_flujo,
         resumen: resumen
-          ? { curvas_usadas: resumen.curvas_usadas ?? [], version_metodo: resumen.version_metodo, huella_crecimientos: resumen.huella_crecimientos, gm_gml: resumen.gm_gml }
+          ? {
+              curvas_usadas: resumen.curvas_usadas ?? [],
+              version_metodo: resumen.version_metodo,
+              huella_crecimientos: resumen.huella_crecimientos,
+              gm_gml: resumen.gm_gml,
+              temporada_equivalencias: resumen.temporada_equivalencias,
+            }
           : null,
         parametros: { factores_usados: parametros.factores_usados, bloques: parametros.bloques },
       },
       // 0.12.1: la huella de lo que aplicaría hoy el global (los GM aprobados vigentes y el Resto efectivo, con sus ids) y el GM vigente de cada nodo.
-      estadoActualDe(ctx, nivelesCambiados(niveles, actuales), crecimientosDeHoy(p, ctx, vigentes).actuales)
+      estadoActualDe(ctx, nivelesCambiados(niveles, actuales), crecimientosDeHoy(p, ctx, vigentes).actuales, p.anio_en_curso)
     )
   );
 }
@@ -249,6 +353,7 @@ export async function leerEstadoInicial(): Promise<Salida<RespuestaProyeccionApi
   const sinCurva = ctx.agrupaciones.filter((a) => !ctx.vigentes.some((v) => v.agrupacion_id === a.id)).map((a) => ({ id: a.id, nombre: a.nombre }));
   const conVenta = new Set(ventaTienda.data.filter((v) => v.unidades > 0).map((v) => v.tienda_id));
   const pend = factoresPendientes(ctx, anio);
+  const estadosY = estadosFactoresY(ctx, anio);
   const dudas = hasta ? dudasDeRed(ctx.tiendas, ventaTienda.data, anio, hasta, ctx.publicados) : [];
   // 0.12.1: los crecimientos aprobados, UNA lectura para todos los años que hacen falta (los de las proyecciones en trabajo y el del año en curso).
   const enTrabajo = lista.data.filter((p) => p.estado === "en_trabajo");
@@ -266,6 +371,8 @@ export async function leerEstadoInicial(): Promise<Salida<RespuestaProyeccionApi
     agrupacionesSinCurva: sinCurva,
     curvasObsoletas: obsoletas.data,
     factoresFaltantes: pend.faltantes,
+    factoresDesfasados: estadosY.filter((e) => e.estado === "desfasado").map((e) => ({ anio: e.anio, temporada: e.temporada })),
+    factoresSinConfirmar: estadosY.filter((e) => e.estado === "sin_confirmar").map((e) => ({ anio: e.anio, temporada: e.temporada, efectivo: e.efectivo })),
     anioSiguienteAtipico: pend.siguienteAtipico,
     crecimientosAprobados: {
       anio: anio + 1,
@@ -281,7 +388,16 @@ export async function leerEstadoInicial(): Promise<Salida<RespuestaProyeccionApi
   for (const p of lista.data) {
     const des = await desactualizadaDe(d, p, ctx, { vigentes: vigentesTodos });
     if (des.respuesta) return falla(des.respuesta);
-    proyecciones.push(aProyeccionApi(p, des.data, ahora, p.estado === "en_trabajo" ? sinAprobarApi(crecimientosDeHoy(p, ctx, vigentesTodos).sinAprobar) : undefined));
+    const enTrabajoP = p.estado === "en_trabajo";
+    proyecciones.push(
+      aProyeccionApi(
+        p,
+        des.data,
+        ahora,
+        enTrabajoP ? sinAprobarApi(crecimientosDeHoy(p, ctx, vigentesTodos).sinAprobar) : undefined,
+        enTrabajoP ? cierreBloqueadoPorDe(bloqueosNinoDe(p, ctx, des.data), p.anio_en_curso) : undefined
+      )
+    );
   }
   const factores = await factoresConPendientes(d, ctx, anio);
   if (factores.respuesta) return falla(factores.respuesta);
@@ -324,7 +440,16 @@ export async function leerProyeccion(id: string): Promise<Salida<ProyeccionApi>>
   if (v.respuesta) return falla(v.respuesta);
   const des = await desactualizadaDe(d, p.data, ctxR.data, { leerNiveles: true, vigentes: v.data });
   if (des.respuesta) return falla(des.respuesta);
-  return listo(aProyeccionApi(p.data, des.data, sello(), p.data.estado === "en_trabajo" ? sinAprobarApi(crecimientosDeHoy(p.data, ctxR.data, v.data).sinAprobar) : undefined));
+  const enTrabajo = p.data.estado === "en_trabajo";
+  return listo(
+    aProyeccionApi(
+      p.data,
+      des.data,
+      sello(),
+      enTrabajo ? sinAprobarApi(crecimientosDeHoy(p.data, ctxR.data, v.data).sinAprobar) : undefined,
+      enTrabajo ? cierreBloqueadoPorDe(bloqueosNinoDe(p.data, ctxR.data, des.data), p.data.anio_en_curso) : undefined
+    )
+  );
 }
 
 /** Prerrequisitos que bloquean el cálculo (lo que `crear` y `calcular` comprueban antes de leer venta). */
@@ -762,14 +887,26 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   for (const [clave, pct] of matriz.celdas) {
     const [genero_id = "", mundo_id = ""] = clave.split("|");
     const id = matriz.ids.get(clave) ?? null;
-    foto.push({ proyeccion_id: proy.id, genero_id, mundo_id, pct, crecimiento_id: id, version: matriz.versiones.get(clave) ?? null, nota: null, perfil_id: null, usuario_nombre: id ? (porId.get(id)?.usuario_nombre ?? null) : null });
+    // 06e (R27): `sobre_base` va SIEMPRE explícito: la foto dice cómo se aplicó cada GM (`bruta` = versión de antes de 0.14.0).
+    foto.push({
+      proyeccion_id: proy.id,
+      genero_id,
+      mundo_id,
+      pct,
+      sobre_base: matriz.sobre?.get(clave) ?? "bruta",
+      crecimiento_id: id,
+      version: matriz.versiones.get(clave) ?? null,
+      nota: null,
+      perfil_id: null,
+      usuario_nombre: id ? (porId.get(id)?.usuario_nombre ?? null) : null,
+    });
   }
   const escrita = await escribirFotoCrecimientos(d, proy.id, foto);
   if (escrita.error) return fallaDb(escrita.error, "proyección: guardar la foto de los crecimientos");
 
   const factoresUsados: ParametrosProyeccion["factores_usados"] = ctx.factoresDb
     .map((f) => aFactorApi(f, Y + 1))
-    .map((f) => ({ anio: f.anio, temporada: f.temporada, ratio: f.ratio_efectivo, origen: f.origen }));
+    .map((f, i) => ({ anio: f.anio, temporada: f.temporada, ratio: f.ratio_efectivo, origen: f.origen, formula: f.formula ?? null, huella_cargas: ctx.factoresDb[i].huella_cargas ?? null }));
   // `crecimiento_pct_defecto` queda tal cual (el Resto provisional nunca se sobrescribe con el aprobado); el Resto que se aplicó va en `crecimiento_resto_usado`.
   const nuevosParametros: ParametrosProyeccion = { ...parametros, factores_usados: factoresUsados, bloques: salida.bloques, crecimiento_resto_usado: resto };
   delete nuevosParametros.recalculo_pendiente;
@@ -788,7 +925,9 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   if (!upd.data) return cambioDuranteCalculo();
   const des = await desactualizadaDe(d, upd.data, ctx, { vigentes: vigentesGlobal });
   if (des.respuesta) return falla(des.respuesta);
-  return listo(aProyeccionApi(upd.data, des.data, sello(), sinAprobarApi(crecimientosDeHoy(upd.data, ctx, vigentesGlobal).sinAprobar)));
+  return listo(
+    aProyeccionApi(upd.data, des.data, sello(), sinAprobarApi(crecimientosDeHoy(upd.data, ctx, vigentesGlobal).sinAprobar), cierreBloqueadoPorDe(bloqueosNinoDe(upd.data, ctx, des.data), upd.data.anio_en_curso))
+  );
 }
 
 function cambioDuranteCalculo(): Salida<never> {
@@ -866,13 +1005,14 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
   if (vigentesR.respuesta) return falla(vigentesR.respuesta);
   const des = await desactualizadaDe(d, p, ctx, { vigentes: vigentesR.data });
   if (des.respuesta) return falla(des.respuesta);
-  const crecimientosHoy = crecimientosDeHoy(p, ctx, vigentesR.data);
 
   const filas = await leerFilasConAnios(d, id, { columnas: "ligeras", tiendaId: null, soloActivas: true });
   if (filas.error) return fallaDb(filas.error, "proyección: leer filas");
   const tiendas = await leerTiendasProyeccion(d, id);
   if (tiendas.error) return fallaDb(tiendas.error, "proyección: leer tiendas");
   const parametros = parametrosDe(p.parametros);
+  // 06e (R15, R16): qué GM tienen Niño material HOY (las decisiones sobre `Y` mueven `B`): con las filas que se acaban de leer, no con la foto del cálculo.
+  const crecimientosHoy = crecimientosDeHoy(p, ctx, vigentesR.data, p.estado === "en_trabajo" ? ninoDeFilas(filas.data, p.anio_en_curso, ctx) : undefined);
 
   const resultado = motivoRechazoCerrar({
     estado: p.estado === "cerrada" ? "cerrada" : p.estado === "archivada" ? "archivada" : "en_trabajo",
@@ -892,8 +1032,10 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     metodoViejo: !esMetodoVigente(p.resumen),
     // 0.10.8 (07c): como `metodoViejo`, no se puede saltar con `forzar`.
     crecimientosCambiados: des.data.some((m) => m.codigo === "crecimientos_cambiados"),
-    // 0.12.1 (decisión de Javier): GM de HOMBRE o MUJER sin aprobar, o el Resto provisional: bloquea SIN excepción, tampoco con `forzar`.
+    // 0.12.1 (decisión de Javier): GM de HOMBRE o MUJER sin aprobar, o el Resto provisional: bloquea SIN excepción, tampoco con `forzar`. 0.14.0: también las `bruta` con Niño (`reaprobar`).
     crecimientosSinAprobar: crecimientosHoy.sinAprobar,
+    // 0.14.0 (06e D5, D7, R16): 2027 marcado como Niño, factor de `Y` faltante, desfasado o sin confirmar, factor de `Y` o temporada cambiados: tampoco con `forzar`.
+    bloqueosNino: bloqueosNinoDe(p, ctx, des.data),
   });
   if (!resultado.ok) {
     let filasLegibles: Record<string, unknown>[] | undefined;
@@ -921,7 +1063,7 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
         total_filas_sin_decidir: resultado.total_filas_sin_decidir,
         total_filas_para_revision: resultado.total_filas_para_revision,
         tiendas_sin_decidir: resultado.tiendas_sin_decidir,
-        detalle: resultado.crecimientos_sin_aprobar,
+        detalle: resultado.crecimientos_sin_aprobar ?? resultado.detalle,
         desactualizada: des.data,
       })
     );
@@ -999,7 +1141,8 @@ async function pendientesDeCierre(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, 
   if (tiendas.error) return { respuesta: fallaDb(tiendas.error, "proyección: releer las tiendas").respuesta };
   const vigentes = await vigentesDe(d, [p.anio_en_curso + 1]);
   if (vigentes.respuesta) return { respuesta: vigentes.respuesta };
-  const hoy = crecimientosDeHoy(p, ctx, vigentes.data);
+  // Se vuelve a medir el Niño con las filas de ahora: un `reaprobar` que apareció justo antes del cierre también lo deshace.
+  const hoy = crecimientosDeHoy(p, ctx, vigentes.data, ninoDeFilas(filas.data, p.anio_en_curso, ctx));
   const r = motivoRechazoCerrar({
     estado: "en_trabajo",
     calculandoDesde: null,
@@ -1027,7 +1170,7 @@ async function pendientesDeCierre(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, 
         total_filas_sin_decidir: r.total_filas_sin_decidir,
         total_filas_para_revision: r.total_filas_para_revision,
         tiendas_sin_decidir: r.tiendas_sin_decidir,
-        detalle: r.crecimientos_sin_aprobar,
+        detalle: r.crecimientos_sin_aprobar ?? r.detalle,
       }
     ),
   };
@@ -1064,7 +1207,13 @@ function aniosAtipicosPorTemporada(ctx: ContextoCalculo): Set<string> {
 async function factoresConPendientes(d: Db, ctx: ContextoCalculo, anioEnCurso: number): Promise<Salida<FactorApi[]>> {
   const filas = ctx.factoresDb;
   const salida = new Map<string, FactorApi>();
-  for (const f of filas) salida.set(`${f.anio}#${f.temporada}`, aFactorApi(f, anioEnCurso + 1));
+  // 06e (B2): el estado de los factores de `Y` (`ok`, `faltante`, `desfasado`, `sin_confirmar`) con sus motivos de desfase; los de otros años no lo traen.
+  const estados = new Map(estadosFactoresY(ctx, anioEnCurso).map((e) => [e.temporada as string, e]));
+  const estadoDe = (anio: number, temporada: string) => {
+    const e = anio === anioEnCurso ? estados.get(temporada) : undefined;
+    return e ? { estado: e.estado, motivos_desfase: e.motivos_desfase } : undefined;
+  };
+  for (const f of filas) salida.set(`${f.anio}#${f.temporada}`, aFactorApi(f, anioEnCurso + 1, estadoDe(f.anio, f.temporada)));
   // Los años atípicos de M6 que aún no tienen fila aparecen vacíos, para que el planner los vea pendientes (incluye el año siguiente).
   for (const temporada of ["invierno", "verano"] as const) {
     const { anios } = aniosAtipicidad({ agrupacion: { temporada }, periodos: ctx.periodosClase, mesesPublicados: ctx.publicados });
@@ -1072,7 +1221,7 @@ async function factoresConPendientes(d: Db, ctx: ContextoCalculo, anioEnCurso: n
       if (a.clase !== "atipico" || salida.has(`${a.anio}#${temporada}`)) continue;
       salida.set(
         `${a.anio}#${temporada}`,
-        aFactorApi({ anio: a.anio, temporada, ratio_calculado: null, ratio_aplicado: null, parcial: !a.completo, tiendas_comunes: null, meses_comparados: null, calculado_at: null, nota: null }, anioEnCurso + 1)
+        aFactorApi({ anio: a.anio, temporada, ratio_calculado: null, ratio_aplicado: null, parcial: !a.completo, tiendas_comunes: null, meses_comparados: null, calculado_at: null, nota: null }, anioEnCurso + 1, estadoDe(a.anio, temporada))
       );
     }
   }
@@ -1114,6 +1263,9 @@ export async function guardarFactores(
       anio: f.anio,
       temporada: f.temporada,
       ratio_aplicado: f.ratio_aplicado,
+      // 06e (B2): escribir un valor lo CONFIRMA contra el cálculo que se tenía delante (la `huella_cargas` de la fila en ese momento; el mismo valor que el calculado también
+      // confirma); limpiarlo borra la confirmación. Sin cálculo previo (fila nueva o nunca sincronizada) no hay contra qué confirmar: queda `null`.
+      aplicado_huella: f.ratio_aplicado === null ? null : (previa?.huella_cargas ?? null),
       nota: f.nota === undefined ? (previa?.nota ?? null) : f.nota,
       perfil_id: actor.id,
       usuario_nombre: actor.nombre,
@@ -1126,8 +1278,11 @@ export async function guardarFactores(
 
 /**
  * `POST factores/sincronizar` (no es un `GET` con efectos). Calcula a demanda, con UNA lectura de venta (la lógica de
- * `/api/periodos-atipicos/anios?con_volumen=1`), el factor de cada año atípico por temporada y guarda `ratio_calculado`,
- * `huella_cargas`, `calculado_at` y `parcial`. No toca `ratio_aplicado` ni `nota`.
+ * `/api/periodos-atipicos/anios?con_volumen=1`), el factor de cada año atípico por temporada con la fórmula RELATIVA de 06e §5.2 (`ρ_P ÷ κ_P`: la caída o subida de la
+ * temporada en los meses del periodo dividida por la de la red de todo el año en los mismos meses y tiendas, del bloque `periodo` de `efectoAtipicoCorrida`) y guarda
+ * `ratio_calculado` (`null` con menos de `MIN_MESES_FACTOR` meses del periodo con dato: lo escribe el planner), `formula`, `ratio_volumen`, `ratio_control`,
+ * `meses_comparados` (= `|P|`), `huella_cargas`, `huella_composicion`, `diagnostico`, `tiendas_comunes`, `parcial` y `calculado_at`. No toca `ratio_aplicado`,
+ * `aplicado_huella` ni `nota` (R24).
  */
 export async function sincronizarFactores(actor: Actor): Promise<Salida<FactorApi[]>> {
   const d = db();
@@ -1136,47 +1291,34 @@ export async function sincronizarFactores(actor: Actor): Promise<Salida<FactorAp
   const c = calculo.data;
   if (!c) return fallaMensaje("No se pudo calcular el efecto del Niño.", 500);
   if (c.salida === null) return fallaMensaje("No hay meses publicados y cerrados: carga la venta en Venta y stock.", 409, "sin_datos");
+  const composicion = await leerHuellasComposicion(d);
+  if (composicion.respuesta) return falla(composicion.respuesta);
   const filasEfecto = c.salida.efecto_atipico.por_temporada;
   const ahora = sello();
   const salida: TablesInsert<"factores_volumen_atipico">[] = [];
   for (const temporada of ["invierno", "verano"] as TemporadaAgrupacion[]) {
-    const volumenDeAnio = (anio: number): { ratio_volumen: number | null; volumen: VolumenAnioApi } | null => {
-      const fila = filasEfecto.find((f) => f.anio === anio && f.temporada === temporada);
-      if (!fila) return null;
-      return {
-        ratio_volumen: fila.ratio_volumen,
-        volumen: {
-          nivel: "temporada",
-          temporada,
-          ratio_control: fila.ratio_control,
-          ratio_relativo: fila.ratio_relativo,
-          crecimiento_normal: fila.crecimiento_normal,
-          anio_referencia: fila.anio_referencia,
-          tiendas_comunes: fila.tiendas_comunes,
-          meses_comparados: fila.meses_comparados,
-          agrupaciones: fila.agrupaciones,
-          ratio_agrupacion: null,
-          corrida_id: null,
-        },
-      };
-    };
     const { anios } = aniosAtipicidad({
       agrupacion: { temporada },
       periodos: c.periodos,
       mesesPublicados: c.venta.meses_publicados,
-      volumenDeAnio,
     });
     for (const a of anios) {
       if (a.clase !== "atipico" || (temporada !== "invierno" && temporada !== "verano")) continue;
-      const ratio = a.ratio_volumen;
+      const fila = filasEfecto.find((f) => f.anio === a.anio && f.temporada === temporada);
+      const f = factorDePeriodo(fila?.periodo);
       salida.push({
         anio: a.anio,
         temporada,
-        ratio_calculado: ratio === null ? null : Math.round(ratio * 10000) / 10000,
+        ratio_calculado: f.ratio_calculado,
+        formula: FORMULA_FACTOR_RELATIVO,
+        ratio_volumen: f.ratio_volumen,
+        ratio_control: f.ratio_control,
         huella_cargas: c.huella_cargas,
+        huella_composicion: composicion.data[temporada],
+        diagnostico: f.diagnostico as unknown as TablesInsert<"factores_volumen_atipico">["diagnostico"],
         calculado_at: ahora,
-        tiendas_comunes: a.volumen?.tiendas_comunes ?? null,
-        meses_comparados: a.volumen?.meses_comparados ?? null,
+        tiendas_comunes: fila?.tiendas_comunes ?? null,
+        meses_comparados: f.meses_comparados,
         parcial: !a.completo,
         perfil_id: actor.id,
         usuario_nombre: actor.nombre,

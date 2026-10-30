@@ -74,7 +74,7 @@ export function aRegistro(a: AnioDb, curva: readonly number[] | null, k: number,
     referencia_tres_meses: a.referencia_tres_meses,
     explicacion: a.explicacion,
     crecimiento_pct: num(a.crecimiento_pct),
-    // `0.10.8`: `B` y `B''` (solo las filas base de `Y+1`); una lectura que no los pidió los deja en `null`.
+    // `0.10.8`: `B` y `B'` (0.14.0: la base corregida del Niño; antes `B''`), solo las filas base de `Y+1`; una lectura que no los pidió los deja en `null`.
     base_siguiente: a.base_siguiente ?? null,
     base_normalizada: num(a.base_normalizada ?? null),
     decidido,
@@ -162,7 +162,7 @@ export function payloadAnioCalculo(filaId: string, r: RegistroModelo, avisosExtr
     referencia_alternativa: r.referencia_alternativa,
     referencia_tres_meses: r.referencia_tres_meses,
     explicacion: r.explicacion,
-    // `0.10.8` (07c): `B` y `B''` los escribe el cálculo y cada recálculo en el acto de una fila base de `Y+1` (nulos sin base o sin curva).
+    // `0.10.8` (07c): `B` y `B'` (corregida del Niño, 0.14.0) los escribe el cálculo y cada recálculo en el acto de una fila base de `Y+1` (nulos sin base o sin curva).
     base_siguiente: r.base_siguiente ?? null,
     base_normalizada: r.base_normalizada ?? null,
     meses: r.meses,
@@ -324,8 +324,9 @@ export const aAnioApi = (r: RegistroModelo): AnioFilaApi => {
 export type CrecimientoDeApi = (claveBase: string, pctFila: number | null) => CrecimientoDeFila;
 
 /**
- * `0.10.8` (07c): en el registro de `Y+1` de una fila base añade `crecimiento_efectivo`, `pct_bruto` (`vigente ÷ B − 1`) y
- * `pct_sobre_normalizada` (`vigente ÷ B'' − 1`). El resto de los registros queda igual.
+ * `0.10.8` (07c): en el registro de `Y+1` de una fila base añade `crecimiento_efectivo`, `pct_bruto` (`vigente ÷ B − 1`, «sobre 2026 real») y, desde
+ * 0.14.0, `pct_sobre_normalizada` (`vigente ÷ B' − 1`, «sobre 2026 corregido»). `crecimiento_efectivo` lleva el `sobre_base` del % aplicado. El resto de
+ * los registros queda igual.
  */
 export function conCamposBrutos(api: AnioFilaApi, fila: Pick<FilaModelo, "tienda_id" | "clave">, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi): AnioFilaApi {
   if (fila.tienda_id !== null || api.anio !== anioEnCurso + 1 || api.bloque !== "mismas") return api;
@@ -336,7 +337,14 @@ export function conCamposBrutos(api: AnioFilaApi, fila: Pick<FilaModelo, "tienda
   return {
     ...api,
     crecimiento_efectivo: e
-      ? { pct: e.pct, origen: e.origen, celda: e.celda, ...(e.version !== undefined ? { version: e.version } : {}), ...(e.provisional !== undefined ? { provisional: e.provisional } : {}) }
+      ? {
+          pct: e.pct,
+          origen: e.origen,
+          celda: e.celda,
+          ...(e.version !== undefined ? { version: e.version } : {}),
+          ...(e.sobre_base !== undefined ? { sobre_base: e.sobre_base } : {}),
+          ...(e.provisional !== undefined ? { provisional: e.provisional } : {}),
+        }
       : null,
     pct_bruto: b !== null && b > 0 && v !== null ? (v / b - 1) * 100 : null,
     pct_sobre_normalizada: bn !== null && bn > 0 && v !== null ? (v / bn - 1) * 100 : null,

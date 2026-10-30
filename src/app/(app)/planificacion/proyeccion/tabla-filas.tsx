@@ -1,12 +1,13 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi, AvisoFila, FilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import { CeldaCrecimiento, CeldaDecision, type DecisionFila } from "./celda-decision";
 import { Avisos, BotonEnlace, NUM } from "./comunes";
-import { textoPieCrecimientoLinea } from "./crecimientos-vista";
+import { basesDeLinea, esBruto, textoPieCrecimientoLinea } from "./crecimientos-vista";
 import {
   aniosHistoricos,
   avisosDeFila,
@@ -82,6 +83,7 @@ export function TablaFilas({
   onDecidir,
   onVerTienda,
   onCsv,
+  gmReaprobar,
 }: {
   filas: readonly FilaApi[];
   lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio" | "filas_tienda">;
@@ -94,6 +96,8 @@ export function TablaFilas({
   onDecidir: (fila: FilaApi, anio: number, d: DecisionFila) => Promise<boolean>;
   onVerTienda?: (tiendaId: string) => void;
   onCsv: () => void;
+  /** Nombres de los GM («HOMBRE · URBANO») cuya versión de antes de 0.14.0 hay que reaprobar para cerrar (`proyeccion.crecimientos_sin_aprobar.reaprobar`): su fila lleva el badge «reaprobar». */
+  gmReaprobar?: readonly string[];
 }) {
   const y = anioEnCurso;
   const historicos = aniosHistoricos(y);
@@ -103,12 +107,16 @@ export function TablaFilas({
   const tS = totalesDeLinea(lineas, y + 1);
   const hayApertura = secciones.length > 0;
   const todasAbiertas = base.length > 0 && base.every((f) => abiertas.has(f.id));
-  // 0.10.8 (07c): el crecimiento bruto de la línea en mismas tiendas = vigente de Y+1 ÷ Σ B − 1 (B = base de las mismas tiendas de Y+1).
-  // El numerador es el vigente de las filas CON base (`vigente_con_base`), no el de toda la línea: así coincide con «Crec. mismas tiendas» de la Matriz.
+  // 0.10.8 (07c): el crecimiento de la línea en mismas tiendas = vigente de Y+1 ÷ Σ B − 1 (B = base de las mismas tiendas de Y+1). El numerador es
+  // el vigente de las filas CON base (`vigente_con_base`), no el de toda la línea: así coincide con «Crec. sobre real» de la Matriz. 0.14.0 (06e):
+  // además, el % sobre la base corregida del Niño (`Σ B'`, sumada de las filas), que es el que se escribe en «Crec.».
   const totalSiguiente = lineas.totales_por_anio.find((x) => x.anio === y + 1);
   const vigenteConBase = totalSiguiente?.vigente_con_base ?? tS.vigente;
   const baseSiguiente = totalSiguiente?.base_siguiente;
-  const pieCrecimiento = textoPieCrecimientoLinea(vigenteConBase, baseSiguiente, y + 1, y);
+  const bases = basesDeLinea(lineas.filas, y);
+  const baseCorregida = bases?.corregida ?? null;
+  const conNino = baseCorregida !== null && baseSiguiente !== undefined && baseSiguiente > 0 && Math.round(baseCorregida) !== Math.round(baseSiguiente);
+  const pieCrecimiento = textoPieCrecimientoLinea(vigenteConBase, baseSiguiente, y, baseCorregida);
 
   const alternar = (id: string) =>
     setAbiertas((prev) => {
@@ -142,7 +150,7 @@ export function TablaFilas({
               <th className={`${TH} text-right`}>Avance</th>
               <th className={`${TH} text-right`}>{y} propuesto</th>
               <th className={`${TH} text-right`}>{y} decidido</th>
-              <th className={`${TH} text-right`} title={`Crecimiento bruto ${y + 1} ÷ ${y} de la fila, sin corregir por el Niño. Vacío = el aprobado de la combinación género · mundo (o el Resto aprobado).`}>
+              <th className={`${TH} text-right`} title={`% de ${y + 1} sobre la venta de ${y} corregida del Niño de la fila. Vacío = el aprobado de la combinación género · mundo (o el Resto aprobado).`}>
                 Crec.
               </th>
               <th className={`${TH} text-right`}>{y + 1} propuesto</th>
@@ -215,6 +223,11 @@ export function TablaFilas({
                         etiqueta={`${nombre}, crecimiento ${y + 1}`}
                         onDecidir={(d) => onDecidir(f, y + 1, d)}
                       />
+                      {esBruto(rS?.crecimiento_efectivo) && gmReaprobar?.includes(rS?.crecimiento_efectivo?.celda ?? "") && (
+                        <span className="mt-0.5 block text-right" title="Esta versión se aprobó sobre el año real antes de 0.14.0 y el GM tuvo Niño: hay que reaprobarla para cerrar">
+                          <Badge tono="alerta">reaprobar</Badge>
+                        </span>
+                      )}
                     </td>
                     <td className={`px-3 py-2 ${NUM}`}>{unidades(rS?.propuesto)}</td>
                     <td className="px-3 py-2">
@@ -341,7 +354,16 @@ export function TablaFilas({
                     </span>
                   </td>
                   <td className={`px-3 py-2 ${NUM}`} title={pieCrecimiento ?? undefined}>
-                    {pieCrecimiento ? formatearPct((vigenteConBase / (baseSiguiente ?? 1) - 1) * 100) : ""}
+                    {pieCrecimiento ? (
+                      <>
+                        <span className="block">{formatearPct((vigenteConBase / (conNino && baseCorregida ? baseCorregida : (baseSiguiente ?? 1)) - 1) * 100)}</span>
+                        <span className="block font-sans text-xs font-normal text-tinta-suave">
+                          {conNino ? `${formatearPct((vigenteConBase / (baseSiguiente ?? 1) - 1) * 100)} real` : "real = corregido"}
+                        </span>
+                      </>
+                    ) : (
+                      ""
+                    )}
                   </td>
                   <td className={`px-3 py-2 ${NUM}`}>{unidades(tS.propuesto)}</td>
                   <td className={`px-3 py-2 ${NUM}`}>

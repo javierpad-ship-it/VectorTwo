@@ -27,6 +27,7 @@ import {
   type FilaModelo,
   type OrigenDecision,
   type RegistroModelo,
+  type SobreBase,
   type TiendaModelo,
 } from "./tipos";
 
@@ -61,7 +62,8 @@ export type ContextoModelo = {
   mismasSiguiente: ReadonlySet<string>;
   tiendas: ReadonlyMap<string, InfoTienda>;
   /**
-   * `0.10.8` (07c): el `g` efectivo (bruto) de la fila base del año siguiente por `claveBase`: % propio de la fila > celda GM > Resto. Con
+   * `0.10.8` (07c): el `g` efectivo de la fila base del año siguiente por `claveBase`: % propio de la fila > celda GM > Resto, con el `sobre_base` de su
+   * versión (`corregida` el % propio de la fila y el Resto provisional; `bruta` una versión de antes de 0.14.0). Con
    * `pctFila` explícito (aunque sea `null`) usa ese % propio; sin él, el guardado en la fila. Sin esto, el Resto
    * (`crecimiento_pct_defecto`). Lo arma `crearCrecimientoDe` (`crecimientos.ts`).
    */
@@ -113,7 +115,7 @@ export type BaseRegistro = Pick<
   | "avisos"
 > & {
   crecimiento_pct?: number | null;
-  /** `0.10.8` (07c): `B` y `B''` de una fila base de `Y+1` (nulos en el resto de los registros). */
+  /** `0.10.8` (07c): `B` (real) y, desde 0.14.0, `B'` (`B` corregida del Niño de `Y`) de una fila base de `Y+1` (nulos en el resto de los registros). */
   base_siguiente?: number | null;
   base_normalizada?: number | null;
 };
@@ -274,10 +276,10 @@ export function recalcularBaseSiguiente(
     if (total > 0) detalleAportes.push({ tienda: ctx.tiendas.get(s.tienda_id)?.codigo ?? s.tienda_id, total, signo: -1 });
   }
 
-  // Método 4: el % (fila > celda GM > Resto) es bruto sobre `B`.
+  // Método 5: el % (fila > celda GM > Resto) se aplica sobre `B'` (`corregida`) o sobre `B` (`bruta`, versiones de antes de 0.14.0), según su `sobre_base`.
   const efectivo: CrecimientoDeFila = ctx.crecimientoDe
     ? ctx.crecimientoDe(claveBaseDe(base.clave), anterior ? anterior.crecimiento_pct : undefined)
-    : { pct: anterior?.crecimiento_pct ?? ctx.crecimiento_pct_defecto, origen: anterior?.crecimiento_pct != null ? "fila" : "resto", gm: null, celda: null };
+    : { pct: anterior?.crecimiento_pct ?? ctx.crecimiento_pct_defecto, origen: anterior?.crecimiento_pct != null ? "fila" : "resto", gm: null, celda: null, sobre_base: "corregida" };
   const g = efectivo.pct;
   const resultado = proponerSiguiente({
     baseVigente: regY.vigente,
@@ -287,6 +289,7 @@ export function recalcularBaseSiguiente(
     crecimiento: g,
     curva: base.curva,
     factoresMesObjetivo: phiSig,
+    sobreBase: efectivo.sobre_base ?? "corregida",
   });
 
   const avisos: AvisoFila[] = [...resultado.avisos];
@@ -306,10 +309,11 @@ export function recalcularBaseSiguiente(
     phiObjetivo: phiSig,
     baseVigente: regY.vigente,
     baseTotal: resultado.base,
-    baseNormalizada: resultado.base_normalizada,
+    baseCorregida: resultado.base_corregida,
+    sobreBase: resultado.sobre_base,
     temporada: base.temporada,
     tiendasSiguiente: ctx.mismasSiguiente.size,
-    crecimientoOrigen: { origen: efectivo.origen, celda: efectivo.celda },
+    crecimientoOrigen: { origen: efectivo.origen, celda: efectivo.celda, version: efectivo.version ?? null, provisional: efectivo.provisional ?? false },
     crecimiento: g,
     aportes: detalleAportes,
     baseColaLarga: base.historico?.cola_larga?.veredicto === "revision" && regY.decidido === null ? (base.historico.cola_larga.demanda_corregida ?? null) : null,
@@ -331,7 +335,8 @@ export function recalcularBaseSiguiente(
       crecimiento_pct: null,
       // `null` sin base o sin curva (`propuesto = null`).
       base_siguiente: resultado.propuesto === null || resultado.base === null ? null : Math.round(resultado.base),
-      base_normalizada: resultado.propuesto === null || resultado.base_normalizada === null ? null : Math.round(resultado.base_normalizada * 100) / 100,
+      // 0.14.0: `B'`, la base de `Y` corregida del Niño (con `φ_Y ≡ 1` es `B`). Antes de 0.14.0 era `B''`.
+      base_normalizada: resultado.propuesto === null || resultado.base_corregida === null ? null : Math.round(resultado.base_corregida * 100) / 100,
     },
     anterior,
     {
@@ -481,8 +486,9 @@ export function unidadesMadurasDeTienda(
 }
 
 /**
- * `0.10.8` (07c §2.4): el % (bruto) con que se explica una tienda `maduro_propio` en `anio`. Si todas sus filas comparten el mismo % y
- * origen, ese; si no, el ponderado `Σ w_f g_f ÷ Σ w_f` con `w_f = A^b_f × Σ_{Y+1} c r`. `null` si la tienda no tiene filas `maduro_propio`.
+ * `0.10.8` (07c §2.4): el % con que se explica una tienda `maduro_propio` en `anio`. Si todas sus filas comparten el mismo % y origen, ese; si no, el
+ * ponderado `Σ w_f g_f ÷ Σ w_f` con `w_f = A_f × Σ_{Y+1} c r` (`A'` o `A^b` según el `sobre_base` de cada %). `null` si la tienda no tiene filas `maduro_propio`.
+ * `sobre_base` es el de las filas si todas comparten el mismo y `corregida` si se mezclan.
  */
 export function crecimientoDeTienda(
   filas: readonly FilaModelo[],
@@ -490,7 +496,7 @@ export function crecimientoDeTienda(
   info: InfoTienda | undefined,
   rampa: readonly number[] | null,
   ctx: ContextoModelo
-): { pct: number; origen: CrecimientoDeFila["origen"]; celda: string | null; ponderado: boolean } | null {
+): { pct: number; origen: CrecimientoDeFila["origen"]; celda: string | null; ponderado: boolean; version: number | null; provisional: boolean; sobre_base: SobreBase } | null {
   const items: { w: number; e: CrecimientoDeFila }[] = [];
   const rampaUsada = rampaDeTienda(info, rampa, ctx);
   for (const f of filas) {
@@ -499,8 +505,8 @@ export function crecimientoDeTienda(
     if (!r || r.metodo !== "maduro_propio" || !regY || f.tienda_id === null || !f.curva) continue;
     const e: CrecimientoDeFila = ctx.crecimientoDe
       ? ctx.crecimientoDe(claveBaseDe(f.clave))
-      : { pct: ctx.crecimiento_pct_defecto, origen: "resto", gm: null, celda: null };
-    const ab = maduroDeVigente({ vigente: regY.vigente, curva: f.curva, rampa: pesosDeTienda(info, "nuevas", rampaUsada, ctx.anio), phi: f.factores_mes?.[ctx.anio] ?? UNOS });
+      : { pct: ctx.crecimiento_pct_defecto, origen: "resto", gm: null, celda: null, sobre_base: "corregida" };
+    const ab = maduroDeVigente({ vigente: regY.vigente, curva: f.curva, rampa: pesosDeTienda(info, "nuevas", rampaUsada, ctx.anio), phi: f.factores_mes?.[ctx.anio] ?? UNOS, sobreBase: e.sobre_base ?? "corregida" });
     const w = (ab ?? 0) * sumaCurva(f.curva, pesosDeTienda(info, "nuevas", rampaUsada, anio), null, 0, 12);
     items.push({ w, e });
   }
@@ -509,12 +515,24 @@ export function crecimientoDeTienda(
   // Una fila sin peso (su total maduro es 0) no mueve la cifra: no cuenta para decidir si todas comparten el mismo %.
   const con = suma > 0 ? items.filter((x) => x.w > 0) : items;
   const primero = con[0].e;
+  const sobres = new Set(items.map((x) => x.e.sobre_base ?? "corregida"));
+  const sobre_base: SobreBase = sobres.size === 1 ? ([...sobres][0] as SobreBase) : "corregida";
   if (con.every((x) => x.e.pct === primero.pct && x.e.origen === primero.origen)) {
     // El mismo % y el mismo origen; si vienen de celdas distintas, ninguna celda en particular.
-    return { pct: primero.pct, origen: primero.origen, celda: con.every((x) => x.e.celda === primero.celda) ? primero.celda : null, ponderado: false };
+    const mismaCelda = con.every((x) => x.e.celda === primero.celda);
+    const mismaVersion = con.every((x) => (x.e.version ?? null) === (primero.version ?? null));
+    return {
+      pct: primero.pct,
+      origen: primero.origen,
+      celda: mismaCelda ? primero.celda : null,
+      ponderado: false,
+      version: mismaCelda && mismaVersion ? (primero.version ?? null) : null,
+      provisional: con.every((x) => x.e.provisional === true),
+      sobre_base,
+    };
   }
   const pct = suma > 0 ? items.reduce((a, x) => a + x.w * x.e.pct, 0) / suma : items.reduce((a, x) => a + x.e.pct, 0) / items.length;
-  return { pct, origen: "celda", celda: null, ponderado: true };
+  return { pct, origen: "celda", celda: null, ponderado: true, version: null, provisional: false, sobre_base };
 }
 
 /**
@@ -547,12 +565,13 @@ export function recalcularFilasTienda(
     const real = registro.meses ? soloReales(registro.meses, ctx.k) : Array.from({ length: 12 }, () => 0);
 
     const regY = registroDe(fila, ctx.anio);
+    const efectivo = ctx.crecimientoDe?.(claveBaseDe(fila.clave));
     let maduroPrevio: number | null = null;
     if (!esY && registro.subbloque === "nuevas_anterior" && regY && info) {
       const rY = pesosDeTienda(info, "nuevas", rampaUsada, ctx.anio);
-      maduroPrevio = maduroDeVigente({ vigente: regY.vigente, curva: fila.curva, rampa: rY, phi: fila.factores_mes?.[ctx.anio] ?? UNOS });
+      maduroPrevio = maduroDeVigente({ vigente: regY.vigente, curva: fila.curva, rampa: rY, phi: fila.factores_mes?.[ctx.anio] ?? UNOS, sobreBase: efectivo?.sobre_base ?? "corregida" });
     }
-    const g = ctx.crecimientoDe?.(claveBaseDe(fila.clave)).pct ?? ctx.crecimiento_pct_defecto;
+    const g = efectivo?.pct ?? ctx.crecimiento_pct_defecto;
     const resultado = proponerFilaTienda({
       esAnioEnCurso: esY,
       k: esY ? ctx.k : 0,

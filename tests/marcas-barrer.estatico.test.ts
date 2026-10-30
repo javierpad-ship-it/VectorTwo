@@ -78,9 +78,9 @@ describe("la lógica pura no toca la base ni los componentes", () => {
       expect(texto, f).not.toMatch(/node:|server-only|from "\.\/(huellas|consultas|servicio|modelo)"/);
     }
   });
-  it("VERSION_METODO_BARRER es 2 y M7 sigue en el método 4", () => {
+  it("VERSION_METODO_BARRER es 2 y M7 está en el método 5 (06e)", () => {
     expect(archivo("src/lib/marcas-barrer/tipos-api.ts").texto).toMatch(/VERSION_METODO_BARRER = 2;/);
-    expect(archivo("src/lib/proyeccion/tipos-api.ts").texto).toMatch(/export const VERSION_METODO = 4;/);
+    expect(archivo("src/lib/proyeccion/tipos-api.ts").texto).toMatch(/export const VERSION_METODO = 5;/);
   });
 });
 

@@ -1,3 +1,4 @@
+import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import type { ResolverMarcas } from "@/lib/flujo/ingresos";
 import { claveDeFila, sumarMes, type FilaCerradaFlujo } from "@/lib/flujo/filas";
 import type { EntradaCalculoFlujo, NodoFlujo, ParametrosCalculo, RegistrosCompras } from "@/lib/flujo/modelo";
@@ -200,7 +201,7 @@ export function entrada(op: Partial<EntradaCalculoFlujo> & { kPrima?: string } =
     horizonte: HORIZONTE,
     cubre: "en_curso",
     parametros: PARAMETROS,
-    cerrada: { filas: [], version_metodo: 4, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
+    cerrada: { filas: [], version_metodo: VERSION_METODO_MIN_M8, huella_flujo: "h", periodo_referencia: { desde: "2025-10", hasta: "2026-09" } },
     huella_flujo_hoy: "h",
     stock: new Map(),
     compras: SIN_COMPRAS,

@@ -1,3 +1,4 @@
+import { VERSION_METODO } from "@/lib/proyeccion/tipos-api";
 import { describe, expect, it } from "vitest";
 import {
   aplicarCurvaNueva,
@@ -113,18 +114,18 @@ describe("cierre y año siguiente (casos 3 a 7)", () => {
     expect(fila(s, DENIM_REC).curva_origen).toEqual([{ agrupacion_id: AG.denim, curva_id: "c-denim-v1", version: 1, peso: 1 }]);
   });
 
-  it("caso 4 (método 4): Niño de invierno en ABRIGO — el cierre no cambia (1 000) y el % es bruto: 2027 = 1 000 × 1,03 = 1 030 (ya no 1 561); B'' = 1 515 queda de referencia", () => {
+  it("caso 4 (método 5): Niño de invierno en ABRIGO — el cierre no cambia (1 000) y el % es sobre 2026 corregido: B' = 1 000 ÷ 0,66 = 1 515, 2027 = 1 515 × 1,03 = 1 561 (el método 4 daba 1 030)", () => {
     const e = entrada({ parametros: { crecimiento_pct_defecto: 3, umbral_avance: 0.3, umbral_cobertura: 0.25, umbral_cola_larga: 100, umbral_disponibilidad: 0.75, rampa_maduracion: [1, 1, 1] } });
     const s = calcularProyeccion(e);
     const c = clave("abrigo", AM.rec, EQ.parka);
     expect(reg(s, c, Y)).toMatchObject({ vendido: 940, propuesto: 1000 });
     expect(reg(s, c, Y).meses?.slice(9)).toEqual([20, 20, 20]);
-    expect(reg(s, c, Y + 1).propuesto).toBe(1030);
-    // `B` = 1 000 sin normalizar; `B''` = 1 000 ÷ 0,66 = 1 515,15 (solo referencia: no entra en la propuesta).
+    expect(reg(s, c, Y + 1).propuesto).toBe(1561);
+    // `B` = 1 000 real; `B'` = 1 000 ÷ 0,66 = 1 515,15 (la base del %: P = round(B' × 1,03)); sobre 2026 real son +56,1 %.
     expect(reg(s, c, Y + 1).base_siguiente).toBe(1000);
     expect(reg(s, c, Y + 1).base_normalizada).toBeCloseTo(1515.15, 2);
-    expect(reg(s, c, Y + 1).explicacion).toContain("Niño");
-    expect(reg(s, c, Y + 1).explicacion).toContain("sin corregir por el Niño");
+    expect(reg(s, c, Y + 1).explicacion).toContain("corregida del Niño de invierno (÷ 0.66, relativo) = 1,515");
+    expect(reg(s, c, Y + 1).explicacion).toContain("sobre 2026 corregido) = 1,561 (56.1 % sobre 2026 real)");
 
     const sin = calcularProyeccion({ ...e, factores: [] });
     expect(reg(sin, c, Y).propuesto).toBe(1000);
@@ -517,7 +518,7 @@ describe("resumen y señales", () => {
   const s = calcularProyeccion(entrada());
 
   it("cuenta filas y decididas por año, totales por bloque y versión del método", () => {
-    expect(s.resumen.version_metodo).toBe(4);
+    expect(s.resumen.version_metodo).toBe(VERSION_METODO);
     expect(s.resumen.totales[Y].total).toBe(s.resumen.totales[Y].mismas + s.resumen.totales[Y].nuevas_anterior + s.resumen.totales[Y].aperturas + s.resumen.totales[Y].cierres);
     expect(s.resumen.decididas).toEqual({ [Y]: 0, [Y + 1]: 0 });
     expect(s.resumen.huella_cargas).toMatch(/^[0-9a-f]{32}$/);

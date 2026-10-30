@@ -1,3 +1,4 @@
+import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import { NextResponse } from "next/server";
 import { indexarNodos } from "@/lib/arbol/nivel/indice";
 import { aplicarCancelacion } from "@/lib/compras/cancelar";
@@ -356,7 +357,7 @@ export function cerradaFalsa(anio: number) {
     cubre: "en_curso" as const,
     anios: [anio, anio + 1],
     huella_flujo: huellaFlujoDeCierre(),
-    version_metodo: 4,
+    version_metodo: VERSION_METODO_MIN_M8,
     periodo_referencia: { desde: "2025-10", hasta: "2026-09" },
     filas: filasCerrada(),
   };

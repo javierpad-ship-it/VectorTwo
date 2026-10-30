@@ -16,12 +16,13 @@ import { huellaCrecimientos, huellaDeMatriz } from "@/lib/proyeccion/huellas-cre
 import { calcularProyeccion, registroDe, type ContextoModelo } from "@/lib/proyeccion/modelo";
 import { crecimientoDeTienda } from "@/lib/proyeccion/decision";
 import { maduroDeVigente, rampaMensual, sumaCurva } from "@/lib/proyeccion/tiendas-nuevas";
-import type { AgregadoCrecimientoApi, DecisionPrevia, FilaModelo, NodoProy, PreviasCalculo, SalidaCalculo } from "@/lib/proyeccion/tipos";
+import { VERSION_METODO } from "@/lib/proyeccion/tipos-api";
+import type { AgregadoCrecimientoApi, DecisionPrevia, FilaModelo, NodoProy, PreviasCalculo, SalidaCalculo, SobreBase } from "@/lib/proyeccion/tipos";
 import { AM, CURVA_INVIERNO, CURVA_PLANA, EQ, GEN, MUN, N, Y, clave, claveTienda, entrada, nodos } from "./proyeccion.fixture";
 
 /**
  * 07c y 06d (sintético; nada real): precedencia, agregados, huellas (con ids desde 0.12.1), «Calcular promedio» y el cálculo con
- * la matriz de crecimientos (método 4: el % es bruto).
+ * la matriz de crecimientos (método 5 de 06e: el % de una versión `corregida` es sobre B'; el de una `bruta`, versión de antes de 0.14.0, sobre B).
  */
 
 const MUJER = GEN.mujer;
@@ -360,7 +361,11 @@ describe("R5 (06e): ejemplo B, el GM sobre 2026 corregido", () => {
 const DENIM_REC = clave("denim", AM.rec);
 const ABRIGO_REC = clave("abrigo", AM.rec, EQ.parka);
 const SANDALIA_VAL = clave("sandalia", AM.val);
-const matriz = (celdas: [string, string, number][]) => matrizDeCeldas(celdas.map(([genero_id, mundo_id, pct]) => ({ genero_id, mundo_id, pct })), [HOMBRE, MUJER]);
+/** La matriz del método con `sobre_base` explícito en cada celda (por defecto `corregida`, lo que escribe la API de 0.14.0; `bruta` = versión de antes de 0.14.0). */
+const matriz = (celdas: [string, string, number][], sobre: SobreBase = "corregida") => ({
+  ...matrizDeCeldas(celdas.map(([genero_id, mundo_id, pct]) => ({ genero_id, mundo_id, pct })), [HOMBRE, MUJER]),
+  sobre: new Map(celdas.map(([g, m]) => [claveGM(g, m), sobre] as const)),
+});
 const fila = (s: SalidaCalculo, c: string): FilaModelo => s.filas.find((f) => f.clave === c) as FilaModelo;
 const reg = (s: SalidaCalculo, c: string, anio: number) => registroDe(fila(s, c), anio)!;
 const decision = (d: Partial<DecisionPrevia>): DecisionPrevia => ({
@@ -381,32 +386,49 @@ describe("regla 10: calcularProyeccion con celdas", () => {
   // B de DENIM × RECONOCIDO en 2027 = 1 800 + T2 300 − T5 240 = 1 860 (caso 8).
   const base = calcularProyeccion(entrada());
 
-  it("una fila sin decidir de una celda al 12 % da round(B × 1,12); B queda en base_siguiente", () => {
+  it("una fila sin decidir de una celda al 12 % (corregida) da round(B' × 1,12); B y B' quedan en base_siguiente y base_normalizada (sin Niño B' = B)", () => {
     const s = calcularProyeccion(entrada({ crecimientos: matriz([[HOMBRE, URBANO, 12]]) }));
-    expect(reg(s, DENIM_REC, Y + 1)).toMatchObject({ base_siguiente: 1860, propuesto: Math.round(1860 * 1.12), metodo: "crecimiento" });
-    expect(reg(s, DENIM_REC, Y + 1).explicacion).toContain("crecimiento bruto de HOMBRE · URBANO");
-    // La otra línea de HOMBRE (ABRIGO · CASUAL) no tiene celda: sigue el Resto (5 %).
-    expect(reg(s, ABRIGO_REC, Y + 1).explicacion).toContain("crecimiento bruto del Resto");
-    expect(reg(s, ABRIGO_REC, Y + 1).propuesto).toBe(Math.round((reg(s, ABRIGO_REC, Y + 1).base_siguiente as number) * 1.05));
+    expect(reg(s, DENIM_REC, Y + 1)).toMatchObject({ base_siguiente: 1860, base_normalizada: 1860, propuesto: Math.round(1860 * 1.12), metodo: "crecimiento" });
+    expect(reg(s, DENIM_REC, Y + 1).explicacion).toContain("12.0 % de HOMBRE · URBANO, sobre 2026 corregido");
+    // La otra línea de HOMBRE (ABRIGO · CASUAL, invierno con Niño a 0,66) no tiene celda: sigue el Resto provisional (5 %, corregida) sobre su B'.
+    const ab = reg(s, ABRIGO_REC, Y + 1);
+    expect(ab.explicacion).toContain("5.0 % del Resto provisional, sobre 2026 corregido");
+    expect(ab.explicacion).toContain("corregida del Niño de invierno (÷ 0.66, relativo)");
+    expect(ab.propuesto).toBe(Math.round(Number(ab.base_normalizada) * 1.05));
+    expect(ab.propuesto as number).toBeGreaterThan(Math.round(Number(ab.base_siguiente) * 1.05));
   });
 
-  it("una fila con % propio del 5 % da round(B × 1,05) aunque la celda sea del 12 %", () => {
-    const s = calcularProyeccion(entrada({ crecimientos: matriz([[HOMBRE, URBANO, 12]]), previas: previas([[`${DENIM_REC}#${Y + 1}`, decision({ crecimiento_pct: 5 })]]) }));
-    expect(reg(s, DENIM_REC, Y + 1)).toMatchObject({ propuesto: 1953, crecimiento_pct: 5 });
-    expect(reg(s, DENIM_REC, Y + 1).explicacion).toContain("crecimiento bruto propio de la fila");
+  it("R3 y R4: una celda `bruta` (versión de antes de 0.14.0) reproduce el método 4: P = round(B × (1 + g)) aunque la fila tenga Niño; la explicación lo dice", () => {
+    const s = calcularProyeccion(entrada({ crecimientos: matriz([[HOMBRE, MUN.casual, 20]], "bruta") }));
+    const ab = reg(s, ABRIGO_REC, Y + 1);
+    expect(ab.propuesto).toBe(Math.round(Number(ab.base_siguiente) * 1.2));
+    expect(ab.explicacion).toContain("20.0 % de HOMBRE · CASUAL, sobre 2026 real, aprobado antes de 0.14.0");
+    expect(ab.explicacion).toContain("equivale a");
+    // Una celda sin dato de sobre_base (matriz de un cálculo de antes de 0.14.0) se lee bruta.
+    const sinDato = calcularProyeccion(entrada({ crecimientos: matrizDeCeldas([{ genero_id: HOMBRE, mundo_id: MUN.casual, pct: 20 }], [HOMBRE, MUJER]) }));
+    expect(reg(sinDato, ABRIGO_REC, Y + 1).propuesto).toBe(ab.propuesto);
+  });
+
+  it("una fila con % propio del 5 % da round(B' × 1,05) (corregida, sin Niño en DENIM: 1 953) aunque la celda sea del 12 %, incluso si la celda es bruta", () => {
+    for (const sobre of ["corregida", "bruta"] as const) {
+      const s = calcularProyeccion(entrada({ crecimientos: matriz([[HOMBRE, URBANO, 12]], sobre), previas: previas([[`${DENIM_REC}#${Y + 1}`, decision({ crecimiento_pct: 5 })]]) }));
+      expect(reg(s, DENIM_REC, Y + 1)).toMatchObject({ propuesto: 1953, crecimiento_pct: 5 });
+      expect(reg(s, DENIM_REC, Y + 1).explicacion).toContain("5.0 % propio de la fila, sobre 2026 corregido");
+    }
   });
 
   it("una fila de un género que no es de la matriz sigue el Resto aunque haya una celda de su mundo", () => {
     const jov = "g-jovencitos";
     const nodosJov: NodoProy[] = nodos().map((n) => (n.gml_id === N.sandalia ? { ...n, genero_id: jov, genero: "JOVENCITOS" } : n));
     const celdas = new Map([[claveGM(jov, MUN.casual), 50], [claveGM(MUJER, MUN.casual), 9]]);
-    const s = calcularProyeccion(entrada({ nodos: nodosJov, parametros: { ...entrada().parametros, crecimiento_pct_defecto: 3 }, crecimientos: { celdas, generos: new Set([HOMBRE, MUJER]) } }));
+    const s = calcularProyeccion(entrada({ nodos: nodosJov, parametros: { ...entrada().parametros, crecimiento_pct_defecto: 3 }, crecimientos: { celdas, generos: new Set([HOMBRE, MUJER]), sobre: new Map([[claveGM(MUJER, MUN.casual), "corregida" as const]]) } }));
     const r = reg(s, SANDALIA_VAL, Y + 1);
-    expect(r.propuesto).toBe(Math.round((r.base_siguiente as number) * 1.03));
+    // El Resto provisional es corregido: 3 % sobre B' (verano 2026 con Niño).
+    expect(r.propuesto).toBe(Math.round(Number(r.base_normalizada) * 1.03));
     expect(r.explicacion).toContain("del Resto");
     // MIXTA sigue siendo MUJER · CASUAL: toma la celda del 9 %.
     const mixta = reg(s, clave("mixta", AM.rec), Y + 1);
-    expect(mixta.propuesto).toBe(Math.round((mixta.base_siguiente as number) * 1.09));
+    expect(mixta.propuesto).toBe(Math.round(Number(mixta.base_normalizada) * 1.09));
   });
 
   it("una apertura de Y+1 no cambia por la matriz (va por la venta esperada, 07d)", () => {
@@ -417,28 +439,43 @@ describe("regla 10: calcularProyeccion con celdas", () => {
     expect(reg(con, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto).toBe(reg(sin, claveTienda("T4", "denim", AM.rec), Y + 1).propuesto);
   });
 
-  it("T3 (abrió en 2026, maduro_propio) toma el % de su GML-AM en bruto: A^b = 480 (φ_Y = 1) × 1,20 = 576, y la explicación cita la celda", () => {
+  it("T3 (abrió en 2026, maduro_propio) toma el % de su GML-AM: A' = A^b = 480 (φ_Y = 1) × 1,20 = 576, y la explicación cita la celda", () => {
     const s = calcularProyeccion(entrada({ crecimientos: matriz([[HOMBRE, URBANO, 20]]) }));
     const t3 = reg(s, claveTienda("T3", "denim", AM.rec), Y + 1);
     expect(t3).toMatchObject({ propuesto: 576, metodo: "maduro_propio" });
     const tienda = s.tiendas.find((t) => t.tienda_id === "T3" && t.anio === Y + 1)!;
-    expect(tienda.explicacion).toContain("× (1 + 20.0 % crecimiento bruto de HOMBRE · URBANO)");
+    expect(tienda.explicacion).toContain("× (1 + 20.0 % de HOMBRE · URBANO, sobre 2026 corregido)");
     expect(tienda.explicacion).not.toContain("5.0 %");
     // Con el Resto (sin celda) la explicación cita el Resto.
-    expect(base.tiendas.find((t) => t.tienda_id === "T3" && t.anio === Y + 1)?.explicacion).toContain("crecimiento bruto del Resto");
+    expect(base.tiendas.find((t) => t.tienda_id === "T3" && t.anio === Y + 1)?.explicacion).toContain("del Resto provisional");
   });
 
-  it("A^b de una tienda con Niño en los meses abiertos: mayor que vigente ÷ Σ c·r y menor que el A normalizado; con φ_Y = 1 coincide con vigente ÷ Σ c·r", () => {
+  it("A^b de una tienda con Niño en los meses abiertos (bruta): mayor que vigente ÷ Σ c·r y menor que el A normalizado; con φ_Y = 1 coincide con vigente ÷ Σ c·r", () => {
     const rY = rampaMensual("2026-05-01", [1, 1, 1], 2026);
     const phiAbiertos = Array.from({ length: 12 }, (_, i) => (i >= 4 ? 0.66 : 1));
     const vigente = 1000;
     const plano = vigente / sumaCurva(CURVA_INVIERNO, rY, null);
-    const ab = maduroDeVigente({ vigente, curva: CURVA_INVIERNO, rampa: rY, phi: phiAbiertos }) as number;
+    const ab = maduroDeVigente({ vigente, curva: CURVA_INVIERNO, rampa: rY, phi: phiAbiertos, sobreBase: "bruta" }) as number;
     const normalizado = vigente / 0.66 / sumaCurva(CURVA_INVIERNO, rY, null); // A normalizado = (V ÷ φ) ÷ Σ c r
     expect(ab).toBeGreaterThan(plano);
     expect(ab).toBeLessThan(normalizado);
     const unos = Array(12).fill(1);
-    expect(maduroDeVigente({ vigente, curva: CURVA_PLANA, rampa: rY, phi: unos }) as number).toBeCloseTo(vigente / sumaCurva(CURVA_PLANA, rY, null), 8);
+    expect(maduroDeVigente({ vigente, curva: CURVA_PLANA, rampa: rY, phi: unos, sobreBase: "bruta" }) as number).toBeCloseTo(vigente / sumaCurva(CURVA_PLANA, rY, null), 8);
+  });
+
+  it("R6: A' (corregida) = vigente ÷ Σ_{m∈Y} c r φ: con φ_Y = 1 coincide con A^b; con Niño de 0,70 en los meses abiertos A' > A^b; la corregida es la que usa el método 5 por defecto", () => {
+    const rY = rampaMensual("2026-05-01", [1, 1, 1], 2026);
+    const phi = Array.from({ length: 12 }, (_, i) => (i >= 4 ? 0.7 : 1));
+    const unos = Array(12).fill(1);
+    const vigente = 1000;
+    expect(maduroDeVigente({ vigente, curva: CURVA_INVIERNO, rampa: rY, phi: unos, sobreBase: "corregida" })).toBeCloseTo(maduroDeVigente({ vigente, curva: CURVA_INVIERNO, rampa: rY, phi: unos, sobreBase: "bruta" }) as number, 10);
+    const corregida = maduroDeVigente({ vigente, curva: CURVA_INVIERNO, rampa: rY, phi, sobreBase: "corregida" }) as number;
+    expect(corregida).toBeCloseTo(vigente / sumaCurva(CURVA_INVIERNO, rY, phi, 0, 12), 10);
+    expect(corregida).toBeGreaterThan(maduroDeVigente({ vigente, curva: CURVA_INVIERNO, rampa: rY, phi, sobreBase: "bruta" }) as number);
+    expect(maduroDeVigente({ vigente, curva: CURVA_INVIERNO, rampa: rY, phi })).toBe(corregida);
+    // Sin vigente o sin curva no hay total maduro.
+    expect(maduroDeVigente({ vigente: null, curva: CURVA_INVIERNO, rampa: rY, phi })).toBeNull();
+    expect(maduroDeVigente({ vigente, curva: null, rampa: rY, phi })).toBeNull();
   });
 
   it("recalcular conserva el total decidido de una fila: la propuesta se rehace con el % efectivo y queda propuesta_cambio", () => {
@@ -449,15 +486,16 @@ describe("regla 10: calcularProyeccion con celdas", () => {
 });
 
 describe("regla 11 y 12: columnas nuevas, huella y gm_gml en el resumen", () => {
-  it("|propuesto − B × (1 + g)| ≤ 0,5 en toda fila base de Y+1 y B'' queda guardada", () => {
+  it("|propuesto − B' × (1 + g)| ≤ 0,5 en toda fila base de Y+1 (corregida) y B' queda guardada en base_normalizada", () => {
     const s = calcularProyeccion(entrada({ crecimientos: matriz([[HOMBRE, URBANO, 12], [HOMBRE, MUN.casual, -10], [MUJER, MUN.casual, 33]]) }));
     const gs: Record<string, number> = { [DENIM_REC]: 12, [ABRIGO_REC]: -10, [SANDALIA_VAL]: 33, [clave("mixta", AM.rec)]: 33 };
     for (const [c, g] of Object.entries(gs)) {
       const r = reg(s, c, Y + 1);
-      expect(Math.abs((r.propuesto as number) - (r.base_siguiente as number) * (1 + g / 100)), c).toBeLessThanOrEqual(0.5);
       expect(r.base_normalizada, c).not.toBeNull();
+      // B' se guarda con dos decimales: el error de P frente a B' × (1 + g) es el redondeo (0,5) más el de B'.
+      expect(Math.abs((r.propuesto as number) - Number(r.base_normalizada) * (1 + g / 100)), c).toBeLessThanOrEqual(0.51);
     }
-    // La fila de ABRIGO (invierno, Niño 2026 a 0,66): B'' = B ÷ 0,66.
+    // La fila de ABRIGO (invierno, Niño 2026 a 0,66): B' = B ÷ 0,66.
     const ab = reg(s, ABRIGO_REC, Y + 1);
     expect(ab.base_normalizada as number).toBeCloseTo((ab.base_siguiente as number) / 0.66, 0);
     // El resto de los registros (Y, aperturas, tiendas) no llevan B.
@@ -475,7 +513,7 @@ describe("regla 11 y 12: columnas nuevas, huella y gm_gml en el resumen", () => 
     const s = calcularProyeccion(entrada({ crecimientos: m }));
     expect(s.resumen.huella_crecimientos).toBe(huellaDeMatriz(m, 5));
     expect(s.resumen.gm_gml).toMatchObject({ [N.denim]: claveGM(HOMBRE, URBANO), [N.abrigo]: claveGM(HOMBRE, MUN.casual), [N.sandalia]: claveGM(MUJER, MUN.casual) });
-    expect(s.resumen.version_metodo).toBe(4);
+    expect(s.resumen.version_metodo).toBe(VERSION_METODO);
     // Otra matriz u otro Resto → otra huella.
     expect(calcularProyeccion(entrada()).resumen.huella_crecimientos).not.toBe(s.resumen.huella_crecimientos);
   });
@@ -539,13 +577,13 @@ describe("explicación del año siguiente: la cuenta de la frase se reproduce", 
 
   it("g = 7,5 % sobre B = 1 860 muestra «× (1 + 7.5 %)» y no un factor redondeado a «1.08» (que daría 2,009 y no 2,000)", () => {
     const t = frase(7.5, 2000);
-    expect(t).toContain("× (1 + 7.5 % crecimiento bruto del Resto, sin corregir por el Niño) = 2,000");
+    expect(t).toContain("× (1 + 7.5 % del Resto, sobre 2026 corregido) = 2,000");
     expect(t).not.toContain("× 1.08");
     expect(Math.round(1860 * (1 + 7.5 / 100))).toBe(2000);
   });
 
   it("un % entero se lee con un decimal y uno con dos decimales no pierde el segundo", () => {
-    expect(frase(5, 1953)).toContain("× (1 + 5.0 % crecimiento bruto del Resto");
-    expect(frase(7.25, 1995)).toContain("× (1 + 7.25 % crecimiento bruto del Resto");
+    expect(frase(5, 1953)).toContain("× (1 + 5.0 % del Resto");
+    expect(frase(7.25, 1995)).toContain("× (1 + 7.25 % del Resto");
   });
 });

@@ -9,8 +9,9 @@ import { armarLista, cargarContexto } from "@/lib/crecimientos/servicio";
 /**
  * Lista del crecimiento por género × mundo (`requirePlanner`; el comprador recibe `403`). Query opcional: `?anio=2027` (año de
  * aplicación; por defecto el del último mes cerrado + 1) y `?proyeccion=<id>` (proyección de referencia; por defecto la de `anio − 1`
- * calculada con el método actual). Solo lee. `ListaGeneroMundoApi`: una fila por género × mundo con venta, la fila Resto, el total
- * ponderado y `huella_datos` (el bloqueo optimista del `POST`). Los errores de Postgres los traduce `traducirErrorDb` dentro de
+ * calculada con el método 5 o posterior). Solo lee. `ListaGeneroMundoApi`: una fila por género × mundo con venta (cierre por curva, base
+ * corregida del Niño y `hay_nino`), la fila Resto, el total ponderado por `Σ B'`, `anio_siguiente_atipico` y `huella_datos` (el bloqueo
+ * optimista del `POST`). Los errores de Postgres los traduce `traducirErrorDb` dentro de
  * `cargarContexto`.
  *
  *   400  query inválida · `anio_no_permitido` · `referencia_otro_anio`

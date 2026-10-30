@@ -71,7 +71,8 @@ export function FormularioProyeccion({
   const anioBase = editando ? proyeccion.anio_en_curso : Number((ultimo ?? estado.datos.hasta ?? "0000").slice(0, 4));
   const [nombre, setNombre] = useState(editando ? proyeccion.nombre : nombrePorDefecto(anioBase));
   const [hasta, setHasta] = useState(editando ? mesAaaaMm(proyeccion.hasta_periodo) : ultimo ? mesAaaaMm(ultimo) : "");
-  // 0.12.1 (06d): este campo es el Resto PROVISIONAL (bruto): se usa solo mientras no haya un Resto aprobado para el año. Al copiar, arranca con el del origen.
+  // 0.12.1 (06d): este campo es el Resto PROVISIONAL: se usa solo mientras no haya un Resto aprobado para el año. Desde 0.14.0 (06e) se aplica sobre
+  // el año en curso CORREGIDO del Niño. Al copiar, arranca con el del origen.
   const [crecimiento, setCrecimiento] = useState(() => {
     if (editando) return String(proyeccion.parametros.crecimiento_pct_defecto);
     const origen = copiarDeInicial ? estado.proyecciones.find((p) => p.id === copiarDeInicial) : undefined;
@@ -197,8 +198,8 @@ export function FormularioProyeccion({
             </div>
           ) : (
             <Field
-              label="Resto provisional (%)"
-              hint={`${ayudaRestoProvisional(anioBase + 1, restoAprobadoReciente(estado.proyecciones, anioBase))} Variación bruta frente al vigente de las mismas tiendas, sin corregir por el Niño.${tendencia ? ` ${tendencia}` : ""}`}
+              label={`Resto provisional (%, sobre ${anioBase} corregido)`}
+              hint={`${ayudaRestoProvisional(anioBase + 1, restoAprobadoReciente(estado.proyecciones, anioBase))} Se aplica sobre ${anioBase} corregido del Niño de las mismas tiendas de ${anioBase + 1}; sin Niño, corregido = real.${tendencia ? ` ${tendencia}` : ""}`}
             >
               <Input inputMode="decimal" value={crecimiento} disabled={accion.ocupado} onChange={(e) => setCrecimiento(e.target.value)} className="font-mono" />
             </Field>

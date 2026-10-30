@@ -14,9 +14,9 @@ const COLUMNAS: Record<string, string[]> = {
   proyeccion_filas: ["id", "proyeccion_id", "tienda_id", "gml_id", "equivalencia_id", "agrupacion_marca_id", "clave", "nivel_proyectado", "agrupacion_estacionalidad_id", "temporada", "curva", "curva_origen", "factores_mes", "historico", "participaciones", "composicion", "avisos", "activo", "created_at", "updated_at"],
   proyeccion_fila_anios: ["id", "fila_id", "anio", "bloque", "subbloque", "vendido", "propuesto", "metodo", "referencia_alternativa", "referencia_tres_meses", "explicacion", "crecimiento_pct", "base_siguiente", "base_normalizada", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "meses", "origen_meses", "curva_origen_usada", "meses_propuestos", "curva_origen_propuesta", "avisos", "activo", "created_at", "updated_at"],
   proyeccion_tiendas: ["id", "proyeccion_id", "tienda_id", "anio", "bloque", "subbloque", "fecha_usada", "venta_esperada_usada", "referente_id_usado", "origen_composicion", "rampa", "unidades_maduras", "vendido", "propuesto", "metodo", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "explicacion", "referencia_alternativa", "referencia_tres_meses", "avisos", "activo", "created_at", "updated_at"],
-  proyeccion_crecimientos: ["id", "proyeccion_id", "genero_id", "mundo_id", "pct", "nota", "perfil_id", "usuario_nombre", "crecimiento_id", "version", "activo", "created_at", "updated_at"],
-  crecimientos_genero_mundo: ["id", "anio_aplicacion", "alcance", "genero_id", "mundo_id", "version", "estado", "pct", "nota", "base_tipo", "base_valor", "referencia", "proyeccion_referencia_id", "perfil_id", "usuario_nombre", "aprobada_at", "activo", "created_at", "updated_at"],
-  factores_volumen_atipico: ["id", "anio", "temporada", "ratio_calculado", "ratio_aplicado", "huella_cargas", "calculado_at", "tiendas_comunes", "meses_comparados", "parcial", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
+  proyeccion_crecimientos: ["id", "proyeccion_id", "genero_id", "mundo_id", "pct", "sobre_base", "nota", "perfil_id", "usuario_nombre", "crecimiento_id", "version", "activo", "created_at", "updated_at"],
+  crecimientos_genero_mundo: ["id", "anio_aplicacion", "alcance", "genero_id", "mundo_id", "version", "estado", "pct", "sobre_base", "nota", "base_tipo", "base_valor", "referencia", "proyeccion_referencia_id", "perfil_id", "usuario_nombre", "aprobada_at", "activo", "created_at", "updated_at"],
+  factores_volumen_atipico: ["id", "anio", "temporada", "ratio_calculado", "ratio_aplicado", "formula", "ratio_volumen", "ratio_control", "huella_cargas", "huella_composicion", "aplicado_huella", "diagnostico", "calculado_at", "tiendas_comunes", "meses_comparados", "parcial", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
 };
 
 const DEFECTOS: Record<string, Fila> = {
@@ -25,7 +25,8 @@ const DEFECTOS: Record<string, Fila> = {
   proyeccion_fila_anios: { vendido: 0, metodo: "sin_propuesta", explicacion: "", curva_origen_usada: [], avisos: [], activo: true },
   proyeccion_tiendas: { rampa: [1, 1, 1], vendido: 0, metodo: "sin_propuesta", explicacion: "", avisos: [], activo: true },
   proyeccion_crecimientos: { activo: true },
-  crecimientos_genero_mundo: { estado: "vigente", base_tipo: "ninguna", referencia: {}, activo: true },
+  // 0029 (B1): `sobre_base` tiene default `bruta` para siempre; solo la API de 0.14.0 escribe `corregida`, siempre explícita.
+  crecimientos_genero_mundo: { estado: "vigente", base_tipo: "ninguna", referencia: {}, sobre_base: "bruta", activo: true },
   factores_volumen_atipico: { parcial: false, activo: true },
 };
 

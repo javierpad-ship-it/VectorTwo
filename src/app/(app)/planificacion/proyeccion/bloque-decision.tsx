@@ -8,7 +8,7 @@ import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
 import { textoPropuestaCambio } from "./celda-decision";
 import { Avisos, NUM } from "./comunes";
-import { ayudaCrecimientoFila, textosDetalleBruto } from "./crecimientos-vista";
+import { ayudaCrecimientoFila, equivalenteDeCrecimiento, textoEquivalente, textosDetalleCrecimiento } from "./crecimientos-vista";
 import { ETIQUETA_METODO, formatearAvance, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida, nombreMes, textoFactoresMes, unidades } from "./vista";
 
 /** Reparto guardado y reparto con la curva vigente, uno junto al otro (I8). */
@@ -90,7 +90,10 @@ export function BloqueDecision({
   const cambio = textoPropuestaCambio(registro);
   const normal = textoFactoresMes(factoresMes);
   const paraRevision = registro.avisos.includes("revision_cola_larga");
-  const detalleBruto = textosDetalleBruto(registro, anio, anioEnCurso);
+  const detalleCrecimiento = textosDetalleCrecimiento(registro, anio, anioEnCurso);
+  // Mientras se escribe el %, lo que daría sobre la base corregida y su equivalente sobre lo vendido (la aritmética del método 5: round(B' × (1 + g))).
+  const gEscrito = crec.trim() === "" ? null : leerPorcentaje(crec);
+  const equivalente = gEscrito && gEscrito.ok ? equivalenteDeCrecimiento({ real: registro.base_siguiente, corregida: registro.base_normalizada }, gEscrito.valor) : null;
   const hayCurvaNueva = registro.meses_propuestos !== null && registro.meses_propuestos !== undefined;
 
   async function guardar() {
@@ -174,13 +177,13 @@ export function BloqueDecision({
       )}
       {paraRevision && !esActual && (
         <p className="rounded-md border border-alerta/30 bg-alerta-suave px-3 py-2 text-sm text-alerta">
-          Para revisión: la propuesta es la base de {anioEnCurso} de las mismas tiendas × (1 + crecimiento bruto), y esa base sale de la demanda corregida de {anioEnCurso}. Decide primero {anioEnCurso}; esta fila también hay que decidirla para poder cerrar.
+          Para revisión: la propuesta es la base de {anioEnCurso} de las mismas tiendas, corregida del Niño, × (1 + crecimiento), y esa base sale de la demanda corregida de {anioEnCurso}. Decide primero {anioEnCurso}; esta fila también hay que decidirla para poder cerrar.
         </p>
       )}
       {registro.explicacion && <p className="rounded-md bg-fondo px-3 py-2 text-sm leading-relaxed text-tinta">{registro.explicacion}</p>}
-      {!esActual && detalleBruto.length > 0 && (
+      {!esActual && detalleCrecimiento.length > 0 && (
         <ul className="space-y-0.5 text-sm text-tinta-suave">
-          {detalleBruto.map((t) => (
+          {detalleCrecimiento.map((t) => (
             <li key={t}>{t}</li>
           ))}
         </ul>
@@ -229,7 +232,7 @@ export function BloqueDecision({
               />
             </Field>
             {!esActual && (
-              <Field label="Crecimiento (%)" hint={ayudaCrecimientoFila(registro.crecimiento_efectivo, anio, anioEnCurso)}>
+              <Field label={`Crecimiento (%) sobre ${anioEnCurso} corregido`} hint={ayudaCrecimientoFila(registro.crecimiento_efectivo, anio, anioEnCurso)}>
                 <Input
                   inputMode="decimal"
                   value={crec}
@@ -246,6 +249,7 @@ export function BloqueDecision({
               <Input value={nota} maxLength={300} disabled={ocupado} onChange={(e) => setNota(e.target.value)} />
             </Field>
           </div>
+          {equivalente && <p className="text-sm text-tinta-suave">{textoEquivalente(equivalente, anio, anioEnCurso)}</p>}
           {motivo && <p className="text-xs text-alerta">{motivo}</p>}
           <div className="flex flex-wrap gap-2">
             <Button tamano="sm" disabled={deshabilitada || registro.propuesto === null} onClick={() => void onDecidir({ origen: "propuesta", nota: nota.trim() === "" ? null : nota.trim() })}>

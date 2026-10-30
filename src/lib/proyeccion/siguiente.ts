@@ -1,20 +1,20 @@
 import { esConstante } from "./nino";
 import { repartirEntero } from "./reparto";
-import type { AvisoFila, Metodo } from "./tipos-api";
+import type { AvisoFila, Metodo, SobreBase } from "./tipos-api";
 
 /**
- * Año siguiente de una fila base (ficha 07, paso 2 y reglas 12 a 14; método 4 de la 0.10.8, ficha 07c §2.4). Puro.
+ * Año siguiente de una fila base (ficha 07, paso 2 y reglas 12 a 14; método 5 de la 0.14.0, ficha 06e §5.1). Puro.
  *
  *   B   = vigente de Y de la fila base
  *         + Σ vigente de Y de las tiendas nuevas de Y que pasan a M(Y+1)
- *         − Σ aporte de Y de las tiendas de M(Y) que no están en M(Y+1)      (sin normalizar por el Niño)
- *   P   = round(B × (1 + g))                                                  % BRUTO: no depende de φ_Y ni de φ_{Y+1}
- *   P_m = P repartido con c_m × φ_{Y+1,m}                                     φ_{Y+1} solo da forma al reparto
- *   B'  = B normalizado por el Niño de Y (B ÷ φ si φ es constante; mes a mes si no)
- *   B'' = B' × Σ_m c_m φ_{Y+1,m}                                              lo que vendería con 0 % si Y hubiera sido normal
+ *         − Σ aporte de Y de las tiendas de M(Y) que no están en M(Y+1)      (real: sin corregir por el Niño)
+ *   B'  = Σ_m b_m ÷ φ_{Y,m}                                                   B corregida del Niño de Y (B ÷ φ si φ es constante)
+ *   P   = round(B' × (1 + g))                                                 % «sobre Y corregido» (`sobreBase = 'corregida'`, la de 0.14.0)
+ *   P   = round(B  × (1 + g))                                                 % «sobre Y real» (`sobreBase = 'bruta'`: el método 4, versiones de antes de 0.14.0)
+ *   P_m = P repartido con c_m × φ_{Y+1,m}                                     φ_{Y+1} solo da forma al reparto, no mueve P
  *
- * `B''` solo es una referencia (rebote del Niño): no entra en la propuesta. Con el método 3 se calculaba
- * `P = round(B' × (1 + g) × Σ c φ_{Y+1})` y el % no era el de la variación bruta.
+ * Con `φ_Y ≡ 1` es `B' = B` y los dos métodos dan la misma cifra, fila por fila (R1). El método 4 corregía `B''` = `B' × Σ c φ_{Y+1}` solo
+ * como referencia; el 5 guarda `B'` (en `proyeccion_fila_anios.base_normalizada`) porque es sobre lo que se escribe el %.
  *
  * Cualquier cambio de un sumando recalcula `P` en el acto, sin releer venta (B2).
  */
@@ -41,19 +41,21 @@ export type EntradaSiguiente = {
   curva: readonly number[] | null;
   /** `φ_{Y+1,m}`. */
   factoresMesObjetivo: readonly number[];
+  /** Sobre qué se interpreta `crecimiento`: `corregida` (por defecto, método 5) o `bruta` (método 4, versiones de antes de 0.14.0). */
+  sobreBase?: SobreBase;
 };
 
 export type ResultadoSiguiente = {
-  /** `B`: base del año siguiente (suma de sumandos), sin normalizar. */
+  /** `B`: base del año siguiente (suma de sumandos), real, sin corregir por el Niño. */
   base: number | null;
-  /** `B'`: la base normalizada por el Niño de `Y` (a nivel de `Y`). */
-  base_nino: number | null;
-  /** `B'' = B' × Σ c φ_{Y+1}`: lo que la fila vendería en `Y+1` con 0 % si `Y` hubiera sido un año normal. Solo referencia. */
-  base_normalizada: number | null;
+  /** `B'`: la base de `Y` corregida del Niño (lo que habrían vendido las mismas tiendas de `Y+1` en un año normal). Se persiste en `base_normalizada`. */
+  base_corregida: number | null;
   propuesto: number | null;
   metodo: Metodo;
   meses: number[] | null;
   avisos: AvisoFila[];
+  /** Sobre qué base se calculó `propuesto`. */
+  sobre_base: SobreBase;
 };
 
 /** Reparto mensual de la base: fila base + aportes con signo. `null` si falta algún reparto. */
@@ -69,15 +71,16 @@ function mesesDeBase(e: EntradaSiguiente): number[] | null {
 }
 
 export function proponerSiguiente(e: EntradaSiguiente): ResultadoSiguiente {
+  const sobreBase: SobreBase = e.sobreBase ?? "corregida";
   if (e.baseVigente === null) {
-    return { base: null, base_nino: null, base_normalizada: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_base"] };
+    return { base: null, base_corregida: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_base"], sobre_base: sobreBase };
   }
   let base = e.baseVigente;
   for (const a of e.aportesTiendas) if (a.total !== null) base += a.signo * a.total;
   base = Math.max(0, base);
 
   if (e.curva === null) {
-    return { base, base_nino: null, base_normalizada: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_curva"] };
+    return { base, base_corregida: null, propuesto: null, metodo: "sin_propuesta", meses: null, avisos: ["sin_curva"], sobre_base: sobreBase };
   }
 
   // B' = Σ b_m ÷ φ_m; con φ constante se cancela y B' = B ÷ φ (sin pasar por los meses enteros).
@@ -99,17 +102,17 @@ export function proponerSiguiente(e: EntradaSiguiente): ResultadoSiguiente {
     }
   }
 
-  // Método 4: el % es bruto sobre `B`; `φ_{Y+1}` solo pondera el reparto mensual.
+  // Método 5: el % es sobre `B'` (corregida); con `bruta` (método 4) es sobre `B`. `φ_{Y+1}` solo pondera el reparto mensual.
   const pesos = e.curva.map((c, i) => c * (e.factoresMesObjetivo[i] ?? 1));
-  const propuesto = Math.max(0, Math.round(base * (1 + e.crecimiento / 100)));
+  const propuesto = Math.max(0, Math.round((sobreBase === "corregida" ? baseNormalizada : base) * (1 + e.crecimiento / 100)));
   return {
     base,
-    base_nino: baseNormalizada,
-    base_normalizada: baseNormalizada * pesos.reduce((a, b) => a + b, 0),
+    base_corregida: baseNormalizada,
     propuesto,
     metodo: "crecimiento",
     meses: repartirEntero(propuesto, pesos),
     avisos: [],
+    sobre_base: sobreBase,
   };
 }
 

@@ -3,8 +3,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 /**
- * 06d (estático): lo que se rompe por descuido se vigila leyendo el código. Complementa a `api.guards.estatico.test.ts` (guard como
- * primera sentencia) y a `proyeccion.estatico.test.ts` (solo `proyeccion/consultas.ts` toca las tablas de M7).
+ * 06d y 06e (estático): lo que se rompe por descuido se vigila leyendo el código. Complementa a `api.guards.estatico.test.ts` (guard como
+ * primera sentencia) y a `proyeccion.estatico.test.ts` (solo `proyeccion/consultas.ts` toca las tablas de M7). 06e: R26 (el umbral de
+ * materialidad vive en `correccionMaterial`) y R27 (todo `insert` en `crecimientos_genero_mundo` lleva `sobre_base`).
  */
 
 const RAIZ = path.resolve(__dirname, "..");
@@ -69,7 +70,7 @@ describe("06d: la base solo se nombra en consultas", () => {
 });
 
 describe("06d: pureza de la lógica", () => {
-  for (const nombre of ["comparables", "series", "referencias", "reglas", "huellas", "cache", "vigentes", "tipos-api", "esquemas"]) {
+  for (const nombre of ["comparables", "series", "referencias", "reglas", "huellas", "cache", "vigentes", "tipos-api", "esquemas", "cierre-curva"]) {
     it(`${nombre}.ts no importa de @supabase/*, de React ni de next, ni nombra supabaseAdmin`, () => {
       const f = fuente(`${LIB}${nombre}.ts`);
       expect(f.length, nombre).toBeGreaterThan(0);
@@ -82,17 +83,38 @@ describe("06d: pureza de la lógica", () => {
   }
 
   it("las reglas, las cifras y las series no usan el reloj ni el azar", () => {
-    for (const nombre of ["comparables", "series", "referencias", "reglas", "huellas"]) {
+    for (const nombre of ["comparables", "series", "referencias", "reglas", "huellas", "cierre-curva"]) {
       expect(sinComentarios(fuente(`${LIB}${nombre}.ts`)), nombre).not.toMatch(/Date\.now|Math\.random|new Date\(/);
     }
   });
 
   it("los handlers calculan las reglas con reglas.ts: no las reimplementan", () => {
     const s = sinComentarios(fuente(`${LIB}servicio.ts`));
-    for (const nombre of ["motivoRechazoAprobar", "motivoRechazoGeneroMundo", "motivoRechazoAnio", "motivoRechazoReferencia", "motivoRechazoBaseAnio", "evaluarObsoleto", "siguienteVersion", "aniosPermitidos"]) {
+    for (const nombre of ["motivoRechazoAprobar", "motivoRechazoGeneroMundo", "motivoRechazoAnio", "motivoRechazoReferencia", "motivoRechazoBaseAnio", "motivoRechazoAnioSiguienteAtipico", "evaluarObsoleto", "siguienteVersion", "aniosPermitidos"]) {
       expect(s, nombre).toContain(`${nombre}(`);
     }
     expect(s).not.toMatch(/0[.,]5\b|UMBRAL_OBSOLETO|TOLERANCIA_NOTA/);
+  });
+
+  it("R26 · hay_nino sale de correccionMaterial: servicio.ts y cierre-curva.ts la llaman y ninguno define su propio umbral", () => {
+    for (const nombre of ["servicio", "cierre-curva"]) {
+      const t = sinComentarios(fuente(`${LIB}${nombre}.ts`));
+      expect(t, nombre).toContain("correccionMaterial(");
+      expect(t, nombre).not.toMatch(/UMBRAL_CORRECCION_NINO|\b0[.,]005\b/);
+    }
+    // La función vive en proyeccion/factor-nino.ts y es la única que lee el umbral.
+    expect(sinComentarios(fuente("src/lib/proyeccion/factor-nino.ts"))).toMatch(/export function correccionMaterial\(/);
+  });
+
+  it("R27 · todo insert en crecimientos_genero_mundo lleva sobre_base explícito (y es corregida)", () => {
+    const usos = DELA_LIB.flatMap((f) => [...sinComentarios(f.texto).matchAll(/insertarVersion\(\s*db,\s*\{([\s\S]*?)\}\);/g)].map((m) => ({ ruta: f.ruta, cuerpo: m[1] as string })));
+    expect(usos.length).toBeGreaterThan(0);
+    for (const u of usos) expect(u.cuerpo, u.ruta).toMatch(/sobre_base:\s*"corregida"/);
+    // consultas.ts solo define el insert genérico; ningún otro archivo de la lib ni de las rutas lo escribe a mano.
+    for (const f of [...DELA_LIB, ...RUTAS]) {
+      if (f.ruta === CONSULTAS) continue;
+      expect(sinComentarios(f.texto), f.ruta).not.toMatch(/crecimientos_genero_mundo["'`]\)\s*\.insert/);
+    }
   });
 
   it("no se usa `any`", () => {
@@ -134,9 +156,16 @@ describe("06d: las rutas", () => {
     }
   });
 
-  it("el POST lee el cuerpo con leerCuerpo y aprobarCrecimientoSchema (estricto)", () => {
+  it("el POST lee el cuerpo con leerCuerpo, responde base_retirada con esBaseRetirada y revalida con el esquema estricto", () => {
     const t = sinComentarios(fuente("src/app/api/curvas/genero-mundo/[clave]/route.ts"));
     expect(t).toMatch(/leerCuerpo\(request, aprobarCrecimientoSchema\)/);
+    expect(t).toMatch(/esBaseRetirada\(/);
+    expect(t).toContain("MENSAJE_BASE_RETIRADA");
+    expect(t).toContain('"base_retirada"');
+    expect(t).toContain("aprobarCrecimientoSchemaEstricto");
+    // `base_retirada` se responde justo después de leer el cuerpo, antes de llamar al servicio.
+    expect(t.indexOf("esBaseRetirada(")).toBeGreaterThan(t.indexOf("leerCuerpo("));
+    expect(t.indexOf("esBaseRetirada(")).toBeLessThan(t.indexOf("aprobarCrecimiento(supabaseAdmin()"));
     expect(t).not.toMatch(/request\.(json|text)\(/);
     expect(sinComentarios(fuente(`${LIB}esquemas.ts`))).toMatch(/\.strict\(\)\s*\.superRefine/);
   });

@@ -94,6 +94,7 @@ function GeneroMundoContenido({
           proyeccionId={proyeccion}
           enTrabajo={enTrabajo}
           referenciaCargando={recurso.cargando && lista === null}
+          anioSiguienteAtipico={lista?.anio_siguiente_atipico ?? null}
           onVolver={() => ir(null)}
           onIrAResto={() => ir(CLAVE_RESTO)}
           onCambio={recurso.recargar}

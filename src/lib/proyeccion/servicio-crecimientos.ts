@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { leerVigentes } from "@/lib/crecimientos/consultas-vigentes";
-import { faltantesDeCierre, gmExigidos, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
+import { faltantesDeCierre, gmExigidos, type GmConNino, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
 import { cargarCatalogo } from "./contexto";
 import { leerCrecimientos, leerFilasConAnios, leerGenerosMundos, leerTiendasProyeccion, type CrecimientoDb, type ProyeccionDb } from "./consultas";
 import { agregarFilas, calcularPromedio, claveGM, generosDeMatriz, type FilaCrecimiento } from "./crecimientos";
@@ -8,6 +8,7 @@ import { esMetodoVigente } from "./servicio";
 import { falla, fallaDb, fotoDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
 import type { Catalogo } from "./persistencia";
 import type {
+  AgregadoCrecimientoApi,
   CeldaParaPromedio,
   CrecimientoAplicadoApi,
   CrecimientosSinAprobarApi,
@@ -15,6 +16,7 @@ import type {
   PuenteApi,
   ResumenCrecimientosProyeccionApi,
   ResumenProyeccion,
+  SobreBase,
 } from "./tipos";
 
 /**
@@ -75,7 +77,9 @@ async function cargarDatos(d: Db, p: ProyeccionDb): Promise<Salida<Datos>> {
       decidido: a.decidido ?? null,
       propuesto: a.propuesto ?? null,
       base_siguiente: a.base_siguiente === null || a.base_siguiente === undefined ? null : Number(a.base_siguiente),
+      // 0.14.0: `B'` (la base corregida del Niño). El % propio de una fila es siempre «sobre 2026 corregido».
       base_normalizada: a.base_normalizada === null || a.base_normalizada === undefined ? null : Number(a.base_normalizada),
+      sobre_base: "corregida",
     });
   }
   return listo({
@@ -93,6 +97,15 @@ async function cargarDatos(d: Db, p: ProyeccionDb): Promise<Salida<Datos>> {
 }
 
 const aplicadoDe = (x: { pct: number; version: number | null } | null): CrecimientoAplicadoApi | null => (x ? { pct: x.pct, version: x.version } : null);
+
+/**
+ * `calcularPromedio(…, { sobre: 'corregida' })` supone que el % de TODOS los conjuntos es sobre `B'`. Un GM (o el Resto) aplicado con `bruta` (versión de antes de 0.14.0)
+ * se escribió sobre `B`: se le pasa el agregado con su base corregida igual a la real, así su `siguiente` es `B × (1 + g)` y pesa por `Σ B`. Es solo para el Total.
+ */
+const agregadoParaPromedio = (a: AgregadoCrecimientoApi, sobre: SobreBase): AgregadoCrecimientoApi =>
+  sobre === "corregida"
+    ? a
+    : { ...a, base_normalizada: a.base, base_libre_corregida: a.base_libre, pct_propio: { ...a.pct_propio, base_corregida: a.pct_propio.base }, decididas: { ...a.decididas, base_corregida: a.decididas.base } };
 
 /**
  * Arma el resumen. La foto manda en «aplicado»; el global solo da «vigente hoy». Un GM de HOMBRE o MUJER sin celda en la foto siguió al Resto: su
@@ -148,16 +161,19 @@ function resumenDe(dt: Datos): ResumenCrecimientosProyeccionApi {
     const celda = celdasFoto.get(k);
     const vigente = vigentesGM.get(k) ?? null;
     const agregado = agregarFilas(filasDe.get(k) ?? []);
+    // 06e: la foto dice sobre qué base se aplicó cada GM (`null` = foto de antes de 0.14.0 = `bruta`); un GM sin celda siguió al Resto.
+    const sobre: SobreBase = celda ? (celda.sobre_base === "corregida" ? "corregida" : "bruta") : (resto.sobre_base ?? "bruta");
     const aplicado: FilaResumenCrecimientoApi["aplicado"] = celda
       ? {
           pct: Number(celda.pct),
           version: celda.version ?? null,
           provisional: false,
+          sobre_base: sobre,
           por_nombre: celda.usuario_nombre,
           // La foto no guarda cuándo se aprobó: si la versión aplicada sigue vigente, su fecha; si no, cuándo la escribió el cálculo.
           at: celda.crecimiento_id && vigente && vigente.id === celda.crecimiento_id ? vigente.aprobada_at : celda.updated_at,
         }
-      : { pct: resto.pct, version: resto.version, provisional: resto.crecimiento_id === null, por_nombre: resto.por_nombre, at: resto.at };
+      : { pct: resto.pct, version: resto.version, provisional: resto.crecimiento_id === null, sobre_base: sobre, por_nombre: resto.por_nombre, at: resto.at };
     const genero = dt.nombresGeneros.get(genero_id) ?? "Género";
     const mundo = dt.nombresMundos.get(mundo_id) ?? "Mundo";
     const clave = `${genero_id}.${mundo_id}`;
@@ -171,7 +187,7 @@ function resumenDe(dt: Datos): ResumenCrecimientosProyeccionApi {
       resultante_pct: agregado.base > 0 ? (agregado.siguiente_vigente / agregado.base - 1) * 100 : null,
       enlace: enlace(clave),
     });
-    paraPromedio.push({ genero, mundo, pct: aplicado.pct, sin_filas: (filasDe.get(k) ?? []).length === 0, agregado });
+    paraPromedio.push({ genero, mundo, pct: aplicado.pct, sin_filas: (filasDe.get(k) ?? []).length === 0, agregado: agregadoParaPromedio(agregado, sobre) });
   }
 
   const agregadoResto = agregarFilas(filasResto);
@@ -184,7 +200,7 @@ function resumenDe(dt: Datos): ResumenCrecimientosProyeccionApi {
     clave: "resto",
     genero: null,
     mundo: null,
-    aplicado: { pct: resto.pct, version: resto.version, provisional: resto.crecimiento_id === null, por_nombre: resto.por_nombre, at: resto.at },
+    aplicado: { pct: resto.pct, version: resto.version, provisional: resto.crecimiento_id === null, sobre_base: resto.sobre_base ?? "bruta", por_nombre: resto.por_nombre, at: resto.at },
     vigente_hoy: vigenteHoy(vigenteResto),
     agregado: agregadoResto,
     resultante_pct: agregadoResto.base > 0 ? (agregadoResto.siguiente_vigente / agregadoResto.base - 1) * 100 : null,
@@ -201,7 +217,10 @@ function resumenDe(dt: Datos): ResumenCrecimientosProyeccionApi {
     cierres_sin_decidir: dt.cierresSinDecidir,
   };
   const metodoViejo = !esMetodoVigente(p.resumen);
-  const total = metodoViejo ? null : (calcularPromedio(paraPromedio, { pct: resto.pct, agregado: agregadoResto }, parametros.crecimiento_objetivo_pct ?? null, puente).resultado ?? null);
+  // 0.14.0: el Total es «sobre 2026 corregido» (el % que se aprueba se aplica sobre `Σ B'`); `pct_resultante_real` de cada fila lo da sobre `Σ B`.
+  const total = metodoViejo
+    ? null
+    : (calcularPromedio(paraPromedio, { pct: resto.pct, agregado: agregadoParaPromedio(agregadoResto, resto.sobre_base ?? "bruta") }, parametros.crecimiento_objetivo_pct ?? null, puente, { sobre: "corregida" }).resultado ?? null);
 
   // Lo que cambió en el global después de calcular (solo tiene sentido en una proyección en trabajo, que se recalcula).
   const cambiados: ResumenCrecimientosProyeccionApi["cambiados"] = [];
@@ -227,17 +246,25 @@ function resumenDe(dt: Datos): ResumenCrecimientosProyeccionApi {
     }
   }
 
-  // Lo que falta aprobar para cerrar (I4), con los mismos vigentes que la desactualización.
+  // Lo que falta aprobar para cerrar (I4), con los mismos vigentes que la desactualización. 0.14.0: y las vigentes `bruta` con Niño material (`reaprobar`).
   let sinAprobar: CrecimientosSinAprobarApi | null = null;
   if (enTrabajo) {
-    const faltan = faltantesDeCierre(gmExigidos(resumen?.gm_gml ?? {}, idsMatriz), dt.vigentes, anioSig);
-    if (faltan.gm.length > 0 || faltan.resto_provisional) {
+    const nombreGM = (clave: string) => {
+      const [g = "", m = ""] = clave.split("|");
+      return `${dt.nombresGeneros.get(g) ?? "Género"} · ${dt.nombresMundos.get(m) ?? "Mundo"}`;
+    };
+    const conNino: GmConNino = new Map(
+      (resumen?.gm_con_nino ?? []).map((clave) => [clave, { nombre: clave === "resto" ? "Resto" : nombreGM(clave), correccion_pct: resumen?.gm_correccion_nino_pct?.[clave] ?? 0 }])
+    );
+    const faltan = faltantesDeCierre(gmExigidos(resumen?.gm_gml ?? {}, idsMatriz), dt.vigentes, anioSig, conNino);
+    if (faltan.gm.length > 0 || faltan.resto_provisional || faltan.reaprobar.length > 0) {
       sinAprobar = {
         faltan: faltan.gm.map((clave) => {
           const [g = "", m = ""] = clave.split("|");
-          return { clave: `${g}.${m}`, nombre: `${dt.nombresGeneros.get(g) ?? "Género"} · ${dt.nombresMundos.get(m) ?? "Mundo"}` };
+          return { clave: `${g}.${m}`, nombre: nombreGM(clave) };
         }),
         resto_provisional: faltan.resto_provisional,
+        reaprobar: faltan.reaprobar.map((r) => ({ ...r, clave: r.clave.replace("|", ".") })),
       };
     }
   }

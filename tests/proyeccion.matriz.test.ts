@@ -207,6 +207,45 @@ describe("contrato de M8: filas por género · mundo · línea · agrupación ·
   });
 });
 
+describe("06e: base corregida del Niño en la Matriz", () => {
+  const { nodos } = armarMatriz(planas, { anio: Y });
+
+  it("Σ B' y «Crec. sobre 2026 corregido» = Σ vigente ÷ Σ B' − 1; «sobre real» sigue siendo Σ vigente ÷ Σ B − 1; sin Niño (DENIM) coinciden", () => {
+    const abrigo = nodo(nodos, "ABRIGO", "linea");
+    // ABRIGO es invierno con Niño 2026 a 0,66: B' = B ÷ 0,66.
+    expect(abrigo.siguiente.base_corregida).toBeGreaterThan(abrigo.siguiente.base_siguiente);
+    expect(abrigo.siguiente.base_corregida as number).toBeCloseTo(abrigo.siguiente.base_siguiente / 0.66, 0);
+    const vigente = (abrigo.siguiente.crec_mismas_pct as number) / 100 + 1;
+    expect(abrigo.siguiente.crec_corregida_pct as number).toBeCloseTo(((vigente * abrigo.siguiente.base_siguiente) / (abrigo.siguiente.base_corregida as number) - 1) * 100, 6);
+    const denim = nodo(nodos, "DENIM", "linea");
+    expect(denim.siguiente.base_corregida).toBe(denim.siguiente.base_siguiente);
+    expect(denim.siguiente.crec_corregida_pct).toBe(denim.siguiente.crec_mismas_pct);
+    // Los nodos que agrupan suman Σ B' de sus líneas.
+    const lineas = nodos.filter((n) => n.nivel === "linea");
+    expect(nodos[0].siguiente.base_corregida as number).toBeCloseTo(lineas.reduce((a, l) => a + (l.siguiente.base_corregida as number), 0), 6);
+  });
+
+  it("una fila sin B' guardado (cálculo anterior) cuenta con B' = B", () => {
+    const sinBc = planas.map((f) => ({ ...f, anios: f.anios.map((a) => ({ ...a, base_normalizada: null })) }));
+    const n = nodo(armarMatriz(sinBc, { anio: Y }).nodos, "ABRIGO", "linea");
+    expect(n.siguiente.base_corregida).toBe(n.siguiente.base_siguiente);
+  });
+
+  it("el Excel de la Matriz parte el crecimiento en «corregido» y «real» (cabecera y valores)", () => {
+    const h = hojasMatriz({ nodos, bloques: salida.bloques, anio: Y, filtro: {}, datosHasta: "2026-09" });
+    const cab = h.MATRIZ[0];
+    const iCorregido = cab.indexOf(`CREC. SOBRE ${Y} CORREGIDO %`);
+    const iReal = cab.indexOf(`CREC. SOBRE ${Y} REAL %`);
+    expect(iCorregido).toBeGreaterThan(0);
+    expect(iReal).toBe(iCorregido + 1);
+    expect(cab).not.toContain("CREC. MISMAS TIENDAS %");
+    const filaAbrigo = h.MATRIZ.find((f) => f[1] === "ABRIGO")!;
+    const n = nodo(nodos, "ABRIGO", "linea");
+    expect(filaAbrigo[iCorregido]).toBe(Math.round((n.siguiente.crec_corregida_pct as number) * 10) / 10);
+    expect(filaAbrigo[iReal]).toBe(Math.round((n.siguiente.crec_mismas_pct as number) * 10) / 10);
+  });
+});
+
 describe("hojas de Excel (caso 23; regla 32)", () => {
   const datosHasta = "2026-09";
 

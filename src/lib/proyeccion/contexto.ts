@@ -5,6 +5,7 @@ import { cargarEstadoNivel } from "@/lib/arbol/nivel/consultas";
 import { leerEquivalencias } from "@/lib/arbol/consultas";
 import { traducirErrorDb } from "@/lib/api/errores-db";
 import { hastaPorDefecto } from "@/lib/curvas/anios";
+import { huellaCargas, huellaTemporada } from "@/lib/curvas/huellas";
 import { aniosAtipicidad, type PeriodoParaClase } from "@/lib/curvas/atipicos";
 import {
   aPeriodoApi,
@@ -13,6 +14,7 @@ import {
   leerCargasPublicadas,
   leerCorridaPorId,
   leerCurvasVigentes,
+  leerAgrupacionesDeTemporada,
   leerPeriodos,
   leerTiendas as leerTiendasMaestro,
   leerVentaMensualTienda,
@@ -39,9 +41,10 @@ import {
   leerNombresAgrupacionesMarca,
   type FactorDb,
 } from "./consultas";
-import type { EstadoActual } from "./desactualizado";
+import { estadosFactoresDeY, temporadasConNinoEnAnio, temporadasDeEquivalencias, type EstadoActual, type EstadoFactorDeY, type HoyFactores } from "./desactualizado";
 import { factorDe, type FactorProy } from "./nino";
 import type { NodoProy } from "./tipos";
+import { TEMPORADAS_FACTOR, type TemporadaFactor } from "./tipos-api";
 
 /**
  * Lo que el servicio de M7 lee de los demás módulos (M1 a M6) y arma en la forma que el método necesita. Solo servidor.
@@ -166,6 +169,18 @@ export const aFactorProy = (f: FactorDb): FactorProy => ({
   ratio_aplicado: f.ratio_aplicado === null ? null : Number(f.ratio_aplicado),
 });
 
+/**
+ * Huella de composición de hoy de cada temporada con `φ` (`invierno`, `verano`): md5 de las agrupaciones activas de la temporada y de `todo_el_ano` (el control del
+ * Niño) con la huella de sus equivalencias activas (`huellaTemporada`). La misma que `sincronizarFactores` escribe en `huella_composicion`: remapear una
+ * equivalencia mueve el factor y deja la fila `desfasada`.
+ */
+export async function leerHuellasComposicion(db: Db): Promise<Leido<Record<TemporadaFactor, string>>> {
+  const composiciones = await Promise.all(TEMPORADAS_FACTOR.map((t) => leerAgrupacionesDeTemporada(db, t)));
+  const fallo = composiciones.find((c) => c.error)?.error;
+  if (fallo) return falla(traducirErrorDb(fallo, "proyección: leer la composición de las agrupaciones"));
+  return listo(Object.fromEntries(TEMPORADAS_FACTOR.map((t, i) => [t, huellaTemporada(composiciones[i].data)])) as Record<TemporadaFactor, string>);
+}
+
 // ─── Contexto completo del cálculo ───
 
 export type ContextoCalculo = {
@@ -191,6 +206,12 @@ export type ContextoCalculo = {
   huellaFlujo: string | null;
   /** `0.10.8` (07c): ids de los géneros que son columna de la matriz de crecimientos (HOMBRE, MUJER), según el catálogo. */
   generosMatriz: string[];
+  /**
+   * `0.14.0` (06e B2): `huellaCargas` de hoy (de las cargas publicadas, las mismas con que `sincronizarFactores` escribe `huella_cargas`) y la huella de
+   * composición de hoy de las agrupaciones de cada temporada y de `todo_el_ano` (`huella_composicion` de los factores). Con ellas se evalúa `estadoFactorY`.
+   */
+  huellaCargas: string;
+  huellasComposicion: Record<TemporadaFactor, string>;
   hoy: string;
   ultimoCerrado: string | null;
   hastaDefecto: string | null;
@@ -220,6 +241,11 @@ export async function cargarContextoCalculo(db: Db, opciones: { conEat?: boolean
     configFlujo = construirConfigFlujo((gml as EstadoGmlCargado).estado, cat.data.equivalencias);
     huella = huellaFlujo(configFlujo);
   }
+
+  // Huellas de composición de hoy: lo que compara `estadoFactorY` con `huella_composicion` de cada factor.
+  const composicion = await leerHuellasComposicion(db);
+  if (composicion.respuesta) return falla(composicion.respuesta);
+  const huellasComposicion = composicion.data;
 
   const nodos: NodoProy[] = [];
   for (const n of cat.data.nodosDb) {
@@ -264,17 +290,25 @@ export async function cargarContextoCalculo(db: Db, opciones: { conEat?: boolean
     configFlujo,
     huellaFlujo: huella,
     generosMatriz: generosDeMatriz(cat.data.generos).map((g) => g.id),
+    huellaCargas: huellaCargas(cargasMapa),
+    huellasComposicion,
     hoy,
     ultimoCerrado: publicados.length > 0 ? ultimoMesCerrado(hoy) : null,
     hastaDefecto: hastaPorDefecto(publicados, hoy),
   });
 }
 
-/** `EstadoActual` para `motivosDesactualizada`, con lo ya leído. */
-export function estadoActualDe(ctx: ContextoCalculo, nivelesCambiados: number, crecimientos?: EstadoActual["crecimientos"]): EstadoActual {
+/**
+ * `EstadoActual` para `motivosDesactualizada`, con lo ya leído. Con `anioEnCurso` (el `Y` de la proyección) añade lo que hace falta para detectar
+ * `temporada_cambiada` (06e M6): `equivalencia → temporada` de hoy y las temporadas con meses atípicos en `Y`.
+ */
+export function estadoActualDe(ctx: ContextoCalculo, nivelesCambiados: number, crecimientos?: EstadoActual["crecimientos"], anioEnCurso?: number): EstadoActual {
   const periodosUpdated = ctx.periodos.map((p) => p.updated_at).sort();
   return {
     ...(crecimientos ? { crecimientos } : {}),
+    ...(anioEnCurso !== undefined
+      ? { temporada_equivalencias: temporadasDeEquivalencias(ctx.nodos, ctx.agrupaciones), temporadas_con_nino: temporadasConNinoEnAnio(anioEnCurso, ctx.periodosClase, ctx.publicados) }
+      : {}),
     cargas_publicadas: ctx.cargasLista.map((c) => ({ periodo: c.periodo, publicada_at: c.publicada_at })),
     ultimo_mes_cerrado: ctx.ultimoCerrado,
     curvas_vigentes: ctx.vigentes.map((v) => ({ agrupacion_id: v.agrupacion_id, curva_id: v.curva_id })),
@@ -300,6 +334,21 @@ export function factoresPendientes(ctx: ContextoCalculo, anioEnCurso: number): {
     }
   }
   return { faltantes, siguienteAtipico };
+}
+
+/** Lo que se sabe hoy para evaluar los factores de `Y` (`estadoFactorY`): cargas, composición, periodos y meses publicados. */
+export function hoyFactores(ctx: ContextoCalculo): HoyFactores {
+  return { huella_cargas: ctx.huellaCargas, huella_composicion: ctx.huellasComposicion, periodos: ctx.periodosClase, publicados: ctx.publicados };
+}
+
+/** El estado de cada factor de `Y` (uno por temporada con meses atípicos en `Y` y alguna agrupación activa): `ok`, `faltante`, `desfasado` o `sin_confirmar`. */
+export function estadosFactoresY(ctx: ContextoCalculo, anioEnCurso: number): EstadoFactorDeY[] {
+  return estadosFactoresDeY({
+    anioEnCurso,
+    factores: ctx.factoresDb,
+    hoy: hoyFactores(ctx),
+    temporadasActivas: new Set(ctx.agrupaciones.map((a) => a.temporada)),
+  });
 }
 
 /** Cuántas curvas vigentes están obsoletas hoy (lectura de fotos sin `resultado`; la misma regla que `GET /api/curvas`). */

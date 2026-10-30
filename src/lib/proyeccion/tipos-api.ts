@@ -38,14 +38,18 @@ export const RATIO_MAX = 3;
  * periodo y eje por marca; una proyección en trabajo con `version_metodo < 3` queda desactualizada hasta recalcular. `4` (`0.10.8`,
  * fichas 07c y 07d): el % de crecimiento del año siguiente es BRUTO (`P = round(B × (1 + g))` con `B` = vigente de `Y` de las mismas
  * tiendas de `Y+1`, sin normalizar por el Niño; vale para la fila, la celda género × mundo y el Resto) y la venta esperada de una
- * tienda nueva es la venta MENSUAL promedio en régimen (año maduro `S = 12 × V`, estacionalizado en los meses abiertos).
+ * tienda nueva es la venta MENSUAL promedio en régimen (año maduro `S = 12 × V`, estacionalizado en los meses abiertos). `5` (`0.14.0`,
+ * ficha 06e): el % aprobado es «sobre `Y` corregido del Niño» (`P = round(B' × (1 + g))` con `B'` = `B` dividida por el factor RELATIVO de su
+ * temporada, por fila); una versión aprobada antes de `0.14.0` (`sobre_base = 'bruta'`) se sigue aplicando como en el 4. Sin Niño en `Y` no cambia
+ * ninguna cifra. Una proyección en trabajo de método 4 queda desactualizada («método nuevo») y no se cierra ni forzando.
  */
-export const VERSION_METODO = 4;
+export const VERSION_METODO = 5;
 /**
  * `0.10.8` (07d §7): versión mínima del método con que debe estar calculada una proyección cerrada para que M8 la use sin avisar
  * (`cerrada_metodo_anterior`). Constante FIJA (no `VERSION_METODO`): una subida futura del método no invalida en M8 cerradas válidas.
+ * `0.14.0` (06e D12): sube a 5, pero una cerrada de método 4 SIGUE sirviendo a M8 con el aviso (no bloquea) hasta el nuevo cierre.
  */
-export const VERSION_METODO_MIN_M8 = 4;
+export const VERSION_METODO_MIN_M8 = 5;
 /**
  * `0.14.0` (06e D8): umbral único de materialidad del Niño. Un GM (o el Resto) «tiene Niño» solo si `|Σ B' ÷ Σ B − 1| ≥ 0,5 %`
  * (`correccionMaterial`, `factor-nino.ts`). Pantalla (`hay_nino`) y M7 (`gm_con_nino`) usan la misma función.
@@ -490,8 +494,11 @@ export type FilaResumenCrecimientoApi = {
   /** `null` en el Resto. */
   genero: string | null;
   mundo: string | null;
-  /** De la foto (`proyeccion_crecimientos` o `parametros.crecimiento_resto_usado`). */
-  aplicado: { pct: number; version: number | null; provisional: boolean; por_nombre: string | null; at: string | null };
+  /**
+   * De la foto (`proyeccion_crecimientos` o `parametros.crecimiento_resto_usado`). `sobre_base` (0.14.0): sobre qué base se escribió ese %; foto de antes de
+   * 0.14.0 = `bruta`, el Resto provisional y el % propio de una fila = `corregida`.
+   */
+  aplicado: { pct: number; version: number | null; provisional: boolean; sobre_base?: SobreBase; por_nombre: string | null; at: string | null };
   /** Del global (`crecimientos_genero_mundo`); `null` si no hay versión vigente. */
   vigente_hoy: { pct: number; version: number; por_nombre: string | null; aprobada_at: string } | null;
   /** 07c: `B`, `B''`, rebote, filas con % propio, decididas y `Σ vigente` de `Y+1`. */
@@ -584,11 +591,14 @@ export type AnioFilaApi = {
   crecimiento_efectivo?: CrecimientoEfectivoApi | null;
   /** `0.10.8`, solo filas base de `Y+1`: `B` = vigente de `Y` de las mismas tiendas de `Y+1`, sin normalizar (B2 incluido). `null` sin base o sin curva. */
   base_siguiente?: number | null;
-  /** `0.10.8`: `B''` = lo que la fila vendería en `Y+1` con 0 % si `Y` hubiera sido normal. Solo referencia (rebote del Niño). */
+  /**
+   * `0.14.0` (método 5): `B'` = `B` corregida del Niño de `Y` (lo que habrían vendido las mismas tiendas de `Y+1` en un año normal); con `φ_Y ≡ 1`, `B' = B`.
+   * Es la base del % «sobre 2026 corregido». (Antes de 0.14.0 era `B''` = `B' × Σ c φ_{Y+1}`, solo referencia.)
+   */
   base_normalizada?: number | null;
-  /** `0.10.8`: `vigente ÷ B − 1` en %; `null` sin `B` o sin vigente. */
+  /** `0.10.8`: `vigente ÷ B − 1` en % («sobre 2026 real»); `null` sin `B` o sin vigente. */
   pct_bruto?: number | null;
-  /** `0.10.8`: `vigente ÷ B'' − 1` en %; `null` sin `B''` (0 o nulo) o sin vigente. */
+  /** `0.14.0`: `vigente ÷ B' − 1` en % («sobre 2026 corregido»); `null` sin `B'` (0 o nulo) o sin vigente. */
   pct_sobre_normalizada?: number | null;
 };
 
@@ -839,6 +849,12 @@ export type ResumenProyeccion = {
   gm_con_nino?: string[];
   /** `0.14.0` (M8): por GM, filas base con `B` nulo (`sin_propuesta` o `sin_curva`) y su venta de `Y`: lo que queda fuera de la base de M7. */
   gm_fuera_base?: Record<string, { filas: number; unidades: number }>;
+  /** `0.14.0`: `Σ B' ÷ Σ B − 1` en % de cada clave de `gm_con_nino` (para decir cuánto Niño tiene el GM que hay que reaprobar). */
+  gm_correccion_nino_pct?: Record<string, number>;
+  /** `0.14.0` (D5): temporadas con `φ` (`invierno`, `verano`) que entran en la composición de alguna fila base: las que exigen un factor de `Y` para cerrar. */
+  temporadas_filas?: string[];
+  /** `0.14.0` (M6): foto interna `equivalencia_id → temporada` (invierno y verano) con que se calculó, para detectar `temporada_cambiada`. La API no la entrega. */
+  temporada_equivalencias?: Record<string, string>;
 };
 
 export type ProyeccionApi = {

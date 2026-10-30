@@ -4,7 +4,17 @@ import { useMemo, useState } from "react";
 import { calcularGeometriaCurvas, lecturaMes, type EstiloTrazo } from "@/lib/curvas/grafico";
 import type { DetalleGeneroMundoApi } from "@/lib/crecimientos/tipos-api";
 import { Chips, type ChipItem } from "@/components/ui/chips";
-import { MODOS_GM, bandasDelNino, seriesDelGrafico, type ModoGM } from "./vista";
+import {
+  GRUPO_VISTA_PREVIA,
+  MODOS_GM,
+  anioAplicacionDe,
+  anioEnCursoDe,
+  bandasDelNino,
+  seriesDelGrafico,
+  textoLeyendaCorregido,
+  textoTiendasBase,
+  type ModoGM,
+} from "./vista";
 
 function dasharray(trazo: EstiloTrazo | undefined, donde: "leyenda" | "linea"): string | undefined {
   if (trazo === "discontinuo") return donde === "linea" ? "7 5" : "5 3";
@@ -15,7 +25,7 @@ function dasharray(trazo: EstiloTrazo | undefined, donde: "leyenda" | "linea"): 
 const TEXTO_MODO: Record<ModoGM, string> = {
   unidades: "Unidades vendidas por mes de las mismas tiendas",
   forma: "Participación del mes en el total de su año",
-  sin_nino: "Unidades por mes con el efecto del Niño quitado (cada mes dividido por el factor de su temporada)",
+  sin_nino: "Unidades por mes con el efecto del Niño quitado (cada mes dividido por el factor de su temporada); el año en curso es el corregido por curva",
 };
 
 /**
@@ -29,16 +39,19 @@ export function GraficoGM({
   modo,
   onModo,
   idTabla,
+  pct = null,
 }: {
-  detalle: Pick<DetalleGeneroMundoApi, "series" | "forma_tipica" | "bandas_nino">;
+  detalle: Pick<DetalleGeneroMundoApi, "series" | "forma_tipica" | "bandas_nino"> & Partial<Pick<DetalleGeneroMundoApi, "serie_corregida" | "serie_base_curva" | "factores_y" | "cierre" | "acumulado">>;
   modo: ModoGM;
   onModo: (m: ModoGM) => void;
   idTabla: string;
+  /** El % que se está escribiendo en «Aprobar» (sobre 2026 corregido): mueve la línea «vista previa». */
+  pct?: number | null;
 }) {
   const [apagados, setApagados] = useState<Record<string, boolean>>({});
   const [mes, setMes] = useState<number | null>(null);
 
-  const series = useMemo(() => seriesDelGrafico(detalle, modo), [detalle, modo]);
+  const series = useMemo(() => seriesDelGrafico(detalle, modo, { pct }), [detalle, modo, pct]);
   const activas = useMemo(() => series.filter((s) => !apagados[s.grupo]), [series, apagados]);
   const bandas = useMemo(() => bandasDelNino(detalle), [detalle]);
   const modoGrafico = modo === "forma" ? "participacion" : "unidades";
@@ -47,6 +60,10 @@ export function GraficoGM({
   const items: ChipItem<ModoGM>[] = MODOS_GM.map((m) => ({ id: m.id, label: m.label }));
   const anchoMes = geom.area.ancho / 12;
   const x0Mes = (m: number) => geom.area.x + (m - 1) * anchoMes;
+  const anioY = anioEnCursoDe(detalle.series) ?? (detalle.acumulado ? detalle.acumulado.anio : null);
+  const leyendaCorregido = anioY !== null && detalle.serie_corregida ? textoLeyendaCorregido(detalle.factores_y ?? [], detalle.bandas_nino, anioY) : null;
+  const hayPrevia = series.some((s) => s.grupo === GRUPO_VISTA_PREVIA);
+  const anioPrevia = detalle.acumulado ? anioAplicacionDe({ acumulado: detalle.acumulado }) : anioY !== null ? anioY + 1 : null;
   const resumen = `Curva de venta mensual de ${activas.map((s) => s.etiqueta).join(", ") || "ninguna serie"}. ${TEXTO_MODO[modo]}. La tabla año por mes trae las cifras exactas.`;
 
   return (
@@ -118,6 +135,21 @@ export function GraficoGM({
         </svg>
       </div>
 
+      {(leyendaCorregido || hayPrevia) && modo !== "forma" && (
+        <ul className="space-y-1 text-xs text-tinta-suave" aria-label="Qué son las líneas nuevas">
+          {leyendaCorregido && modo === "unidades" && (
+            <li>
+              <strong className="text-tinta">{anioY} corregido (sin Niño)</strong>: {leyendaCorregido}.
+            </li>
+          )}
+          {hayPrevia && anioPrevia !== null && (
+            <li>
+              <strong className="text-tinta">{anioPrevia} vista previa</strong>: {textoTiendasBase(anioPrevia, detalle.cierre?.base_curva ?? null)}. Es la base {anioPrevia} corregida por curva × (1 + el % que escribes en «Aprobar»); se mueve al escribir.
+            </li>
+          )}
+        </ul>
+      )}
+
       {bandas.length > 0 && (
         <ul className="space-y-1 text-xs text-tinta-suave" aria-label="Bandas del Niño">
           {bandas.map((b) => (
@@ -130,7 +162,7 @@ export function GraficoGM({
       )}
 
       <figcaption className="text-xs text-tinta-suave">
-        {TEXTO_MODO[modo]}. Cada línea es un año; el año en curso va continuo hasta el último mes real y discontinuo en los meses proyectados. Las franjas rojizas son los meses
+        {TEXTO_MODO[modo]}. Cada línea es un año; el año en curso va continuo hasta el último mes real y discontinuo con el cierre por curva. Las franjas rojizas son los meses
         de temporada afectados por el Niño.{modo === "forma" ? " La línea punteada oscura es la forma típica: el promedio de los años completos normales." : ""}
       </figcaption>
     </figure>

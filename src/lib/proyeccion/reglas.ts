@@ -1,4 +1,15 @@
-import { CALCULO_CADUCA_MIN, MAX_TOTAL, UMBRAL_COLA_LARGA, type EstadoProyeccion } from "./tipos-api";
+import { mensajeFactorDesfasado, mensajeFactorSinConfirmar } from "./desactualizado";
+import {
+  CALCULO_CADUCA_MIN,
+  FORMULA_FACTOR_RELATIVO,
+  MAX_TOTAL,
+  MIN_MESES_FACTOR,
+  UMBRAL_COLA_LARGA,
+  type DiagnosticoFactorApi,
+  type EstadoProyeccion,
+  type ReaprobarCierreApi,
+} from "./tipos-api";
+import type { PeriodoEfectoApi } from "@/lib/curvas/tipos-api";
 
 /**
  * Reglas de estado de la proyección (ficha 07, reglas 36 a 39). Puras: el handler las llama y no las reimplementa.
@@ -124,18 +135,114 @@ export type FilaSinDecidir = {
 
 /**
  * `0.12.1` (06d §3.1): lo que falta aprobar para cerrar. `anio` es el año de aplicación (`Y+1`); `faltan` los GM de HOMBRE o MUJER con filas base sin
- * versión vigente y `resto_provisional` que se exige el Resto y no hay uno aprobado.
+ * versión vigente y `resto_provisional` que se exige el Resto y no hay uno aprobado. `0.14.0` (06e R16): `reaprobar` las vigentes `bruta` de GM con Niño material.
  */
-export type SinAprobarCierre = { anio: number; faltan: { clave: string; nombre: string }[]; resto_provisional: boolean };
+export type SinAprobarCierre = { anio: number; faltan: { clave: string; nombre: string }[]; resto_provisional: boolean; reaprobar?: ReaprobarCierreApi[] };
 
-/** Mensaje de `crecimientos_sin_aprobar` («Faltan 3 crecimientos aprobados para 2027 (…) y el Resto es provisional: apruébalos en …»). */
+const pct1 = (x: number): string => `${x >= 0 ? "+" : "−"}${Math.abs(x).toLocaleString("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %`;
+
+/** Mensaje de `crecimientos_sin_aprobar` («Faltan 3 crecimientos aprobados para 2027 (…) y el Resto es provisional: apruébalos en …»; con `reaprobar`, qué reaprobar). */
 export function mensajeSinAprobar(s: SinAprobarCierre): string {
   const donde = "apruébalos en Curvas de estacionalidad → Crecimiento por género × mundo";
   const n = s.faltan.length;
-  if (n === 0) return `El Resto de ${s.anio} es provisional: apruébalo en Curvas de estacionalidad → Crecimiento por género × mundo antes de cerrar.`;
-  const lista = s.faltan.map((f) => f.nombre).join(", ");
-  const falta = `Faltan ${n} ${n === 1 ? "crecimiento aprobado" : "crecimientos aprobados"} para ${s.anio} (${lista})`;
-  return s.resto_provisional ? `${falta} y el Resto es provisional: ${donde}.` : `${falta}: ${n === 1 ? "apruébalo" : "apruébalos"} en Curvas de estacionalidad → Crecimiento por género × mundo.`;
+  const reaprobar = s.reaprobar ?? [];
+  let falta: string | null = null;
+  if (n === 0) {
+    if (s.resto_provisional) falta = `El Resto de ${s.anio} es provisional: apruébalo en Curvas de estacionalidad → Crecimiento por género × mundo antes de cerrar.`;
+  } else {
+    const lista = s.faltan.map((f) => f.nombre).join(", ");
+    const texto = `Faltan ${n} ${n === 1 ? "crecimiento aprobado" : "crecimientos aprobados"} para ${s.anio} (${lista})`;
+    falta = s.resto_provisional ? `${texto} y el Resto es provisional: ${donde}.` : `${texto}: ${n === 1 ? "apruébalo" : "apruébalos"} en Curvas de estacionalidad → Crecimiento por género × mundo.`;
+  }
+  const anioEnCurso = s.anio - 1;
+  let re: string | null = null;
+  if (reaprobar.length === 1) {
+    const r = reaprobar[0];
+    re = `${r.nombre} v${r.version} se aprobó sobre ${anioEnCurso} real antes de 0.14.0 y este GM tuvo Niño en ${anioEnCurso} (${pct1(r.correccion_pct)}): reapruébalo.`;
+  } else if (reaprobar.length > 1) {
+    re = `Se aprobaron sobre ${anioEnCurso} real, antes de 0.14.0, ${reaprobar.length} crecimientos de GM con Niño en ${anioEnCurso} (${reaprobar.map((r) => `${r.nombre} v${r.version} ${pct1(r.correccion_pct)}`).join(", ")}): reapruébalos.`;
+  }
+  return [falta, re].filter((x): x is string => x !== null).join(" ");
+}
+
+/**
+ * `0.14.0` (06e D5, D7, R16): lo que impide cerrar por el Niño, calculado fuera (`desactualizado.ts`, `servicio.ts`) con lo que se sabe hoy. Ninguno se puede
+ * saltar con `forzar`. Todo es opcional: sin él no se comprueba.
+ */
+export type BloqueosNino = {
+  /** `Y+1` tiene meses atípicos marcados en Curvas (D7: 2027 no es Niño). */
+  anioSiguienteAtipico?: { meses: string[] } | null;
+  /** Temporadas con meses atípicos en `Y`, sin factor efectivo y con filas base cuyo `φ_Y` las incluye. */
+  factorFaltante?: { anio: number; temporada: string }[];
+  /** Factores de `Y` ya sincronizados con fórmula, cargas, meses o composición viejos (B2). */
+  factorDesfasado?: { anio: number; temporada: string; motivos: string[] }[];
+  /** Factores de `Y` parciales sin `ratio_aplicado` escrito sobre el cálculo de hoy (B2). */
+  factorSinConfirmar?: { anio: number; temporada: string; efectivo: number | null }[];
+  /** Los factores de `Y` (`invierno 2026`) que cambiaron después de calcular (el `factores_cambiados` de otro año sí se fuerza). */
+  factoresCambiadosY?: string[];
+  /** Alguna equivalencia con Niño cambió de agrupación después de calcular. */
+  temporadaCambiada?: boolean;
+};
+
+/** Mensaje de `anio_siguiente_atipico` (D7); `accion` dice qué no se puede hacer. */
+export function mensajeAnioSiguienteAtipico(anioSiguiente: number, accion: "aprobar" | "cerrar"): string {
+  return accion === "aprobar"
+    ? `${anioSiguiente} está marcado como año del Niño en Curvas → Periodos atípicos. Por ahora el crecimiento de ${anioSiguiente} no incluye el Niño: si no lo habrá, quita la marca; si lo habrá, hay que decidir cómo modelarlo antes de aprobar.`
+    : `${anioSiguiente} está marcado como año del Niño en Curvas → Periodos atípicos y no puedes cerrar: por ahora el crecimiento de ${anioSiguiente} no incluye el Niño. Si no lo habrá, quita la marca; si lo habrá, hay que decidir cómo modelarlo.`;
+}
+
+const nombreFactor = (f: { anio: number; temporada: string }): string => `${f.temporada} ${f.anio}`;
+
+/**
+ * Los bloqueos del cierre por el Niño, EN ESTE ORDEN (§3.3, R16): `anio_siguiente_atipico`, `factor_faltante`, `factor_desfasado`, `factor_sin_confirmar`,
+ * `factores_cambiados` de `Y` y `temporada_cambiada`. Ninguno se salta con `forzar`. Pura; `cierre_bloqueado_por` de la API es esta lista y el `409` es el primero.
+ */
+export function bloqueosNinoDeCierre(b: BloqueosNino | undefined, anioEnCurso: number): { codigo: string; mensaje: string; detalle: Record<string, unknown> }[] {
+  const salida: { codigo: string; mensaje: string; detalle: Record<string, unknown> }[] = [];
+  if (!b) return salida;
+  if (b.anioSiguienteAtipico) {
+    salida.push({ codigo: "anio_siguiente_atipico", mensaje: mensajeAnioSiguienteAtipico(anioEnCurso + 1, "cerrar"), detalle: { meses: b.anioSiguienteAtipico.meses } });
+  }
+  const faltan = b.factorFaltante ?? [];
+  if (faltan.length > 0) {
+    const lista = faltan.map(nombreFactor);
+    salida.push({
+      codigo: "factor_faltante",
+      mensaje:
+        faltan.length === 1
+          ? `Falta el factor del Niño de ${lista[0]}: sin él la base de ${anioEnCurso + 1} no se corrige. Escríbelo en Factores del Niño (1,00 si no hubo efecto) y recalcula.`
+          : `Faltan los factores del Niño de ${lista.join(" y ")}: sin ellos la base de ${anioEnCurso + 1} no se corrige. Escríbelos en Factores del Niño (1,00 si no hubo efecto) y recalcula.`,
+      detalle: { faltan: faltan.map((f) => ({ anio: f.anio, temporada: f.temporada })) },
+    });
+  }
+  const desfasados = b.factorDesfasado ?? [];
+  if (desfasados.length > 0) {
+    salida.push({
+      codigo: "factor_desfasado",
+      mensaje: desfasados.map(mensajeFactorDesfasado).join(" "),
+      detalle: { desfasados: desfasados.map((f) => ({ anio: f.anio, temporada: f.temporada, motivos: f.motivos })) },
+    });
+  }
+  const sinConfirmar = b.factorSinConfirmar ?? [];
+  if (sinConfirmar.length > 0) {
+    salida.push({
+      codigo: "factor_sin_confirmar",
+      mensaje: sinConfirmar.map(mensajeFactorSinConfirmar).join(" "),
+      detalle: { sin_confirmar: sinConfirmar.map((f) => ({ anio: f.anio, temporada: f.temporada, efectivo: f.efectivo })) },
+    });
+  }
+  const cambiados = b.factoresCambiadosY ?? [];
+  if (cambiados.length > 0) {
+    salida.push({
+      codigo: "factores_cambiados",
+      mensaje: `Cambió el factor del Niño de ${cambiados.join(" y ")}, que corrige la base de ${anioEnCurso + 1}: recalcula (no se puede forzar).`,
+      detalle: { factores: cambiados },
+    });
+  }
+  if (b.temporadaCambiada) {
+    salida.push({ codigo: "temporada_cambiada", mensaje: "Cambió la agrupación de alguna línea con Niño y con ella su factor: recalcula.", detalle: {} });
+  }
+  return salida;
 }
 
 export type ResultadoCerrar =
@@ -143,8 +250,10 @@ export type ResultadoCerrar =
   | {
       ok: false;
       rechazo: RechazoRegla;
-      /** `0.12.1`: solo con el motivo `crecimientos_sin_aprobar` (el `detalle` del `409`). */
-      crecimientos_sin_aprobar?: { faltan: { clave: string; nombre: string }[]; resto_provisional: boolean };
+      /** `0.12.1`: solo con el motivo `crecimientos_sin_aprobar` (el `detalle` del `409`); `0.14.0`: con `reaprobar`. */
+      crecimientos_sin_aprobar?: { faltan: { clave: string; nombre: string }[]; resto_provisional: boolean; reaprobar?: ReaprobarCierreApi[] };
+      /** `0.14.0` (06e): el `detalle` del `409` de los motivos del Niño (`factor_faltante`, `factor_desfasado`…). */
+      detalle?: Record<string, unknown>;
       /** Las `MAX_FILAS_SIN_DECIDIR_LISTADAS` de mayor propuesta; el total va en `total_filas_sin_decidir`. */
       filas_sin_decidir?: FilaSinDecidir[];
       total_filas_sin_decidir?: number;
@@ -183,6 +292,11 @@ export function motivoRechazoCerrar(args: {
    * falta. BLOQUEA SIN EXCEPCIÓN (decisión de Javier): `forzar` no lo salta. Va después de `version_metodo` y `crecimientos_cambiados`.
    */
   crecimientosSinAprobar?: SinAprobarCierre | null;
+  /**
+   * `0.14.0` (06e D5, D7, R16): lo que impide cerrar por el Niño (2027 marcado, factor de `Y` faltante, desfasado o sin confirmar, factor de `Y` o
+   * temporada cambiados). Va después de `crecimientos_cambiados` y antes de `crecimientos_sin_aprobar`; NO se puede saltar con `forzar`.
+   */
+  bloqueosNino?: BloqueosNino;
 }): ResultadoCerrar {
   if (args.estado === "cerrada") return { ok: false, rechazo: { status: 409, codigo: "ya_cerrada", mensaje: "La proyección ya está cerrada." } };
   if (args.estado === "archivada") return { ok: false, rechazo: { status: 409, codigo: "archivada", mensaje: MENSAJE_ARCHIVADA } };
@@ -209,12 +323,14 @@ export function motivoRechazoCerrar(args: {
       },
     };
   }
+  const nino = bloqueosNinoDeCierre(args.bloqueosNino, args.anioEnCurso)[0];
+  if (nino) return { ok: false, rechazo: { status: 409, codigo: nino.codigo, mensaje: nino.mensaje }, detalle: nino.detalle };
   const sin = args.crecimientosSinAprobar;
-  if (sin && (sin.faltan.length > 0 || sin.resto_provisional)) {
+  if (sin && (sin.faltan.length > 0 || sin.resto_provisional || (sin.reaprobar?.length ?? 0) > 0)) {
     return {
       ok: false,
       rechazo: { status: 409, codigo: "crecimientos_sin_aprobar", mensaje: mensajeSinAprobar(sin) },
-      crecimientos_sin_aprobar: { faltan: sin.faltan, resto_provisional: sin.resto_provisional },
+      crecimientos_sin_aprobar: { faltan: sin.faltan, resto_provisional: sin.resto_provisional, ...(sin.reaprobar !== undefined ? { reaprobar: sin.reaprobar } : {}) },
     };
   }
   const umbral = args.umbralColaLarga ?? UMBRAL_COLA_LARGA;
@@ -297,3 +413,46 @@ export function cargasIguales(tandas: readonly Readonly<Record<string, string>>[
   const referencia = JSON.stringify(Object.entries(tandas[0]).sort(([a], [b]) => a.localeCompare(b)));
   return tandas.every((t) => JSON.stringify(Object.entries(t).sort(([a], [b]) => a.localeCompare(b))) === referencia);
 }
+
+// ─── Factor del Niño relativo a partir del bloque `periodo` de M6 (06e §5.2) ───
+
+const redondear4 = (x: number): number => Math.round((x + Number.EPSILON * Math.sign(x)) * 1e4) / 1e4;
+
+/** `numeric(6,4)` con `check > 0`: un ratio nulo, cero, negativo o que no cabe (≥ 100) se guarda como `null` (solo es un dato para mostrar). */
+export function ratioGuardable(x: number | null | undefined): number | null {
+  if (x === null || x === undefined || !Number.isFinite(x)) return null;
+  const r = redondear4(x);
+  return r > 0 && r < 100 ? r : null;
+}
+
+/** Lo que `sincronizarFactores` escribe de un factor del Niño a partir del bloque `periodo` de `efectoAtipicoCorrida` (`ρ_P`, `κ_P`, `ρ_P ÷ κ_P`, el diagnóstico mes a mes). */
+export type FactorDePeriodo = {
+  /** `round4(ρ_P ÷ κ_P)` con al menos `MIN_MESES_FACTOR` meses del periodo con dato; si no, `null` (lo escribe el planner). */
+  ratio_calculado: number | null;
+  ratio_volumen: number | null;
+  ratio_control: number | null;
+  /** `|P|`: meses del periodo publicados en el año y en la referencia (lo que se guarda en `meses_comparados`). */
+  meses_comparados: number;
+  meses_periodo_con_dato: number;
+  diagnostico: DiagnosticoFactorApi | null;
+};
+
+export function factorDePeriodo(periodo: PeriodoEfectoApi | null | undefined): FactorDePeriodo {
+  if (!periodo) return { ratio_calculado: null, ratio_volumen: null, ratio_control: null, meses_comparados: 0, meses_periodo_con_dato: 0, diagnostico: null };
+  const suficiente = periodo.relativo !== null && periodo.meses_periodo_con_dato >= MIN_MESES_FACTOR;
+  return {
+    ratio_calculado: suficiente ? ratioGuardable(periodo.relativo) : null,
+    ratio_volumen: ratioGuardable(periodo.ratio_volumen),
+    ratio_control: ratioGuardable(periodo.ratio_control),
+    meses_comparados: periodo.meses.filter((m) => m.en_periodo).length,
+    meses_periodo_con_dato: periodo.meses_periodo_con_dato,
+    diagnostico: {
+      meses: periodo.meses.map((m) => ({ ...m })),
+      ratio_fuera: periodo.ratio_fuera,
+      meses_periodo: periodo.meses_periodo,
+      meses_periodo_con_dato: periodo.meses_periodo_con_dato,
+    },
+  };
+}
+
+export { FORMULA_FACTOR_RELATIVO };

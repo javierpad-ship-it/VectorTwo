@@ -2,19 +2,20 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { leerVigentes } from "@/lib/crecimientos/consultas-vigentes";
+import { matrizDeVigentes, sobreBaseDe } from "@/lib/crecimientos/vigentes";
 
 /** 06d §3.1: `leerVigentes` con un doble de la base que anota la consulta (sintético). */
 
-type Llamada = { tabla: string; filtros: [string, unknown][]; orden: string[]; rango: [number, number][] };
+type Llamada = { tabla: string; columnas: string; filtros: [string, unknown][]; orden: string[]; rango: [number, number][] };
 
 function dobleDb(filas: Record<string, unknown>[], error: { message: string } | null = null) {
   const llamadas: Llamada[] = [];
   const db = {
     from(tabla: string) {
-      const l: Llamada = { tabla, filtros: [], orden: [], rango: [] };
+      const l: Llamada = { tabla, columnas: "", filtros: [], orden: [], rango: [] };
       llamadas.push(l);
       const q = {
-        select: () => q,
+        select: (c: string) => ((l.columnas = c), q),
         eq: (c: string, v: unknown) => (l.filtros.push([`eq:${c}`, v]), q),
         in: (c: string, v: unknown) => (l.filtros.push([`in:${c}`, v]), q),
         order: (c: string) => (l.orden.push(c), q),
@@ -34,6 +35,7 @@ const fila = (extra: Record<string, unknown> = {}) => ({
   mundo_id: "m",
   version: 1,
   pct: "12.50",
+  sobre_base: "corregida",
   usuario_nombre: "Javier",
   aprobada_at: "2026-10-27T10:00:00Z",
   ...extra,
@@ -75,5 +77,26 @@ describe("leerVigentes", () => {
     const r = await leerVigentes(db, [2027]);
     expect(r.error?.message).toBe("falla");
     expect(r.data).toEqual([]);
+  });
+
+  it("06e §2.1 · lee sobre_base y la devuelve; una fila sin el dato queda null y se lee bruta", async () => {
+    const sinColumna = fila({ id: "i2", mundo_id: "m2" });
+    delete (sinColumna as Record<string, unknown>).sobre_base;
+    const { db, llamadas } = dobleDb([fila(), sinColumna, fila({ id: "i3", mundo_id: "m3", sobre_base: "bruta" })]);
+    const r = await leerVigentes(db, [2027]);
+    expect(llamadas[0]?.columnas.split(",")).toContain("sobre_base");
+    expect(r.data.map((v) => v.sobre_base)).toEqual(["corregida", null, "bruta"]);
+    expect(r.data.map((v) => sobreBaseDe(v))).toEqual(["corregida", "bruta", "bruta"]);
+  });
+
+  it("06e R4 · la matriz de vigentes lleva el sobre_base de cada GM y el del Resto (sin Resto aprobado, el provisional es corregida)", async () => {
+    const resto = fila({ id: "r1", alcance: "resto", genero_id: null, mundo_id: null, sobre_base: null });
+    const { db } = dobleDb([fila({ genero_id: "g", mundo_id: "m1", sobre_base: "corregida" }), fila({ id: "i2", genero_id: "g", mundo_id: "m2", sobre_base: "bruta" }), resto]);
+    const { data } = await leerVigentes(db, [2027]);
+    const m = matrizDeVigentes(data, ["g"], 2027);
+    expect(m.sobre?.get("g|m1")).toBe("corregida");
+    expect(m.sobre?.get("g|m2")).toBe("bruta");
+    expect(m.resto.sobre_base).toBe("bruta");
+    expect(matrizDeVigentes(data.filter((v) => v.alcance !== "resto"), ["g"], 2027).resto.sobre_base).toBe("corregida");
   });
 });

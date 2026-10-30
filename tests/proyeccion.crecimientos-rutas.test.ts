@@ -40,6 +40,7 @@ import { POST as cerrar } from "@/app/api/proyeccion/proyecciones/[id]/cerrar/ro
 import { GET as tiendas } from "@/app/api/proyeccion/proyecciones/[id]/tiendas/route";
 import { POST as archivar } from "@/app/api/proyeccion/proyecciones/[id]/archivar/route";
 import { construirVenta, GEN, LIN, MUN, AM, N, tiendas as tiendasFixture } from "./proyeccion.fixture";
+import { VERSION_METODO } from "@/lib/proyeccion/tipos-api";
 import type { ProyeccionApi, ResumenCrecimientosProyeccionApi, RespuestaLineasApi, RespuestaMatrizApi, RespuestaTiendasApi } from "@/lib/proyeccion/tipos-api";
 
 /**
@@ -141,12 +142,12 @@ describe("permisos y GET", () => {
     expect(r.status).toBe(200);
     expect(r.headers.get("Cache-Control")).toBe("no-store");
     const g = (await leer<ResumenCrecimientosProyeccionApi>(r)).data;
-    expect(g).toMatchObject({ anio_siguiente: 2027, version_metodo: 4, objetivo_pct: null, cambiados: [] });
+    expect(g).toMatchObject({ anio_siguiente: 2027, version_metodo: VERSION_METODO, objetivo_pct: null, cambiados: [] });
     // Los 3 GM con filas base: HOMBRE · URBANO aprobado (v1, 15 %); los otros dos siguieron al Resto aprobado (10 %, v1).
     expect(g.filas.map((f) => `${f.genero} · ${f.mundo}`)).toEqual(["HOMBRE · URBANO", "HOMBRE · CASUAL", "MUJER · CASUAL"]);
     const urbano = g.filas[0];
     expect(urbano.clave).toBe(claveGm(GEN.hombre, MUN.urbano));
-    expect(urbano.aplicado).toMatchObject({ pct: 15, version: 1, provisional: false, por_nombre: "Javier de prueba", at: "2026-10-10T12:00:00.000Z" });
+    expect(urbano.aplicado).toMatchObject({ pct: 15, version: 1, provisional: false, sobre_base: "corregida", por_nombre: "Javier de prueba", at: "2026-10-10T12:00:00.000Z" });
     expect(urbano.vigente_hoy).toMatchObject({ pct: 15, version: 1, por_nombre: "Javier de prueba" });
     expect(urbano.agregado).toMatchObject({ base_libre: 1860 + 60 });
     expect(urbano.resultante_pct).toBeCloseTo(15, 0);
@@ -167,6 +168,7 @@ describe("permisos y GET", () => {
         { clave: claveGm(GEN.mujer, MUN.casual), nombre: "MUJER · CASUAL" },
       ],
       resto_provisional: false,
+      reaprobar: [],
     });
   });
 
@@ -204,6 +206,29 @@ describe("permisos y GET", () => {
     expect((await resumen(id)).cambiados).toEqual([]);
   });
 
+  it("06e: el resumen dice sobre qué base se aplicó cada GM (la foto), lista lo que hay que reaprobar y el Total es «sobre 2026 corregido» con cada GM sobre su base", async () => {
+    aprobarCrecimientosFalsos(2027, { pct: { "HOMBRE · URBANO": 15, "HOMBRE · CASUAL": 20, "MUJER · CASUAL": 10 }, resto: 10, sobre: { "HOMBRE · CASUAL": "bruta", "HOMBRE · URBANO": "bruta" } });
+    const { id } = await nueva();
+    const g = await resumen(id);
+    const por = Object.fromEntries(g.filas.map((f) => [`${f.genero} · ${f.mundo}`, f]));
+    // La foto: `bruta` en los dos aprobados antes de 0.14.0, `corregida` en el de 0.14.0 y en el Resto.
+    expect(por["HOMBRE · URBANO"].aplicado.sobre_base).toBe("bruta");
+    expect(por["HOMBRE · CASUAL"].aplicado.sobre_base).toBe("bruta");
+    expect(por["MUJER · CASUAL"].aplicado.sobre_base).toBe("corregida");
+    expect(g.resto.aplicado.sobre_base).toBe("corregida");
+    // Solo HOMBRE · CASUAL (ABRIGO, invierno con Niño) hay que reaprobarlo: HOMBRE · URBANO bruta sin Niño material cierra (R17).
+    expect(g.sin_aprobar?.reaprobar).toEqual([expect.objectContaining({ clave: claveGm(GEN.hombre, MUN.casual), nombre: "HOMBRE · CASUAL", version: 1 })]);
+    expect(g.sin_aprobar?.faltan).toEqual([]);
+    // El agregado trae B' (base corregida) y el Total pondera cada GM sobre su base: el bruto sobre B, los corregidos sobre B'.
+    expect(por["HOMBRE · CASUAL"].agregado.base_normalizada).toBeGreaterThan(por["HOMBRE · CASUAL"].agregado.base);
+    const filaTotal = g.total?.filas.find((f) => f.genero === "HOMBRE" && f.mundo === "CASUAL");
+    expect(filaTotal?.base).toBe(por["HOMBRE · CASUAL"].agregado.base);
+    expect(filaTotal?.siguiente).toBeCloseTo(por["HOMBRE · CASUAL"].agregado.base * 1.2, 0);
+    const mujer = g.total?.filas.find((f) => f.genero === "MUJER" && f.mundo === "CASUAL");
+    expect(mujer?.base).toBe(por["MUJER · CASUAL"].agregado.base_normalizada);
+    expect(mujer?.pct_resultante_real).not.toBeUndefined();
+  });
+
   it("una proyección de método anterior (3): version_metodo = 3, sin Total y sin cambiados; recalcular la pone al día", async () => {
     aprobarCrecimientosFalsos(2027, { pct: 12, resto: 5 });
     const { id } = await nueva();
@@ -212,7 +237,7 @@ describe("permisos y GET", () => {
     const g = await resumen(id);
     expect(g).toMatchObject({ version_metodo: 3, total: null, cambiados: [], sin_aprobar: null });
     expect((await calcular(enviar("POST", "/x"), ctx(id))).status).toBe(201);
-    expect(await resumen(id)).toMatchObject({ version_metodo: 4 });
+    expect(await resumen(id)).toMatchObject({ version_metodo: VERSION_METODO });
   });
 });
 
@@ -321,26 +346,26 @@ describe("07c, lecturas: matriz y líneas (con la versión aprobada)", () => {
     expect(m.nodos[0].siguiente.crec_mismas_pct).not.toBeNull();
   });
 
-  it("la fila de 2027 trae crecimiento_efectivo con su origen, celda, versión y si es el Resto provisional, base_siguiente, base_normalizada y los % brutos", async () => {
+  it("la fila de 2027 trae crecimiento_efectivo con su origen, celda, versión, sobre_base y si es el Resto provisional, base_siguiente, base_normalizada (B') y los % sobre corregido y sobre real", async () => {
     aprobarCrecimientosFalsos(2027, { pct: 20, resto: null, sin: ["MUJER · CASUAL"] });
     const { id } = await nueva();
     await decidirFila(enviar("PUT", "/x", { crecimiento_pct: 7, origen: "manual" }), ctx(id, { filaId: idFila(DENIM_REC), anio: "2027" }));
     const l = (await leer<RespuestaLineasApi>(await lineas(get("/l", `?genero_id=${GEN.hombre}&mundo_id=${MUN.casual}&linea_id=${LIN.abrigo}`), ctx(id)))).data;
     const abrigo = l.filas[0].anios.find((a) => a.anio === 2027)!;
-    expect(abrigo.crecimiento_efectivo).toEqual({ pct: 20, origen: "celda", celda: "HOMBRE · CASUAL", version: 1, provisional: false });
+    expect(abrigo.crecimiento_efectivo).toEqual({ pct: 20, origen: "celda", celda: "HOMBRE · CASUAL", version: 1, sobre_base: "corregida", provisional: false });
     expect(abrigo.base_siguiente).toBeGreaterThan(0);
-    expect(abrigo.pct_bruto).toBeCloseTo(20, 0);
-    // Con Niño en 2026: sobre la base normalizada equivale a menos (B'' > B).
+    // Método 5: el 20 % es sobre 2026 corregido (B' = B ÷ φ con el invierno 2026 a 0,66) y equivale a más sobre 2026 real.
+    expect(abrigo.pct_sobre_normalizada).toBeCloseTo(20, 0);
     expect(abrigo.base_normalizada as number).toBeGreaterThan(abrigo.base_siguiente as number);
-    expect(abrigo.pct_sobre_normalizada as number).toBeLessThan(abrigo.pct_bruto as number);
+    expect(abrigo.pct_bruto as number).toBeGreaterThan(abrigo.pct_sobre_normalizada as number);
     expect(l.totales_por_anio.find((t) => t.anio === 2027)?.base_siguiente).toBe(abrigo.base_siguiente);
     // La de DENIM tiene % propio: sin versión.
     const l2 = (await leer<RespuestaLineasApi>(await lineas(get("/l", `?genero_id=${GEN.hombre}&mundo_id=${MUN.urbano}&linea_id=${LIN.denim}`), ctx(id)))).data;
     const rec = l2.filas.find((f) => f.agrupacion_marca === "RECONOCIDO")!.anios.find((a) => a.anio === 2027)!;
-    expect(rec.crecimiento_efectivo).toEqual({ pct: 7, origen: "fila", celda: "HOMBRE · URBANO", version: null, provisional: false });
+    expect(rec.crecimiento_efectivo).toEqual({ pct: 7, origen: "fila", celda: "HOMBRE · URBANO", version: null, sobre_base: "corregida", provisional: false });
     // Una de MUJER · CASUAL no tiene GM aprobado ni Resto aprobado: el Resto provisional de la proyección (5 %).
     const l3 = (await leer<RespuestaLineasApi>(await lineas(get("/l", `?genero_id=${GEN.mujer}&mundo_id=${MUN.casual}&linea_id=${LIN.sandalia}`), ctx(id)))).data;
-    expect(l3.filas[0].anios.find((a) => a.anio === 2027)?.crecimiento_efectivo).toEqual({ pct: 5, origen: "resto", celda: "MUJER · CASUAL", version: null, provisional: true });
+    expect(l3.filas[0].anios.find((a) => a.anio === 2027)?.crecimiento_efectivo).toEqual({ pct: 5, origen: "resto", celda: "MUJER · CASUAL", version: null, sobre_base: "corregida", provisional: true });
     // Las filas de 2026 y las aperturas no llevan crecimiento efectivo.
     expect(l2.filas[0].anios.find((a) => a.anio === 2026)?.crecimiento_efectivo).toBeUndefined();
   });
@@ -349,7 +374,7 @@ describe("07c, lecturas: matriz y líneas (con la versión aprobada)", () => {
     aprobarCrecimientosFalsos(2027, { pct: 20, resto: 9, sin: ["MUJER · CASUAL"] });
     const { id } = await nueva();
     const l3 = (await leer<RespuestaLineasApi>(await lineas(get("/l", `?genero_id=${GEN.mujer}&mundo_id=${MUN.casual}&linea_id=${LIN.sandalia}`), ctx(id)))).data;
-    expect(l3.filas[0].anios.find((a) => a.anio === 2027)?.crecimiento_efectivo).toEqual({ pct: 9, origen: "resto", celda: "MUJER · CASUAL", version: 1, provisional: false });
+    expect(l3.filas[0].anios.find((a) => a.anio === 2027)?.crecimiento_efectivo).toEqual({ pct: 9, origen: "resto", celda: "MUJER · CASUAL", version: 1, sobre_base: "corregida", provisional: false });
   });
 
   it("una línea con una fila sin base y con total decidido: el pie de «Línea (mismas)» y la Matriz dan el mismo «Crec. mismas tiendas» (la fila sin B no cuenta en ninguno de los dos lados)", async () => {

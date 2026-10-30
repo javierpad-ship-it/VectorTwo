@@ -1,17 +1,29 @@
 "use client";
 
+import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { formatearNumero, plural } from "@/lib/formato";
 import type { DatosProyeccionApi, Motivo, PrerrequisitosProyeccionApi } from "@/lib/proyeccion/tipos-api";
-import { mesAaaaMm } from "./vista";
+import { CODIGOS_AVISO_NINO, enlaceDeAvisoNino, mesAaaaMm } from "./vista";
 
+/**
+ * Los avisos del Niño (factor sin calcular, desfasado o sin confirmar; 2027 marcado como atípico) no bloquean el cálculo pero sí el cierre: van con
+ * tono de alerta y con el enlace de dónde se arreglan (06e §3.3). Los demás avisos conservan el tono de la lista.
+ */
 function ListaMotivos({ motivos, tono }: { motivos: readonly Motivo[]; tono: "alerta" | "info" }) {
   return (
     <ul className="space-y-1.5">
       {motivos.map((m, i) => (
         <li key={`${m.codigo}-${i}`}>
-          <Alert tono={tono}>
+          <Alert tono={CODIGOS_AVISO_NINO.includes(m.codigo) ? "alerta" : tono}>
             <span className="block">{m.mensaje}</span>
+            {enlaceDeAvisoNino(m.codigo) && (
+              <span className="mt-1 block text-xs">
+                <Link href={enlaceDeAvisoNino(m.codigo)!.href} className="font-medium underline underline-offset-2">
+                  {enlaceDeAvisoNino(m.codigo)!.texto}
+                </Link>
+              </span>
+            )}
             {m.detalle && m.detalle.length > 0 && (
               <ul className="mt-1 list-disc pl-5 text-xs">
                 {m.detalle.slice(0, 12).map((d) => (

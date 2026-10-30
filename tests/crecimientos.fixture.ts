@@ -1,10 +1,21 @@
+import { huellaCargas, huellaComposicion, huellaTemporada } from "@/lib/curvas/huellas";
 import { estadoFalso, type Fila } from "./crecimientos.fake-db";
 
 /**
- * Mundo sintético de 06d: hoy es 2026-10-27 (último mes cerrado: setiembre de 2026), venta publicada de 2023-01 a 2026-09, tiendas
+ * Mundo sintético de 06d y 06e: hoy es 2026-10-27 (último mes cerrado: setiembre de 2026), venta publicada de 2023-01 a 2026-09, tiendas
  * `T01…`, géneros HOMBRE, MUJER y NIÑO, mundos URBANO, RI y DEPORTIVO (este último desactivado). Las cifras de HOMBRE · URBANO
- * reproducen el ejemplo de la ficha 06d §5.1 (acumulado 40 000 → 41 200; ρ = 63 100 ÷ 58 900 − 1; cierre proyectado 55 620).
+ * reproducen el ejemplo de la ficha 06d §5.1 (acumulado 40 000 → 41 200; ρ = 63 100 ÷ 58 900 − 1). Desde 06e cada serie trae su agrupación
+ * de estacionalidad `a` (invierno `A_INV`, todo el año `A_TODO`, verano `A_VER`, y `A_SIN` sin curva vigente) con curvas planas (1/12 por
+ * mes, avance a setiembre 0,75) y el factor del Niño de invierno 2026 confirmado y al día. La proyección de referencia es de método 5.
  */
+
+/** Versión del método de la proyección de referencia (06e): la mínima que acepta la pantalla de GM. */
+export const METODO_REF = 5;
+
+export const A_INV = "a1111111-0000-4000-8000-000000000001";
+export const A_TODO = "a2222222-0000-4000-8000-000000000002";
+export const A_VER = "a3333333-0000-4000-8000-000000000003";
+export const A_SIN = "a4444444-0000-4000-8000-000000000004";
 
 export const G_H = "11111111-1111-4111-8111-111111111111";
 export const G_M = "22222222-2222-4222-8222-222222222222";
@@ -46,9 +57,11 @@ export function repartir(total: number, pesos: readonly number[]): number[] {
   return partes;
 }
 
-type Serie = { g: string; m: string; temp: string; t: string; u: Record<string, number> };
+type Serie = { g: string; m: string; temp: string; a: string | null; t: string; u: Record<string, number> };
 
-function serieDe(g: string, m: string, temp: string, tiendas: string[], porAnio: Record<number, number[]>, pesos: readonly number[] = PESOS_123): Serie[] {
+const AGRUPACION_DE: Record<string, string> = { invierno: A_INV, todo_el_ano: A_TODO, verano: A_VER };
+
+function serieDe(g: string, m: string, temp: string, tiendas: string[], porAnio: Record<number, number[]>, pesos: readonly number[] = PESOS_123, a: string = AGRUPACION_DE[temp] as string): Serie[] {
   return tiendas.map((t, i) => {
     const u: Record<string, number> = {};
     for (const [anio, totales] of Object.entries(porAnio)) {
@@ -56,7 +69,7 @@ function serieDe(g: string, m: string, temp: string, tiendas: string[], porAnio:
         u[mes(Number(anio), idx + 1)] = repartir(total, pesos.slice(0, tiendas.length))[i] as number;
       });
     }
-    return { g, m, temp, t, u };
+    return { g, m, temp, a, t, u };
   });
 }
 
@@ -72,7 +85,7 @@ const planoPorAnio = (v2023: number, v2024: number, v2025: number, v2026: number
 function ruido(g: string, m: string, temp: string, t: string, desde: string, hasta: string, unidades: number): Serie {
   const u: Record<string, number> = {};
   for (const p of PUBLICADOS) if (p >= desde && p <= hasta) u[p] = unidades;
-  return { g, m, temp, t, u };
+  return { g, m, temp, a: AGRUPACION_DE[temp] as string, t, u };
 }
 
 export function seriesFixture(): Serie[] {
@@ -84,7 +97,8 @@ export function seriesFixture(): Serie[] {
     ...serieDe(G_M, M_U, "verano", ["t1", "t2", "t3", "t7"], planoPorAnio(2000, 2100, 2200, 2300), [0.4, 0.3, 0.2, 0.1]),
     ...serieDe(G_N, M_U, "todo_el_ano", ["t1", "t2", "t3"], planoPorAnio(500, 500, 500, 520)),
     ...serieDe(G_N, M_R, "todo_el_ano", ["t1", "t2", "t3"], planoPorAnio(300, 300, 300, 310)),
-    ...serieDe(G_H, M_D, "todo_el_ano", ["t1", "t2", "t3"], planoPorAnio(100, 100, 100, 100)),
+    // HOMBRE · DEPORTIVO: una agrupación sin curva vigente (el cierre por curva no se puede calcular).
+    ...serieDe(G_H, M_D, "todo_el_ano", ["t1", "t2", "t3"], planoPorAnio(100, 100, 100, 100), PESOS_123, A_SIN),
   ];
 }
 
@@ -94,6 +108,48 @@ export function ventaGMJson(series: Serie[] = seriesFixture()) {
 }
 
 const dia1 = (m: string) => `${m}-01`;
+
+/** Lo de hoy contra lo que se juzga un factor (06e B2): las cargas y la composición de invierno + todo el año, como las calcula el servicio. */
+export const HUELLA_CARGAS_HOY = huellaCargas(Object.fromEntries(PUBLICADOS.map((p) => [p, `carga-${p}`])));
+export const HUELLA_COMPOSICION_INVIERNO = huellaTemporada([
+  { id: A_INV, temporada: "invierno", huella: huellaComposicion(["e1"]) },
+  { id: A_TODO, temporada: "todo_el_ano", huella: huellaComposicion(["e2"]) },
+  { id: A_SIN, temporada: "todo_el_ano", huella: huellaComposicion(["e4"]) },
+]);
+export const HUELLA_COMPOSICION_VERANO = huellaTemporada([
+  { id: A_VER, temporada: "verano", huella: huellaComposicion(["e3"]) },
+  { id: A_TODO, temporada: "todo_el_ano", huella: huellaComposicion(["e2"]) },
+  { id: A_SIN, temporada: "todo_el_ano", huella: huellaComposicion(["e4"]) },
+]);
+
+/** Invierno 2026: parcial (9 de 12 meses), confirmado por Javier con el cálculo de hoy (0,80 relativo = 0,76 ÷ 0,95). */
+export function factorInvierno2026(extra: Fila = {}): Fila {
+  return {
+    id: "fa1",
+    anio: 2026,
+    temporada: "invierno",
+    ratio_calculado: 0.8,
+    ratio_aplicado: 0.8,
+    parcial: true,
+    activo: true,
+    formula: "relativo_periodo",
+    ratio_volumen: 0.76,
+    ratio_control: 0.95,
+    huella_cargas: HUELLA_CARGAS_HOY,
+    huella_composicion: HUELLA_COMPOSICION_INVIERNO,
+    aplicado_huella: HUELLA_CARGAS_HOY,
+    calculado_at: "2026-10-26T10:00:00Z",
+    meses_comparados: 9,
+    tiendas_comunes: 3,
+    diagnostico: null,
+    ...extra,
+  };
+}
+
+/** Invierno 2023: completo, calculado con la fórmula anterior (no es de `Y`: no se juzga). */
+export function factorInvierno2023(): Fila {
+  return { id: "fa2", anio: 2023, temporada: "invierno", ratio_calculado: 0.9, ratio_aplicado: null, parcial: false, activo: true, formula: null, ratio_volumen: null, ratio_control: null, huella_cargas: null, huella_composicion: null, aplicado_huella: null, calculado_at: null, meses_comparados: 12, diagnostico: null };
+}
 const T0 = "2026-10-01T10:00:00Z";
 
 const tienda = (id: string, codigo: string, extra: Fila = {}): Fila => ({
@@ -153,8 +209,11 @@ const proyeccion = (id: string, anio: number, estado: string, extra: Fila = {}):
     bloques: { [String(anio)]: { mismas: ["t1", "t2", "t3"].map((t) => ({ tienda_id: t })), nuevas: [], cierres: [], fuera: [] } },
   },
   resumen: {
-    version_metodo: 4,
+    version_metodo: METODO_REF,
     gm_gml: { n1: `${G_H}|${M_U}`, n3: `${G_H}|${M_R}`, n4: `${G_M}|${M_U}`, n5: `${G_N}|${M_U}` },
+    // 06e: HOMBRE · URBANO tiene Niño material (Σ B' ÷ Σ B − 1 = +7,1 %); 400 u de 2026 de HOMBRE · RI quedaron fuera de la base de M7.
+    gm_con_nino: [`${G_H}|${M_U}`],
+    gm_fuera_base: { [`${G_H}|${M_R}`]: { filas: 2, unidades: 400 } },
   },
   ...extra,
 });
@@ -196,8 +255,26 @@ export function sembrar() {
       { id: "n6", genero_id: G_N, mundo_id: M_R, linea_id: "l1", nivel_planificacion: "GML", activo: true, updated_at: T0 },
       { id: "n7", genero_id: G_H, mundo_id: M_D, linea_id: "l1", nivel_planificacion: "GML", activo: true, updated_at: T0 },
     ],
-    equivalencias: [{ id: "e1", updated_at: T0 }],
-    agrupaciones_estacionalidad: [{ id: "a1", updated_at: T0 }],
+    equivalencias: [
+      { id: "e1", agrupacion_estacionalidad_id: A_INV, activo: true, updated_at: T0 },
+      { id: "e2", agrupacion_estacionalidad_id: A_TODO, activo: true, updated_at: T0 },
+      { id: "e3", agrupacion_estacionalidad_id: A_VER, activo: true, updated_at: T0 },
+      { id: "e4", agrupacion_estacionalidad_id: A_SIN, activo: true, updated_at: T0 },
+    ],
+    agrupaciones_estacionalidad: [
+      { id: A_INV, nombre: "ABRIGOS", codigo: "AB", temporada: "invierno", activo: true, orden: 1, updated_at: T0 },
+      { id: A_TODO, nombre: "POLOS", codigo: "PO", temporada: "todo_el_ano", activo: true, orden: 2, updated_at: T0 },
+      { id: A_VER, nombre: "CAMISETAS", codigo: "CA", temporada: "verano", activo: true, orden: 3, updated_at: T0 },
+      { id: A_SIN, nombre: "NUEVOS", codigo: "NU", temporada: "todo_el_ano", activo: true, orden: 4, updated_at: T0 },
+    ],
+    // Curvas planas: 1/12 por mes (avance a setiembre 0,75). `A_SIN` no tiene curva vigente.
+    curvas_estacionalidad: [A_INV, A_TODO, A_VER].map((agrupacion, i) => ({
+      id: `cv${i + 1}`,
+      agrupacion_estacionalidad_id: agrupacion,
+      version: 3 - i,
+      estado: "vigente",
+      ...Object.fromEntries(Array.from({ length: 12 }, (_, m) => [`p${String(m + 1).padStart(2, "0")}`, 1 / 12])),
+    })),
     tiendas: [
       tienda("t1", "T01"),
       tienda("t2", "T02"),
@@ -212,18 +289,16 @@ export function sembrar() {
       { id: "00000000-0000-4000-8000-0000000000a1", desde: "2026-06-01", hasta: "2026-08-01", motivo: "Niño costero", descripcion: null, alcance: "invierno", temporadas: ["invierno"], activo: true, created_at: T0, updated_at: T0 },
       { id: "00000000-0000-4000-8000-0000000000a2", desde: "2023-06-01", hasta: "2023-08-01", motivo: "Niño 2023", descripcion: null, alcance: "invierno", temporadas: ["invierno"], activo: true, created_at: T0, updated_at: T0 },
     ],
-    factores_volumen_atipico: [
-      { id: "fa1", anio: 2026, temporada: "invierno", ratio_calculado: 0.8, ratio_aplicado: null, parcial: true, activo: true },
-      { id: "fa2", anio: 2023, temporada: "invierno", ratio_calculado: 0.9, ratio_aplicado: null, parcial: false, activo: true },
-    ],
+    factores_volumen_atipico: [factorInvierno2026(), factorInvierno2023()],
     proyecciones: [
       proyeccion(P1, 2026, "en_trabajo"),
       proyeccion(P2, 2025, "cerrada"),
-      proyeccion(P3, 2026, "en_trabajo", { calculado_at: "2026-09-01T10:00:00Z", resumen: { version_metodo: 3 } }),
+      proyeccion(P3, 2026, "en_trabajo", { calculado_at: "2026-09-01T10:00:00Z", resumen: { version_metodo: METODO_REF - 1 } }),
     ],
     proyeccion_filas: filas.map((f) => f.fila),
     proyeccion_fila_anios: filas.flatMap((f) => f.anios),
-    proyeccion_crecimientos: [{ id: "c1", proyeccion_id: P1, genero_id: G_H, mundo_id: M_U, pct: 12, crecimiento_id: null, version: null }],
+    // La foto de lo aplicado: HOMBRE · URBANO al 12 % bruto (una versión de antes de 0.14.0).
+    proyeccion_crecimientos: [{ id: "c1", proyeccion_id: P1, genero_id: G_H, mundo_id: M_U, pct: 12, crecimiento_id: null, version: null, sobre_base: "bruta" }],
     crecimientos_genero_mundo: [],
   };
 }
@@ -231,13 +306,19 @@ export function sembrar() {
 /** Fecha del sistema falsa del mediodía de Lima del 27 de octubre de 2026. */
 export const AHORA = new Date(HOY_ISO);
 
+/**
+ * El % «Cierre por curva · corregido» de HOMBRE · URBANO con las curvas planas del fixture: `T' = V' ÷ C_9` con `V' = 44 200` y `C_9 = 0,75`, contra
+ * `U'(2025) = 54 000`. Con esto el `POST` de `cuerpoAprobar` va sin nota.
+ */
+export const PCT_CIERRE_CURVA_HU = Math.round((44200 / 0.75 / 54000 - 1) * 10000) / 100;
+
 /** Un cuerpo de `POST` válido para el GM; `huella_datos` sale del `GET` previo. */
 export function cuerpoAprobar(huella: string, extra: Record<string, unknown> = {}) {
   return {
     anio: 2027,
-    pct: 18.4,
+    pct: PCT_CIERRE_CURVA_HU,
     nota: null,
-    base: { tipo: "acumulado", anio: null, variante: "sin_nino_mas_rebote" },
+    base: { tipo: "cierre_curva", anio: null, variante: "corregido" },
     proyeccion_referencia_id: P1,
     huella_datos: huella,
     version_vigente: null,

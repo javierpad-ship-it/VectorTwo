@@ -8,21 +8,24 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, Input } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
-import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
+import { CODIGOS_CIERRE_BLOQUEADO_NINO, type ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { AlertaError } from "./comunes";
 import { rutaProyeccion, useAccion } from "./use-proyeccion";
 import {
   cierreExigeRecalcular,
   crecimientosSinAprobarDe,
   enlaceCrecimientoGeneroMundo,
+  enlaceDetalleGeneroMundo,
   leerCrecimientosSinAprobar,
   lineasDeCierre,
   listaSinDecidir,
   listaTiendasSinDecidir,
   MAX_SIN_DECIDIR,
+  motivosCierreBloqueado,
   RUTA_APROBAR_CRECIMIENTOS,
   textoFaltanCrecimientos,
   textoMotivoDesactualizada,
+  textoReaprobarUno,
   type GrupoSinDecidir,
 } from "./vista";
 import { formatearNumero } from "@/lib/formato";
@@ -53,6 +56,9 @@ export function GrupoLista({ titulo, grupo, pista }: { titulo: string; grupo: Gr
  * todos modos (`?forzar=1`, que solo salta ese aviso). Al cerrar, la cerrada anterior del mismo año pasa a archivada y
  * una cerrada es solo lectura: nunca se vuelve a repartir. Desde 0.12.1 (06d) tampoco se cierra sin los crecimientos aprobados de HOMBRE y
  * MUJER por mundo y el Resto: ese motivo bloquea sin excepción (no hay «Cerrar de todos modos») y manda a Curvas → Crecimiento por género × mundo.
+ * Desde 0.14.0 (06e) tampoco se cierra, ni forzando, con 2027 marcado como año del Niño, con un factor del Niño de 2026 faltante, desfasado o sin
+ * confirmar, con un factor o una agrupación que cambió después de calcular, ni con crecimientos de antes de 0.14.0 por reaprobar: el modal lista cada
+ * motivo con su enlace (Factores del Niño, Curvas o la pantalla del GM) o con «Recalcular ahora».
  */
 export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: { proyeccion: ProyeccionApi; onCerrar: () => void; onCerrada: (p: ProyeccionApi) => Promise<void> | void; onRecalcular: () => void }) {
   const [nota, setNota] = useState("");
@@ -68,6 +74,12 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
   const rechazoSinAprobar = accion.error?.codigo === "crecimientos_sin_aprobar" ? leerCrecimientosSinAprobar(accion.error.detalle) : null;
   const sinAprobar = rechazoSinAprobar ?? crecimientosSinAprobarDe(proyeccion);
   const bloqueadoSinAprobar = sinAprobar !== null || accion.error?.codigo === "crecimientos_sin_aprobar";
+  const faltaAprobar = sinAprobar === null || sinAprobar.faltan.length > 0 || sinAprobar.resto_provisional;
+  const reaprobar = sinAprobar?.reaprobar ?? [];
+  // El Niño de `Y`: lo que trae la proyección (`cierre_bloqueado_por`) y, si el servidor acaba de rechazar con uno de esos códigos, ese rechazo.
+  const rechazo = accion.error ? { codigo: accion.error.codigo, mensaje: accion.error.mensaje } : null;
+  const motivosNino = motivosCierreBloqueado(proyeccion, rechazo);
+  const rechazoDelNino = accion.error?.codigo ? (CODIGOS_CIERRE_BLOQUEADO_NINO as readonly string[]).includes(accion.error.codigo) : false;
 
   async function cerrar() {
     const r = await accion.ejecutar(() => api.post<ProyeccionApi>(`${rutaProyeccion(proyeccion.id)}/cerrar${forzar ? "?forzar=1" : ""}`, { nota: nota.trim() === "" ? null : nota.trim() }));
@@ -88,15 +100,60 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
           <Button variante="fantasma" disabled={accion.ocupado} onClick={onCerrar}>
             Cancelar
           </Button>
-          <Button disabled={accion.ocupado || exigeRecalcular || bloqueadoSinAprobar || (desactualizada && !forzar)} onClick={() => void cerrar()}>
+          <Button disabled={accion.ocupado || exigeRecalcular || bloqueadoSinAprobar || motivosNino.length > 0 || (desactualizada && !forzar)} onClick={() => void cerrar()}>
             {accion.ocupado ? "Cerrando…" : "Cerrar proyección"}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        {accion.error && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} />}
-        {bloqueadoSinAprobar && (
+        {accion.error && !rechazoDelNino && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} />}
+        {motivosNino.length > 0 && (
+          <Alert tono="alerta">
+            <span className="block font-medium">No se puede cerrar: el Niño de {proyeccion.anio_en_curso} no está resuelto.</span>
+            <ul className="mt-1 list-disc space-y-1.5 pl-5 text-sm">
+              {motivosNino.map((m) => (
+                <li key={m.codigo}>
+                  {m.mensaje}
+                  {m.enlace && (
+                    <>
+                      {" "}
+                      <Link href={m.enlace.href} onClick={onCerrar} className="font-medium underline underline-offset-2">
+                        {m.enlace.texto}
+                      </Link>
+                    </>
+                  )}
+                  {m.recalcular && (
+                    <>
+                      {" "}
+                      <button type="button" onClick={onRecalcular} disabled={accion.ocupado} className="font-medium underline underline-offset-2 disabled:opacity-50">
+                        Recalcular ahora
+                      </button>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <span className="mt-1 block text-xs">Estos motivos no se pueden saltar con «Cerrar de todos modos».</span>
+          </Alert>
+        )}
+        {reaprobar.length > 0 && (
+          <Alert tono="alerta">
+            <span className="block font-medium">No se puede cerrar: hay crecimientos por reaprobar.</span>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+              {reaprobar.map((r) => (
+                <li key={r.clave}>
+                  {textoReaprobarUno(r, proyeccion.anio_en_curso)}.{" "}
+                  <Link href={enlaceDetalleGeneroMundo(proyeccion.anio_siguiente, proyeccion.id, r.clave)} onClick={onCerrar} className="font-medium underline underline-offset-2">
+                    Reaprobar {r.nombre}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <span className="mt-1 block text-xs">Reaprobar conserva el total del GM y redistribuye entre sus líneas; después recalcula la proyección. Este motivo no se puede saltar.</span>
+          </Alert>
+        )}
+        {bloqueadoSinAprobar && faltaAprobar && (
           <Alert tono="alerta">
             <span className="block font-medium">No se puede cerrar: faltan crecimientos aprobados.</span>
             {sinAprobar ? (
@@ -151,11 +208,12 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
         </ul>
         <p className="text-sm text-tinta-suave">
           Se bloquea si queda sin decidir, en cualquiera de los dos años, una fila con propuesta mayor o igual a {proyeccion.parametros.umbral_cola_larga} unidades, una fila para revisión (cola larga con quiebres de stock) o una tienda nueva con venta esperada. Lo demás (la cola larga) se cierra con la propuesta y queda marcado.
+          Tampoco se cierra, ni forzando, si {proyeccion.anio_siguiente} está marcado como año del Niño, si el factor del Niño de {proyeccion.anio_en_curso} falta, está desfasado o sin confirmar, o si hay un crecimiento de antes de 0.14.0 por reaprobar.
           Una proyección cerrada es solo lectura: para seguir, se copia.
         </p>
         {desactualizada && (
           <Alert tono="alerta">
-            <span className="block">La proyección está desactualizada: {proyeccion.desactualizada.map(textoMotivoDesactualizada).join("; ")}. Lo recomendable es recalcular antes de cerrar.</span>
+            <span className="block">La proyección está desactualizada: {proyeccion.desactualizada.map((m) => textoMotivoDesactualizada(m, proyeccion.anio_en_curso)).join("; ")}. Lo recomendable es recalcular antes de cerrar.</span>
             {exigeRecalcular ? (
               <span className="mt-2 block text-sm">
                 Hay que recalcular antes de cerrar: este motivo no se puede saltar.{" "}

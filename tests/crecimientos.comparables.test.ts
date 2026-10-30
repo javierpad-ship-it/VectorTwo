@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TiendaMaestro } from "@/lib/curvas/tipos";
 import { aniosDeRed, calcularRedes, comparablesDe, motivoFuera, PARAMETROS_RED_GM, ventaTotalPorTienda } from "@/lib/crecimientos/comparables";
-import { armarSeriesAnios, crearPhi, type SerieGM } from "@/lib/crecimientos/series";
+import { agruparPorAgrupacion, armarSeriesAnios, comoVentaGeneroMundo, crearPhi, unidades, type SerieGM } from "@/lib/crecimientos/series";
 
 /**
  * Regla 12 (ficha 06d §5.2): `C(Y)` excluye la tienda nueva de `Y−1` y los cierres de `Y` hasta `k`, e incluye un cierre posterior a
@@ -91,7 +91,6 @@ describe("regla 12 · la serie sin Niño con φ = 1 es idéntica a la bruta", ()
       y: 2026,
       k: 9,
       phi: crearPhi([], []),
-      proyectado: null,
     });
     for (const a of s) {
       expect(a.meses_sin_nino).toEqual(a.meses);
@@ -114,10 +113,71 @@ describe("regla 12 · la serie sin Niño con φ = 1 es idéntica a la bruta", ()
       y: 2026,
       k: 9,
       phi: crearPhi(periodos, factores),
-      proyectado: null,
     });
     expect(s?.meses[5]).toBe(100);
     expect(s?.meses_sin_nino[5]).toBe(200);
     expect(s?.meses_sin_nino[0]).toBe(100);
+  });
+});
+
+describe("06e · el cierre por curva completa los meses de Y posteriores a k", () => {
+  it("los meses > k llevan el cierre real y el corregido (origen proyectado); lo demás no cambia", () => {
+    const [s] = armarSeriesAnios({
+      entradas: [serie("a", 100, "2026-01", "2026-09", "g", "m", "invierno")],
+      tiendas: new Set(["a"]),
+      anios: [2026],
+      publicados: new Set(publicados),
+      y: 2026,
+      k: 9,
+      phi: crearPhi([], []),
+      cierreY: { meses: [...Array(9).fill(100), 40, 50, 60], corregidos: [...Array(9).fill(100), 80, 100, 120] },
+    });
+    expect(s?.origen.slice(8)).toEqual(["real", "proyectado", "proyectado", "proyectado"]);
+    expect(s?.meses.slice(9)).toEqual([40, 50, 60]);
+    expect(s?.meses_sin_nino.slice(9)).toEqual([80, 100, 120]);
+    expect(s?.incompleto).toBe(true);
+    expect(s?.total).toBe(900 + 150);
+    expect(s?.total_sin_nino).toBe(900 + 300);
+    // Con los doce meses con dato la forma existe.
+    expect(s?.forma.every((v) => v !== null)).toBe(true);
+  });
+
+  it("un cierre con meses null (no calculable) deja los meses > k sin dato", () => {
+    const [s] = armarSeriesAnios({
+      entradas: [serie("a", 100, "2026-01", "2026-09", "g", "m", "invierno")],
+      tiendas: new Set(["a"]),
+      anios: [2026],
+      publicados: new Set(publicados),
+      y: 2026,
+      k: 9,
+      phi: crearPhi([], []),
+      cierreY: { meses: Array(12).fill(null), corregidos: Array(12).fill(null) },
+    });
+    expect(s?.meses.slice(9)).toEqual([null, null, null]);
+    expect(s?.origen.slice(9)).toEqual([null, null, null]);
+  });
+});
+
+describe("R21 · la venta con y sin la agrupación a", () => {
+  const sin = { series: [{ g: "g", m: "m", temp: "invierno", t: "t1", u: { "2026-01-01": 10 } }, { g: "g", m: "m", temp: "invierno", t: "t1", u: { "2026-01-01": 5 } }], cargas: { "2026-01": "c1" } };
+  const con = { series: [{ g: "g", m: "m", temp: "invierno", a: "a1", t: "t1", u: { "2026-01": 10 } }, { g: "g", m: "m", temp: "invierno", a: "a2", t: "t1", u: { "2026-01": 5 } }, { g: "g", m: "m", temp: "sin_agrupacion", a: null, t: "t1", u: { "2026-01": 1 } }], cargas: { "2026-01": "c1" } };
+
+  it("el lector de 0.12.1 (que ignora a) suma lo mismo con o sin la clave; el nuevo agrupa por a", () => {
+    const viejo = comoVentaGeneroMundo(sin)!;
+    expect(unidades(viejo.series, 2026, { desde: 1, hasta: 1 })).toBe(15);
+    const nuevo = comoVentaGeneroMundo(con)!;
+    // Sumando las entradas (como el lector viejo) se obtiene lo de siempre: 10 + 5 de las dos agrupaciones y 1 sin agrupación.
+    expect(unidades(nuevo.series, 2026, { desde: 1, hasta: 1 })).toBe(16);
+    const grupos = agruparPorAgrupacion(nuevo.series);
+    expect([...grupos.keys()].sort()).toEqual(["a1", "a2", null]);
+    expect(grupos.get("a1")?.temporada).toBe("invierno");
+    expect(grupos.get(null)?.temporada).toBe("sin_agrupacion");
+    // Las series sin la clave caen en la agrupación nula.
+    expect(comoVentaGeneroMundo(sin)?.series.every((x) => x.a === null)).toBe(true);
+  });
+
+  it("una forma inválida da null", () => {
+    expect(comoVentaGeneroMundo({ series: "mal", cargas: {} })).toBeNull();
+    expect(comoVentaGeneroMundo({ series: [{ g: "g" }], cargas: {} })).toBeNull();
   });
 });

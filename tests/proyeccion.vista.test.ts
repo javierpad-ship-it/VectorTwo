@@ -76,8 +76,29 @@ import {
   vecinas,
   FILTRO_VISTA_VACIO,
 } from "../src/app/(app)/planificacion/proyeccion/vista";
+import {
+  anioEnCursoDeFactores,
+  factor2,
+  factor3,
+  filasDiagnostico,
+  formatearDiaMes,
+  insigniasFactor,
+  leerAplicado,
+  listaDeMeses,
+  pideConfirmar,
+  textoCalculado,
+  textoDesfase,
+  textoDiferencia,
+  textoEfectivo,
+  textoIntroFactores,
+  textoMesesPeriodo,
+  textoResumenDiagnostico,
+  type DiagnosticoVista,
+  type FactorVista,
+} from "../src/app/(app)/planificacion/proyeccion/factores-vista";
+import { CODIGOS_AVISO_NINO, enlaceDeAvisoNino, enlaceDeMotivoNino } from "../src/app/(app)/planificacion/proyeccion/vista";
 import type { AvisoFila } from "../src/lib/proyeccion/tipos-api";
-import { bloques, colaLarga, detalleFila, filaRevision, filaMensual, filasDenim, INDICE, nodo, proyeccion, respuestaLineas, respuestaMensual, tiendaProyeccion, Y } from "./proyeccion.pantalla.fixture";
+import { bloques, colaLarga, detalleFila, diagnosticoInvierno, diagnosticoVerano, factorInviernoConfirmado, factores, filaRevision, filaMensual, filasDenim, INDICE, nodo, proyeccion, respuestaLineas, respuestaMensual, tiendaProyeccion, Y } from "./proyeccion.pantalla.fixture";
 
 /** Lógica de vista de la pantalla de M7 con datos sintéticos (T01…T12): nada real de Lukers. */
 
@@ -617,5 +638,176 @@ describe("cola larga con disponibilidad y filas para revisión (0.10.1)", () => 
     expect(leerUmbralDisponibilidad("-0.1").ok).toBe(false);
     expect(leerUmbralDisponibilidad("").ok).toBe(false);
     expect(leerUmbralDisponibilidad("x").ok).toBe(false);
+  });
+});
+
+describe("Factores del Niño: lectura de la fila, estados y diagnóstico (06e §4.2 y §5.2)", () => {
+  const [f2023, invierno, verano, objetivo] = factores() as FactorVista[];
+
+  it("el año en curso sale de las filas con estado; sin ellas, del año objetivo; el texto fijo lo nombra con el factor relativo", () => {
+    expect(anioEnCursoDeFactores(factores())).toBe(2026);
+    expect(anioEnCursoDeFactores([f2023, objetivo])).toBe(2026);
+    expect(anioEnCursoDeFactores([f2023])).toBeNull();
+    expect(anioEnCursoDeFactores([])).toBeNull();
+    expect(textoIntroFactores(2026)).toBe("El factor de 2026 corrige la base de 2027 de cada temporada (método 5). Es relativo: la temporada frente a la red en los mismos meses. Si una temporada no tuvo efecto, escribe 1.00.");
+    expect(textoIntroFactores(null)).toContain("el año en curso");
+  });
+
+  it("formatos: dos decimales en el texto corrido, tres en las tablas, «—» sin valor, y el día y mes en Lima", () => {
+    expect(factor2(0.7021)).toBe("0.70");
+    expect(factor2(1)).toBe("1.00");
+    expect(factor3(0.7021)).toBe("0.702");
+    expect(factor2(null)).toBe("—");
+    expect(factor3(undefined)).toBe("—");
+    expect(formatearDiaMes("2026-10-29T20:00:00Z")).toBe("29/10");
+    expect(formatearDiaMes(null)).toBeNull();
+    expect(formatearDiaMes("no es fecha")).toBeNull();
+  });
+
+  it("«9 de 12 del periodo»; sin los meses del periodo (calculado antes de 0.14.0), «12 meses»; sin nada, null", () => {
+    expect(textoMesesPeriodo(invierno)).toBe("9 de 12 del periodo");
+    expect(textoMesesPeriodo(verano)).toBe("1 de 4 del periodo");
+    expect(textoMesesPeriodo(f2023)).toBe("12 meses");
+    expect(textoMesesPeriodo({ meses_comparados: 1 })).toBe("1 mes");
+    expect(textoMesesPeriodo({ meses_comparados: null })).toBeNull();
+  });
+
+  it("el calculado: el valor relativo, o por qué no hay (un mes, sin datos, sin calcular)", () => {
+    expect(textoCalculado(invierno)).toEqual({ valor: "0.70", nota: null });
+    expect(textoCalculado(verano)).toEqual({ valor: "—", nota: "1 mes del periodo, escríbelo tú" });
+    expect(textoCalculado({ ratio_calculado: null, calculado_at: "2026-10-29T00:00:00Z", meses_periodo_con_dato: 0 })).toEqual({ valor: "—", nota: "sin datos del periodo todavía" });
+    expect(textoCalculado({ ratio_calculado: null, calculado_at: "2026-10-29T00:00:00Z", meses_periodo_con_dato: 3 }).nota).toBe("sin valor calculado");
+    expect(textoCalculado({ ratio_calculado: null, calculado_at: null, meses_periodo_con_dato: undefined })).toEqual({ valor: "—", nota: "sin calcular" });
+    expect(textoCalculado({ ratio_calculado: null, calculado_at: "2026-10-29T00:00:00Z", meses_periodo_con_dato: undefined }).nota).toBe("sin valor calculado");
+  });
+
+  it("«tu valor 0.72 · calculado hoy 0.70» solo si difieren a dos decimales", () => {
+    expect(textoDiferencia(invierno)).toBe("tu valor 0.72 · calculado hoy 0.70");
+    expect(textoDiferencia({ ratio_aplicado: 0.7, ratio_calculado: 0.7021 })).toBeNull();
+    expect(textoDiferencia({ ratio_aplicado: null, ratio_calculado: 0.7 })).toBeNull();
+    expect(textoDiferencia({ ratio_aplicado: 0.7, ratio_calculado: null })).toBeNull();
+  });
+
+  it("efectivo con su origen, y «sin factor»", () => {
+    expect(textoEfectivo(invierno)).toBe("0.72 · escrito por ti");
+    expect(textoEfectivo(f2023)).toBe("0.63 · calculado");
+    expect(textoEfectivo(verano)).toBe("sin factor");
+  });
+
+  it("insignias por estado: fórmula anterior solo si se calculó con ella; parcial; por confirmar; confirmado con o sin fecha; desfasado; sin factor", () => {
+    const t = (f: FactorVista) => insigniasFactor(f).map((i) => i.texto);
+    expect(t(f2023)).toEqual(["fórmula anterior"]);
+    expect(t(invierno)).toEqual(["parcial", "por confirmar"]);
+    expect(t(verano)).toEqual(["parcial", "Sin factor"]);
+    expect(t(objetivo)).toEqual(["Año objetivo", "Sin factor"]);
+    expect(t(factorInviernoConfirmado())).toEqual(["parcial", "confirmado el 29/10"]);
+    expect(t({ ...factorInviernoConfirmado(), aplicado_at: undefined })).toEqual(["parcial", "confirmado"]);
+    expect(t({ ...invierno, estado: "desfasado", motivos_desfase: ["formula"] })).toEqual(["parcial", "desfasado: sincroniza"]);
+    // Un factor completo (no parcial) al día no lleva insignias; uno sin fórmula (no calculado nunca) tampoco dice «fórmula anterior».
+    expect(t({ ...f2023, formula: "relativo_periodo" })).toEqual([]);
+    expect(t({ ...f2023, formula: null, calculado_at: null })).toEqual([]);
+    expect(insigniasFactor({ ...invierno, estado: "desfasado", motivos_desfase: ["cargas"] }).find((i) => i.clave === "desfasado")?.titulo).toContain("se cargaron datos nuevos después de calcular");
+    expect(insigniasFactor(invierno).find((i) => i.clave === "sin_confirmar")?.titulo).toContain("el mismo lo confirma");
+  });
+
+  it("por confirmar es solo el estado `sin_confirmar`", () => {
+    expect(pideConfirmar({ estado: "sin_confirmar" })).toBe(true);
+    for (const estado of ["ok", "faltante", "desfasado", undefined] as const) expect(pideConfirmar({ estado })).toBe(false);
+  });
+
+  it("el motivo del desfase en palabras: cada condición por separado, juntas y sin motivo", () => {
+    expect(textoDesfase(["formula"])).toBe("Desfasado: se calculó con la fórmula anterior. Pulsa «Sincronizar» y revisa el valor.");
+    expect(textoDesfase(["cargas", "meses"])).toBe("Desfasado: se cargaron datos nuevos después de calcular y hay más meses publicados del periodo que cuando se calculó. Pulsa «Sincronizar» y revisa el valor.");
+    expect(textoDesfase(["composicion"])).toContain("cambió la composición de las agrupaciones");
+    expect(textoDesfase(["formula", "cargas", "composicion"])).toContain("fórmula anterior, se cargaron datos nuevos después de calcular y cambió la composición");
+    expect(textoDesfase([])).toBe("Desfasado. Pulsa «Sincronizar» y revisa el valor.");
+    expect(textoDesfase(undefined)).toBe("Desfasado. Pulsa «Sincronizar» y revisa el valor.");
+  });
+
+  it("lo que se escribe en «Aplicado»: vacío = el calculado; con `exigir` (confirmar) hay que escribir el valor; los límites son los de siempre", () => {
+    expect(leerAplicado("0,72", false)).toEqual({ ok: true, valor: 0.72 });
+    expect(leerAplicado("", false)).toEqual({ ok: true, valor: null });
+    expect(leerAplicado("", true)).toEqual({ ok: false, motivo: "Escribe el valor para confirmarlo." });
+    expect(leerAplicado("0.70", true)).toEqual({ ok: true, valor: 0.7 });
+    expect(leerAplicado("1", true)).toEqual({ ok: true, valor: 1 });
+    expect(leerAplicado("0.05", true).ok).toBe(false);
+    expect(leerAplicado("3.1", false).ok).toBe(false);
+    expect(leerAplicado("x", false).ok).toBe(false);
+  });
+
+  it("meses en palabras: uno, seguidos («setiembre a diciembre») o salteados", () => {
+    expect(listaDeMeses([9])).toBe("setiembre");
+    expect(listaDeMeses([12, 9, 10, 11])).toBe("setiembre a diciembre");
+    expect(listaDeMeses([1, 2, 3, 4, 5, 6, 7, 8, 9])).toBe("enero a setiembre");
+    expect(listaDeMeses([1, 3])).toBe("enero y marzo");
+    expect(listaDeMeses([1, 3, 5])).toBe("enero, marzo y mayo");
+    expect(listaDeMeses([])).toBe("");
+  });
+
+  it("la tabla de diagnóstico trae los doce meses en orden con tres decimales, y marca los del periodo", () => {
+    const f = filasDiagnostico(diagnosticoVerano());
+    expect(f).toHaveLength(12);
+    expect(f.map((x) => x.mes).slice(0, 3)).toEqual(["ene", "feb", "mar"]);
+    const set = f[8];
+    expect(set).toEqual({ m: 9, mes: "set", enPeriodo: true, uRef: "7,000", u: "13,300", ratio: "1.900", control: "0.950", relativo: "2.000" });
+    expect(f.filter((x) => x.enPeriodo).map((x) => x.mes)).toEqual(["set"]);
+    expect(f[11]).toMatchObject({ enPeriodo: false, ratio: "—", control: "—", relativo: "—" });
+    expect(filasDiagnostico(diagnosticoInvierno()).filter((x) => x.enPeriodo)).toHaveLength(9);
+    // El orden no depende del que mande el servidor.
+    const d = diagnosticoVerano();
+    expect(filasDiagnostico({ ...d, meses: [...d.meses].reverse() })[0].mes).toBe("ene");
+  });
+
+  it("resumen del verano (ejemplo G): setiembre ×1.90, tendencia ene–ago ×1.20, red ×0.95 → ×1.58 sobre su tendencia y ×2.00 sobre la red, y el dato frágil", () => {
+    const d: DiagnosticoVista = { ...diagnosticoVerano(), anio_ref: 2025 };
+    expect(textoResumenDiagnostico(verano, d)).toEqual([
+      "Setiembre: ×1.90 frente a 2025; su tendencia ene–ago ×1.20; la red ×0.95 → crece ×1.58 sobre su tendencia y ×2.00 sobre la red.",
+      "1 solo mes del periodo, y es el de inicio de temporada: dato frágil. El sistema no propone factor: escríbelo tú.",
+    ]);
+    // Sin el año de referencia, lo dice en palabras.
+    expect(textoResumenDiagnostico(verano, diagnosticoVerano())[0]).toContain("×1.90 frente al año normal de referencia;");
+  });
+
+  it("resumen del invierno: sin tendencia propia, el relativo frente a la red; con 2 o más meses del periodo no hay aviso de fragilidad", () => {
+    expect(textoResumenDiagnostico(invierno, diagnosticoInvierno())).toEqual(["Enero a setiembre: ×0.66 frente al año normal de referencia; la red ×0.94 → ×0.70 frente a la red (el factor relativo)."]);
+    // Verano con dos meses del periodo (set y oct): ya hay valor calculado y no hay aviso.
+    const dos = { ...diagnosticoVerano(), meses_periodo_con_dato: 2, meses: diagnosticoVerano().meses.map((m) => (m.m === 10 ? { ...m, en_periodo: true, u: 9000, u_ref: 6000, ratio: 1.5, control: 0.95, relativo: 1.58 } : m)) };
+    const r = textoResumenDiagnostico(verano, dos);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toContain("Setiembre a octubre:");
+    // Un solo mes de invierno con dato: también es frágil (el mínimo son 2 meses del periodo).
+    expect(textoResumenDiagnostico(invierno, { ...diagnosticoInvierno(), meses_periodo_con_dato: 1 })[1]).toBe("1 solo mes del periodo: dato frágil. El sistema no propone factor: escríbelo tú.");
+  });
+
+  it("sin meses del periodo con dato: «Sin datos del periodo todavía»", () => {
+    const sinDatos: DiagnosticoVista = { meses: diagnosticoVerano().meses.map((m) => ({ ...m, en_periodo: false })), ratio_fuera: 1.2, meses_periodo: 4, meses_periodo_con_dato: 0 };
+    expect(textoResumenDiagnostico(verano, sinDatos)).toEqual(["Sin datos del periodo todavía."]);
+  });
+
+  it("sin la tendencia propia ni la red, el resumen dice solo lo que hay (sin inventar excesos)", () => {
+    const sinRed = textoResumenDiagnostico({ temporada: "verano", ratio_volumen: 1.9, ratio_control: null }, { ...diagnosticoVerano(), ratio_fuera: null });
+    expect(sinRed[0]).toBe("Setiembre: ×1.90 frente al año normal de referencia.");
+    const soloTendencia = textoResumenDiagnostico({ temporada: "verano", ratio_volumen: 1.9, ratio_control: null }, diagnosticoVerano());
+    expect(soloTendencia[0]).toBe("Setiembre: ×1.90 frente al año normal de referencia; su tendencia ene–ago ×1.20 → crece ×1.58 sobre su tendencia.");
+  });
+});
+
+describe("Antes de proyectar y cierre: avisos del Niño y sus enlaces (06e §3.3)", () => {
+  it("los avisos del Niño tienen enlace: Factores del Niño (con la proyección si se conoce) o Curvas", () => {
+    expect(CODIGOS_AVISO_NINO).toEqual(["factor_sin_calcular", "factor_desfasado", "factor_sin_confirmar", "anio_siguiente_atipico"]);
+    expect(enlaceDeAvisoNino("factor_desfasado")).toEqual({ href: "/planificacion/proyeccion?pestana=factores", texto: "Ir a Factores del Niño" });
+    expect(enlaceDeAvisoNino("anio_siguiente_atipico")).toEqual({ href: "/planificacion/curvas-estacionalidad", texto: "Curvas → Periodos atípicos" });
+    expect(enlaceDeAvisoNino("apertura_dudosa")).toBeNull();
+    expect(enlaceDeMotivoNino("factor_faltante", "p1")?.href).toBe("/planificacion/proyeccion?proyeccion=p1&pestana=factores");
+    expect(enlaceDeMotivoNino("factores_cambiados", "p1")).toBeNull();
+    expect(enlaceDeMotivoNino("temporada_cambiada", "p1")).toBeNull();
+  });
+
+  it("los avisos de fila del Niño dicen lo nuevo: sin factor ya no se cierra; 2027 marcado no se aprueba ni se cierra", () => {
+    expect(TEXTO_AVISO.sin_factor.texto).toContain("no podrás cerrar");
+    expect(TEXTO_AVISO.sin_factor.texto).toContain("Factores del Niño");
+    expect(TEXTO_AVISO.objetivo_atipico.texto).toContain("no aprobar su crecimiento ni cerrar");
+    expect(TEXTO_AVISO.objetivo_atipico.tono).toBe("alerta");
+    expect(TEXTO_AVISO.objetivo_atipico.texto).not.toContain("tu % es bruto");
   });
 });

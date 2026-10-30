@@ -6,6 +6,8 @@ import { proponerCierre, pruebaPorAvance } from "./cierre";
 import { proponerCierreTienda } from "./cierres-tienda";
 import { composicionPromedio, composicionTienda, tieneHistoria, type ComposicionTienda, type HechoTiendaFila } from "./composicion";
 import { claveGM, crearCrecimientoDe, MATRIZ_SIN_CELDAS } from "./crecimientos";
+import { temporadasDeEquivalencias } from "./desactualizado";
+import { correccionMaterial } from "./factor-nino";
 import { huellaDeMatriz } from "./huellas-crecimientos";
 import { aColaLargaApi, avisosColaLarga, disponibilidadFila, proponerPorDemandaCorregida, type FilaDisponibilidad } from "./cola-larga";
 import { curvaFila, type ResultadoCurvaFila } from "./curva-fila";
@@ -322,7 +324,7 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     nombresCurva,
     mismasSiguiente,
     tiendas: infoTiendas,
-    // 0.10.8 (07c): fila con % propio > celda género × mundo > Resto (`crecimiento_pct_defecto`), todo bruto.
+    // 0.10.8 (07c): fila con % propio > celda género × mundo > Resto (`crecimiento_pct_defecto`); 0.14.0 (06e): cada % lleva su `sobre_base`.
     crecimientoDe: crearCrecimientoDe({
       matriz,
       resto: gDefecto,
@@ -565,11 +567,13 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
         const r = pesosDeTienda(info, "nuevas", rampa, z);
         pesosExtra = r;
         const regY = registroDe(fila, Y);
+        // El % efectivo de la fila (fila > celda GM > Resto) y su `sobre_base`: el total maduro de `Y` se calcula sin el Niño (`A'`) si el % es sobre `Y` corregido.
+        const efectivo = ctxModelo.crecimientoDe?.(clave);
         let maduroPrevio: number | null = null;
         if (!esY && c.subbloque === "nuevas_anterior" && regY) {
-          maduroPrevio = maduroDeVigente({ vigente: regY.vigente, curva: u.curva, rampa: pesosDeTienda(info, "nuevas", rampa, Y), phi: phiDe(u, Y) });
+          maduroPrevio = maduroDeVigente({ vigente: regY.vigente, curva: u.curva, rampa: pesosDeTienda(info, "nuevas", rampa, Y), phi: phiDe(u, Y), sobreBase: efectivo?.sobre_base ?? "corregida" });
         }
-        const g = ctxModelo.crecimientoDe?.(clave).pct ?? gDefecto;
+        const g = efectivo?.pct ?? gDefecto;
         const res = proponerFilaTienda({
           esAnioEnCurso: esY,
           k: esY ? k : 0,
@@ -689,7 +693,13 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
       anioMaduroSoles: c.bloque === "nuevas" ? st.anioMaduro : null,
       ventaAnioApertura: c.bloque === "nuevas" ? st.ventaApertura : null,
       crecimiento: crecTienda?.pct ?? gDefecto,
-      ...(crecTienda ? { crecimientoOrigen: { origen: crecTienda.origen, celda: crecTienda.celda }, crecimientoPonderado: crecTienda.ponderado } : {}),
+      ...(crecTienda
+        ? {
+            crecimientoOrigen: { origen: crecTienda.origen, celda: crecTienda.celda, version: crecTienda.version, provisional: crecTienda.provisional },
+            crecimientoPonderado: crecTienda.ponderado,
+            sobreBase: crecTienda.sobre_base,
+          }
+        : {}),
     });
     tiendasModelo.push({
       tienda_id: t.id,
@@ -980,6 +990,28 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     if (n) gm_gml[f.gml_id] = claveGM(n.genero_id, n.mundo_id);
   }
   resumen.gm_gml = gm_gml;
+  // 06e (R15): qué GM (y el Resto) tienen Niño material en la base de `Y+1` y cuántas unidades de `Y` quedan fuera de la base de M7 (M8).
+  const nino = ninoPorGM(
+    filasBaseFinal.map((f) => ({
+      gml_id: f.gml_id,
+      base_siguiente: registroDe(f, Y1)?.base_siguiente ?? null,
+      base_normalizada: registroDe(f, Y1)?.base_normalizada ?? null,
+      vendido: registroDe(f, Y)?.vendido ?? 0,
+    })),
+    (gml) => {
+      const n = nodos.get(gml);
+      return n ? (matriz.generos.has(n.genero_id) ? claveGM(n.genero_id, n.mundo_id) : "resto") : null;
+    }
+  );
+  resumen.gm_con_nino = nino.gm_con_nino;
+  resumen.gm_correccion_nino_pct = nino.gm_correccion_nino_pct;
+  resumen.gm_fuera_base = nino.gm_fuera_base;
+  // 06e (D5, M6): qué temporadas con Niño entran en la composición de alguna fila base y cómo estaban asignadas las equivalencias de invierno y verano
+  // (para `factor_faltante` y `temporada_cambiada`). Fotos internas: la API no las entrega.
+  const temporadasFilas = new Set<string>();
+  for (const f of filasBaseFinal) for (const o of f.curva_origen) temporadasFilas.add(agrupaciones.get(o.agrupacion_id)?.temporada ?? "");
+  resumen.temporadas_filas = [...temporadasFilas].filter((t) => t === "invierno" || t === "verano").sort();
+  resumen.temporada_equivalencias = temporadasDeEquivalencias(e.nodos, e.agrupaciones);
 
   return {
     bloques,
@@ -987,6 +1019,45 @@ export function calcularProyeccion(e: EntradaCalculo): SalidaCalculo {
     filas: [...filasBaseFinal, ...[...filasTienda.values()].sort((x, y) => x.clave.localeCompare(y.clave))],
     tiendas: tiendasModelo.sort((x, y) => x.tienda_id.localeCompare(y.tienda_id) || x.anio - y.anio),
     resumen,
+  };
+}
+
+/** Lo que `ninoPorGM` necesita de una fila base: su nodo, `B` y `B'` de `Y+1` (los guardados, ya redondeados) y lo vendido de `Y`. */
+export type FilaParaNino = { gml_id: string; base_siguiente: number | null; base_normalizada: number | null; vendido: number };
+
+/**
+ * 06e R15. Por GM (clave `genero_id|mundo_id` si el género es de la matriz, `resto` si no): `gm_con_nino` lista exactamente los que cumplen
+ * `correccionMaterial(Σ B, Σ B')` (la ÚNICA función de umbral: la misma que usa la pantalla de GM para `hay_nino`), `gm_correccion_nino_pct` su
+ * `Σ B' ÷ Σ B − 1` en % y `gm_fuera_base` las filas con `B` nulo (`sin_propuesta` o `sin_curva`) con su venta de `Y`, que quedan fuera de `Σ B`.
+ * Una fila con `B` y sin `B'` cuenta con `B' = B`. `claveDe` devuelve `null` para un nodo desconocido (la fila no cuenta).
+ */
+export function ninoPorGM(
+  filas: readonly FilaParaNino[],
+  claveDe: (gmlId: string) => string | null
+): { gm_con_nino: string[]; gm_correccion_nino_pct: Record<string, number>; gm_fuera_base: Record<string, { filas: number; unidades: number }> } {
+  const sumas = new Map<string, { b: number; bc: number }>();
+  const fuera: Record<string, { filas: number; unidades: number }> = {};
+  for (const f of filas) {
+    const clave = claveDe(f.gml_id);
+    if (clave === null) continue;
+    if (f.base_siguiente === null) {
+      const x = fuera[clave] ?? { filas: 0, unidades: 0 };
+      x.filas += 1;
+      x.unidades += f.vendido;
+      fuera[clave] = x;
+      continue;
+    }
+    const x = sumas.get(clave) ?? { b: 0, bc: 0 };
+    x.b += f.base_siguiente;
+    x.bc += f.base_normalizada ?? f.base_siguiente;
+    sumas.set(clave, x);
+  }
+  const conNino = [...sumas].filter(([, x]) => correccionMaterial(x.b, x.bc)).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const orden = (o: Record<string, { filas: number; unidades: number }>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return {
+    gm_con_nino: conNino.map(([k]) => k),
+    gm_correccion_nino_pct: Object.fromEntries(conNino.map(([k, x]) => [k, (x.bc / x.b - 1) * 100])),
+    gm_fuera_base: orden(fuera),
   };
 }
 

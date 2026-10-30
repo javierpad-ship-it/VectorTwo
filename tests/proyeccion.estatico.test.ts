@@ -101,6 +101,43 @@ describe("M7: pureza de la lógica", () => {
   it("VERSION_METODO vive en tipos-api.ts y entra en el resumen del cálculo", () => {
     expect(fuente(`${LIB}tipos-api.ts`)).toMatch(/export const VERSION_METODO\s*=\s*\d+/);
     expect(fuente(`${LIB}calculo.ts`)).toMatch(/version_metodo:\s*VERSION_METODO/);
+    // 06e: el método 5 y el mínimo de M8 suben juntos (la cerrada de método 4 sigue sirviendo a M8 con aviso).
+    expect(fuente(`${LIB}tipos-api.ts`)).toMatch(/export const VERSION_METODO = 5;/);
+    expect(fuente(`${LIB}tipos-api.ts`)).toMatch(/export const VERSION_METODO_MIN_M8 = 5;/);
+  });
+});
+
+describe("06e: un solo umbral de materialidad y sobre_base siempre explícito", () => {
+  it("R26: calculo.ts decide `gm_con_nino` con correccionMaterial (la misma función que la pantalla de GM) y no define su propio umbral; el servicio pasa por ninoPorGM", () => {
+    const calculo = sinComentarios(fuente(`${LIB}calculo.ts`));
+    expect(calculo).toMatch(/import \{ correccionMaterial \} from "\.\/factor-nino"/);
+    expect(calculo).toMatch(/correccionMaterial\(x\.b, x\.bc\)/);
+    // Ni el umbral ni un 0,005 / 0,5 % escritos a mano en la lógica del método ni en el servicio.
+    for (const nombre of ["calculo", "servicio", "servicio-crecimientos", "desactualizado", "reglas"]) {
+      const t = sinComentarios(fuente(`${LIB}${nombre}.ts`));
+      expect(t, nombre).not.toMatch(/UMBRAL_CORRECCION_NINO|\b0\.005\b|\b0\.5\s*%/);
+    }
+    // Quien lee las filas de hoy (cerrar) usa la misma función de calculo.ts.
+    const servicio = sinComentarios(fuente(`${LIB}servicio.ts`));
+    expect(servicio).toMatch(/import \{ calcularProyeccion, ninoPorGM \} from "\.\/calculo"/);
+    expect(servicio).toMatch(/return ninoPorGM\(/);
+  });
+
+  it("R27: la foto de lo aplicado (`proyeccion_crecimientos`) se escribe con `sobre_base` explícito en cada celda; ningún otro archivo arma esas filas", () => {
+    const servicio = sinComentarios(fuente(`${LIB}servicio.ts`));
+    const push = /foto\.push\(\{[\s\S]*?\}\);/.exec(servicio)?.[0] ?? "";
+    expect(push).toContain("sobre_base:");
+    expect(push).toMatch(/sobre_base:\s*matriz\.sobre\?\.get\(clave\)\s*\?\?\s*"bruta"/);
+    // La única escritura de la tabla es `escribirFotoCrecimientos` (upsert de las filas que arma `calcularYGuardar`).
+    const escrituras = src.filter((f) => /from\(\s*["'`]proyeccion_crecimientos["'`]\)\s*\.(insert|upsert)/.test(f.texto)).map((f) => f.ruta);
+    expect(escrituras).toEqual([CONSULTAS]);
+    const armadas = src.filter((f) => /TablesInsert<"proyeccion_crecimientos">/.test(f.texto) && f.ruta !== TIPOS_DB).map((f) => f.ruta).sort();
+    expect(armadas).toEqual([CONSULTAS, `${LIB}servicio.ts`].sort());
+  });
+
+  it("el Resto que se aplicó guarda su sobre_base en parametros.crecimiento_resto_usado (lo arma restoEfectivo y parametrosDe lo deja pasar)", () => {
+    expect(sinComentarios(fuente(`${LIB}servicio.ts`))).toMatch(/crecimiento_resto_usado:\s*resto/);
+    expect(sinComentarios(fuente(`${LIB}servicio-base.ts`))).toMatch(/crecimiento_resto_usado:\s*o\.crecimiento_resto_usado/);
   });
 });
 

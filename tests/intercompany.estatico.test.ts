@@ -113,8 +113,8 @@ describe("la lógica pura no toca la base ni los componentes", () => {
 });
 
 describe("el contrato de M7 y M8 sigue intacto", () => {
-  it("VERSION_METODO sigue en 4 y M13 no toca proyeccion ni marcas-barrer/vigentes", () => {
-    expect(archivo("src/lib/proyeccion/tipos-api.ts").texto).toMatch(/VERSION_METODO\s*=\s*4\b/);
+  it("VERSION_METODO está en 5 (06e) y M13 no toca proyeccion ni marcas-barrer/vigentes", () => {
+    expect(archivo("src/lib/proyeccion/tipos-api.ts").texto).toMatch(/VERSION_METODO\s*=\s*5\b/);
     for (const f of lib) expect(sinComentarios(f.texto), f.ruta).not.toMatch(/VERSION_METODO/);
     // M13 solo LEE la cerrada (leerParticipacionesDeCerrada): no importa nada que la escriba.
     expect(sinComentarios(archivo("src/lib/intercompany/servicio.ts").texto)).not.toMatch(/servicio-edicion|cerrarProyeccion|calcularProyeccion/);

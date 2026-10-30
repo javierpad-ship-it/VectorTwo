@@ -234,9 +234,9 @@ describe("regla 10: apertura y cierre en el mismo año de Y+1", () => {
 });
 
 describe("regla 9 y 14 de 07d: versión del método", () => {
-  it("VERSION_METODO = 4 y entra en el resumen; M8 exige una cerrada con version_metodo ≥ VERSION_METODO_MIN_M8 = 4 (constante fija)", () => {
-    expect(VERSION_METODO).toBe(4);
-    expect(VERSION_METODO_MIN_M8).toBe(4);
+  it("06e (D12): VERSION_METODO = 5 y entra en el resumen; M8 exige una cerrada con version_metodo ≥ VERSION_METODO_MIN_M8 = 5 (constante fija; una de método 4 sigue sirviendo con aviso)", () => {
+    expect(VERSION_METODO).toBe(5);
+    expect(VERSION_METODO_MIN_M8).toBe(5);
     expect(calc().resumen.version_metodo).toBe(VERSION_METODO);
   });
 

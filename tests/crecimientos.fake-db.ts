@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
  * Base falsa en memoria para probar las rutas de 06d sin red ni datos reales (sintético). Implementa solo lo que usan las consultas:
  * `select` (con proyección de columnas y la relación anidada `proyeccion_fila_anios(...)`), filtros (`eq`, `neq`, `in`, `is`, `gt`,
  * `not … is null`), `order` (con `ascending`), `limit`, `range`, `maybeSingle`, `single`, `insert`, `update`, `delete` y el `rpc`
- * `venta_genero_mundo`. Hace cumplir los dos únicos de `crecimientos_genero_mundo` (una vigente por GM y año; la versión única) con
+ * `venta_genero_mundo` (con la agrupación `a` de la 0029). Hace cumplir los dos únicos de `crecimientos_genero_mundo` (una vigente por GM y año; la versión única) con
  * el código y el mensaje de Postgres, y anota cada escritura (`escrituras`) para probar que aprobar no toca ninguna proyección.
  */
 
@@ -184,7 +184,8 @@ class Consulta implements PromiseLike<Resultado> {
         activo: true,
         created_at: `2026-10-27T10:${String(n % 60).padStart(2, "0")}:00Z`,
         updated_at: "2026-10-27T10:00:00Z",
-        ...(this.tabla === "crecimientos_genero_mundo" ? { estado: "vigente", aprobada_at: "2026-10-27T11:00:00Z", nota: null, base_valor: null, genero_id: null, mundo_id: null, proyeccion_referencia_id: null } : {}),
+        // `sobre_base` lleva el default de la 0029 (`'bruta'` para siempre): una inserción que no lo trae queda `bruta`.
+        ...(this.tabla === "crecimientos_genero_mundo" ? { estado: "vigente", aprobada_at: "2026-10-27T11:00:00Z", nota: null, base_valor: null, genero_id: null, mundo_id: null, proyeccion_referencia_id: null, sobre_base: "bruta" } : {}),
         ...this.carga,
       };
       const c = this.choque(filas, nueva);
