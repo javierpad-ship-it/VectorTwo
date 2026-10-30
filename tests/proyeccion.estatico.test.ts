@@ -33,6 +33,34 @@ const PURAS = [
   "explicar", "cola-larga", "resumen", "matriz", "mensual", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
 ];
 
+describe("0.14.0 F1: los meses del periodo que se comparan en un factor salen de UNA sola función", () => {
+  const sin = (ruta: string) => sinComentarios(fuente(ruta));
+
+  it("M7 (estadosFactoresDeY) y GM (hoyFactor) llaman a mesesPeriodoPublicados; ninguno cuenta los meses del periodo por su cuenta", () => {
+    const desactualizado = sin(`${LIB}desactualizado.ts`);
+    const gm = sin("src/lib/crecimientos/servicio.ts");
+    expect(desactualizado).toMatch(/meses_periodo_publicados:\s*mesesPeriodoPublicados\(/);
+    expect(gm).toMatch(/meses_periodo_publicados:\s*mesesPeriodoPublicados\(/);
+    expect(gm).toMatch(/import \{[^}]*mesesPeriodoPublicados[^}]*\} from "@\/lib\/proyeccion\/desactualizado"/);
+    // Ningún otro sitio de src/ arma `meses_periodo_publicados` (la proyección y el contexto de M7 pasan por estadosFactoresDeY).
+    const arman = src.filter((f) => /meses_periodo_publicados\s*:/.test(sinComentarios(f.texto)) && !/^src\/lib\/proyeccion\/factor-nino\.ts$/.test(f.ruta)).map((f) => f.ruta).sort();
+    expect(arman).toEqual(["src/lib/crecimientos/servicio.ts", `${LIB}desactualizado.ts`]);
+    // El recuento a mano que causó F1: filtrar los meses atípicos por «publicado» sin tope de mes cerrado.
+    for (const t of [desactualizado.replace(/export function mesesPeriodoPublicados[\s\S]*?\n\}\n/, ""), gm]) expect(t).not.toMatch(/meses_atipicos\)?\.filter\([^)]*\.has\(m\)\)\.length|publicados\.has\(m\)\)\.length/);
+  });
+
+  it("la función mide con el mismo tope que sincronizarFactores: hastaPorDefecto(publicados, hoyLima)", () => {
+    const fn = sin(`${LIB}desactualizado.ts`).match(/export function mesesPeriodoPublicados[\s\S]*?\n\}\n/)?.[0] ?? "";
+    expect(fn).toContain("hastaPorDefecto(");
+    expect(fn).toMatch(/m <= hasta/);
+    // sincronizar mide con calcularEfectoNino (lectura.ts), que fija `hasta` con el mismo criterio y el reloj de Lima.
+    expect(sin("src/lib/curvas/lectura.ts")).toMatch(/hastaPorDefecto\(venta\.data\.meses_publicados,\s*hoyLima\(\)\)/);
+    expect(sin(`${LIB}servicio.ts`)).toMatch(/calcularEfectoNino\(d, null\)/);
+    // y el contexto de M7 le pasa el reloj de Lima de la misma lectura (nunca un `new Date`).
+    expect(sin(`${LIB}contexto.ts`)).toMatch(/hoy_lima:\s*ctx\.hoy/);
+  });
+});
+
 describe("M7 regla 44: la lectura de venta y las tablas", () => {
   it("solo consultas.ts nombra venta_proyeccion (y los tipos generados)", () => {
     const usan = src.filter((f) => sinComentarios(f.texto).includes("venta_proyeccion") && f.ruta !== TIPOS_DB && f.ruta !== CONSULTAS).map((f) => f.ruta);

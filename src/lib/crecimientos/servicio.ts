@@ -13,6 +13,7 @@ import { curvaDeFila } from "@/lib/curvas/reglas";
 import { clasificarTienda } from "@/lib/proyeccion/bloques";
 import { calcularPromedio, claveGM, generosDeMatriz } from "@/lib/proyeccion/crecimientos";
 import { leerCrecimientos, leerFactoresDb, leerFilasConAnios, leerGenerosMundos, listarProyeccionesDb, type FactorDb, type ProyeccionDb } from "@/lib/proyeccion/consultas";
+import { mesesPeriodoPublicados } from "@/lib/proyeccion/desactualizado";
 import { correccionMaterial, type HoyFactor } from "@/lib/proyeccion/factor-nino";
 import { factorDe, type FactorProy } from "@/lib/proyeccion/nino";
 import type { SobreBase, TemporadaFactor } from "@/lib/proyeccion/tipos-api";
@@ -353,7 +354,8 @@ export async function cargarContexto(db: Db, consulta: ConsultaGeneroMundo, hoy:
   const hoyFactor = (temporada: TemporadaFactor): HoyFactor => ({
     huella_cargas: cargasHuella,
     huella_composicion: huellaComposicionDe[temporada],
-    meses_periodo_publicados: mesesAtipicosY(temporada).filter((m) => publicados.has(m)).length,
+    // La función compartida con el cierre de M7: mide hasta el último mes CERRADO, como `sincronizarFactores` (nunca un mes publicado y aún en curso).
+    meses_periodo_publicados: mesesPeriodoPublicados(y, temporada, periodosApi, mesesPublicados, hoy),
   });
 
   // La proyección de referencia: solo se leen sus filas si es del método con `B'` (≥ 5).

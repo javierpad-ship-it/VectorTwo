@@ -338,7 +338,7 @@ export function factoresPendientes(ctx: ContextoCalculo, anioEnCurso: number): {
 
 /** Lo que se sabe hoy para evaluar los factores de `Y` (`estadoFactorY`): cargas, composición, periodos y meses publicados. */
 export function hoyFactores(ctx: ContextoCalculo): HoyFactores {
-  return { huella_cargas: ctx.huellaCargas, huella_composicion: ctx.huellasComposicion, periodos: ctx.periodosClase, publicados: ctx.publicados };
+  return { huella_cargas: ctx.huellaCargas, huella_composicion: ctx.huellasComposicion, periodos: ctx.periodosClase, publicados: ctx.publicados, hoy_lima: ctx.hoy };
 }
 
 /** El estado de cada factor de `Y` (uno por temporada con meses atípicos en `Y` y alguna agrupación activa): `ok`, `faltante`, `desfasado` o `sin_confirmar`. */

@@ -1,4 +1,4 @@
-import { mesesFaltantes } from "@/lib/curvas/anios";
+import { hastaPorDefecto, mesesFaltantes } from "@/lib/curvas/anios";
 import { claseDeAnio, type PeriodoParaClase } from "@/lib/curvas/atipicos";
 import { redComparable } from "@/lib/curvas/red";
 import { PARAMETROS_POR_DEFECTO } from "@/lib/curvas/tipos-api";
@@ -131,6 +131,8 @@ export type HoyFactores = {
   huella_composicion: Readonly<Record<TemporadaFactor, string>>;
   periodos: readonly PeriodoParaClase[];
   publicados: readonly string[];
+  /** `aaaa-mm-dd` de hoy en Lima: fija el último mes cerrado con que se cuentan los meses del periodo (`mesesPeriodoPublicados`). */
+  hoy_lima: string;
 };
 
 export type EstadoFactorDeY = {
@@ -144,12 +146,24 @@ export type EstadoFactorDeY = {
 };
 
 /**
- * Meses del periodo atípico de `temporada` en `anio` que están publicados hoy (el `|P|` que se comparan en el factor: el año de referencia es un año
- * normal completo, así que basta con los publicados de `anio`). Con él `estadoFactorY` detecta un mes nuevo (`desfasado` por `meses`).
+ * Meses del periodo atípico de `temporada` en `anio` que están publicados Y CERRADOS hoy (el `|P|` que se comparan en el factor: el año de referencia es un
+ * año normal completo, así que basta con los publicados de `anio`). Con él `estadoFactorY` detecta un mes nuevo (`desfasado` por `meses`).
+ *
+ * ÚNICA fuente de este número: la usan el cierre de M7 (`estadosFactoresDeY`) y las pantallas de GM (`hoyFactor` de crecimientos). Mide con el MISMO tope que
+ * `sincronizarFactores` (`calcularEfectoNino`: `hastaPorDefecto(publicados, hoyLima)`, el último mes publicado y terminado en Lima), así un mes publicado pero
+ * aún en curso no cuenta y el factor no queda `desfasado` por `meses` sin que «Sincronizar» pueda arreglarlo.
  */
-export function mesesPeriodoPublicados(anio: number, temporada: TemporadaFactor, periodos: readonly PeriodoParaClase[], publicados: readonly string[]): number {
-  const p = new Set(publicados.map(recortarPeriodo));
-  return claseDeAnio(anio, { temporada }, periodos, [...p]).meses_atipicos.filter((m) => p.has(m)).length;
+export function mesesPeriodoPublicados(
+  anio: number,
+  temporada: TemporadaFactor,
+  periodos: readonly PeriodoParaClase[],
+  publicados: Iterable<string>,
+  hoyLima: string
+): number {
+  const p = new Set([...publicados].map(recortarPeriodo));
+  const hasta = hastaPorDefecto(p, hoyLima);
+  if (hasta === null) return 0;
+  return claseDeAnio(anio, { temporada }, periodos, [...p]).meses_atipicos.filter((m) => p.has(m) && m <= hasta).length;
 }
 
 /**
@@ -174,7 +188,7 @@ export function estadosFactoresDeY(args: {
     const r = estadoFactorY(f, {
       huella_cargas: args.hoy.huella_cargas,
       huella_composicion: args.hoy.huella_composicion[temporada],
-      meses_periodo_publicados: mesesPeriodoPublicados(args.anioEnCurso, temporada, args.hoy.periodos, args.hoy.publicados),
+      meses_periodo_publicados: mesesPeriodoPublicados(args.anioEnCurso, temporada, args.hoy.periodos, args.hoy.publicados, args.hoy.hoy_lima),
     });
     salida.push({ anio: args.anioEnCurso, temporada, estado: r.estado, motivos_desfase: r.motivos_desfase, efectivo: f.ratio_aplicado ?? f.ratio_calculado, parcial: f.parcial });
   }

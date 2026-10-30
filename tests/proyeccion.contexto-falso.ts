@@ -1,3 +1,5 @@
+import { hastaPorDefecto } from "@/lib/curvas/anios";
+import { ultimoMesCerrado } from "@/lib/ventas/periodo";
 import type { PeriodoParaClase } from "@/lib/curvas/atipicos";
 import type { PeriodoEfectoApi } from "@/lib/curvas/tipos-api";
 import { huellaTemporada } from "@/lib/curvas/huellas";
@@ -45,6 +47,8 @@ export const contexto = {
   factoresDesdeBase: false,
   /** 06e (M6): `equivalencia_id → agrupacion_estacionalidad_id` de hoy; un test remapea una equivalencia DESPUÉS de calcular (`temporada_cambiada`). */
   eqAgrupacion: {} as Record<string, string>,
+  /** Hoy en Lima (`aaaa-mm-dd`): fija el último mes cerrado (`ultimoCerrado`, `hastaDefecto`); sin llamar al reloj real. Un test lo mueve para cerrar o no un mes publicado. */
+  hoy: "2026-10-15",
   /** 06e (D7): periodos atípicos de más (p. ej. uno de 2027 para probar `anio_siguiente_atipico`). */
   periodosExtra: [] as PeriodoParaClase[],
 };
@@ -68,6 +72,7 @@ export function reiniciarContexto() {
   contexto.factoresDesdeBase = false;
   contexto.eqAgrupacion = {};
   contexto.periodosExtra = [];
+  contexto.hoy = "2026-10-15";
 }
 
 /**
@@ -231,9 +236,9 @@ export function contextoFalso(): ContextoCalculo {
     generosMatriz: [...contexto.generosMatriz],
     huellaCargas: contexto.huellaCargas,
     huellasComposicion: { ...contexto.huellasComposicion },
-    hoy: "2026-10-15",
-    ultimoCerrado: "2026-09",
-    hastaDefecto: publicados[publicados.length - 1] ?? null,
+    hoy: contexto.hoy,
+    ultimoCerrado: publicados.length > 0 ? ultimoMesCerrado(contexto.hoy) : null,
+    hastaDefecto: hastaPorDefecto(publicados, contexto.hoy),
   };
 }
 

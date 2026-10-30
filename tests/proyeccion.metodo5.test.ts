@@ -41,7 +41,7 @@ import { POST as sincronizar } from "@/app/api/proyeccion/factores/sincronizar/r
 import { GET as cerrada } from "@/app/api/proyeccion/cerrada/route";
 import { calcularProyeccion } from "@/lib/proyeccion/calculo";
 import { avanceAcumulado } from "@/lib/proyeccion/cierre";
-import { estadosFactoresDeY, equivalenciasConTemporadaCambiada, motivosDesactualizada, temporadasDeEquivalencias, type EstadoActual, type ProyeccionParaEstado } from "@/lib/proyeccion/desactualizado";
+import { estadosFactoresDeY, equivalenciasConTemporadaCambiada, mesesPeriodoPublicados, motivosDesactualizada, temporadasDeEquivalencias, type EstadoActual, type ProyeccionParaEstado } from "@/lib/proyeccion/desactualizado";
 import { ninoPorGM } from "@/lib/proyeccion/calculo";
 import { correccionMaterial } from "@/lib/proyeccion/factor-nino";
 import { aFactorApi, aplicadoAtDe, diagnosticoDe } from "@/lib/proyeccion/servicio-base";
@@ -379,7 +379,7 @@ describe("estadosFactoresDeY: ámbito, meses del periodo publicados y estados", 
     { id: "p2", desde: "2026-09", hasta: "2026-12", motivo: "Niño", alcance: "invierno" as const, temporadas: ["verano" as const], activo: true },
   ];
   const publicados = Array.from({ length: 9 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`);
-  const hoy = { huella_cargas: "h9", huella_composicion: { invierno: "ci", verano: "cv" }, periodos, publicados };
+  const hoy = { huella_cargas: "h9", huella_composicion: { invierno: "ci", verano: "cv" }, periodos, publicados, hoy_lima: "2026-10-15" };
   const f = (temporada: string, extra: Record<string, unknown> = {}) => ({
     anio: 2026,
     temporada,
@@ -400,8 +400,24 @@ describe("estadosFactoresDeY: ámbito, meses del periodo publicados y estados", 
     expect(sinFila.map((e) => [e.temporada, e.estado])).toEqual([["invierno", "sin_confirmar"], ["verano", "faltante"]]);
     const ok = estadosFactoresDeY({ anioEnCurso: 2026, factores: [f("invierno", { ratio_aplicado: 0.7, aplicado_huella: "h9" }), f("verano", { ratio_aplicado: 1.5, aplicado_huella: "h9" })], hoy });
     expect(ok.map((e) => e.estado)).toEqual(["ok", "ok"]);
-    const mesNuevo = estadosFactoresDeY({ anioEnCurso: 2026, factores: [f("invierno", { ratio_aplicado: 0.7, aplicado_huella: "h9" })], hoy: { ...hoy, huella_cargas: "h10", publicados: [...publicados, "2026-10"] } });
+    const mesNuevo = estadosFactoresDeY({ anioEnCurso: 2026, factores: [f("invierno", { ratio_aplicado: 0.7, aplicado_huella: "h9" })], hoy: { ...hoy, huella_cargas: "h10", publicados: [...publicados, "2026-10"], hoy_lima: "2026-11-05" } });
     expect(mesNuevo[0]).toMatchObject({ estado: "desfasado", motivos_desfase: ["cargas", "meses"] });
+  });
+
+  it("F1 (0.14.0): un mes publicado pero aún en curso NO cuenta; al cerrarse, sí. Mismo tope que sincronizarFactores (hastaPorDefecto)", () => {
+    const conOctubre = [...publicados, "2026-10"];
+    // 15 de octubre: octubre está publicado pero no cerrado → 9 meses del periodo (los mismos que mide sincronizar), no 10.
+    expect(mesesPeriodoPublicados(2026, "invierno", periodos, conOctubre, "2026-10-15")).toBe(9);
+    expect(mesesPeriodoPublicados(2026, "verano", periodos, conOctubre, "2026-10-15")).toBe(1);
+    // 5 de noviembre: octubre ya cerró.
+    expect(mesesPeriodoPublicados(2026, "invierno", periodos, conOctubre, "2026-11-05")).toBe(10);
+    expect(mesesPeriodoPublicados(2026, "verano", periodos, conOctubre, "2026-11-05")).toBe(2);
+    // Sin ningún mes cerrado publicado: 0.
+    expect(mesesPeriodoPublicados(2026, "invierno", periodos, [], "2026-10-15")).toBe(0);
+    // Con el mismo `hasta` que usa sincronizar, el estado no se desfasa por `meses` aunque octubre esté publicado (las cargas sí cambian: eso lo arregla Sincronizar).
+    const factor = f("invierno", { ratio_aplicado: 0.7, aplicado_huella: "h9" });
+    const enCurso = estadosFactoresDeY({ anioEnCurso: 2026, factores: [factor], hoy: { ...hoy, publicados: conOctubre } });
+    expect(enCurso[0]).toMatchObject({ estado: "ok", motivos_desfase: [] });
   });
 
   it("solo cuentan las temporadas con meses atípicos en Y y con alguna agrupación activa", () => {
@@ -730,7 +746,8 @@ describe("R24 de servicio: sincronizar, confirmar y el ejemplo H", () => {
     await sincronizar();
     await guardarFactores(enviar("PUT", "/factores", { factores: [{ anio: 2026, temporada: "invierno", ratio_aplicado: 0.66 }] }));
     expect((await estadoDe(2026, "invierno"))?.estado).toBe("ok");
-    // Noviembre: se publica octubre. Hoy hay otras cargas y un mes más del periodo.
+    // Noviembre: se publica octubre (ya cerrado). Hoy hay otras cargas y un mes más del periodo.
+    contexto.hoy = "2026-11-05";
     contexto.huellaCargas = "huella-octubre";
     contexto.mesesPublicados = [...contexto.mesesPublicados, "2026-10"];
     expect(await estadoDe(2026, "invierno")).toMatchObject({ estado: "desfasado", motivos_desfase: ["cargas", "meses"] });
@@ -754,6 +771,25 @@ describe("R24 de servicio: sincronizar, confirmar y el ejemplo H", () => {
     await guardarFactores(enviar("PUT", "/factores", { factores: [{ anio: 2026, temporada: "invierno", ratio_aplicado: 0.71 }] }));
     expect(filaFactor(2026, "invierno").aplicado_huella).toBe("huella-octubre");
     expect((await estadoDe(2026, "invierno"))?.estado).toBe("ok");
+  });
+
+  it("F1 (0.14.0): octubre publicado pero sin cerrar (15 de octubre) no desfasa por meses; sincronizar deja el factor sin_confirmar y al escribir el valor, ok", async () => {
+    contexto.factoresDesdeBase = true;
+    await sincronizar();
+    await guardarFactores(enviar("PUT", "/factores", { factores: [{ anio: 2026, temporada: "invierno", ratio_aplicado: 0.66 }] }));
+    expect((await estadoDe(2026, "invierno"))?.estado).toBe("ok");
+    // 15 de octubre (fecha simulada): se publica octubre, que sigue en curso. Cambian las cargas, pero el periodo medido sigue siendo hasta setiembre.
+    contexto.hoy = "2026-10-15";
+    contexto.huellaCargas = "huella-octubre-en-curso";
+    contexto.mesesPublicados = [...contexto.mesesPublicados, "2026-10"];
+    expect(await estadoDe(2026, "invierno")).toMatchObject({ estado: "desfasado", motivos_desfase: ["cargas"] });
+    // Sincronizar mide hasta setiembre (meses_comparados 9), que es lo que M7 y GM esperan: ningún desfase por meses.
+    contexto.efectoNino = { ...efectoNinoFalso(), huella_cargas: "huella-octubre-en-curso" };
+    expect((await sincronizar()).status).toBe(200);
+    expect(filaFactor(2026, "invierno")).toMatchObject({ meses_comparados: 9, huella_cargas: "huella-octubre-en-curso" });
+    expect(await estadoDe(2026, "invierno")).toMatchObject({ estado: "sin_confirmar", motivos_desfase: [] });
+    await guardarFactores(enviar("PUT", "/factores", { factores: [{ anio: 2026, temporada: "invierno", ratio_aplicado: 0.66 }] }));
+    expect(await estadoDe(2026, "invierno")).toMatchObject({ estado: "ok", motivos_desfase: [] });
   });
 
   it("la composición también cuenta: remapear una equivalencia después de sincronizar deja el factor desfasado por composicion", async () => {
