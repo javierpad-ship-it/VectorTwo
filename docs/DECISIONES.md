@@ -1140,3 +1140,91 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** El hash del contenido más un ordinal duplicaba todo lo que venía después de una fila corregida. Con la fecha de hoy como valor por defecto, el mismo archivo crearía compras nuevas al reimportarlo otro día.
 
 **Descartado.** Hash más ordinal; fecha de compra por defecto; importar lotes sin reparto (líneas que no contarían y que nadie podría arreglar hasta `0.13.1`).
+
+## 2026-10-29 · M6/M7 (06e): método 5, el % del año siguiente es sobre el año en curso corregido del Niño, normalizado por fila (decisión 63)
+
+**Decisión.** `VERSION_METODO` pasa a 5. La base del año siguiente de cada fila de M7 (línea × agrupación de marca) se corrige del Niño con **el factor de la temporada de esa fila**, y la propuesta es `P = round(B' × (1 + g))`, con `g` el % aprobado en Curvas. La base corregida del GM es la suma de las de sus filas. Los GM que mezclan temporadas conservan el factor ponderado por mes de antes, con el aviso `temporadas_mezcladas`. Toda pantalla muestra el % de dos formas: sobre 2026 corregido (el que se escribe) y sobre 2026 real (el que da la Matriz). En un año sin Niño el resultado es idéntico al del método 4, fila por fila. Revierte en parte la decisión de 07c de que el % del año siguiente es bruto.
+
+**Por qué.** Con el % bruto, las líneas de invierno partían de una venta hundida por el Niño y el rebote había que sumarlo aparte; Javier quiere aprobar un crecimiento sobre una base normal. Normalizar por fila y no con una curva compuesta del GM evita repartir el rebote del invierno sobre líneas de verano (la variante que 07c ya había descartado).
+
+**Descartado.** Una curva compuesta por GM para normalizar; reinterpretar en silencio las versiones ya aprobadas como corregidas (un 15 % de invierno habría saltado a +64 % real); dejar el % bruto.
+
+## 2026-10-29 · M6 (06e): el factor del Niño es relativo (decisión 64)
+
+**Decisión.** El factor que usa M7 es `φ = ρ_P ÷ κ_P`: lo que cayó o subió la temporada en los meses del periodo atípico, dividido por lo que cayó o subió la red de todo el año en los mismos meses y tiendas. Se calcula con un mínimo de 2 meses del periodo; con menos, no se propone. El factor de volumen anterior queda como dato en pantalla. Con los datos de hoy el invierno sale cerca de 0,70 (el de volumen era 0,66).
+
+**Por qué.** El factor de volumen borra de las líneas de invierno la caída general de la red de 2026 y deja las de verano con ella: el invierno corregido sería, por construcción, 2025 de las mismas tiendas extrapolado. El relativo quita solo el efecto propio del Niño y conserva la tendencia de la red. Decisión de Javier.
+
+**Descartado.** Seguir con el factor de volumen; un factor único para todas las temporadas.
+
+## 2026-10-29 · M6 (06e): el factor de verano lo escribe Javier con un diagnóstico delante (decisión 65)
+
+**Decisión.** El sistema no propone factor de verano. Calcula y muestra, mes a mes del periodo, cuánto creció el verano por encima de su propia tendencia y de la red («cómo crece el verano atípicamente»), y Javier escribe el valor a mano. Cierra la pregunta abierta del 2026-10-14 sobre el periodo de verano (set–dic).
+
+**Por qué.** Hoy el factor de verano sale de 9 meses, 8 de ellos fuera del periodo del Niño, y el único mes del periodo (setiembre) es de inicio de temporada: un dato frágil no debe fijar solo el nivel de 2027 de esas líneas.
+
+**Descartado.** Calcular el factor con un solo mes del periodo; excluir el verano de la corrección.
+
+## 2026-10-29 · M6/M7 (06e): 2027 no es Niño; si se marca, no se aprueba ni se cierra (decisión 66)
+
+**Decisión.** No se modela un factor del Niño para el año siguiente. Si el año siguiente tiene meses atípicos marcados en Estacionalidad, aprobar un crecimiento de ese año (`409 anio_siguiente_atipico`) y cerrar la proyección quedan bloqueados, sin excepción, hasta que Javier quite la marca o decida cómo modelarlo. Calcular sigue permitido.
+
+**Por qué.** Un % único por GM no puede incluir el efecto de una sola temporada, y el último factor conocido (el de invierno 2026) se aplicaría a 2027 solo porque su periodo llega a diciembre de 2026. Es más seguro frenar que producir una cifra que nadie pidió.
+
+**Descartado.** Aplicar el factor del año siguiente al nivel de cada fila.
+
+## 2026-10-29 · M7 (06e): cerrar exige un factor existente, al día y confirmado cada mes publicado (decisión 67)
+
+**Decisión.** Para cerrar, cada factor del año en curso que toque filas de 2027 tiene que existir (`factor_faltante`), estar al día con los datos, la composición y la fórmula (`factor_desfasado`) y, si es parcial, estar **confirmado por Javier sobre el cálculo vigente** (`factor_sin_confirmar`): al escribir el valor se guarda `aplicado_huella`, la huella de cargas que tenía delante, y escribir el mismo valor que el calculado confirma. Cada mes publicado hay que sincronizar y volver a confirmar. Ninguno se fuerza. Si el factor cambia después de calcular, cerrar tampoco se fuerza (`factores_cambiados` de ese año). Los factores de otros años siguen forzables, y calcular nunca se bloquea.
+
+**Por qué.** El factor del año en curso fija el nivel de 2027 de las líneas con Niño y hoy nada detectaba que un factor parcial había quedado viejo. Cerrar ocurre pocas veces al año; confirmar mensualmente cuesta un minuto y evita que un factor de setiembre cierre en diciembre sin que nadie lo mire. Decisión de Javier al aprobar la ficha.
+
+**Descartado.** Confirmar una vez y que valga hasta borrarlo; solo avisar sin bloquear.
+
+## 2026-10-29 · M6 (06e): umbral de materialidad del Niño de 0,5 % (decisión 68)
+
+**Decisión.** Un GM (o el Resto) «tiene Niño» solo si su base corregida difiere de la real en 0,5 % o más (`UMBRAL_CORRECCION_NINO = 0,005`); la misma función decide en la pantalla y en M7. Por debajo, una versión `bruta` vale tal cual para cerrar, la pantalla muestra un solo %, no dibuja la línea corregida y no pide reaprobar.
+
+**Por qué.** Con un umbral de 0,05 % casi todos los GM de HOMBRE y MUJER tienen algo de invierno y Javier habría tenido que reaprobar unos diez GM y el Resto sin que cambiara nada material. Con 0,5 %, la diferencia entre aplicar una versión bruta y una corregida es menor que el 0,5 % del 2027 del GM.
+
+**Descartado.** 0,05 %; exigir reaprobar todo al subir el método.
+
+## 2026-10-29 · M6/M8 (06e): transición con método 4, versiones bruta y cerrada que sigue sirviendo a M8 (decisión 69)
+
+**Decisión.** Javier puede cerrar ahora una proyección con el método 4 para validar M8 y volver a cerrar con `0.14.0` después. Una cerrada de método 4 **sigue sirviendo a M8** con el aviso `cerrada_metodo_anterior` (los meses de 2027 de las líneas con Niño no están corregidos), que no bloquea; al cerrar una de método 5, la anterior se archiva sola. Las proyecciones en trabajo quedan «desactualizadas: método nuevo» (no se fuerza; recalcular conserva las decisiones). `crecimientos_genero_mundo.sobre_base` tiene default `'bruta'` para siempre, en una sola sentencia: las versiones aprobadas antes de `0.14.0` conservan su significado y solo la API nueva escribe `corregida`, siempre explícita. Solo en un GM con Niño material hay que «Reaprobar» (un clic, conserva el total del GM).
+
+**Por qué.** Javier va a aprobar y cerrar en la `0.13.x` antes del despliegue y no se le debe invalidar nada de golpe. Con un default `corregida`, una aprobación hecha en la `0.13.x` habría quedado marcada como corregida aunque la pantalla vieja la mostró bruta, y sus líneas de invierno habrían subido de golpe al desplegar.
+
+**Descartado.** Default `corregida`; convertir las versiones antiguas solas (06d: nunca se copian solas); bloquear M8 hasta tener una cerrada de método 5.
+
+## 2026-10-30 · M7 (07e): la IA es una fuente más de la cifra decidida, la meta es solo de lo existente y las libres absorben (decisión 70)
+
+**Decisión.** La propuesta del método (`propuesto`) no cambia. La IA añade una segunda cifra por fila (natural, con meta, brecha y razón) y el botón «Aceptar IA», que es una decisión manual con traza (`decision_ia_fila_id`), una fila a la vez y con la cifra que el planner vio. Las filas libres se siguen decidiendo a mano para poder cerrar. La **meta del GM** es la suma de lo que el método propondría si todas sus filas siguieran al GM y es **solo de lo que ya existe**: filas con base en 2026 (las líneas o marcas nuevas de 2027 se trabajan aparte; las tiendas nuevas y cierres quedan fuera). Son fijas (no las toca la IA) las decididas, las de % propio y la cola larga. **Las demás filas libres absorben** cualquier cambio de la meta o de las fijas, de modo que el GM sume exacto, y cada fila muestra cuánto absorbió desde que la IA propuso. El cuadre de la Matriz es la garantía; cerrar no lo exige.
+
+**Por qué.** El método es determinista y M8 depende de él; sustituirlo por la cifra de un modelo rompería la reproducibilidad. El planner decide cada fila libre de todos modos: la IA le ahorra el análisis, no la decisión. Un modelo no suma con exactitud ni conoce decisiones posteriores, así que el código normaliza al leer y muestra lo absorbido para que ninguna cifra «de la IA» esconda un ajuste que la IA no propuso.
+
+**Descartado.** Reemplazar `propuesto`; una proyección aparte «escenario IA»; aceptar en bloque; guardar cifras ya normalizadas (habría que reescribirlas en cada decisión).
+
+## 2026-10-30 · M7 (07e): a la IA solo salen cifras agregadas y los nombres de marcas y tiendas van como alias (decisión 71)
+
+**Decisión.** Al proveedor salen únicamente unidades agregadas por fila, por año relativo (`A−3` … `A`) y mes, los nombres del árbol y de las agrupaciones de marca, e indicadores derivados por el código. **Las marcas y las tiendas van como alias**, que el sistema restituye al volver para que el usuario siempre vea nombres reales. Nunca salen años reales, tiendas, soles, costos, stock, usuarios, el nombre de la empresa ni ids. Lo enviado se guarda canónico e inmutable en una tabla propia (solo admin) y nada de lo enviado ni lo recibido va a los logs. La clave vive solo como variable secreta en Railway.
+
+**Por qué.** Es el perímetro que fijó Javier. La revisión midió 196 equivalencias activas cuyo nombre contiene el de una marca (90 idénticas), así que los nombres del árbol podían filtrar marcas: Javier eligió alias. Los años relativos impiden que el modelo «recuerde» lo ocurrido en un año concreto, que contaminaría el backtest. Guardar la entrada exacta permite verificar la huella de lo enviado.
+
+**Descartado.** Enviar nombres reales de marca; enviar tiendas o soles; no guardar la entrada.
+
+## 2026-10-30 · M7 (07e): la IA se enciende solo si gana al mejor rival (decisión 72)
+
+**Decisión.** La capacidad de distribución se enciende únicamente si una evaluación con el mismo modelo y la misma versión del prompt la dio por ganadora frente al **mejor** de dos rivales, el método actual (reparto parejo) y una regla de tendencia, tanto en el reparto como en el natural, y **en al menos la mitad de los GM con ≥ 5 filas libres**; además no puede empeorar de forma notable en ningún género. Sin evaluación ganadora, la IA no muestra cifras. El modelo es un parámetro (admin) y se queda el más barato que gane.
+
+**Por qué.** Javier pidió backtest obligatorio. Si una regla determinista empata con la IA no hay razón para pagar un modelo, y atar el encendido al par modelo + prompt impide que un cambio entre sin volver a medirse. Medir por GM evita que un par de GM grandes tapen el resto.
+
+**Descartado.** Compararla solo contra el método; encenderla por configuración sin medir.
+
+## 2026-10-30 · M7 (07e): la primera entrega es solo la distribución de la meta (decisión 73)
+
+**Decisión.** `0.15.0 · M7` trae solo la **distribución de la meta de 2027** entre las filas libres del GM (proyección natural sin conocer la meta, reparto, brecha, cuadre en la Matriz, evaluación y administración; migración `0030`). Las sublíneas y el cierre del año en curso por la IA quedan para `0.15.1`, con su diseño conservado en la ficha. Una llamada al proveedor por petición, conducida por el navegador, con candado por GM y registro transaccional.
+
+**Por qué.** Javier decidió (decisión 2 de la revisión de la ficha) empezar solo por la distribución y construir lo demás después de recorrer el hito de `0.15.0`. Una llamada por petición evita que un reintento del navegador duplique el gasto o deje una propuesta a medias. La ficha `07e` está lista y revisada; **no se ha construido**.
+
+**Descartado.** Entregar todo junto; procesar un GM entero en una sola petición.
