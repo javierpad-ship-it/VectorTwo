@@ -167,7 +167,7 @@ base: z.object({
   variante: z.enum(VARIANTES_APROBABLES),
 }).strict(),
 // Un valor heredado (cierre_proyectado, sin_nino_mas_rebote) no pasa zod: el handler lo traduce a 400 base_retirada
-// («Esa base ya no se usa desde 0.14.0: elige “Cierre por curva” o “Aplicado hoy”»). `pct` se redondea a 2 decimales (numeric(6,2)).
+// («Esa base ya no se usa desde 0.14.0 (la base «Cierre proyectado» y la variante «sin Niño más rebote»). Elige «Cierre por curva», «Acumulado», «Año completo», «Aplicado hoy» o «Ninguna», con variante corregido o bruto.»). `pct` se redondea a 2 decimales (numeric(6,2)).
 ```
 
 **Aprobar** (orden de 06d §3, con estos cambios):

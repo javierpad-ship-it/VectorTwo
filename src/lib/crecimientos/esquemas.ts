@@ -19,7 +19,7 @@ export const VARIANTES_RETIRADAS: readonly string[] = VARIANTES_BASE.filter((v) 
 /** ¿La base de un `POST` es una de las retiradas? El handler la traduce a `400 base_retirada` con `MENSAJE_BASE_RETIRADA`. */
 export const esBaseRetirada = (base: { tipo: string; variante: string }): boolean => BASES_RETIRADAS.includes(base.tipo) || VARIANTES_RETIRADAS.includes(base.variante);
 
-export const MENSAJE_BASE_RETIRADA = "Esa base ya no se usa desde 0.14.0: elige “Cierre por curva” o “Aplicado hoy”.";
+export const MENSAJE_BASE_RETIRADA = "Esa base ya no se usa desde 0.14.0 (la base «Cierre proyectado» y la variante «sin Niño más rebote»). Elige «Cierre por curva», «Acumulado», «Año completo», «Aplicado hoy» o «Ninguna», con variante corregido o bruto.";
 
 const uuid = z.uuid("Identificador inválido.");
 

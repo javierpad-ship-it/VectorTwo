@@ -7,10 +7,10 @@ import { sincronizarFactores } from "@/lib/proyeccion/servicio";
  * temporada y guarda `ratio_calculado`, `huella_cargas`, `calculado_at` y `parcial`. No toca `ratio_aplicado` ni la nota.
  */
 export async function POST() {
-  const { perfil, response } = await requirePlanner();
+  const { response } = await requirePlanner();
   if (response) return response;
 
-  const r = await sincronizarFactores({ id: perfil.id, nombre: perfil.nombre });
+  const r = await sincronizarFactores();
   if (r.respuesta) return r.respuesta;
   return ok(r.data);
 }

@@ -497,7 +497,7 @@ describe("POST /api/curvas/genero-mundo/[clave]", () => {
       const r = await aprobarHU({ base, pct: 10, nota: "x" });
       expect(r.status, JSON.stringify(base)).toBe(400);
       expect(r.codigo).toBe("base_retirada");
-      expect(r.error).toBe("Esa base ya no se usa desde 0.14.0: elige “Cierre por curva” o “Aplicado hoy”.");
+      expect(r.error).toBe("Esa base ya no se usa desde 0.14.0 (la base «Cierre proyectado» y la variante «sin Niño más rebote»). Elige «Cierre por curva», «Acumulado», «Año completo», «Aplicado hoy» o «Ninguna», con variante corregido o bruto.");
     }
     expect(estadoFalso.escrituras).toHaveLength(0);
     expect(versiones()).toHaveLength(0);

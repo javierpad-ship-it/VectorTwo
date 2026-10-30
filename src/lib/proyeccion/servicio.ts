@@ -1108,7 +1108,7 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
   // crecimiento aprobado que pasó su comprobación justo antes de este UPDATE puede escribirse después. Se vuelven a leer las pendientes y los
   // vigentes con la proyección ya cerrada; si aparece alguna, se revierte el cierre (y el archivado) como en cualquier otro fallo y se responde
   // con el mismo 409 que habría dado antes.
-  const pendientes = await pendientesDeCierre(d, cerrada.data, ctx, parametros.umbral_cola_larga);
+  const pendientes = await pendientesDeCierre(d, cerrada.data, parametros.umbral_cola_larga);
   if (pendientes.respuesta) {
     await revertirCierre(d, id);
     await revertirArchivado();
@@ -1123,6 +1123,9 @@ export function esMetodoVigente(resumen: unknown): boolean {
   return typeof v === "number" && v >= VERSION_METODO;
 }
 
+/** Códigos de rechazo del cierre que vienen del Niño (`bloqueosNinoDeCierre`). */
+const CODIGOS_NINO_CIERRE: ReadonlySet<string> = new Set(["anio_siguiente_atipico", "factor_faltante", "factor_desfasado", "factor_sin_confirmar", "factores_cambiados", "temporada_cambiada"]);
+
 /** Deshace el `UPDATE` de cerrar (la proyección vuelve a `en_trabajo`; `cerrada_*` se limpian). */
 async function revertirCierre(d: Db, id: string) {
   await cambiarEstadoProyeccion(d, id, "cerrada", { estado: "en_trabajo", cerrada_at: null, cerrada_por_id: null, cerrada_por_nombre: null });
@@ -1132,9 +1135,16 @@ async function revertirCierre(d: Db, id: string) {
  * Lo que sigue pendiente justo ahora (misma regla que el cierre; `forzar` no aplica): filas y tiendas sin decidir y, desde `0.12.1` (M5), los
  * crecimientos aprobados — se vuelven a leer los vigentes: si la huella de hoy ya no es la que aplicó el cálculo (`409 crecimientos_cambiados`) o
  * falta alguno (`409 crecimientos_sin_aprobar`), `respuesta` lo dice y quien llama revierte el cierre.
+ *
+ * `0.14.1` (auditoría de seguridad): también RELEE el contexto (factores del Niño con sus huellas de cargas y de composición, agrupaciones y equivalencias) y evalúa
+ * los bloqueos del Niño con lo de AHORA, no con el `ctx` leído al inicio del cierre: si entre la comprobación y el `UPDATE` cambió un factor de `Y`, su confirmación o
+ * la composición de una temporada, el cierre se deshace (esos motivos no se saltan con `forzar`).
  */
-async function pendientesDeCierre(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, umbralColaLarga: number): Promise<{ respuesta: NextResponse | null }> {
+async function pendientesDeCierre(d: Db, p: ProyeccionDb, umbralColaLarga: number): Promise<{ respuesta: NextResponse | null }> {
   const id = p.id;
+  const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: false });
+  if (ctxR.respuesta) return { respuesta: ctxR.respuesta };
+  const ctx = ctxR.data;
   const filas = await leerFilasConAnios(d, id, { columnas: "ligeras", tiendaId: null, soloActivas: true });
   if (filas.error) return { respuesta: fallaDb(filas.error, "proyección: releer las filas").respuesta };
   const tiendas = await leerTiendasProyeccion(d, id);
@@ -1143,6 +1153,9 @@ async function pendientesDeCierre(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, 
   if (vigentes.respuesta) return { respuesta: vigentes.respuesta };
   // Se vuelve a medir el Niño con las filas de ahora: un `reaprobar` que apareció justo antes del cierre también lo deshace.
   const hoy = crecimientosDeHoy(p, ctx, vigentes.data, ninoDeFilas(filas.data, p.anio_en_curso, ctx));
+  // `p` ya está `cerrada` (el UPDATE se hizo): se evalúa como lo que era, `en_trabajo`, para que `desactualizadaDe` dé `factores_cambiados` y `temporada_cambiada` de hoy.
+  const des = await desactualizadaDe(d, { ...p, estado: "en_trabajo" }, ctx, { vigentes: vigentes.data });
+  if (des.respuesta) return { respuesta: des.respuesta };
   const r = motivoRechazoCerrar({
     estado: "en_trabajo",
     calculandoDesde: null,
@@ -1158,12 +1171,14 @@ async function pendientesDeCierre(d: Db, p: ProyeccionDb, ctx: ContextoCalculo, 
     umbralColaLarga,
     crecimientosCambiados: crecimientosCambiados(p.resumen as unknown as Partial<ResumenProyeccion> | null, hoy.actuales),
     crecimientosSinAprobar: hoy.sinAprobar,
+    bloqueosNino: bloqueosNinoDe(p, ctx, des.data),
   });
   if (r.ok) return { respuesta: null };
   const deCrecimientos = r.rechazo.codigo === "crecimientos_cambiados" || r.rechazo.codigo === "crecimientos_sin_aprobar";
+  const deNino = CODIGOS_NINO_CIERRE.has(r.rechazo.codigo);
   return {
     respuesta: errorConCodigoExtra(
-      `${r.rechazo.mensaje} ${deCrecimientos ? "Se aprobó un crecimiento mientras se cerraba" : "Alguien cambió una decisión mientras se cerraba"}: el cierre se deshizo.`,
+      `${r.rechazo.mensaje} ${deCrecimientos ? "Se aprobó un crecimiento mientras se cerraba" : deNino ? "Cambió un factor del Niño, su confirmación o una agrupación mientras se cerraba" : "Alguien cambió una decisión mientras se cerraba"}: el cierre se deshizo.`,
       r.rechazo.status,
       r.rechazo.codigo,
       {
@@ -1282,9 +1297,9 @@ export async function guardarFactores(
  * temporada en los meses del periodo dividida por la de la red de todo el año en los mismos meses y tiendas, del bloque `periodo` de `efectoAtipicoCorrida`) y guarda
  * `ratio_calculado` (`null` con menos de `MIN_MESES_FACTOR` meses del periodo con dato: lo escribe el planner), `formula`, `ratio_volumen`, `ratio_control`,
  * `meses_comparados` (= `|P|`), `huella_cargas`, `huella_composicion`, `diagnostico`, `tiendas_comunes`, `parcial` y `calculado_at`. No toca `ratio_aplicado`,
- * `aplicado_huella` ni `nota` (R24).
+ * `aplicado_huella` ni `nota` (R24), y tampoco `perfil_id` ni `usuario_nombre` (la autoría es de quien confirmó el factor, no de quien sincroniza).
  */
-export async function sincronizarFactores(actor: Actor): Promise<Salida<FactorApi[]>> {
+export async function sincronizarFactores(): Promise<Salida<FactorApi[]>> {
   const d = db();
   const calculo = await calcularEfectoNino(d, null);
   if (calculo.respuesta) return falla(calculo.respuesta);
@@ -1320,8 +1335,7 @@ export async function sincronizarFactores(actor: Actor): Promise<Salida<FactorAp
         tiendas_comunes: fila?.tiendas_comunes ?? null,
         meses_comparados: f.meses_comparados,
         parcial: !a.completo,
-        perfil_id: actor.id,
-        usuario_nombre: actor.nombre,
+        // Sin `perfil_id` ni `usuario_nombre`: son la autoría de quien escribió `ratio_aplicado`/`nota` (PUT de factores). Sincronizar solo calcula; el upsert no los toca.
       });
     }
   }

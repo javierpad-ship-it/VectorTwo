@@ -168,3 +168,21 @@ describe("06e · bases aprobables y retiradas (R11)", () => {
     expect(aprobarCrecimientoSchemaEstricto.safeParse(cuerpo({ base: { ...nueva, otra: 1 } })).success).toBe(false);
   });
 });
+
+describe("MENSAJE_BASE_RETIRADA dice lo que de verdad se admite", () => {
+  const ETIQUETA: Record<(typeof BASES_APROBABLES)[number], string> = {
+    cierre_curva: "Cierre por curva",
+    acumulado: "Acumulado",
+    anio_completo: "Año completo",
+    aplicado_hoy: "Aplicado hoy",
+    ninguna: "Ninguna",
+  };
+
+  it("nombra todas las bases aprobables y las variantes aprobables, y ninguna retirada como opción", () => {
+    for (const b of BASES_APROBABLES) expect(MENSAJE_BASE_RETIRADA, b).toContain(`«${ETIQUETA[b]}»`);
+    for (const v of VARIANTES_APROBABLES) expect(MENSAJE_BASE_RETIRADA, v).toContain(v);
+    // Lo retirado se cita solo como lo que ya no se usa (antes del «Elige»), nunca como opción.
+    const opciones = MENSAJE_BASE_RETIRADA.slice(MENSAJE_BASE_RETIRADA.indexOf("Elige"));
+    expect(opciones).not.toMatch(/proyectado|rebote/i);
+  });
+});

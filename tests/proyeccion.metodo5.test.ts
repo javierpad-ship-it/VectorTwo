@@ -564,6 +564,52 @@ describe("R16: factor de Y faltante, desfasado o sin confirmar bloquea el cierre
     expect((await cerrarConQuery(id)).status).toBe(200);
   });
 
+  it("carrera: un factor de Y que cambia entre la comprobación y el UPDATE de cerrar se relee y revierte el cierre con el motivo (también con forzar)", async () => {
+    aprobarCrecimientosFalsos(2027, { pct: 5, resto: 5 });
+    contexto.factoresExtra["2026#invierno"] = { ...FACTOR_AL_DIA, ratio_aplicado: 0.66 };
+    const id = await nueva();
+    await decidirTodo(id);
+    for (const query of ["", "?forzar=1"]) {
+      let cambiado = false;
+      base.falloDeEscritura = (tabla, modo, carga) => {
+        if (!cambiado && tabla === "proyecciones" && modo === "update" && (carga as Fila).estado === "cerrada") {
+          cambiado = true;
+          // «Alguien» confirma otro valor del factor de 2026 justo después de que cerrar comprobó y antes (o durante) su UPDATE.
+          contexto.factoresExtra["2026#invierno"] = { ...FACTOR_AL_DIA, ratio_aplicado: 0.7 };
+        }
+        return null;
+      };
+      const r = await cerrarConQuery(id, query);
+      base.falloDeEscritura = null;
+      expect(cambiado).toBe(true);
+      expect(r.status).toBe(409);
+      const c = await leer(r);
+      expect(c.codigo).toBe("factores_cambiados");
+      expect(c.error).toContain("invierno 2026");
+      expect(c.error).toContain("el cierre se deshizo");
+      expect(proyecciones().find((p) => p.id === id)).toMatchObject({ estado: "en_trabajo", cerrada_at: null, cerrada_por_nombre: null });
+      contexto.factoresExtra["2026#invierno"] = { ...FACTOR_AL_DIA, ratio_aplicado: 0.66 };
+    }
+    // Sin cambios en medio, cierra.
+    expect((await cerrarConQuery(id)).status).toBe(200);
+  });
+
+  it("carrera: la confirmación del factor de Y que se pierde (aplicado_huella) entre la comprobación y el UPDATE también revierte el cierre", async () => {
+    aprobarCrecimientosFalsos(2027, { pct: 5, resto: 5 });
+    contexto.factoresExtra["2026#invierno"] = { ...FACTOR_AL_DIA, ratio_aplicado: 0.66 };
+    const id = await nueva();
+    await decidirTodo(id);
+    base.falloDeEscritura = (tabla, modo, carga) => {
+      if (tabla === "proyecciones" && modo === "update" && (carga as Fila).estado === "cerrada") contexto.factoresExtra["2026#invierno"] = { ...FACTOR_AL_DIA, ratio_aplicado: 0.66, aplicado_huella: null };
+      return null;
+    };
+    const r = await cerrarConQuery(id);
+    base.falloDeEscritura = null;
+    expect(r.status).toBe(409);
+    expect((await leer(r)).codigo).toBe("factor_sin_confirmar");
+    expect(proyecciones().find((p) => p.id === id)?.estado).toBe("en_trabajo");
+  });
+
   it("el orden: anio_siguiente_atipico, factor_faltante y luego los de crecimientos (cada uno tapa al siguiente)", async () => {
     contexto.periodosExtra = [{ id: "p-2027", desde: "2027-03", hasta: "2027-06", motivo: "Niño 2027", alcance: "invierno", temporadas: ["invierno"], activo: true }];
     contexto.factores = contexto.factores.filter((f) => !(f.anio === 2026 && f.temporada === "verano"));

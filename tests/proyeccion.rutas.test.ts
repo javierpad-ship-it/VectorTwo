@@ -898,6 +898,25 @@ describe("factores del Niño", () => {
     expect(filas.find((f) => f.anio === 2026 && f.temporada === "verano")).toMatchObject({ meses_comparados: 1, parcial: true });
   });
 
+  it("sincronizar no toca la autoría de quien confirmó el factor (perfil_id, usuario_nombre) ni crea autoría en filas nuevas", async () => {
+    await guardarFactores(enviar("PUT", "/factores", { factores: [{ anio: 2026, temporada: "invierno", ratio_aplicado: 0.7, nota: "de otra persona" }] }));
+    const f = filasDe("factores_volumen_atipico").find((x) => x.anio === 2026 && x.temporada === "invierno") as Fila;
+    f.perfil_id = "00000000-0000-4000-8000-0000000000aa";
+    f.usuario_nombre = "Otra Persona";
+    expect((await sincronizar()).status).toBe(200);
+    const despues = filasDe("factores_volumen_atipico");
+    expect(despues.find((x) => x.anio === 2026 && x.temporada === "invierno")).toMatchObject({
+      perfil_id: "00000000-0000-4000-8000-0000000000aa",
+      usuario_nombre: "Otra Persona",
+      ratio_aplicado: 0.7,
+      nota: "de otra persona",
+    });
+    // Las filas que solo calculó el sincronizar no llevan autoría (nadie las confirmó).
+    const nueva2023 = despues.find((x) => x.anio === 2023 && x.temporada === "invierno") as Fila;
+    expect(nueva2023.perfil_id ?? null).toBeNull();
+    expect(nueva2023.usuario_nombre ?? null).toBeNull();
+  });
+
   it("sincronizar sin meses publicados y cerrados responde 409 sin_datos", async () => {
     contexto.efectoNino = { ...(contexto.efectoNino as object), salida: null };
     const r = await sincronizar();
