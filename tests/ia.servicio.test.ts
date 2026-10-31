@@ -215,6 +215,52 @@ describe("GET …/ia y POST …/ia/corridas", () => {
   });
 });
 
+describe("GET no escribe, costo estimado del servidor y orden de las comprobaciones (QA y seguridad de 0.15.0)", () => {
+  it("GET …/ia muestra caducada una corrida sin actividad (en memoria) y no escribe nada; el siguiente POST sí la abandona", async () => {
+    const cfg = iniciar();
+    sembrarCorrida(esc.proyeccionId, { configuracionId: cfg.id as string, corrida: { ultima_actividad_at: new Date(Date.now() - 31 * 60_000).toISOString() } });
+    const foto = () => Object.fromEntries(Object.entries(base.tablas).map(([t, f]) => [t, JSON.stringify(f)]));
+    const antes = foto();
+    const e = await ok(leerEstadoIa(esc.proyeccionId, ACTOR));
+    expect(e.corrida_en_curso).toBeNull();
+    const despues = foto();
+    expect(Object.keys(despues).filter((t) => despues[t] !== (antes[t] ?? "[]"))).toEqual([]);
+    expect(filas("ia_corridas")[0]).toMatchObject({ estado: "en_curso", terminada_at: null });
+
+    // Una corrida viva sí se muestra (y tampoco se toca).
+    filas("ia_corridas")[0].ultima_actividad_at = new Date().toISOString();
+    expect((await ok(leerEstadoIa(esc.proyeccionId, ACTOR))).corrida_en_curso).toMatchObject({ estado: "en_curso" });
+
+    // La mutación ocurre en el POST: iniciar una corrida nueva abandona la caducada.
+    filas("ia_corridas")[0].ultima_actividad_at = new Date(Date.now() - 31 * 60_000).toISOString();
+    await ok(iniciarCorrida(esc.proyeccionId, { gms: "todos", regenerar: false, costo_confirmado_usd: 100 }, ACTOR));
+    expect(filas("ia_corridas")[0]).toMatchObject({ estado: "abandonada" });
+    expect(filas("ia_corridas")).toHaveLength(2);
+  });
+
+  it("la corrida y la evaluación guardan la estimación del servidor, no lo que manda el cliente", async () => {
+    iniciar();
+    const est = (await falla(iniciarCorrida(esc.proyeccionId, { gms: "pendientes", regenerar: false, costo_confirmado_usd: 0 }, ACTOR))).cuerpo.estimacion as Record<string, number>;
+    expect(est.costo_usd).toBeLessThan(100);
+    await ok(iniciarCorrida(esc.proyeccionId, { gms: "pendientes", regenerar: false, costo_confirmado_usd: 100 }, ACTOR));
+    expect(Number(filas("ia_corridas")[0].costo_estimado_usd)).toBe(est.costo_usd);
+  });
+
+  it("las lecturas del GM y de las filas comprueban el servicio ANTES de cargar la proyección (H7)", async () => {
+    const cfg = iniciar();
+    void cfg;
+    ctxIa.hayClave = false;
+    const inexistente = "00000000-0000-4000-8000-0000000fffff";
+    // Con la IA apagada la respuesta es 409 de servicio aunque la proyección ni exista: no se leyó nada pesado para llegar a ella.
+    expect((await falla(leerGMDetalle(inexistente, CLAVE_GM, ACTOR))).cuerpo).toMatchObject({ codigo: "ia_no_disponible", motivo: "sin_clave" });
+    expect((await falla(leerFilasIa(inexistente, {}, ACTOR))).cuerpo).toMatchObject({ codigo: "ia_no_disponible", motivo: "sin_clave" });
+    // Con el servicio al día, la misma petición sí llega a la proyección y responde 404.
+    ctxIa.hayClave = true;
+    expect((await falla(leerGMDetalle(inexistente, CLAVE_GM, ACTOR))).status).toBe(404);
+    expect((await falla(leerFilasIa(inexistente, {}, ACTOR))).status).toBe(404);
+  });
+});
+
 describe("lectura y «Aceptar IA» (R21)", () => {
   it("el reparto vigente suma la meta y las brechas son las del ejemplo A", async () => {
     const cfg = iniciar();
@@ -336,7 +382,7 @@ describe("configuración (R23), uso y auditoría", () => {
     incluir_cola_larga: false,
     presupuesto_razonamiento: 0,
     precios: { entrada: 2, entrada_cache: 0.5, salida: 8 },
-    terminos_extra: [],
+    terminos_extra: ["Nombre de la Empresa"],
     nota: null,
     version_vigente: null,
     ...extra,
@@ -371,6 +417,18 @@ describe("configuración (R23), uso y auditoría", () => {
     const pierde = evaluacion({ veredicto: { distribucion_y1: "no_gana", regla_que_fallo: "mejora" } });
     expect((await falla(guardarConfiguracionIa(cuerpo({ capacidades: ["distribucion_y1"], evaluacion_id: pierde.id }) as never, ACTOR))).cuerpo.codigo).toBe("evaluacion_no_gana");
     expect(filas("ia_configuraciones")).toHaveLength(0);
+  });
+
+  it("encender una capacidad exige al menos un término privado (el nombre de la empresa): 409 `terminos_extra_requeridos`", async () => {
+    const e = evaluacion();
+    const sin = await falla(guardarConfiguracionIa(cuerpo({ capacidades: ["distribucion_y1"], evaluacion_id: e.id, terminos_extra: [] }) as never, ACTOR));
+    expect(sin).toMatchObject({ status: 409, cuerpo: { codigo: "terminos_extra_requeridos" } });
+    expect(String(sin.cuerpo.error)).toMatch(/nombre de la empresa/);
+    expect(filas("ia_configuraciones")).toHaveLength(0);
+    // Con la IA apagada no se exige; con un término, sí se guarda.
+    expect((await ok(guardarConfiguracionIa(cuerpo({ terminos_extra: [] }) as never, ACTOR))).capacidades).toEqual([]);
+    const c = await ok(guardarConfiguracionIa(cuerpo({ capacidades: ["distribucion_y1"], evaluacion_id: e.id, version_vigente: 1 }) as never, ACTOR));
+    expect(c.terminos_extra).toEqual(["Nombre de la Empresa"]);
   });
 
   it("con una evaluación ganadora del mismo proveedor, modelo y prompt enciende la capacidad", async () => {

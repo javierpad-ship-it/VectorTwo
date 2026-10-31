@@ -256,9 +256,16 @@ export const esTerminalGM = (estado: string): boolean => ["hecho", "reusado", "s
 /** Cuántos GM de la corrida terminaron (con propuesta, reuso, sin filas libres o bloqueados por privacidad) o fallaron: nada más que hacer en ellos. */
 const sinPendientes = (gms: readonly CorridaGMDb[]): boolean => gms.every((g) => esTerminalGM(g.estado) || g.estado === "fallido");
 
-/** Una corrida `en_curso` sin actividad en `CORRIDA_CADUCA_MIN` minutos pasa a `abandonada`. Devuelve la corrida ya actualizada. */
+/** ¿Una corrida `en_curso` lleva `CORRIDA_CADUCA_MIN` minutos o más sin actividad? Puro: los GET la muestran como caducada sin escribir (QA/R20). */
+export const corridaCaducada = (corrida: Pick<CorridaDb, "estado" | "ultima_actividad_at">, ahora: Date = new Date()): boolean =>
+  corrida.estado === "en_curso" && ahora.getTime() - Date.parse(corrida.ultima_actividad_at) >= CORRIDA_CADUCA_MIN * 60_000;
+
+/**
+ * Una corrida `en_curso` sin actividad en `CORRIDA_CADUCA_MIN` minutos pasa a `abandonada`. Devuelve la corrida ya actualizada. ESCRIBE: solo la
+ * llaman los `POST` (iniciar corrida y pasos); los `GET` usan `corridaCaducada` y no mutan nada.
+ */
 export async function aplicarCaducidad(d: Db, corrida: CorridaDb, ahora: Date = new Date()): Promise<Salida<CorridaDb>> {
-  if (corrida.estado !== "en_curso" || ahora.getTime() - Date.parse(corrida.ultima_actividad_at) < CORRIDA_CADUCA_MIN * 60_000) return listo(corrida);
+  if (!corridaCaducada(corrida, ahora)) return listo(corrida);
   const r = await actualizarCorrida(d, corrida.id, { estado: "abandonada", terminada_at: ahora.toISOString() });
   if (r.error) return fallaDb(r.error, "IA: caducar la corrida");
   return listo(r.data ?? { ...corrida, estado: "abandonada" });
@@ -578,14 +585,11 @@ export async function leerEstadoIa(id: string, actor: Actor): Promise<Salida<Est
   let corrida: CorridaApi | null = null;
   const c = await leerCorridaEnCurso(d, id);
   if (c.error) return fallaDb(c.error, "IA: leer la corrida en curso");
-  if (c.data) {
-    const v = await aplicarCaducidad(d, c.data);
-    if (v.respuesta) return falla(v.respuesta);
-    if (v.data.estado === "en_curso") {
-      const api = await aCorridaApi(d, v.data);
-      if (api.respuesta) return falla(api.respuesta);
-      corrida = api.data;
-    }
+  // Un GET nunca escribe: una corrida caducada se oculta calculándolo en memoria; pasa a `abandonada` en el siguiente POST.
+  if (c.data && !corridaCaducada(c.data)) {
+    const api = await aCorridaApi(d, c.data);
+    if (api.respuesta) return falla(api.respuesta);
+    corrida = api.data;
   }
   const tope = s.data.config ? NUMERO(s.data.config.tope_usd_corrida) : 0;
   const { estimacion } = estimarSeleccion(l.data, filtrarPendientes(todos), false, tope);
@@ -596,14 +600,16 @@ export async function leerEstadoIa(id: string, actor: Actor): Promise<Salida<Est
 
 export async function leerGMDetalle(id: string, clave: string, actor: Actor): Promise<Salida<GMIaDetalleApi>> {
   const d = db();
-  const pi = await cargarProyeccionIa(d, id);
-  if (pi.respuesta) return falla(pi.respuesta);
-  const gm = pi.data.gms.find((g) => g.gm_clave === clave);
-  if (!gm || leerClaveGM(clave) === null) return fallaIa("Género y mundo no encontrado en esta proyección.", 404, "gm_no_encontrado");
+  if (leerClaveGM(clave) === null) return fallaIa("Género y mundo no encontrado en esta proyección.", 404, "gm_no_encontrado");
+  // QA H7: primero se comprueba que el servicio permita leer; la proyección (pesada) solo se carga si la respuesta va a ser de datos.
   const s = await evaluarServicio(d, actor.id);
   if (s.respuesta) return falla(s.respuesta);
   const permitido = lecturaPermitida(s.data);
   if (!permitido.ok) return falla(permitido.respuesta);
+  const pi = await cargarProyeccionIa(d, id);
+  if (pi.respuesta) return falla(pi.respuesta);
+  const gm = pi.data.gms.find((g) => g.gm_clave === clave);
+  if (!gm) return fallaIa("Género y mundo no encontrado en esta proyección.", 404, "gm_no_encontrado");
   const l = await cargarLecturaProyeccion(d, pi.data, s.data, [gm]);
   if (l.respuesta) return falla(l.respuesta);
   const completas = await leerFilasConAnios(d, id, { columnas: "completas", gmlIds: gm.gml_ids, tiendaId: null, soloActivas: true });
@@ -617,12 +623,13 @@ export async function leerGMDetalle(id: string, clave: string, actor: Actor): Pr
 
 export async function leerFilasIa(id: string, filtro: { genero_id?: string; mundo_id?: string; linea_id?: string }, actor: Actor): Promise<Salida<{ filas: IaFilaApi[] }>> {
   const d = db();
-  const pi = await cargarProyeccionIa(d, id);
-  if (pi.respuesta) return falla(pi.respuesta);
+  // QA H7: antes de cargar la proyección se comprueba que el servicio permita leer.
   const s = await evaluarServicio(d, actor.id);
   if (s.respuesta) return falla(s.respuesta);
   const permitido = lecturaPermitida(s.data);
   if (!permitido.ok) return falla(permitido.respuesta);
+  const pi = await cargarProyeccionIa(d, id);
+  if (pi.respuesta) return falla(pi.respuesta);
   const gms = pi.data.gms.filter((g) => (filtro.genero_id === undefined || g.genero_id === filtro.genero_id) && (filtro.mundo_id === undefined || g.mundo_id === filtro.mundo_id));
   const l = await cargarLecturaProyeccion(d, pi.data, s.data, gms);
   if (l.respuesta) return falla(l.respuesta);
@@ -708,7 +715,7 @@ export async function iniciarCorrida(id: string, cuerpo: IniciarCorridaCuerpo, a
     calculado_at_proyeccion: pi.data.p.calculado_at,
     alcance: { gms: cuerpo.gms === "pendientes" || cuerpo.gms === "todos" ? cuerpo.gms : elegidos.map((g) => g.gm.gm_clave), regenerar: cuerpo.regenerar, semilla: null } as unknown as Json,
     estado: "en_curso",
-    costo_estimado_usd: cuerpo.costo_confirmado_usd,
+    costo_estimado_usd: estimacion.costo_usd,
     perfil_id: actor.id,
     usuario_nombre: actor.nombre,
     iniciada_at: ahora,
@@ -847,6 +854,10 @@ export async function guardarConfiguracionIa(cuerpo: ConfiguracionCuerpo, actor:
   if (!adaptador) return fallaIa(MENSAJE_SERVICIO.sin_proveedor, 409, "sin_proveedor");
   if (!entorno.modelos.includes(cuerpo.modelo)) return fallaIa("Ese modelo no está entre los que permite el servidor (IA_MODELO).", 409, "modelo_no_permitido", { modelos_permitidos: entorno.modelos });
   if (!(cuerpo.version_prompt in PROMPTS)) return fallaIa("Esa versión del prompt no existe.", 409, "prompt_inexistente");
+  // Privacidad: el nombre de la empresa no está en ninguna tabla de marcas o tiendas, así que sin un término propio nada lo detendría.
+  if (cuerpo.capacidades.length > 0 && cuerpo.terminos_extra.length === 0) {
+    return fallaIa("Antes de encender la IA, agrega en «Términos privados» al menos el nombre de la empresa (y siglas internas): así nunca sale al proveedor.", 409, "terminos_extra_requeridos");
+  }
 
   const vig = await leerConfigVigente(d);
   if (vig.error) return fallaDb(vig.error, "IA: leer la configuración vigente");

@@ -21,7 +21,7 @@ import { delLoteJerarquico, pasoGM } from "@/lib/ia/servicio-pasos";
 import { terminarCorrida } from "@/lib/ia/servicio";
 import { ErrorSolicitudInvalida } from "@/lib/ia/proveedor";
 import { componerPropuesta, type EstadoPlanIa } from "@/lib/ia/propuesta";
-import { crearSemaforo, diaLima, esperaTras429, esperaTrasFallo, mesLima, rangoDiaLima, rangoMesLima } from "@/lib/ia/limites";
+import { MAX_FALLOS_POR_GM, MAX_LLAMADAS_SIMULTANEAS, contarFallos, crearLimitadorPorClave, crearSemaforo, diaLima, esperaTras429, esperaTrasFallo, mesLima, rangoDiaLima, rangoMesLima, semaforoLlamadas } from "@/lib/ia/limites";
 import { sanearRegistro } from "@/lib/ia/registro";
 import { describirErrorRegistro } from "@/lib/ia/consultas";
 import type { PasoGMApi } from "@/lib/ia/tipos-api";
@@ -523,5 +523,216 @@ describe("registrar_propuesta_ia_gm (R16, con la base falsa)", () => {
     expect(p.cuerpo.codigo).toBe("gm_en_proceso");
     expect(filas("ia_propuestas_gm")).toHaveLength(0);
     void valida;
+  });
+});
+
+
+// ─── Correcciones de QA y seguridad de 0.15.0 ───
+
+/** Ocupa los cupos del semáforo de proceso: lo que se pida después hace cola hasta `liberar()`. */
+function ocuparSemaforo() {
+  let soltar!: () => void;
+  const espera = new Promise<void>((r) => (soltar = r));
+  const tareas = Array.from({ length: MAX_LLAMADAS_SIMULTANEAS }, () => semaforoLlamadas.ejecutar(() => espera));
+  return {
+    liberar: async () => {
+      soltar();
+      await Promise.all(tareas);
+    },
+  };
+}
+
+async function esperarEnCola(): Promise<void> {
+  for (let i = 0; i < 400 && semaforoLlamadas.esperando < 1; i++) await new Promise((r) => setTimeout(r, 5));
+  expect(semaforoLlamadas.esperando).toBe(1);
+}
+
+const gastoDeLlamada = (corridaId: string, gmId: string, costo: number, extra: Fila = {}) =>
+  sembrarIa("ia_llamadas", [{ corrida_id: corridaId, corrida_gm_id: gmId, paso: "n1", tipo_llamada: "natural", intento: 1, huella_llamada: "h".repeat(64), bytes_entrada: 1, filas_enviadas: 1, duracion_ms: 1, estado: "ok", costo_usd: costo, perfil_id: ACTOR.id, ...extra }]);
+
+describe("topes con la cota superior y repetidos dentro del turno (seguridad I1)", () => {
+  it("la cota suma la salida máxima: con 9,90 USD gastados de 10 la llamada no se hace aunque su salida esperada costaría centavos", async () => {
+    const { corridaId, gmIds } = iniciar();
+    await paso(corridaId);
+    gastoDeLlamada(corridaId, gmIds[0], 9.9);
+    const p = await paso(corridaId);
+    expect(p).toMatchObject({ status: 409, cuerpo: { codigo: "tope_corrida" } });
+    expect(prov.llamadas).toBe(0);
+    expect(filas("ia_corridas")[0]).toMatchObject({ estado: "detenida", motivo_fin: "tope_corrida" });
+    expect(filas("ia_corrida_gms")[0].candado_token).toBeNull();
+  });
+
+  it("mientras la petición espera su turno otra gasta: el tope se repite dentro del semáforo y no se llama", async () => {
+    const { corridaId, gmIds } = iniciar();
+    await paso(corridaId);
+    const cupos = ocuparSemaforo();
+    const espera = paso(corridaId);
+    await esperarEnCola();
+    gastoDeLlamada(corridaId, gmIds[0], 9.9);
+    await cupos.liberar();
+    const p = await espera;
+    expect(p).toMatchObject({ status: 409, cuerpo: { codigo: "tope_corrida" } });
+    expect(prov.llamadas).toBe(0);
+    expect(filas("ia_corridas")[0]).toMatchObject({ estado: "detenida", motivo_fin: "tope_corrida" });
+    expect(filas("ia_corrida_gms")[0].candado_token).toBeNull();
+  });
+
+  it("el tope diario del usuario también se repite dentro del turno", async () => {
+    const { corridaId, gmIds } = iniciar(FILAS_A, { tope_usd_dia_usuario: 1 });
+    await paso(corridaId);
+    const cupos = ocuparSemaforo();
+    const espera = paso(corridaId);
+    await esperarEnCola();
+    gastoDeLlamada(corridaId, gmIds[0], 0.95);
+    await cupos.liberar();
+    expect((await espera).cuerpo.codigo).toBe("tope_dia");
+    expect(prov.llamadas).toBe(0);
+  });
+
+  it("un solo GM en vuelo por corrida: el limitador por clave serializa la misma corrida y deja pasar otras", async () => {
+    const l = crearLimitadorPorClave(1);
+    let activas = 0;
+    let maxA = 0;
+    const tarea = async () => {
+      activas += 1;
+      maxA = Math.max(maxA, activas);
+      await new Promise((r) => setTimeout(r, 5));
+      activas -= 1;
+    };
+    await Promise.all(Array.from({ length: 5 }, () => l.ejecutar("corrida-1", tarea)));
+    expect(maxA).toBe(1);
+    expect(l.claves).toBe(0);
+    activas = 0;
+    maxA = 0;
+    await Promise.all([l.ejecutar("a", tarea), l.ejecutar("b", tarea), l.ejecutar("a", tarea)]);
+    expect(maxA).toBe(2);
+    expect(l.claves).toBe(0);
+    await expect(l.ejecutar("x", async () => { throw new Error("falla"); })).rejects.toThrow("falla");
+    expect(l.claves).toBe(0);
+  });
+
+  it("la llamada al proveedor pasa por el limitador de la corrida y por el semáforo de proceso (estático)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const t = readFileSync(`${__dirname}/../src/lib/ia/servicio-pasos.ts`, "utf8");
+    expect(t).toMatch(/limitadorPorCorrida\.ejecutar\(dom\.corrida\.id,[\s\S]*?semaforoLlamadas\.ejecutar\([\s\S]*?dom\.proveedor\.llamar\(/);
+    expect(t.match(/dom\.proveedor\.llamar\(/g)).toHaveLength(1);
+  });
+});
+
+describe("control final antes de cada llamada (QA H6)", () => {
+  it("un término privado agregado después de armar los bloques bloquea el GM en el paso siguiente: 0 llamadas", async () => {
+    const { corridaId } = iniciar();
+    await paso(corridaId);
+    expect(filas("ia_corrida_gms")[0].estado).toBe("en_proceso");
+    // El planner agrega «DENIM» a los términos privados de la configuración mientras la corrida sigue.
+    base.tablas.ia_configuraciones[0].terminos_extra = ["DENIM"];
+    const p = await paso(corridaId);
+    expect(p.cuerpo).toMatchObject({ estado: "bloqueado_privacidad", siguiente: "hecho" });
+    expect(prov.llamadas).toBe(0);
+    expect(filas("ia_corrida_gms")[0]).toMatchObject({ estado: "bloqueado_privacidad", error_codigo: "privacidad", candado_token: null });
+  });
+
+  it("también en el reparto: pasa el natural y, si en medio aparece un término, el reparto no se envía", async () => {
+    const { corridaId } = iniciar();
+    await paso(corridaId);
+    await paso(corridaId);
+    expect(prov.llamadas).toBe(1);
+    base.tablas.ia_configuraciones[0].terminos_extra = ["POLO"];
+    const p = await paso(corridaId);
+    expect(p.cuerpo.estado).toBe("bloqueado_privacidad");
+    expect(prov.llamadas).toBe(1);
+  });
+});
+
+describe("tope de reintentos por GM, contado en el servidor (seguridad M5)", () => {
+  const fallos = (corridaId: string, gmId: string, n: number, estado = "error_proveedor") => {
+    for (let i = 0; i < n; i++) gastoDeLlamada(corridaId, gmId, 0, { estado, intento: i + 1, error_codigo: "500" });
+  };
+
+  it("contarFallos no cuenta las ok ni los 429", () => {
+    expect(contarFallos([{ estado: "ok" }, { estado: "limite_proveedor" }, { estado: "invalida" }, { estado: "error_proveedor" }, { estado: "truncada" }])).toBe(3);
+  });
+
+  it("un GM fallido con 12 llamadas fallidas ya no se reinicia: 409 `gm_sin_reintentos` y sigue fallido", async () => {
+    const { corridaId, gmIds } = iniciar();
+    const gm = filas("ia_corrida_gms")[0];
+    gm.estado = "fallido";
+    gm.error_codigo = "proveedor";
+    fallos(corridaId, gmIds[0], MAX_FALLOS_POR_GM);
+    const p = await paso(corridaId);
+    expect(p).toMatchObject({ status: 409, cuerpo: { codigo: "gm_sin_reintentos" } });
+    expect(gm).toMatchObject({ estado: "fallido", error_codigo: "proveedor" });
+    expect(prov.llamadas).toBe(0);
+  });
+
+  it("con 11 fallos todavía se reinicia (y se registra la nueva llamada)", async () => {
+    const { corridaId, gmIds } = iniciar();
+    const gm = filas("ia_corrida_gms")[0];
+    gm.estado = "fallido";
+    fallos(corridaId, gmIds[0], MAX_FALLOS_POR_GM - 1);
+    const p = await paso(corridaId);
+    expect(p.status).toBe(200);
+    expect(gm.estado).toBe("en_proceso");
+  });
+
+  it("los 429 y las llamadas ok no cuentan para el tope", async () => {
+    const { corridaId, gmIds } = iniciar();
+    const gm = filas("ia_corrida_gms")[0];
+    gm.estado = "fallido";
+    fallos(corridaId, gmIds[0], 20, "limite_proveedor");
+    fallos(corridaId, gmIds[0], 20, "ok");
+    expect((await paso(corridaId)).status).toBe(200);
+  });
+
+  it("a mitad de un intento: al llegar a 12 fallos el GM queda fallido (`tope_reintentos`) sin llamar al proveedor", async () => {
+    const { corridaId, gmIds } = iniciar();
+    await paso(corridaId);
+    fallos(corridaId, gmIds[0], MAX_FALLOS_POR_GM);
+    const p = await paso(corridaId);
+    expect(p.cuerpo).toMatchObject({ estado: "fallido", siguiente: "fallido" });
+    expect(filas("ia_corrida_gms")[0]).toMatchObject({ estado: "fallido", error_codigo: "tope_reintentos" });
+    expect(prov.llamadas).toBe(0);
+    // Y de ahí en adelante no se reinicia.
+    expect((await paso(corridaId)).cuerpo.codigo).toBe("corrida_terminada");
+  });
+});
+
+describe("candado mientras espera en el semáforo (seguridad M6)", () => {
+  const OTRO_TOKEN = "11111111-1111-4111-8111-111111111111";
+
+  it("al salir de la cola renueva `candado_desde` (solo si el token sigue siendo suyo) y recién entonces llama", async () => {
+    const { corridaId } = iniciar();
+    await paso(corridaId);
+    const vistos: string[] = [];
+    const base0 = prov;
+    ctxIa.proveedor = { llamar: async (p) => (vistos.push(String(filas("ia_corrida_gms")[0].candado_desde)), base0.llamar(p)) };
+    const cupos = ocuparSemaforo();
+    const espera = paso(corridaId);
+    await esperarEnCola();
+    // La espera fue tan larga que el candado «venció» (nadie más lo tomó).
+    filas("ia_corrida_gms")[0].candado_desde = "2020-01-01T00:00:00.000Z";
+    const antes = Date.now();
+    await cupos.liberar();
+    const p = await espera;
+    expect(p.status).toBe(200);
+    expect(vistos).toHaveLength(1);
+    expect(Date.parse(vistos[0])).toBeGreaterThanOrEqual(antes - 1);
+  });
+
+  it("si mientras esperaba otra petición retomó el candado vencido, la primera no llama (409 `gm_en_proceso`) y no pisa al dueño", async () => {
+    const { corridaId } = iniciar();
+    await paso(corridaId);
+    const cupos = ocuparSemaforo();
+    const espera = paso(corridaId);
+    await esperarEnCola();
+    const gm = filas("ia_corrida_gms")[0];
+    gm.candado_token = OTRO_TOKEN;
+    gm.candado_desde = new Date().toISOString();
+    await cupos.liberar();
+    const p = await espera;
+    expect(p).toMatchObject({ status: 409, cuerpo: { codigo: "gm_en_proceso" } });
+    expect(prov.llamadas).toBe(0);
+    expect(gm.candado_token).toBe(OTRO_TOKEN);
+    expect(filas("ia_llamadas")).toHaveLength(0);
   });
 });

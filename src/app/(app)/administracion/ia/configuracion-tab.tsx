@@ -18,12 +18,18 @@ import { formatearMomento } from "@/app/(app)/planificacion/proyeccion/vista";
 import { formatearDecimal } from "@/lib/formato";
 import {
   ETIQUETA_CAPACIDAD,
+  MENSAJE_TERMINOS_REQUERIDOS,
   TEXTOS_PROMPT,
+  TEXTO_AYUDA_CACHE,
   capacidadHabilitable,
   evaluacionesElegibles,
   formDesdeVigente,
+  terminosObligatorios,
+  textoAvisoConfiguracion,
   textoClavePresente,
+  textoErrorConfiguracion,
   validarConfiguracion,
+  type AvisoConfiguracionApi,
   type FormConfiguracion,
   type RespuestaConfiguracionApi,
 } from "./ia-vista";
@@ -58,6 +64,20 @@ export function EstadoServicio({ datos }: { datos: RespuestaConfiguracionApi }) 
       </dl>
       <div className="mt-3">{apagada ? <Alert tono="alerta">IA apagada: {apagada}</Alert> : <Alert tono="exito">La IA está disponible.</Alert>}</div>
     </Card>
+  );
+}
+
+/** Avisos informativos del servidor sobre la configuración (p. ej. el proveedor respondió con otro modelo). No bloquean nada. */
+export function AvisosConfiguracion({ avisos }: { avisos: readonly AvisoConfiguracionApi[] | undefined }) {
+  if (!avisos || avisos.length === 0) return null;
+  return (
+    <div className="space-y-2" aria-label="Avisos de la configuración">
+      {avisos.map((a) => (
+        <Alert key={`${a.codigo}-${a.produccion.join("|")}`} tono="info">
+          {textoAvisoConfiguracion(a)}
+        </Alert>
+      ))}
+    </div>
   );
 }
 
@@ -101,6 +121,9 @@ export function FormularioConfiguracion({
   const habilitable = capacidadHabilitable(elegibles, form.evaluacion_id);
   const sinModelos = servicio.modelos_permitidos.length === 0;
   const sinProveedor = servicio.proveedor === null;
+  // Con alguna capacidad encendida, `terminos_extra` es obligatorio (el nombre de la empresa); se marca en rojo si falta tras un intento de guardar.
+  const terminosRequeridos = terminosObligatorios(form.capacidades);
+  const terminosFaltan = terminosRequeridos && (errores.includes(MENSAJE_TERMINOS_REQUERIDOS) || accion.error?.codigo === "terminos_extra_requeridos");
 
   function poner<K extends keyof FormConfiguracion>(k: K, v: FormConfiguracion[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -147,7 +170,7 @@ export function FormularioConfiguracion({
       <form onSubmit={(e) => void guardar(e)} className="space-y-5">
         {accion.error && (
           <Alert tono="alerta" onCerrar={accion.limpiar}>
-            <span className="block">{accion.error.mensaje}</span>
+            <span className="block">{textoErrorConfiguracion(accion.error.codigo, accion.error.mensaje)}</span>
             {accion.error.codigo === "vigente_cambiada" && (
               <span className="mt-1 block">
                 <BotonEnlace onClick={() => void onGuardada()}>Actualizar pantalla</BotonEnlace>
@@ -254,7 +277,7 @@ export function FormularioConfiguracion({
             <Field label="Entrada">
               <Input inputMode="decimal" value={form.precio_entrada} disabled={accion.ocupado} onChange={(e) => poner("precio_entrada", e.target.value)} />
             </Field>
-            <Field label="Entrada en caché" hint="Si el proveedor no tiene caché, igual a la entrada.">
+            <Field label="Entrada en caché" hint={TEXTO_AYUDA_CACHE}>
               <Input inputMode="decimal" value={form.precio_entrada_cache} disabled={accion.ocupado} onChange={(e) => poner("precio_entrada_cache", e.target.value)} />
             </Field>
             <Field label="Salida">
@@ -263,8 +286,19 @@ export function FormularioConfiguracion({
           </div>
         </fieldset>
 
-        <Field label="Términos que nunca salen" hint="Uno por línea (hasta 50, de 2 a 60 caracteres). Marcas y tiendas ya se reemplazan solas; añade el nombre de la empresa u otros.">
-          <Textarea value={form.terminos_extra} rows={4} disabled={accion.ocupado} onChange={(e) => poner("terminos_extra", e.target.value)} />
+        <Field
+          label={terminosRequeridos ? "Términos que nunca salen (obligatorio con la IA encendida)" : "Términos que nunca salen"}
+          hint={`Uno por línea (hasta 50, de 2 a 60 caracteres). Marcas y tiendas ya se reemplazan solas; añade el nombre de la empresa u otros.${terminosRequeridos ? " Con alguna capacidad encendida hace falta al menos uno: el nombre de la empresa." : ""}`}
+        >
+          <Textarea
+            value={form.terminos_extra}
+            rows={4}
+            className={terminosFaltan ? "border-alerta" : ""}
+            aria-required={terminosRequeridos}
+            aria-invalid={terminosFaltan}
+            disabled={accion.ocupado}
+            onChange={(e) => poner("terminos_extra", e.target.value)}
+          />
         </Field>
         <Field label="Nota (opcional)">
           <Input value={form.nota} maxLength={300} disabled={accion.ocupado} onChange={(e) => poner("nota", e.target.value)} />
@@ -298,6 +332,7 @@ export function ConfiguracionTab() {
       {datos && (
         <>
           <EstadoServicio datos={datos} />
+          <AvisosConfiguracion avisos={datos.avisos} />
           <VersionesConfiguracion vigente={datos.vigente} versiones={datos.versiones} />
           {/* El formulario parte de la vigente cada vez que cambia (la `key` lo reinicia tras guardar o recargar). */}
           <FormularioConfiguracion key={datos.vigente?.id ?? "sin-vigente"} datos={datos} evaluaciones={evals.datos ?? []} onGuardada={recargar} />

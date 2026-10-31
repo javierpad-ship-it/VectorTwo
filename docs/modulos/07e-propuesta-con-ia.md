@@ -449,7 +449,7 @@ export type BloqueGMIa = {                         // idéntico en la llamada na
   gm: { id: "g1"; genero: string; mundo: string; es_resto: boolean;
     historia: { anio: AnioRel; unidades: number; comparable_pct: number | null }[];
     fuera_de_meta: { aperturas_y1: number; cierres_y1: number };
-    cola_larga: { filas: number; unidades_y1: number } };
+    cola_larga: { filas: number; base_corregida: number } };
   lote: { n: number; de: number };
   filas: FilaEntradaIa[];
 };
@@ -487,7 +487,7 @@ export type EntradaLineasIa = {                   // modo jerárquico, una sola 
   - `meta`: de `metaDeGM` con la foto de crecimientos (`proyeccion_crecimientos` y `crecimiento_resto_usado`, 06d).
 - **`y1.pedir`** = fila **libre** (§5.1). Una fija viaja como contexto con `fija_en`.
 - **La llamada natural no lleva** `meta`, `g`, `propuesta_metodo` ni nada derivado de ellos (D9, rev. M11). Una prueba lo exige (R10).
-- **Las filas de cola larga no viajan** (D4): van resumidas en `gm.cola_larga`.
+- **Las filas de cola larga no viajan** (D4): van resumidas en `gm.cola_larga = { filas, base_corregida }` (la suma de su `B'`, **nunca su propuesta**: `B' × (1 + g)` depende de la meta y violaría D9/R10).
 - **Señales del código** (deterministas; se envían y se muestran aparte):
   - `dato_insuficiente`: menos de 12 meses con venta en los últimos 24;
   - `linea_nueva`: primer mes con venta dentro de los últimos 18;

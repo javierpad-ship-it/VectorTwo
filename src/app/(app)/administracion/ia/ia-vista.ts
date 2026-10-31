@@ -25,7 +25,9 @@ import {
 
 // ─── Contratos de §3.2 que `tipos-api.ts` no declara ───
 
-export type RespuestaConfiguracionApi = { vigente: ConfiguracionIaApi | null; versiones: ConfiguracionIaApi[]; servicio: ServicioIaApi; prompts: string[] };
+/** Aviso informativo de `GET /api/ia/configuracion` (R34): el proveedor respondió, en producción, con un modelo que no apareció en la evaluación. */
+export type AvisoConfiguracionApi = { codigo: "modelo_efectivo_distinto"; observados: string[]; produccion: string[] };
+export type RespuestaConfiguracionApi = { vigente: ConfiguracionIaApi | null; versiones: ConfiguracionIaApi[]; servicio: ServicioIaApi; prompts: string[]; avisos: AvisoConfiguracionApi[] };
 export type RespuestaUsoApi = { mes: string; costo_usd: number; tope_usd_mes: number | null; corridas: CorridaApi[]; por_dia: { dia: string; costo_usd: number; llamadas: number }[] };
 export type PlanEvaluacionApi = { pliegue: string; gm_clave: string };
 export type RespuestaIniciarEvaluacionApi = { evaluacion: EvaluacionApi; plan: PlanEvaluacionApi[]; estimacion: EstimacionApi };
@@ -111,6 +113,18 @@ export function formDesdeVigente(vigente: ConfiguracionIaApi | null, modelosPerm
   };
 }
 
+const listaModelos = (ms: readonly string[]): string => (ms.length > 0 ? ms.map((m) => `«${m}»`).join(", ") : "ninguno registrado");
+
+/** Texto claro del aviso informativo de la configuración. Los ids de modelo salen de la API, nunca de aquí. */
+export function textoAvisoConfiguracion(a: AvisoConfiguracionApi): string {
+  switch (a.codigo) {
+    case "modelo_efectivo_distinto":
+      return `El proveedor respondió con un modelo distinto al configurado: en las corridas de esta configuración respondió ${listaModelos(a.produccion)}, y la evaluación que la respalda se hizo con ${listaModelos(a.observados)}. Es solo un aviso: conviene volver a evaluar si el cambio es permanente.`;
+    default:
+      return "El servidor dejó un aviso sobre la configuración que esta pantalla no conoce.";
+  }
+}
+
 /** Una línea por término; sin vacíos ni repetidos (sin distinguir mayúsculas). */
 export function leerTerminos(textoLibre: string): string[] {
   const vistos = new Set<string>();
@@ -141,6 +155,32 @@ export type CuerpoConfiguracion = {
   version_vigente: number | null;
 };
 
+/**
+ * Con alguna capacidad encendida, `terminos_extra` no puede quedar vacío: hace falta al menos el nombre de la empresa, porque el
+ * servidor reemplaza solo marcas y tiendas, no a la empresa (el servidor responde `terminos_extra_requeridos`).
+ */
+export const terminosObligatorios = (capacidades: readonly CapacidadIa[]): boolean => capacidades.length > 0;
+
+export const MENSAJE_TERMINOS_REQUERIDOS =
+  "Con la IA encendida hace falta al menos un término que nunca sale: el nombre de la empresa. Marcas y tiendas se reemplazan solas, pero el nombre de la empresa no; sin él podría llegar al proveedor. Escríbelo en «Términos que nunca salen» (uno por línea).";
+
+/** Explicación que se muestra cuando el servidor rechaza el guardado con `terminos_extra_requeridos` (el mensaje del servidor puede ser más seco). */
+export const textoErrorConfiguracion = (codigo: string | null, mensaje: string): string => (codigo === "terminos_extra_requeridos" ? MENSAJE_TERMINOS_REQUERIDOS : mensaje);
+
+/** Los tres precios (USD por millón de tokens): entrada y salida mayores que 0; caché desde 0 y sin pasar de la entrada. Suma los errores a `errores`. */
+function validarPrecios(f: { precio_entrada: string; precio_entrada_cache: string; precio_salida: string }, errores: string[]): { entrada: number | null; cache: number | null; salida: number | null } {
+  const entrada = leerNumero(f.precio_entrada);
+  const cache = leerNumero(f.precio_entrada_cache);
+  const salida = leerNumero(f.precio_salida);
+  if (entrada === null || entrada <= 0 || entrada > 1000) errores.push("Precio de entrada: un número mayor que 0 y hasta 1 000 (USD por millón de tokens).");
+  if (cache === null || cache < 0) errores.push("Precio de entrada en caché: un número desde 0 (0 es válido) y no mayor que el de entrada.");
+  else if (entrada !== null && cache > entrada) errores.push("Precio de entrada en caché: no puede ser mayor que el precio de entrada.");
+  if (salida === null || salida <= 0 || salida > 1000) errores.push("Precio de salida: un número mayor que 0 y hasta 1 000 (USD por millón de tokens).");
+  return { entrada, cache, salida };
+}
+
+export const TEXTO_AYUDA_CACHE = "Desde 0 y no mayor que la entrada. Si el proveedor no cobra distinto por la caché, igual a la entrada; 0 solo si la caché sale gratis.";
+
 export type ContextoConfiguracion = { modelosPermitidos: readonly string[]; prompts: readonly string[]; versionVigente: number | null };
 
 /** Valida el formulario con los rangos de `configuracionSchema` y arma el cuerpo del `POST`. Devuelve todos los errores juntos. */
@@ -163,17 +203,13 @@ export function validarConfiguracion(f: FormConfiguracion, ctx: ContextoConfigur
   const razonamiento = entero(f.presupuesto_razonamiento);
   if (razonamiento === null || razonamiento < 0 || razonamiento > 32000) errores.push("Razonamiento: un entero entre 0 y 32 000 (0 = sin razonamiento).");
 
-  const entrada = leerNumero(f.precio_entrada);
-  const cache = leerNumero(f.precio_entrada_cache);
-  const salida = leerNumero(f.precio_salida);
-  if (entrada === null || entrada <= 0 || entrada > 1000) errores.push("Precio de entrada: un número mayor que 0 y hasta 1 000 (USD por millón de tokens).");
-  if (cache === null || cache < 0 || (entrada !== null && cache > entrada)) errores.push("Precio de entrada en caché: un número desde 0 y no mayor que el de entrada (si el proveedor no tiene caché, igual al de entrada).");
-  if (salida === null || salida <= 0 || salida > 1000) errores.push("Precio de salida: un número mayor que 0 y hasta 1 000 (USD por millón de tokens).");
+  const { entrada, cache, salida } = validarPrecios(f, errores);
 
   const terminos = leerTerminos(f.terminos_extra);
   if (terminos.length > 50) errores.push("Términos que nunca salen: hasta 50.");
   const cortos = terminos.filter((t) => t.length < 2 || t.length > 60);
   if (cortos.length > 0) errores.push("Cada término que nunca sale debe tener entre 2 y 60 caracteres.");
+  if (terminosObligatorios(f.capacidades) && terminos.length === 0) errores.push(MENSAJE_TERMINOS_REQUERIDOS);
 
   const nota = f.nota.trim();
   if (nota.length > 300) errores.push("La nota admite hasta 300 caracteres.");
@@ -406,12 +442,7 @@ export function validarEvaluacion(f: FormEvaluacion, ctx: { modelosPermitidos: r
   if (!f.modelo || !ctx.modelosPermitidos.includes(f.modelo)) errores.push("Elige un modelo de la lista permitida por el servidor.");
   if (!ctx.prompts.includes(f.version_prompt)) errores.push("Elige una versión de prompt que exista.");
   if (f.pliegues.length === 0) errores.push("Elige al menos un pliegue.");
-  const entrada = leerNumero(f.precio_entrada);
-  const cache = leerNumero(f.precio_entrada_cache);
-  const salida = leerNumero(f.precio_salida);
-  if (entrada === null || entrada <= 0 || entrada > 1000) errores.push("Precio de entrada: un número mayor que 0 y hasta 1 000 (USD por millón de tokens).");
-  if (cache === null || cache < 0 || (entrada !== null && cache > entrada)) errores.push("Precio de entrada en caché: un número desde 0 y no mayor que el de entrada.");
-  if (salida === null || salida <= 0 || salida > 1000) errores.push("Precio de salida: un número mayor que 0 y hasta 1 000 (USD por millón de tokens).");
+  const { entrada, cache, salida } = validarPrecios(f, errores);
   const tope = leerNumero(f.tope_usd);
   if (tope === null || tope <= 0 || tope > 500) errores.push("Tope de la evaluación (US$): un número mayor que 0 y hasta 500.");
   if (errores.length > 0) return { ok: false, errores };

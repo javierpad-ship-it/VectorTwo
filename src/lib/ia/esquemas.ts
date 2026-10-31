@@ -88,7 +88,8 @@ export function jsonSchemaSalida(tipo: TipoLlamadaIa): Record<string, unknown> {
 const uuid = z.uuid("Identificador inválido.");
 const dinero = (max: number, nombre: string) =>
   z.number(`${nombre} debe ser un número.`).positive(`${nombre} debe ser mayor que 0.`).max(max, `${nombre} no puede superar ${max}.`);
-const costoConfirmado = z.number("El costo confirmado debe ser un número.").min(0, "El costo confirmado no puede ser negativo.");
+/** Lo que el planner vio y confirmó; el servidor solo lo compara con su propia estimación y guarda SIEMPRE la suya. Acotado a lo que cabe en `numeric(10,4)`. */
+const costoConfirmado = z.number("El costo confirmado debe ser un número.").min(0, "El costo confirmado no puede ser negativo.").max(5000, "El costo confirmado no puede superar 5000.");
 const nota = z
   .string("La nota debe ser texto.")
   .trim()
@@ -114,11 +115,14 @@ export const aceptarIaSchema = z.strictObject({
   nota: nota.optional(),
 });
 
-export const preciosSchema = z.strictObject({
-  entrada: dinero(1000, "El precio de entrada"),
-  entrada_cache: dinero(1000, "El precio de entrada en caché"),
-  salida: dinero(1000, "El precio de salida"),
-});
+export const preciosSchema = z
+  .strictObject({
+    entrada: dinero(1000, "El precio de entrada"),
+    // Sin caché, la tarifa de la entrada en caché puede ser 0 (gratis) pero nunca negativa ni mayor que la entrada normal.
+    entrada_cache: z.number("El precio de entrada en caché debe ser un número.").min(0, "El precio de entrada en caché no puede ser negativo.").max(1000, "El precio de entrada en caché no puede superar 1000."),
+    salida: dinero(1000, "El precio de salida"),
+  })
+  .refine((p) => p.entrada_cache <= p.entrada, { message: "El precio de entrada en caché no puede ser mayor que el de entrada.", path: ["entrada_cache"] });
 
 const termino = z.string("Cada término debe ser texto.").trim().min(2, "Cada término debe tener al menos 2 caracteres.").max(60, "Cada término puede tener hasta 60 caracteres.").refine(sinProhibidos, "Un término no puede llevar caracteres de control.");
 

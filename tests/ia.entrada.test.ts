@@ -52,7 +52,8 @@ describe("R10 · el bloque del ejemplo A", () => {
     expect(bloque.filas.map((f) => f.f)).toEqual(["f001", "f002", "f003", "f004"]);
     expect(bloque.filas[3].y1.fija_en).toBe(3300);
     expect(bloque.filas[0].y1.fija_en).toBeNull();
-    expect(bloque.gm.cola_larga).toEqual({ filas: 1, unidades_y1: 86 });
+    // La cola larga viaja como su BASE (B' = 80), nunca como su propuesta (86 = B' × 1,08, que depende de g).
+    expect(bloque.gm.cola_larga).toEqual({ filas: 1, base_corregida: 80 });
     expect(bloque.lote).toEqual({ n: 1, de: 1 });
     expect(r.lotes[0].filas_libres).toEqual(["f001", "f002", "f003"]);
     expect(r.lotes[0].diccionario.f).toEqual({ f001: "k1", f002: "k2", f003: "k3", f004: "k4" });
@@ -93,21 +94,31 @@ describe("R10 · el bloque del ejemplo A", () => {
     expect(armarSufijoNatural()).toEqual({ tarea: "natural" });
   });
 
-  it("propiedad: cambiar g no cambia el bloque (el estado de las filas lejos del umbral no depende de g)", () => {
-    const bloques = [-20, 0, 3, 8, 15, 30].map((g) => {
+  it("propiedad: cambiar g no cambia el bloque (ni siquiera el resumen de la cola larga, cuya `fija_en` se recalcula con cada g)", () => {
+    const GS = [-20, 0, 3, 8, 15, 30];
+    const bloques = GS.map((g) => {
       const filas: FilaMeta[] = [
         fm({ fila_id: "f1", clave: "k1", propuesto: Math.round(10000 * (1 + g / 100)), base: 10000, base_corregida: 10000 }),
         fm({ fila_id: "f4", clave: "k4", propuesto: Math.round(3000 * (1 + g / 100)), base: 3000, base_corregida: 3000, decidido: 3300 }),
         fm({ fila_id: "f5", clave: "k5", propuesto: Math.round(40 * (1 + g / 100)), base: 40, base_corregida: 40 }),
       ];
       const estado = new Map(filas.map((f) => [f.clave, estadoFilaMeta(f, OPCIONES_META)]));
+      // `vigente` de la fila en M7 = decidido ?? propuesto: para la cola larga es B' × (1 + g) (la que antes se enviaba como `fija_en`).
+      const vigente = new Map(filas.map((f) => [f.clave, f.decidido ?? f.propuesto]));
       const datos = datosA({
         filas: datosA().filas
           .filter((f) => ["k1", "k4", "k5"].includes(f.clave))
-          .map((f): FilaDatosIa => ({ ...f, estado: estado.get(f.clave) === "libre" ? "libre" : estado.get(f.clave) === "fija_decidida" ? "fija" : "cola_larga" })),
+          .map((f): FilaDatosIa => ({
+            ...f,
+            estado: estado.get(f.clave) === "libre" ? "libre" : estado.get(f.clave) === "fija_decidida" ? "fija" : "cola_larga",
+            y1: { ...f.y1, fija_en: f.clave === "k1" ? null : (vigente.get(f.clave) ?? null) },
+          })),
       });
       return armar(datos).lotes[0].contenido;
     });
+    // El `fija_en` de la cola larga sí cambia con g (si no, la prueba no detectaría la dependencia)…
+    expect(new Set(GS.map((g) => Math.round(80 * (1 + g / 100)))).size).toBeGreaterThan(1);
+    // …pero el bloque que va a la llamada natural no.
     expect(new Set(bloques).size).toBe(1);
   });
 

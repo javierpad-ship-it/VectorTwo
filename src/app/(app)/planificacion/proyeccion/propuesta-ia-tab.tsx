@@ -99,7 +99,18 @@ export function PrerrequisitosIa({ estado, onIrAFactores }: { estado: EstadoIaPr
 }
 
 /** La tabla de GM (HOMBRE, MUJER y los del Resto agrupados al final). */
-export function TablaGmIa({ gms, onVer, onReintentar }: { gms: readonly GMIaResumenApi[]; onVer: (clave: string) => void; onReintentar?: (clave: string) => void }) {
+export function TablaGmIa({
+  gms,
+  onVer,
+  onReintentar,
+  motivoSinDetalle = null,
+}: {
+  gms: readonly GMIaResumenApi[];
+  onVer: (clave: string) => void;
+  onReintentar?: (clave: string) => void;
+  /** Con la IA apagada el servidor no entrega el detalle del GM (409): «Ver» queda deshabilitado y este es el motivo. */
+  motivoSinDetalle?: string | null;
+}) {
   const filas = useMemo(() => ordenarGms(gms), [gms]);
   const columnas: Columna<GMIaResumenApi>[] = [
     {
@@ -170,7 +181,14 @@ export function TablaGmIa({ gms, onVer, onReintentar }: { gms: readonly GMIaResu
       titulo: "",
       className: "whitespace-nowrap",
       render: (g) => (
-        <Button variante="secundario" tamano="sm" aria-label={`Ver ${nombreGm(g)}`} onClick={() => onVer(g.gm_clave)}>
+        <Button
+          variante="secundario"
+          tamano="sm"
+          aria-label={`Ver ${nombreGm(g)}`}
+          disabled={motivoSinDetalle !== null}
+          title={motivoSinDetalle ? `El detalle no está disponible con la IA apagada. ${motivoSinDetalle}` : undefined}
+          onClick={() => onVer(g.gm_clave)}
+        >
           Ver
         </Button>
       ),
@@ -218,6 +236,7 @@ export function VistaPropuestaIa({
   onIrAFactores: () => void;
 }) {
   const permiso = permiteGenerar(estado, bloqueada);
+  const motivoApagada = estado.servicio.disponible ? null : (textoServicioApagado(estado.servicio) ?? "la IA está apagada");
   const pendientes = estado.gms.filter(gmPendiente).length;
   const corrida = estado.corrida_en_curso;
   return (
@@ -238,7 +257,13 @@ export function VistaPropuestaIa({
           {estado.gms.length} GM · {pendientes} pendientes o desactualizados
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variante="secundario" disabled={excelOcupado || !estado.gms.some((g) => g.propuesta)} onClick={onExcel}>
+          {/* El Excel arma su hoja FILAS con el detalle de cada GM, que el servidor no entrega con la IA apagada. */}
+          <Button
+            variante="secundario"
+            disabled={excelOcupado || motivoApagada !== null || !estado.gms.some((g) => g.propuesta)}
+            title={motivoApagada ? `El Excel necesita el detalle de cada GM, que no está disponible con la IA apagada. ${motivoApagada}` : undefined}
+            onClick={onExcel}
+          >
             {excelOcupado ? "Preparando Excel…" : "Descargar Excel"}
           </Button>
           {/* Con el servicio apagado no se ofrece generar: el motivo ya está arriba. */}
@@ -250,7 +275,7 @@ export function VistaPropuestaIa({
         </div>
       </div>
 
-      <TablaGmIa gms={estado.gms} onVer={onVer} onReintentar={estado.servicio.disponible && permiso.ok ? (clave) => onGenerar([clave]) : undefined} />
+      <TablaGmIa gms={estado.gms} onVer={onVer} motivoSinDetalle={motivoApagada} onReintentar={estado.servicio.disponible && permiso.ok ? (clave) => onGenerar([clave]) : undefined} />
     </div>
   );
 }
@@ -328,7 +353,8 @@ export function PropuestaIaTab({
       {cancelar.error && <AlertaError error={cancelar.error} onCerrar={cancelar.limpiar} onRecargar={() => void lectura.recargar()} />}
       {lectura.cargando && !estado && <Cargando texto="Leyendo el estado de la IA…" />}
 
-      {estado && gmClave !== null && claveGmValida(gmClave) ? (
+      {/* Con la IA apagada no se abre el detalle (el servidor responde 409), ni siquiera por un enlace con `?gm_ia=`: se ve la tabla con el motivo. */}
+      {estado && estado.servicio.disponible && gmClave !== null && claveGmValida(gmClave) ? (
         <GmIaDetalle proyeccionId={proyeccion.id} anioEnCurso={proyeccion.anio_en_curso} clave={gmClave} indice={indice} onVolver={() => onGm(null)} onIrALinea={onIrALinea} />
       ) : (
         estado && (

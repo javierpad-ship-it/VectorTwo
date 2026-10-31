@@ -19,6 +19,7 @@ import {
   ETIQUETA_VEREDICTO,
   NOTA_PLIEGUE,
   PLIEGUES_OFRECIDOS,
+  TEXTO_AYUDA_CACHE,
   TONO_VEREDICTO,
   duracionTexto,
   formEvaluacionInicial,
@@ -287,7 +288,7 @@ function NuevaEvaluacion({ config, evaluaciones, onTermino }: { config: Respuest
               <Field label="Precio de entrada (US$/M)">
                 <Input inputMode="decimal" value={form.precio_entrada} disabled={cond.iniciando} onChange={(e) => poner("precio_entrada", e.target.value)} />
               </Field>
-              <Field label="Entrada en caché (US$/M)">
+              <Field label="Entrada en caché (US$/M)" hint={TEXTO_AYUDA_CACHE}>
                 <Input inputMode="decimal" value={form.precio_entrada_cache} disabled={cond.iniciando} onChange={(e) => poner("precio_entrada_cache", e.target.value)} />
               </Field>
               <Field label="Salida (US$/M)">

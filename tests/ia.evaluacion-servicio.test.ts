@@ -115,6 +115,14 @@ describe("iniciar una evaluación", () => {
     expect(estimarEvaluacion(3, 36, PRECIOS, 50)).toMatchObject({ gms: 108, llamadas: 192 });
   });
 
+  it("guarda la estimación del servidor como costo estimado de la corrida, no el costo que mandó el cliente", async () => {
+    const sin = await falla(iniciarEvaluacion(cuerpoEv({ costo_confirmado_usd: 0 }), ACTOR));
+    const estimado = sin.cuerpo.estimacion?.costo_usd as number;
+    expect(estimado).toBeLessThan(50);
+    await ok(iniciarEvaluacion(cuerpoEv({ costo_confirmado_usd: 4999 }), ACTOR));
+    expect(Number(filas("ia_corridas")[0].costo_estimado_usd)).toBe(estimado);
+  });
+
   it("crea la evaluación y su corrida con un GM por pliegue; E25 exige D25; una a la vez; 3 por mes", async () => {
     expect((await falla(iniciarEvaluacion(cuerpoEv({ pliegues: ["E25"] }), ACTOR))).cuerpo.codigo).toBe("pliegues_invalidos");
     const r = await ok(iniciarEvaluacion(cuerpoEv(), ACTOR));

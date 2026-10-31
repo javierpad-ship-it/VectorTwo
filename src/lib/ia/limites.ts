@@ -22,6 +22,13 @@ export const MAX_LLAMADAS_SIMULTANEAS = 3;
 /** Estimación previa del bloque (ficha §3.9): ≈ 260 tokens por fila y 500 por lote. */
 export const TOKENS_POR_FILA_BLOQUE = 260;
 export const TOKENS_POR_LOTE_BLOQUE = 500;
+/** Llamadas simultáneas al proveedor por corrida (seguridad I1): un solo GM en vuelo, así el desborde de un tope se acota a una llamada. */
+export const MAX_LLAMADAS_POR_CORRIDA = 1;
+/**
+ * Tope de llamadas fallidas por GM (seguridad M5), sumadas entre todos sus reinicios («Reintentar este GM» vuelve a empezar): al llegar, el GM queda
+ * `fallido` y no se reinicia más. No cuentan las `ok` (un GM grande hace muchas) ni los `429` (no se cobran; tienen su propio tope de esperas).
+ */
+export const MAX_FALLOS_POR_GM = 12;
 /** Un GM de una corrida de propuesta se identifica con pliegue vacío. */
 export const PLIEGUE_PROPUESTA = "";
 
@@ -59,6 +66,39 @@ export function crearSemaforo(n: number): Semaforo {
 
 /** El semáforo de proceso de las llamadas al proveedor. */
 export const semaforoLlamadas: Semaforo = crearSemaforo(MAX_LLAMADAS_SIMULTANEAS);
+
+export type LimitadorPorClave = { ejecutar<T>(clave: string, tarea: () => Promise<T>): Promise<T>; readonly claves: number };
+
+/** Un semáforo de `n` por clave (p. ej. por corrida). Se crea al primer uso y se descarta cuando nadie lo usa ni lo espera. */
+export function crearLimitadorPorClave(n: number): LimitadorPorClave {
+  const mapa = new Map<string, { semaforo: Semaforo; usos: number }>();
+  return {
+    async ejecutar<T>(clave: string, tarea: () => Promise<T>): Promise<T> {
+      let e = mapa.get(clave);
+      if (!e) {
+        e = { semaforo: crearSemaforo(n), usos: 0 };
+        mapa.set(clave, e);
+      }
+      const entrada = e;
+      entrada.usos += 1;
+      try {
+        return await entrada.semaforo.ejecutar(tarea);
+      } finally {
+        entrada.usos -= 1;
+        if (entrada.usos === 0 && mapa.get(clave) === entrada) mapa.delete(clave);
+      }
+    },
+    get claves() {
+      return mapa.size;
+    },
+  };
+}
+
+/** Las llamadas de una corrida al proveedor: a lo sumo `MAX_LLAMADAS_POR_CORRIDA` a la vez por corrida (se toma antes que el semáforo de proceso). */
+export const limitadorPorCorrida: LimitadorPorClave = crearLimitadorPorClave(MAX_LLAMADAS_POR_CORRIDA);
+
+/** ¿Cuántas llamadas de un GM cuentan para el tope de reintentos? Las que no fueron `ok` ni `429`. */
+export const contarFallos = (llamadas: readonly { estado: string }[]): number => llamadas.filter((l) => l.estado !== "ok" && l.estado !== "limite_proveedor").length;
 
 // ─── Esperas ───
 

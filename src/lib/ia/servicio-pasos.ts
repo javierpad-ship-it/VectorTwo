@@ -1,12 +1,14 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import type { NextResponse } from "next/server";
+import { traducirErrorDb } from "@/lib/api/errores-db";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/supabase/database.types";
 import { repartirEntero } from "@/lib/proyeccion/reparto";
 import { leerFilasConAnios } from "@/lib/proyeccion/consultas";
 import { aFilaModelo } from "@/lib/proyeccion/persistencia";
 import { falla, fallaDb, listo, proyeccionOr404, sello, type Actor, type Db, type Salida } from "@/lib/proyeccion/servicio-base";
-import { crearAliasador, type Aliasador, type TerminoPrivado } from "./alias";
+import { controlFinal, crearAliasador, type Aliasador, type TerminoPrivado } from "./alias";
 import { canonico } from "./canonico";
 import {
   actualizarCorrida,
@@ -23,7 +25,7 @@ import {
   leerCorridaGM,
   leerCostosPorCorrida,
   leerEntradas,
-  leerLlamadasDePaso,
+  leerLlamadasDeGM,
   leerPropuestaVigenteDeGM,
   leerTerminosPrivados,
   leerVentaLineasIa,
@@ -43,19 +45,22 @@ import {
   leerContextoTiendasGM,
   planMetaDeGM,
 } from "./contexto-gm";
-import { costoUsd, estimarUsoLlamada, motivoDetencion, redondearUsd, tokensDeBytes } from "./costo";
-import { armarBloquesGM, armarEntradaLineas, armarSufijoNatural, armarSufijoReparto, desempaquetarVentaLineasIa, type PlanEntradaGM } from "./entrada";
+import { costoUsd, cotaSuperiorUsoLlamada, estimarUsoLlamada, motivoDetencion, redondearUsd, salidaMaximaTokens, tokensDeBytes, type MotivoTope } from "./costo";
+import { CLAVES_BLOQUE, armarBloquesGM, armarEntradaLineas, armarSufijoNatural, armarSufijoReparto, desempaquetarVentaLineasIa, type PlanEntradaGM } from "./entrada";
 import { ESQUEMAS_SALIDA, jsonSchemaSalida, type TipoLlamadaIa } from "./esquemas";
 import { huellaEntrada, huellaGM, huellaLlamada } from "./huellas";
 import {
   CORTE_CIRCUITO_GM,
   ESPERA_429_DEFECTO_MS,
+  MAX_FALLOS_POR_GM,
   MAX_INTENTOS_PASO,
   MAX_TOKENS_SALIDA,
   PLIEGUE_PROPUESTA,
   TIMEOUT_LLAMADA_MS,
+  contarFallos,
   esperaTras429,
   esperaTrasFallo,
+  limitadorPorCorrida,
   semaforoLlamadas,
 } from "./limites";
 import { componerPropuesta, hayReparto, type EstadoPlanIa, type FilaBaseFinal, type LineaBasePlan, type SalidasPasos } from "./propuesta";
@@ -350,6 +355,37 @@ type Resultado =
   | { tipo: "truncada" }
   | { tipo: "error"; error: ErrorProveedorIa };
 
+const MENSAJE_TOPE: Record<MotivoTope, string> = { tope_corrida: "Se alcanzó el tope de gasto de la corrida.", tope_mensual: "Se alcanzó el tope de gasto del mes.", tope_dia: "Se alcanzó tu tope de gasto de hoy." };
+
+/** ¿Alguna llamada más pasaría de un tope? Lee el gasto de AHORA (mes y día del usuario y de la corrida) y le suma la cota de la llamada. */
+async function motivoDeTope(dom: DominioPaso, cotaLlamadaUsd: number): Promise<Salida<MotivoTope | null>> {
+  const gastos = await dom.gastos();
+  if (gastos.respuesta) return falla(gastos.respuesta);
+  const corrida = await leerCostosPorCorrida(dom.d, [dom.corrida.id]);
+  if (corrida.error) return fallaDb(corrida.error, "IA: leer el gasto de la corrida");
+  return listo(
+    motivoDetencion({
+      gasto_corrida_usd: corrida.data.get(dom.corrida.id) ?? 0,
+      estimacion_llamada_usd: cotaLlamadaUsd,
+      tope_usd_corrida: dom.topes.corrida,
+      gasto_mes_usd: gastos.data.mes,
+      tope_usd_mes: dom.topes.mes,
+      gasto_dia_usuario_usd: gastos.data.dia,
+      tope_usd_dia_usuario: dom.topes.dia,
+    })
+  );
+}
+
+/** Suelta el candado y detiene la corrida por un tope. */
+async function detenerPorTope(dom: DominioPaso, gm: CorridaGMDb, token: string, motivo: MotivoTope): Promise<Salida<PasoGMApi>> {
+  await soltar(dom, gm, token);
+  await detener(dom, motivo);
+  return fallaIa(MENSAJE_TOPE[motivo], 409, motivo);
+}
+
+/** Lo que devuelve el turno de una llamada: la respuesta del proveedor, o por qué no se llamó. */
+type Turno = { tipo: "respuesta"; respuesta: RespuestaIa } | { tipo: "tope"; motivo: MotivoTope } | { tipo: "candado_perdido" } | { tipo: "fallo"; respuesta: NextResponse };
+
 async function ejecutarLlamada(dom: DominioPaso, gm: CorridaGMDb, token: string, paso: PasoPlanIa, estado: EstadoPlanIa, parcial: Parcial): Promise<Salida<PasoGMApi>> {
   const d = dom.d;
   const bl = await cargarBloques(dom, gm);
@@ -366,6 +402,12 @@ async function ejecutarLlamada(dom: DominioPaso, gm: CorridaGMDb, token: string,
   const terminos: TerminoPrivado[] = terminosR.data;
   const aliasador = crearAliasador(terminos);
   if (!aliasVigentes(bloques, aliasador)) return fallar(dom, gm, token, "alias_cambiaron", false);
+  // QA H6: el control final corre antes de CADA llamada con los términos de HOY (no solo al armar el GM): una marca, una tienda o un término de la
+  // empresa agregados después de armar los bloques no pueden colarse en un paso posterior.
+  if (paso.tipo !== "lineas") {
+    const lote = bloques[paso.lote - 1];
+    if (lote && !controlFinal(lote.bloque, terminos, CLAVES_BLOQUE).ok) return bloquearPorPrivacidad(dom, gm, token);
+  }
   const jerarquico = gm.modo === "jerarquico";
   const meta = estado.meta_entrada;
 
@@ -452,40 +494,27 @@ async function ejecutarLlamada(dom: DominioPaso, gm: CorridaGMDb, token: string,
   const sufijoTexto = canonico(sufijoObj as never);
   const bytesEntrada = Buffer.byteLength(bloqueTexto, "utf8") + Buffer.byteLength(sufijoTexto, "utf8");
 
-  // Topes: antes de llamar, el gasto acumulado más la estimación de esta llamada no puede pasar de ninguno.
+  // Topes: antes de llamar, el gasto acumulado más la COTA SUPERIOR de esta llamada (la entrada estimada y la salida máxima posible) no puede pasar de
+  // ninguno. Se comprueba aquí (para no hacer cola en vano) y otra vez dentro del turno, justo antes de llamar: mientras esperaba, otra petición pudo gastar.
   const estimacion = estimarUsoLlamada(
     paso.tipo === "lineas" ? { tipo: "lineas", tokens_entrada: tokensDeBytes(bytesEntrada), lineas: estado.lineas_base.length } : { tipo: paso.tipo, tokens_bloque: tokensDeBytes(bytesEntrada), filas_libres: filasEnviadas }
   );
-  const gastos = await dom.gastos();
-  if (gastos.respuesta) {
+  const cotaUsd = costoUsd(cotaSuperiorUsoLlamada(estimacion, salidaMaximaTokens(MAX_TOKENS_SALIDA, dom.config.presupuesto_razonamiento)), dom.precios);
+  const tope = await motivoDeTope(dom, cotaUsd);
+  if (tope.respuesta) {
     await soltar(dom, gm, token);
-    return falla(gastos.respuesta);
+    return falla(tope.respuesta);
   }
-  const corrida = await leerCostosPorCorrida(d, [dom.corrida.id]);
-  if (corrida.error) {
-    await soltar(dom, gm, token);
-    return fallaDb(corrida.error, "IA: leer el gasto de la corrida");
-  }
-  const tope = motivoDetencion({
-    gasto_corrida_usd: corrida.data.get(dom.corrida.id) ?? 0,
-    estimacion_llamada_usd: costoUsd(estimacion, dom.precios),
-    tope_usd_corrida: dom.topes.corrida,
-    gasto_mes_usd: gastos.data.mes,
-    tope_usd_mes: dom.topes.mes,
-    gasto_dia_usuario_usd: gastos.data.dia,
-    tope_usd_dia_usuario: dom.topes.dia,
-  });
-  if (tope) {
-    await soltar(dom, gm, token);
-    await detener(dom, tope);
-    return fallaIa({ tope_corrida: "Se alcanzó el tope de gasto de la corrida.", tope_mensual: "Se alcanzó el tope de gasto del mes.", tope_dia: "Se alcanzó tu tope de gasto de hoy." }[tope], 409, tope);
-  }
+  if (tope.data) return detenerPorTope(dom, gm, token, tope.data);
 
-  const previas = await leerLlamadasDePaso(d, gm.id, paso.id);
-  if (previas.error) {
+  const delGM = await leerLlamadasDeGM(d, gm.id);
+  if (delGM.error) {
     await soltar(dom, gm, token);
-    return fallaDb(previas.error, "IA: leer las llamadas del paso");
+    return fallaDb(delGM.error, "IA: leer las llamadas del género y mundo");
   }
+  // Tope de reintentos por GM (seguridad M5): contado en el servidor entre todos los reinicios; al llegar, el GM queda fallido para siempre.
+  if (contarFallos(delGM.data) >= MAX_FALLOS_POR_GM) return fallar(dom, gm, token, "tope_reintentos", false);
+  const previas = { data: delGM.data.filter((p) => p.paso === paso.id) };
   const sin429 = previas.data.filter((p) => p.estado !== "limite_proveedor");
   const intento = sin429.length + 1;
   const correccion = estado.correccion?.paso === paso.id ? estado.correccion.resumen : null;
@@ -512,7 +541,26 @@ async function ejecutarLlamada(dom: DominioPaso, gm: CorridaGMDb, token: string,
   let respuesta: RespuestaIa | null = null;
   let errorProveedor: ErrorProveedorIa | null = null;
   try {
-    respuesta = await semaforoLlamadas.ejecutar(() => dom.proveedor.llamar(peticion));
+    // Un solo GM en vuelo por corrida y, dentro, el semáforo de proceso. Al salir de la cola (puede haber esperado minutos): se renueva el candado
+    // solo si sigue siendo mío (seguridad M6: si venció y otro lo tomó, no se llama) y se repiten los topes con el gasto de ese instante.
+    const turno = await limitadorPorCorrida.ejecutar(dom.corrida.id, () =>
+      semaforoLlamadas.ejecutar(async (): Promise<Turno> => {
+        const vigente = await actualizarCorridaGMConToken(d, gm.id, token, { candado_desde: sello() });
+        if (vigente.error) return { tipo: "fallo", respuesta: traducirErrorDb(vigente.error, "IA: renovar el candado") };
+        if (!vigente.data) return { tipo: "candado_perdido" };
+        const otra = await motivoDeTope(dom, cotaUsd);
+        if (otra.respuesta) return { tipo: "fallo", respuesta: otra.respuesta };
+        if (otra.data) return { tipo: "tope", motivo: otra.data };
+        return { tipo: "respuesta", respuesta: await dom.proveedor.llamar(peticion) };
+      })
+    );
+    if (turno.tipo === "candado_perdido") return fallaIa("Otro proceso tomó este género y mundo mientras esperaba su turno. Vuelve a intentarlo.", 409, "gm_en_proceso");
+    if (turno.tipo === "fallo") {
+      await soltar(dom, gm, token);
+      return falla(turno.respuesta);
+    }
+    if (turno.tipo === "tope") return detenerPorTope(dom, gm, token, turno.motivo);
+    respuesta = turno.respuesta;
   } catch (e) {
     // Un error que no es del proveedor (un fallo del adaptador): se trata como un fallo del servicio; su mensaje no se propaga.
     errorProveedor = esErrorProveedorIa(e) ? e : new ErrorServicioProveedor("500");
@@ -704,6 +752,10 @@ export async function ejecutarPasoGM(dom: DominioPaso, gmId: string): Promise<Sa
   dom = { ...dom, corrida: vivo.data };
 
   if (gm.estado === "fallido") {
+    // Seguridad M5: el tope de reintentos lo cuenta el servidor, no el navegador; pasado el tope el GM no se reinicia.
+    const hechas = await leerLlamadasDeGM(d, gm.id);
+    if (hechas.error) return fallaDb(hechas.error, "IA: leer las llamadas del género y mundo");
+    if (contarFallos(hechas.data) >= MAX_FALLOS_POR_GM) return fallaIa(`Este género y mundo ya falló ${MAX_FALLOS_POR_GM} veces y no se reintenta más. Revisa el proveedor o consulta con soporte.`, 409, "gm_sin_reintentos");
     // «Reintentar este GM»: vuelve a empezar desde cero (las entradas ya guardadas se reusan por su huella).
     const r = await actualizarCorridaGM(d, gm.id, { estado: "pendiente", plan: null, modo: null, parcial: {}, bloque_ids: [], huella_gm: null, error_codigo: null, candado_token: null, candado_desde: null });
     if (r.error) return fallaDb(r.error, "IA: reintentar el género y mundo");

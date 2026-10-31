@@ -436,14 +436,21 @@ export function describirErrorDb(
   return { status: 500, mensaje: MENSAJE_DB_INESPERADO };
 }
 
+/** Prefijo de contexto de los módulos cuyos errores pueden citar datos del usuario o del proveedor (la IA, R26). */
+const PREFIJO_CONTEXTO_SIN_DATOS = "IA:";
+
+/**
+ * Lo que se escribe en el log. Para un contexto `"IA: …"` solo `code` y `hint`: el `message` y los `details` de Postgres pueden citar valores
+ * (`Key (col)=(valor)…`, un `check` con el dato rechazado) y en la IA esos valores pueden ser lo enviado o lo recibido (R26).
+ */
+export function datosParaLogDb(err: PostgrestError, contexto?: string): Record<string, unknown> {
+  if (contexto?.startsWith(PREFIJO_CONTEXTO_SIN_DATOS)) return { code: err.code, hint: err.hint };
+  return { code: err.code, message: err.message, details: err.details, hint: err.hint };
+}
+
 /** Deja el error crudo en el log del servidor (solo los que no sabemos traducir). */
 export function registrarErrorDb(err: PostgrestError, contexto?: string): void {
-  console.error(`[db]${contexto ? ` ${contexto}` : ""}`, {
-    code: err.code,
-    message: err.message,
-    details: err.details,
-    hint: err.hint,
-  });
+  console.error(`[db]${contexto ? ` ${contexto}` : ""}`, datosParaLogDb(err, contexto));
 }
 
 /** Respuesta HTTP para un error de PostgREST. Los 500 se registran con su detalle. */

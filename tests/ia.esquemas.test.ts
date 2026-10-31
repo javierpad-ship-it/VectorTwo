@@ -184,6 +184,19 @@ describe("cuerpos de las rutas", () => {
     for (const m of malos) expect(configuracionSchema.safeParse(m).success).toBe(false);
   });
 
+  it("precios: la entrada en caché puede ser 0 pero no negativa ni mayor que la entrada; el costo confirmado tiene tope", () => {
+    const precios = (p: Record<string, number>) => configuracionSchema.safeParse({ ...config, precios: p }).success;
+    expect(precios({ entrada: 3, entrada_cache: 0, salida: 15 })).toBe(true);
+    expect(precios({ entrada: 3, entrada_cache: 3, salida: 15 })).toBe(true);
+    expect(precios({ entrada: 3, entrada_cache: 3.01, salida: 15 })).toBe(false);
+    expect(precios({ entrada: 3, entrada_cache: -0.1, salida: 15 })).toBe(false);
+    const evaluacion = { modelo: "m", version_prompt: "v1", precios: config.precios, tope_usd: 50 };
+    expect(evaluacionSchema.safeParse({ ...evaluacion, costo_confirmado_usd: 5000, precios: { entrada: 3, entrada_cache: 5, salida: 15 } }).success).toBe(false);
+    expect(evaluacionSchema.safeParse({ ...evaluacion, costo_confirmado_usd: 5000 }).success).toBe(true);
+    expect(evaluacionSchema.safeParse({ ...evaluacion, costo_confirmado_usd: 5001 }).success).toBe(false);
+    expect(iniciarCorridaSchema.safeParse({ gms: "todos", costo_confirmado_usd: 1e12 }).success).toBe(false);
+  });
+
   it("evaluacionSchema y pasoEvaluacionSchema", () => {
     const ok = { modelo: "m", version_prompt: "v1", precios: config.precios, tope_usd: 50, costo_confirmado_usd: 8 };
     expect(evaluacionSchema.safeParse(ok).success).toBe(true);

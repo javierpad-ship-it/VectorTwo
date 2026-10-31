@@ -243,7 +243,7 @@ export async function iniciarEvaluacion(cuerpo: EvaluacionCuerpo, actor: Actor):
     version_prompt: cuerpo.version_prompt,
     alcance: { pliegues, semilla: null } as unknown as Json,
     estado: "en_curso",
-    costo_estimado_usd: cuerpo.costo_confirmado_usd,
+    costo_estimado_usd: estimacion.costo_usd,
     perfil_id: actor.id,
     usuario_nombre: actor.nombre,
     iniciada_at: ahora,

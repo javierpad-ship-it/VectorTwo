@@ -204,7 +204,7 @@ export function estadisticasVenta(registros: readonly RegistroVentaIa[], a: { an
 const claves = (...grupos: string[][]): ReadonlySet<string> => new Set(grupos.flat());
 const CLAVES_ANIO = ["A-3", "A-2", "A-1", "A"];
 const CLAVES_CONTEXTO = ["contexto", "ultimo_mes_cerrado", "objetivo", "objetivo_normal", "nino", "anio", "temporada", "meses", "factor", "umbral_cola_larga"];
-const CLAVES_GM = ["gm", "id", "genero", "mundo", "es_resto", "historia", "unidades", "comparable_pct", "fuera_de_meta", "aperturas_y1", "cierres_y1", "cola_larga", "filas", "unidades_y1"];
+const CLAVES_GM = ["gm", "id", "genero", "mundo", "es_resto", "historia", "unidades", "comparable_pct", "fuera_de_meta", "aperturas_y1", "cierres_y1", "cola_larga", "filas"];
 export const CLAVES_BLOQUE: ReadonlySet<string> = claves(
   ["version_entrada", "lote", "n", "de", "f", "l", "linea", "equivalencia", "agrupacion_marca", "estado", "y", "vendido", "vigente", "avance", "metodo", "decidido"],
   ["y1", "base", "base_corregida", "aporte_entrantes", "aporte_salientes", "fija_en", "pedir", "senales", "lista", "meses_quiebre_w12", "disponibilidad", "meses_desde_primera_venta", "meses_con_venta_24"],
@@ -337,7 +337,8 @@ export function armarBloquesGM(datos: DatosGM, opciones: OpcionesArmado): Result
       comparable_pct: a === "A-3" ? null : decimal1(datos.comparable_gm[a] ?? null),
     })),
     fuera_de_meta: { aperturas_y1: entero(datos.fuera_de_meta.aperturas_y1), cierres_y1: entero(datos.fuera_de_meta.cierres_y1) },
-    cola_larga: { filas: colaLarga.length, unidades_y1: entero(colaLarga.reduce((a, f) => a + (f.y1.fija_en ?? 0), 0)) },
+    // R10/D9: la base de la cola larga, nunca su propuesta (`fija_en` = B' × (1 + g) depende de la meta): el bloque natural no puede depender de g.
+    cola_larga: { filas: colaLarga.length, base_corregida: entero(colaLarga.reduce((a, f) => a + (f.y1.base_corregida ?? f.y1.base ?? 0), 0)) },
   };
 
   const aFilaEntrada = (f: FilaDatosIa): FilaEntradaIa => ({

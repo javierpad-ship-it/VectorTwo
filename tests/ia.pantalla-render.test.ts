@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EvaluacionesTab, InformeEvaluacion, ListaEvaluaciones, ProgresoEvaluacion } from "../src/app/(app)/administracion/ia/evaluaciones-tab";
-import { ConfiguracionTab, EstadoServicio, FormularioConfiguracion, VersionesConfiguracion } from "../src/app/(app)/administracion/ia/configuracion-tab";
+import { AvisosConfiguracion, ConfiguracionTab, EstadoServicio, FormularioConfiguracion, VersionesConfiguracion } from "../src/app/(app)/administracion/ia/configuracion-tab";
 import { IaPanel, PESTANAS_IA } from "../src/app/(app)/administracion/ia/ia-panel";
 import { CONDUCCION_INACTIVA, claveAvance } from "../src/app/(app)/administracion/ia/use-evaluacion-ia";
 import { UsoTab, UsoVista } from "../src/app/(app)/administracion/ia/uso-tab";
@@ -115,6 +115,21 @@ describe("vista de la pestaña", () => {
     const h = html(vistaEl({ estado: estadoIa({ servicio: servicioApagado("sin_clave") }) }));
     expect(h).not.toContain("Generar propuesta IA");
     expect(h).toContain("Falta la clave del proveedor");
+  });
+
+  it("con el servicio apagado «Ver» de cada GM y el Excel quedan deshabilitados, con el motivo (el detalle respondería 409)", () => {
+    const apagado = html(vistaEl({ estado: estadoIa({ servicio: servicioApagado("sin_clave") }) }));
+    const botones = apagado.match(/<button[^>]*aria-label="Ver [^"]*"[^>]*>/g) ?? [];
+    expect(botones).toHaveLength(3);
+    for (const b of botones) {
+      expect(b).toContain('disabled=""');
+      expect(b).toContain("El detalle no está disponible con la IA apagada. Falta la clave del proveedor");
+    }
+    expect(botonDeshabilitado(apagado, "Descargar Excel")).toBe(true);
+    // Encendida, «Ver» sigue activo.
+    const encendido = html(vistaEl());
+    for (const b of encendido.match(/<button[^>]*aria-label="Ver [^"]*"[^>]*>/g) ?? []) expect(b).not.toContain('disabled=""');
+    expect(botonDeshabilitado(encendido, "Descargar Excel")).toBe(false);
   });
 
   it("con bloqueos o la proyección cerrada, «Generar» queda deshabilitado", () => {
@@ -412,6 +427,29 @@ describe("Administración → Motor de IA", () => {
     expect(caja(con)).not.toContain('disabled=""');
     expect(caja(con)).toContain('checked=""');
     expect(con).toContain("Intento 1 · 02/11 · modelo-a · v1");
+  });
+
+  it("los avisos del servidor se muestran como información en la pestaña Configuración; sin avisos no sale nada", () => {
+    const aviso = { codigo: "modelo_efectivo_distinto" as const, observados: ["modelo-a"], produccion: ["modelo-a", "modelo-a-nuevo"] };
+    const h = html(createElement(AvisosConfiguracion, { avisos: [aviso] }));
+    expect(h).toContain("El proveedor respondió con un modelo distinto al configurado");
+    expect(h).toContain("«modelo-a-nuevo»");
+    expect(html(createElement(AvisosConfiguracion, { avisos: [] }))).toBe("");
+    expect(html(createElement(AvisosConfiguracion, { avisos: undefined }))).toBe("");
+  });
+
+  it("con alguna capacidad encendida «Términos que nunca salen» se marca obligatorio; sin ninguna, no", () => {
+    const con = formulario();
+    expect(con).toContain("Términos que nunca salen (obligatorio con la IA encendida)");
+    expect(con).toContain("hace falta al menos uno: el nombre de la empresa");
+    expect(con).toMatch(/<textarea[^>]*aria-required="true"/);
+    const sin = formulario(respuestaConfiguracion({ vigente: null, versiones: [] }), [evaluacionNoGana()]);
+    expect(sin).not.toContain("obligatorio con la IA encendida");
+    expect(sin).toMatch(/<textarea[^>]*aria-required="false"/);
+  });
+
+  it("la ayuda del precio en caché dice que 0 es válido y que no pasa del de entrada", () => {
+    expect(formulario()).toContain("Desde 0 y no mayor que la entrada");
   });
 
   it("sin proveedor o sin modelos permitidos, no deja guardar", () => {

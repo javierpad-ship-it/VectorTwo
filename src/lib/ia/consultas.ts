@@ -244,9 +244,9 @@ export function insertarLlamada(db: Db, fila: TablesInsert<"ia_llamadas">) {
   return db.from("ia_llamadas").insert(fila).select("*").single();
 }
 
-/** Las llamadas de un paso de un GM, de la más antigua a la más reciente. */
-export function leerLlamadasDePaso(db: Db, corridaGmId: string, paso: string) {
-  return leerTodo<LlamadaDb>((d, h) => db.from("ia_llamadas").select("*").eq("corrida_gm_id", corridaGmId).eq("paso", paso).order("created_at").order("id").range(d, h));
+/** Todas las llamadas de un GM (de todos sus pasos y reinicios), de la más antigua a la más reciente: para el tope de reintentos. */
+export function leerLlamadasDeGM(db: Db, corridaGmId: string) {
+  return leerTodo<LlamadaDb>((d, h) => db.from("ia_llamadas").select("*").eq("corrida_gm_id", corridaGmId).order("created_at").order("id").range(d, h));
 }
 
 /** Las llamadas de una corrida (columnas de gasto y modelo), de la más antigua a la más reciente. */
@@ -423,20 +423,25 @@ export async function leerVentaLineasIa(
 }
 
 /**
- * Los términos que nunca salen al proveedor (§3.5): marcas (activas o no), nombre y código de cada tienda y los `terminos_extra` de la
- * configuración. Se arman en tiempo de ejecución: nunca viven en el repo.
+ * Los términos que nunca salen al proveedor (§3.5): marcas (activas o no; nombre y código), tiendas (nombre, código, razón social y zona) y los
+ * `terminos_extra` de la configuración (el nombre de la empresa: sin él, nada lo detiene; por eso guardar una configuración con la IA encendida
+ * exige al menos uno). Se arman en tiempo de ejecución: nunca viven en el repo. La zona la comparten varias tiendas: su alias no apunta a ninguna
+ * (`id: null`).
  */
 export async function leerTerminosPrivados(db: Db, terminosExtra: readonly string[]): Promise<Resultado<TerminoPrivado[]>> {
   const [marcas, tiendas] = await Promise.all([
-    leerTodo<{ id: string; nombre: string }>((d, h) => db.from("marcas").select("id, nombre").order("id").range(d, h)),
-    leerTodo<{ id: string; nombre: string; codigo: string }>((d, h) => db.from("tiendas").select("id, nombre, codigo").order("id").range(d, h)),
+    leerTodo<{ id: string; nombre: string; codigo: string | null }>((d, h) => db.from("marcas").select("id, nombre, codigo").order("id").range(d, h)),
+    leerTodo<{ id: string; nombre: string; codigo: string; razon_social: string | null; zona: string | null }>((d, h) => db.from("tiendas").select("id, nombre, codigo, razon_social, zona").order("id").range(d, h)),
   ]);
   const fallo = marcas.error ?? tiendas.error;
+  const hay = (t: string | null | undefined): t is string => typeof t === "string" && t.trim() !== "";
   const terminos: TerminoPrivado[] = [
-    ...marcas.data.map((m): TerminoPrivado => ({ texto: m.nombre, tipo: "marca", id: m.id })),
+    ...marcas.data.flatMap((m): TerminoPrivado[] => [{ texto: m.nombre, tipo: "marca", id: m.id }, ...(hay(m.codigo) ? [{ texto: m.codigo, tipo: "marca" as const, id: m.id }] : [])]),
     ...tiendas.data.flatMap((t): TerminoPrivado[] => [
       { texto: t.nombre, tipo: "tienda", id: t.id },
       { texto: t.codigo, tipo: "tienda", id: t.id },
+      ...(hay(t.razon_social) ? [{ texto: t.razon_social, tipo: "tienda" as const, id: t.id }] : []),
+      ...(hay(t.zona) ? [{ texto: t.zona, tipo: "tienda" as const, id: null }] : []),
     ]),
     ...terminosExtra.map((t): TerminoPrivado => ({ texto: t, tipo: "termino", id: null })),
   ];

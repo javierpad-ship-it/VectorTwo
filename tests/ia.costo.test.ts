@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { armarBloquesGM } from "@/lib/ia/entrada";
 import {
   costoUsd,
+  cotaSuperiorUsoLlamada,
+  salidaMaximaTokens,
   estimarCorrida,
   estimarGM,
   estimarUsoLlamada,
@@ -124,5 +126,28 @@ describe("R14 · topes", () => {
 
   it("no hay errores de coma flotante en el límite exacto", () => {
     expect(motivoDetencion({ gasto_corrida_usd: 0.1 + 0.2, estimacion_llamada_usd: 0.7, tope_usd_corrida: 1, gasto_mes_usd: 0, tope_usd_mes: 60, gasto_dia_usuario_usd: 0, tope_usd_dia_usuario: 15 })).toBeNull();
+  });
+});
+
+describe("cota superior de una llamada (seguridad I1)", () => {
+  it("la salida máxima es max_tokens (o el presupuesto de razonamiento si fuera mayor)", () => {
+    expect(salidaMaximaTokens(16_000, 0)).toBe(16_000);
+    expect(salidaMaximaTokens(16_000, 4_000)).toBe(16_000);
+    expect(salidaMaximaTokens(16_000, 32_000)).toBe(32_000);
+  });
+
+  it("la cota conserva la entrada y pone la salida máxima; nunca queda por debajo de lo esperado", () => {
+    const esperado = estimarUsoLlamada({ tipo: "natural", tokens_bloque: 10_000, filas_libres: 40 });
+    const cota = cotaSuperiorUsoLlamada(esperado, 16_000);
+    expect(cota).toEqual({ entrada: esperado.entrada, entrada_cache: 0, salida: 16_000 });
+    expect(costoUsd(cota, PRECIOS)).toBeGreaterThan(costoUsd(esperado, PRECIOS));
+    expect(cotaSuperiorUsoLlamada(esperado, 10).salida).toBe(esperado.salida);
+  });
+
+  it("con la cota, una corrida con 9,90 de 10 gastados ya no puede hacer otra llamada que antes pasaba", () => {
+    const esperado = estimarUsoLlamada({ tipo: "reparto", tokens_bloque: 8_000, filas_libres: 20 });
+    const topes = { tope_usd_corrida: 10, gasto_mes_usd: 0, tope_usd_mes: 60, gasto_dia_usuario_usd: 0, tope_usd_dia_usuario: 15, gasto_corrida_usd: 9.9 };
+    expect(motivoDetencion({ ...topes, estimacion_llamada_usd: costoUsd(esperado, PRECIOS) })).toBeNull();
+    expect(motivoDetencion({ ...topes, estimacion_llamada_usd: costoUsd(cotaSuperiorUsoLlamada(esperado, 16_000), PRECIOS) })).toBe("tope_corrida");
   });
 });

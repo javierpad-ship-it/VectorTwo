@@ -65,6 +65,18 @@ export function estimarUsoLlamada(l: LlamadaParaEstimar): UsoTokensIa {
   return { entrada: TOKENS_SISTEMA + l.tokens_entrada, entrada_cache: 0, salida: SALIDA_LINEAS_POR_LINEA * l.lineas + SALIDA_POR_LLAMADA };
 }
 
+/**
+ * Salida máxima que una llamada puede producir (seguridad I1): `max_tokens` (que en los proveedores incluye el razonamiento) o, si el presupuesto
+ * de razonamiento fuera mayor, ese presupuesto. Es la cota con la que se comprueban los topes antes de CADA llamada: la estimación esperada
+ * (`85 × filas`…) subestima una salida que se desboca.
+ */
+export const salidaMaximaTokens = (maxTokens: number, presupuestoRazonamiento: number): number => Math.max(0, maxTokens, presupuestoRazonamiento);
+
+/** Cota superior del uso de UNA llamada: la entrada estimada y, de salida, lo máximo que puede producir (nunca menos que lo esperado). */
+export function cotaSuperiorUsoLlamada(uso: UsoTokensIa, salidaMaxima: number): UsoTokensIa {
+  return { ...uso, salida: Math.max(uso.salida, salidaMaxima) };
+}
+
 export type GMParaEstimar = {
   /** Bytes del bloque de cada lote y filas libres de cada uno (mismo orden). */
   lotes: { bytes_bloque: number; filas_libres: number }[];

@@ -300,7 +300,7 @@ export function configuracion(extra: Partial<ConfiguracionIaApi> = {}): Configur
 
 export function respuestaConfiguracion(extra: Partial<RespuestaConfiguracionApi> = {}): RespuestaConfiguracionApi {
   const vigente = configuracion();
-  return { vigente, versiones: [vigente, configuracion({ id: "cfg-1", version: 1, estado: "reemplazada", capacidades: [], evaluacion_id: null, nota: null })], servicio: servicio(), prompts: ["v1"], ...extra };
+  return { vigente, versiones: [vigente, configuracion({ id: "cfg-1", version: 1, estado: "reemplazada", capacidades: [], evaluacion_id: null, nota: null })], servicio: servicio(), prompts: ["v1"], avisos: [], ...extra };
 }
 
 const repartoD25: MetricasRepartoApi = {

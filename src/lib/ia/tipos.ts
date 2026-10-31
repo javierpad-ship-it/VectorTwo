@@ -30,7 +30,8 @@ export type GMEntradaIa = {
   es_resto: boolean;
   historia: { anio: AnioRel; unidades: number; comparable_pct: number | null }[];
   fuera_de_meta: { aperturas_y1: number; cierres_y1: number };
-  cola_larga: { filas: number; unidades_y1: number };
+  /** `base_corregida`: Σ B' (o B) de la cola larga; nunca su propuesta, que depende de la meta (D9). */
+  cola_larga: { filas: number; base_corregida: number };
 };
 
 export type FilaEntradaIa = {

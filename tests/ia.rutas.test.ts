@@ -193,7 +193,9 @@ describe("formas de respuesta", () => {
     expect(((await leer(ok)) as { data: { proveedor: string; version: number } }).data).toMatchObject({ proveedor: "openai", version: 1 });
     // El cuerpo no admite `proveedor`: lo pone el servidor.
     expect((await guardarConfig(enviar("/x", { ...cuerpo, proveedor: "otro", version_vigente: 1 }))).status).toBe(400);
-    expect((await guardarConfig(enviar("/x", { ...cuerpo, precios: { entrada: 2, entrada_cache: 5, salida: 8 }, version_vigente: 1 }))).status).toBe(201);
+    // La entrada en caché no puede costar más que la entrada normal; puede ser 0.
+    expect((await guardarConfig(enviar("/x", { ...cuerpo, precios: { entrada: 2, entrada_cache: 5, salida: 8 }, version_vigente: 1 }))).status).toBe(400);
+    expect((await guardarConfig(enviar("/x", { ...cuerpo, precios: { entrada: 2, entrada_cache: 0, salida: 8 }, version_vigente: 1 }))).status).toBe(201);
   });
 
   it("uso y entradas: formas y 404", async () => {

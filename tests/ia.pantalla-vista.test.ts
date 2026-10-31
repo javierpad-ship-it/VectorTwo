@@ -42,6 +42,7 @@ import { MAX_PASOS_POR_GM, REINTENTOS_CANDADO, conducirPasos, corridaTerminadaPo
 import { unidades } from "../src/app/(app)/planificacion/proyeccion/vista";
 import {
   ETIQUETA_CAPACIDAD,
+  MENSAJE_TERMINOS_REQUERIDOS,
   TEXTOS_PROMPT,
   capacidadHabilitable,
   diaCorto,
@@ -54,7 +55,10 @@ import {
   mejoraTexto,
   nombreMes,
   tablasInforme,
+  terminosObligatorios,
+  textoAvisoConfiguracion,
   textoClavePresente,
+  textoErrorConfiguracion,
   textoIc90,
   textoIntentoNuevo,
   textoReglaQueFallo,
@@ -493,6 +497,54 @@ describe("administración: números y formulario", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errores.join(" ")).toMatch(/entre 2 y 60/);
     if (!r.ok) expect(r.errores.join(" ")).toMatch(/300 caracteres/);
+  });
+
+  it("el precio de entrada en caché admite 0 y no puede pasar del de entrada (configuración y evaluación igual)", () => {
+    const base = formDesdeVigente(configuracion(), ctx.modelosPermitidos, ctx.prompts);
+    const cero = validarConfiguracion({ ...base, precio_entrada_cache: "0" }, ctx);
+    expect(cero.ok).toBe(true);
+    if (cero.ok) expect(cero.cuerpo.precios.entrada_cache).toBe(0);
+    expect(validarConfiguracion({ ...base, precio_entrada_cache: "1.5" }, ctx).ok).toBe(true); // igual a la entrada
+    const mayor = validarConfiguracion({ ...base, precio_entrada_cache: "1.51" }, ctx);
+    expect(mayor.ok).toBe(false);
+    if (!mayor.ok) expect(mayor.errores.join(" ")).toContain("no puede ser mayor que el precio de entrada");
+    expect(validarConfiguracion({ ...base, precio_entrada_cache: "" }, ctx).ok).toBe(false);
+    expect(validarConfiguracion({ ...base, precio_entrada_cache: "-1" }, ctx).ok).toBe(false);
+    // La entrada y la salida siguen exigiendo más que 0.
+    expect(validarConfiguracion({ ...base, precio_entrada: "0", precio_entrada_cache: "0" }, ctx).ok).toBe(false);
+    expect(validarConfiguracion({ ...base, precio_salida: "0" }, ctx).ok).toBe(false);
+
+    const ev = formEvaluacionInicial(configuracion(), ctx.modelosPermitidos, ctx.prompts);
+    expect(validarEvaluacion({ ...ev, precio_entrada_cache: "0" }, ctx).ok).toBe(true);
+    const evMayor = validarEvaluacion({ ...ev, precio_entrada_cache: "9" }, ctx);
+    expect(evMayor.ok).toBe(false);
+    if (!evMayor.ok) expect(evMayor.errores.join(" ")).toContain("no puede ser mayor que el precio de entrada");
+  });
+
+  it("con alguna capacidad encendida, `terminos_extra` es obligatorio (el nombre de la empresa); sin capacidades puede ir vacío", () => {
+    const base = formDesdeVigente(configuracion(), ctx.modelosPermitidos, ctx.prompts);
+    expect(terminosObligatorios(["distribucion_y1"])).toBe(true);
+    expect(terminosObligatorios([])).toBe(false);
+    const sin = validarConfiguracion({ ...base, terminos_extra: " \n  \n" }, ctx);
+    expect(sin.ok).toBe(false);
+    if (!sin.ok) expect(sin.errores).toContain(MENSAJE_TERMINOS_REQUERIDOS);
+    expect(MENSAJE_TERMINOS_REQUERIDOS).toContain("nombre de la empresa");
+    expect(validarConfiguracion({ ...base, terminos_extra: "EMPRESA X" }, ctx).ok).toBe(true);
+    expect(validarConfiguracion({ ...base, capacidades: [], evaluacion_id: "", terminos_extra: "" }, ctx).ok).toBe(true);
+  });
+
+  it("el código `terminos_extra_requeridos` del servidor se explica; otros errores conservan su mensaje", () => {
+    expect(textoErrorConfiguracion("terminos_extra_requeridos", "seco")).toBe(MENSAJE_TERMINOS_REQUERIDOS);
+    expect(textoErrorConfiguracion("vigente_cambiada", "La vigente cambió.")).toBe("La vigente cambió.");
+    expect(textoErrorConfiguracion(null, "Error")).toBe("Error");
+  });
+
+  it("el aviso `modelo_efectivo_distinto` dice con claridad que el proveedor respondió con otro modelo", () => {
+    const t = textoAvisoConfiguracion({ codigo: "modelo_efectivo_distinto", observados: ["modelo-a"], produccion: ["modelo-a", "modelo-a-nuevo"] });
+    expect(t).toContain("El proveedor respondió con un modelo distinto al configurado");
+    expect(t).toContain("«modelo-a-nuevo»");
+    expect(t).toContain("«modelo-a»");
+    expect(textoAvisoConfiguracion({ codigo: "modelo_efectivo_distinto", observados: [], produccion: ["x"] })).toContain("ninguno registrado");
   });
 
   it("una capacidad solo se habilita con una evaluación ganadora de la misma terna", () => {
