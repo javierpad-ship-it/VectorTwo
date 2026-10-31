@@ -2,15 +2,15 @@
 
 Objetivo: recorrer las pantallas nuevas con un navegador real, que es lo único que no han podido hacer ni los tests ni QA. Cowork **observa y reporta**; no decide ni cambia datos salvo donde el paso lo diga.
 
-**Nota de numeración.** Las secciones A a D son de las primeras entregas (hasta `0.9.7`). Las fichas 07, 12 y 13 citan las letras F, G y H para los hitos de M7, M12 y M13; esos hitos todavía no se han pasado a este archivo y las letras quedan reservadas. Las secciones **I** (`0.12.1 · M6`), **J** (`0.13.0 · M8`) y **K** (`0.14.0 · M6`) son las nuevas; la L quedará para M9a.
+**Nota de numeración.** Las secciones A a D son de las primeras entregas (hasta `0.9.7`). Las fichas 07, 12 y 13 citan las letras F, G y H para los hitos de M7, M12 y M13; esos hitos todavía no se han pasado a este archivo y las letras quedan reservadas. Las secciones **I** (`0.12.1 · M6`), **J** (`0.13.0 · M8`), **K** (`0.14.0 · M6`) y **L** (`0.15.0 · M7`) son las nuevas; la M quedará para M9a.
 
 ## Reglas para Cowork (leer antes de empezar)
 
 1. Usa **solo** los usuarios de prueba que Javier cree (un `planner` y un `comprador`). No uses el usuario admin. **Nunca pegues claves en el chat ni en capturas.**
-2. La base es la de producción (no hay otra). No pulses **Retirar**, **Aprobar esta curva**, **Aprobar** un crecimiento, **Reaprobar**, **Desactivar**, **Eliminar**, **Cerrar proyección**, **Cancelar** una compra, **Confirmar ingreso**, **Aceptar sugerencia** ni **Aplicar** una importación en ningún sitio, salvo en un paso ✍️ que Javier haya autorizado. No edites maestros, tiendas, marcas ni agrupaciones fuera de lo que diga un paso ✍️.
+2. La base es la de producción (no hay otra). No pulses **Retirar**, **Aprobar esta curva**, **Aprobar** un crecimiento, **Reaprobar**, **Desactivar**, **Eliminar**, **Cerrar proyección**, **Cancelar** una compra, **Confirmar ingreso**, **Aceptar sugerencia**, **Aplicar** una importación, **Generar propuesta IA**, **Regenerar**, **Aceptar IA** ni **Nueva evaluación** (estas dos últimas cuestan dinero) en ningún sitio, salvo en un paso ✍️ que Javier haya autorizado. No edites maestros, tiendas, marcas ni agrupaciones fuera de lo que diga un paso ✍️.
 3. Los únicos pasos que escriben datos son los marcados con ✍️ (crear periodos atípicos, aprobar curvas, aprobar y reaprobar crecimientos, sincronizar y confirmar factores del Niño, importar y mover compras, cambiar un parámetro, y en dos pasos tocar un maestro y revertirlo). Antes de cada ✍️, pide confirmación a Javier y espera su "sí" **en ese paso**; una autorización general no vale. Si Javier no lo autoriza, salta el paso, anótalo como "no ejecutado" y sigue.
 4. En cada paso: captura de pantalla, qué esperabas, qué viste, y si hubo errores en la consola del navegador. Si algo se ve lento (más de 3 s), anótalo con el tiempo.
-5. Anota la versión que aparece al pie del menú: debe ser la que Javier diga para la sección que vas a recorrer (**0.9.7 · M6** para la D, **0.12.1 · M6** o posterior para la I, **0.13.0 · M8** o posterior para la J, **0.14.0 · M6** o posterior para la K). Si es otra, detente y avisa.
+5. Anota la versión que aparece al pie del menú: debe ser la que Javier diga para la sección que vas a recorrer (**0.9.7 · M6** para la D, **0.12.1 · M6** o posterior para la I, **0.13.0 · M8** o posterior para la J, **0.14.0 · M6** o posterior para la K, **0.15.0 · M7** o posterior para la L). Si es otra, detente y avisa.
 6. Los números de este documento van con punto decimal (0.66), como los muestra la pantalla; si ves una coma como separador decimal en algún texto de la pantalla, anótalo como hallazgo.
 
 ## A. Roles y seguridad (comprador)
@@ -131,6 +131,54 @@ Contexto: desde la `0.14.0` la pantalla «Crecimiento por género × mundo» cal
 12. **Rendimiento.** La pantalla «Crecimiento por género × mundo» abre en **menos de 3 s en frío** (`venta_genero_mundo` se midió en 1.6 s). Anota el tiempo, el tamaño de la respuesta de `GET /api/curvas/genero-mundo` y los errores de consola.
 
 Además, en cada paso de K: la versión del pie del menú es **0.14.0 · M6** o posterior y no hay errores en la consola del navegador. **Validación de negocio (Javier):** el invierno corregido de un GM que conoce se parece a lo que él esperaría para un año sin Niño, y decide el factor de verano con el diagnóstico; Cowork solo recoge lo que dicte. **Cowork no escribe datos fuera de los pasos ✍️, no cierra proyecciones y no usa el usuario admin.**
+
+## L. Propuesta con IA (hito de `0.15.0 · M7`, ficha `docs/modulos/07e-propuesta-con-ia.md`, §6.3 y §12)
+
+Contexto: desde la `0.15.0` la proyección tiene una pestaña **«Propuesta IA»** (entre Crecimientos y Por línea). Un motor de IA propone, por género × mundo (GM), cuánto vendería cada fila libre de 2027 sin conocer la meta (el «natural») y cómo se reparte la meta del GM entre ellas, con su motivo. **La IA no decide nada:** es una segunda cifra por fila y «Aceptar IA» es una decisión manual, una fila a la vez. Se despliega **apagada** y solo se enciende si una evaluación (backtest) la da por ganadora. La Matriz muestra por GM «Meta 2027» y «Desvío frente a la meta». Los usuarios de prueba son un planner y un comprador; **la administración del Motor de IA es solo del admin y la recorre Javier, no Cowork** (regla 1). Generar y evaluar **cuestan dinero**: Cowork no los pulsa sin la autorización de Javier en ese paso.
+
+La sección tiene dos partes. **L1** se recorre ya, con la IA apagada. **L2 a L4** solo después de que Javier haya hecho las acciones de abajo y encendido la IA; si Javier decide no encenderla (la evaluación no ganó), el hito termina en L3 y es un resultado válido.
+
+### L1. Con la IA apagada (Cowork puede recorrerlo)
+
+**Prerrequisito de Javier:** la `0.15.0` desplegada y, en Railway, **sin** `OPENAI_API_KEY` o con `IA_DESACTIVADA=1`. La proyección en trabajo debe ser de método 5 (si sigue en método 3, Javier la recalcula antes; conserva las decisiones).
+
+1. **Pestaña sin clave.** Con el planner, la pestaña «Propuesta IA» abre sin error y dice el motivo por el que no hay cifras («falta la clave en el servidor» o «sin proveedor configurado»; con `IA_DESACTIVADA=1`, que está desactivada). **No hay ninguna cifra de IA** y no se puede generar. Si faltan prerrequisitos (proyección de método anterior, factor del Niño sin confirmar, crecimientos sin aprobar), la pestaña los lista.
+2. **Todo lo demás funciona igual que en `0.14.0`.** Por línea carga (sin cifras de IA y sin errores), la Matriz, la Mensual y los Factores del Niño abren, y «Cerrar proyección» se habilita o se bloquea por los mismos motivos de siempre; **no pulses cerrar**. Si la IA falla o está apagada, ninguna otra pestaña se rompe.
+3. **Matriz: «Meta 2027» y «Desvío frente a la meta».** Cada GM muestra su meta en unidades, el desvío de lo decidido frente a ella (en unidades y en %) y su fuente. **Comprobar a mano un GM** con la fórmula de §5.1 de la ficha: la meta es la suma de lo que el método propondría para todas sus filas siguiendo al GM. Javier dicta la cifra esperada; Cowork anota qué ve. Una fila decidida a mano mueve el desvío; cerrar no lo exige.
+4. **Excel de la Matriz.** Descargarlo: abre sin error y trae la meta y el desvío por GM.
+5. **Roles.** Con el **comprador**: no ve la pestaña «Propuesta IA» ni «Motor de IA» en el menú; abrir a mano `/administracion/ia` redirige a Inicio; abrir en el navegador `/api/proyeccion/proyecciones/<id>/ia`, `/api/ia/uso` y `/api/ia/configuracion` responde 403. Con el **planner**: no ve Administración y esas dos últimas rutas también responden 403. No envíes POST desde la consola.
+6. **Nada sale del navegador hacia la IA.** En la pestaña de red del navegador, ninguna petición va a un dominio de OpenAI ni lleva una clave: el navegador solo habla con la propia aplicación.
+7. **Rendimiento.** La pestaña «Propuesta IA» y Por línea abren en **menos de 3 s**; anota el tiempo y los errores de consola.
+
+### L2. Acciones de Javier fuera del código (antes de encender)
+
+Las hace **Javier**, con TIC; Cowork no participa y la clave **nunca** pasa por el chat ni por una captura.
+1. Clave de OpenAI **dedicada a Vector2** (proyecto propio de la cuenta, si se puede).
+2. En Railway: `OPENAI_API_KEY` como variable secreta (escrita directamente en el panel), `IA_PROVEEDOR=openai` e `IA_MODELO` con los modelos candidatos separados por comas. Los pasos están en el CHANGELOG de `0.15.0`.
+3. **Límite de gasto mensual duro** en la cuenta, por encima del tope de la app (por defecto US$ 60), y saber si **corta las peticiones o solo avisa**; conocer las cuotas de uso.
+4. **Retención de datos** de la organización (y *zero data retention* si aplica), acordada con TIC antes de encender.
+5. Con TIC o con `backend`, confirmar en la **documentación de OpenAI** lo que falta (ficha §11.2: modelos con salida estructurada estricta, parámetros por modelo, precios, límites, caché de prompt, cobro del razonamiento).
+6. Proyección **recalculada con el método 5**, factores del Niño confirmados y crecimientos de 2027 aprobados (incluido el Resto, sin «reaprobar» pendiente).
+
+### L3. Administración y evaluación (lo hace Javier, con el usuario admin)
+
+1. ✍️ **Configuración v1.** En Administración → Motor de IA: proveedor `openai` en solo lectura, uno de los modelos de `IA_MODELO`, prompt `v1`, **sin capacidades**, precios vigentes copiados de la página de OpenAI, topes por defecto y **al menos un término privado: el nombre de la empresa**. Un modelo fuera de `IA_MODELO` se rechaza. Intentar encender la capacidad **sin evaluación** se rechaza con el motivo; intentar encenderla **sin término privado** se rechaza con «Antes de encender la IA, agrega…».
+2. ✍️ **Evaluación (backtest).** «Nueva evaluación» con ese modelo y `v1`; revisar la **estimación de costo** con los precios cargados y confirmar solo si Javier la acepta. Ver «preparando…», el progreso y el informe: error del método, de la regla de tendencia y de la IA, rival, mejora, intervalo, GM ganados, resultado por género, natural, estabilidad, cobertura, veredicto, costo real frente al estimado e intento n.º. Repetir con otros modelos candidatos si Javier quiere comparar; se queda el más barato que gane.
+3. **Si no gana:** la IA queda apagada, el informe se guarda y **el hito termina aquí** (criterio cumplido: «no se enciende sin ganar»). **Si gana:** ✍️ guardar la versión 2 con esa evaluación y la capacidad `distribucion_y1`.
+4. **Verificación de privacidad.** En Administración → Uso, abrir «Ver entrada» de una llamada de la evaluación: **los nombres de marca y de tienda aparecen como alias, no hay ningún año real ni el nombre de la empresa**. Anotar lo que se vea; cualquier nombre real de marca, tienda o empresa es **bloqueante**.
+
+### L4. Con la IA encendida (planner, cada ✍️ con autorización de Javier en ese paso)
+
+1. ✍️ **Generar.** «Generar propuesta IA» → estimación de costo → confirmar. Ver el avance por pasos (y «esperando al proveedor» si hay límite). Al terminar, la tabla de GM con meta, esfuerzo, filas forzadas y «2026 sin decidir». En Uso, la corrida con tokens (entrada, entrada en caché, salida), costo, proveedor, modelo, prompt y huellas.
+2. **Cuadre y lectura.** En un GM de HOMBRE con una fila decidida, comprobar con §5.1 que `Σ fijas + Σ IA con meta = Meta_GM`. Leer cinco razones (natural y reparto): ¿citan una cifra, tienen sentido y muestran los **nombres reales**, no alias? Un alias visible en pantalla es un hallazgo.
+3. ✍️ **Aceptar IA.** En Por línea, con «Ver IA», aceptar la cifra de una fila de 2027: queda decidida con el badge «IA» y sus meses salen de la curva. Las demás libres del GM no cambian la cifra que aceptaste.
+4. ✍️ **Fijar a mano y absorción.** Fijar otra fila del GM bastante por encima de su cifra IA: las libres se reajustan, «Absorbido» lo muestra, el GM pasa a «meta movida» desde el 5 % y las filas avisan desde el 10 %. Con la pantalla abierta en otra pestaña sin refrescar, intentar «Aceptar IA» en una libre da «la cifra IA cambió»; aceptar la nueva.
+5. ✍️ **2026 primero.** Decidir el 2026 de una fila libre del GM y ver cómo cambia la meta; «Volver a la propuesta» en la fila aceptada quita el badge.
+6. **Desactualización.** Tras aprobar una curva o publicar un mes y recalcular, los GM afectados quedan «desactualizada: la historia cambió» y «Aceptar IA» se deshabilita; «Regenerar» ese GM lo deja al día. Recalcular sin cambiar nada deja todo «al día» y la siguiente corrida **reusa sin llamar** al proveedor.
+7. **Matriz.** El desvío frente a la meta refleja lo aceptado y lo fijado a mano; el Excel coincide.
+8. **Cerrar y M8.** Cerrar (o dejarlo descrito) exige decidir las filas libres como siempre y **no pide nada de la IA**; la cerrada no cambia al regenerar; M8 da las mismas cifras. **Cowork no pulsa Cerrar.**
+
+Además, en cada paso de L: la versión del pie del menú es **0.15.0 · M7** o posterior y no hay errores en la consola del navegador. **Validación de negocio (Javier):** las razones de la IA y su reparto le sirven para decidir más rápido y mejor que con el reparto parejo; Cowork solo recoge lo que dicte. **Cowork no usa el usuario admin, no genera ni evalúa sin autorización, no cierra proyecciones y no escribe datos fuera de los pasos ✍️.**
 
 ## Informe (al terminar cualquier sección)
 

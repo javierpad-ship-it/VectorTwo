@@ -1225,7 +1225,7 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 **Decisión.** `0.15.0 · M7` trae solo la **distribución de la meta de 2027** entre las filas libres del GM (proyección natural sin conocer la meta, reparto, brecha, cuadre en la Matriz, evaluación y administración; migración `0030`). Las sublíneas y el cierre del año en curso por la IA quedan para `0.15.1`, con su diseño conservado en la ficha. Una llamada al proveedor por petición, conducida por el navegador, con candado por GM y registro transaccional.
 
-**Por qué.** Javier decidió (decisión 2 de la revisión de la ficha) empezar solo por la distribución y construir lo demás después de recorrer el hito de `0.15.0`. Una llamada por petición evita que un reintento del navegador duplique el gasto o deje una propuesta a medias. La ficha `07e` está lista y revisada; **no se ha construido**.
+**Por qué.** Javier decidió (decisión 2 de la revisión de la ficha) empezar solo por la distribución y construir lo demás después de recorrer el hito de `0.15.0`. Una llamada por petición evita que un reintento del navegador duplique el gasto o deje una propuesta a medias. La ficha `07e` estaba lista y revisada. *Actualización 2026-10-31: construida en `0.15.0 · M7` con la IA apagada (decisiones 75 a 80).*
 
 **Descartado.** Entregar todo junto; procesar un GM entero en una sola petición.
 
@@ -1236,3 +1236,51 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** La interfaz `ProveedorIA` ya era independiente del SDK, así que cambiar de proveedor solo cambia el adaptador. La exactitud de la meta sigue garantizada por el código y la IA solo propone pesos.
 
 **Descartado.** Esperar la API de Claude; cablear ids de modelo o precios de un proveedor en el código.
+
+## 2026-10-31 · M7 (07e): dentro de un género × mundo la IA puede repartir la meta distinto por fila (decisión 75, matiza la 07c del 2026-10-16)
+
+**Decisión.** El método estadístico sigue haciendo crecer a todas las filas de un GM el mismo %. La IA puede proponer crecimientos distintos por fila, siempre que las filas libres sumen exactamente la meta del GM (`Σ propuesta del método`, o su fórmula para las filas con % propio). En el Resto, cada GM recibe su meta con el % del Resto y la IA reparte **dentro** de cada GM, nunca entre GM del Resto. Aperturas, cierres y tiendas abiertas durante 2026 quedan fuera de la meta. Se recomienda decidir el 2026 antes que el 2027, porque cada decisión de 2026 mueve la meta.
+
+**Por qué.** Javier aprobó un % por GM y un % único para el Resto; mover esfuerzo entre GM del Resto sería decidir algo que nadie aprobó. Dentro del GM, el reparto parejo es lo que la IA debe mejorar: si no lo hace, el backtest no la enciende.
+
+**Descartado.** Repartir también entre GM del Resto; que la IA toque tiendas nuevas y cierres (tienen su método en 07d).
+
+## 2026-10-31 · M7 (07e): el natural se pide sin la meta y los meses nunca salen de la IA (decisión 76)
+
+**Decisión.** Por GM, primero va una llamada **natural** sin la meta, sin `g` y sin la propuesta del método (que es la meta encubierta), y después una de **reparto** con la meta y los naturales ya devueltos. El modelo devuelve pesos, no cifras finales: el código los normaliza al leer con la meta y las fijas de hoy (peso nulo toma la cifra del método). Los meses de una cifra aceptada salen siempre de `curvaFila × φ`.
+
+**Por qué.** Si el modelo ve la meta al estimar el natural, se ancla hacia ella y la brecha se ve más chica de lo que es (bloqueante B3 de la revisión; QA encontró después una fuga por `g` en la cola larga y se corrigió). Un modelo no suma con exactitud ni conoce decisiones posteriores; una sola fuente de estacionalidad conserva la regla de 06e.
+
+**Descartado.** Un solo paso con la meta a la vista; guardar cifras ya normalizadas; que la IA proponga meses.
+
+## 2026-10-31 · M7 (07e): el adaptador de OpenAI usa `fetch` directo, sin SDK (decisión 77)
+
+**Decisión.** `proveedor-openai.ts` habla con la API por `fetch`, sin dependencia nueva. La salida es JSON Schema estricto validada otra vez con zod. El servicio no envía temperatura ni semilla hasta saber qué admite cada modelo; la reproducibilidad descansa en guardar la entrada y la salida validada, y el backtest mide la estabilidad.
+
+**Por qué.** La última versión del SDK oficial exige Node 22 o más y el proyecto declara 20; con `fetch` no se añade nada y el adaptador se prueba con un `fetch` falso, sin red. Un parámetro no admitido por un modelo daría `400` en toda una corrida.
+
+**Descartado.** El SDK oficial; fijar temperatura o semilla sin verificar el modelo.
+
+## 2026-10-31 · M7 (07e): no se enciende la IA sin un término privado propio (decisión 78)
+
+**Decisión.** Guardar una configuración con alguna capacidad encendida exige al menos un término privado (`terminos_extra_requeridos`): el nombre de la empresa y siglas internas. Los términos que nunca salen al proveedor son, además, las marcas (nombre y código), las tiendas (nombre, código, razón social y zona) y esos términos extra, y se reemplazan por alias. Se arman al ejecutar; nunca viven en el repo.
+
+**Por qué.** El nombre de la empresa no está en ninguna tabla de marcas o tiendas, así que sin un término propio nada lo detendría. La auditoría de seguridad pidió además ampliar la lista a la razón social, la zona y los códigos de marca, que también podían aparecer dentro de los nombres que sí salen.
+
+**Descartado.** Dejar los términos extra como opcionales con una recomendación; un alias difuso (marcas concatenadas, homoglifos), diferido a `0.15.1`.
+
+## 2026-10-31 · M7 (07e): los topes de gasto son blandos pero no se rebasan en paralelo (decisión 79)
+
+**Decisión.** Los topes de la app (por corrida, por mes, por usuario y día, por evaluación) se comprueban **dentro del semáforo** de llamadas, justo antes de cada una, con una sola llamada al proveedor en vuelo por corrida y una cota superior. Un GM que acumula 12 llamadas fallidas entre reinicios queda fallido y no se reinicia más. El tope mensual de la app es blando: el duro es el límite de gasto del proyecto en la cuenta de OpenAI (Javier averigua si corta o solo avisa).
+
+**Por qué.** La auditoría mostró que varias llamadas en paralelo podían pasar la comprobación a la vez y rebasar un tope. Con una llamada en vuelo, el desborde máximo es el de una llamada. Un «Reintentar» infinito sobre un GM que siempre falla gasta dinero sin avanzar.
+
+**Descartado.** Comprobar el tope antes de encolar la llamada; confiar solo en el límite de la cuenta del proveedor.
+
+## 2026-10-31 · M7 (07e): qué queda para `0.15.1` y por qué no bloquea (decisión 80)
+
+**Decisión.** Quedan para `0.15.1`, además de las sublíneas y el cierre del año por IA: la defensa en profundidad en SQL de `registrar_propuesta_ia_gm` (que el reuso exija misma proyección y misma terna proveedor, modelo y prompt; hoy lo asegura la aplicación), el alias difuso del control final, el tope diario de las evaluaciones, tratar el `403` del proveedor como clave inválida solo 10 minutos, la columna de 2025 real y «Ver entrada» dentro de la pestaña, y neutralizar fórmulas si algún día se exporta a CSV. También queda anotado que `list_migrations` de Vector2 está vacío porque las migraciones se aplican con `execute_sql`.
+
+**Por qué.** Ninguno bloquea el hito: con la IA apagada o sin una evaluación ganadora no se ejecuta nada de esto, y la propia aplicación cubre hoy lo que el SQL no. Cerrarlos antes del hito retrasaría que Javier vea la primera propuesta; los de gasto y privacidad que sí importaban se corrigieron en `0.15.0` (decisiones 78 y 79).
+
+**Descartado.** Retener `0.15.0` hasta cerrarlos; meter las sublíneas en esta entrega (decisión 73).

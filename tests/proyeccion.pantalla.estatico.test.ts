@@ -138,8 +138,8 @@ describe("estructura de la pantalla /planificacion/proyeccion", () => {
     expect(fuente(`${DIR}cerrar-modal.tsx`)).toContain("CODIGOS_CIERRE_BLOQUEADO_NINO");
   });
 
-  it("la versión vigente es 0.14.0 · M6", () => {
-    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.14.0 · M6"');
+  it("la versión vigente es 0.15.0 · M7", () => {
+    expect(fuente("src/lib/version.ts")).toContain('APP_VERSION = "0.15.0 · M7"');
   });
 });
 

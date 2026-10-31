@@ -1,11 +1,11 @@
 # 07e · Propuesta de la IA por línea: proyección natural y reparto de la meta del género × mundo
 
-> Estado: **ficha lista; en construcción** (la `0030` está aplicada en Vector2 y la lógica pura de la tanda 1 está en `src/lib/ia/`). Especificada el 2026-10-30, ajustada el mismo día tras la revisión independiente (`arquitecto-revisor`, opus) y las decisiones de Javier (§9), y **ajustada el 2026-10-31 por el cambio de proveedor (decisión 74 de DECISIONES): el primer proveedor es OpenAI y Claude queda como adaptador futuro** (resumen, puntos a verificar y ajustes de código en §11); pendiente de la aprobación final de Javier. Idea de Javier: el crecimiento por género × mundo (GM) que aprueba en Curvas es una **meta**, y son demasiadas filas (≈ 1 606 GML × agrupación de marca con venta en 24 meses) para analizarlas a mano. Quiere que un motor de IA (primero OpenAI; decisión 74) haga la **primera propuesta** de cada fila, con su motivo, y que el planner la revise. Amplía M7 ([07](07-proyeccion-anual.md), [07b](07b-apertura-en-la-linea.md), [07c](07c-crecimientos-por-genero-mundo.md)) sobre el **método 5** de [06e](06e-cierre-del-anio-y-base-sin-nino.md) y la meta global y versionada de [06d](06d-curva-y-crecimiento-por-genero-mundo.md). De [12](12-analisis-marcas-barrer.md) reutiliza la métrica de error de un reparto (`eatPp`, en puntos) y la idea de un backtest que dice si un reparto merece confianza.
+> Estado: **construida (`0.15.0 · M7`, 2026-10-31), con la IA apagada; falta el hito con Javier** (sección L de `docs/pruebas/cowork-checklist.md`). La `0030` está aplicada en Vector2 y lo construido (servicio, adaptador de OpenAI, rutas, pantallas y la integración en M7) está descrito en §12, con los cambios respecto a lo especificado. Las secciones 1 a 11 conservan la especificación tal como se revisó; donde lo construido se aparta, manda §12. Especificada el 2026-10-30, ajustada el mismo día tras la revisión independiente (`arquitecto-revisor`, opus) y las decisiones de Javier (§9), y **ajustada el 2026-10-31 por el cambio de proveedor (decisión 74 de DECISIONES): el primer proveedor es OpenAI y Claude queda como adaptador futuro** (resumen, puntos a verificar y ajustes de código en §11); aprobada para construir. Idea de Javier: el crecimiento por género × mundo (GM) que aprueba en Curvas es una **meta**, y son demasiadas filas (≈ 1 606 GML × agrupación de marca con venta en 24 meses) para analizarlas a mano. Quiere que un motor de IA (primero OpenAI; decisión 74) haga la **primera propuesta** de cada fila, con su motivo, y que el planner la revise. Amplía M7 ([07](07-proyeccion-anual.md), [07b](07b-apertura-en-la-linea.md), [07c](07c-crecimientos-por-genero-mundo.md)) sobre el **método 5** de [06e](06e-cierre-del-anio-y-base-sin-nino.md) y la meta global y versionada de [06d](06d-curva-y-crecimiento-por-genero-mundo.md). De [12](12-analisis-marcas-barrer.md) reutiliza la métrica de error de un reparto (`eatPp`, en puntos) y la idea de un backtest que dice si un reparto merece confianza.
 >
 > - **Alcance en dos entregas (decisión 2 de Javier).**
 >   - **Primera entrega, `0.15.0 · M7`:** solo la **distribución de la meta de 2027** (`distribucion_y1`): proyección natural de cada fila **pedida sin la meta**, reparto de la meta del GM, brecha, cuadre en la Matriz, evaluación (backtest) y administración.
 >   - **Segunda entrega, `0.15.1 · M7`:** **sublíneas** (`sublineas`) y **cierre del año en curso por la IA** (`cierre_y`). Su diseño se conserva en §10, ya corregido (las participaciones son las de la FILA, no las del nodo). Se construye solo después del hito de `0.15.0`.
-> - **Versión y migración.** Commits `M7:`. Versión vigente en `src/lib/version.ts`: `0.14.0 · M6` (método 5, `VERSION_METODO = 5`, base corregida del Niño `B'`, `correccionMaterial`, factores confirmados; construida el 2026-10-30, migración `0029` aplicada en Vector2). **Esta ficha está en construcción:** la `0030` se aplicó el 2026-10-31 y la tanda 1 de lógica pura está en `src/lib/ia/` (con los ajustes de §11.3 pendientes). La `0026` es de `0.13.1 · M8` y la `0028` de M9a. Esta ficha usa **`0030_propuesta_ia.sql`**; la segunda entrega, la siguiente libre. Las versiones se asignan al cerrar (DECISIONES 2026-10-13): si otra entrega cierra antes, esta toma la siguiente libre. `docs/PLAN.md` ya está alineado (2026-10-30): `0.13.1` es de M8, `0.14.0` de M6 (hecha), `0.15.0` y `0.15.1` de esta ficha, y M9a toma la siguiente libre al cerrar.
+> - **Versión y migración.** Commits `M7:`. Versión vigente en `src/lib/version.ts`: **`0.15.0 · M7`** (esta ficha; antes `0.14.0 · M6`: método 5, `VERSION_METODO = 5`, base corregida del Niño `B'`, `correccionMaterial`, factores confirmados, migración `0029`). **Construida el 2026-10-31:** la `0030` se aplicó en Vector2 y los ajustes de §11.3 están hechos. La `0026` es de `0.13.1 · M8` y la `0028` de M9a. Esta ficha usa **`0030_propuesta_ia.sql`**; la segunda entrega, la siguiente libre. Las versiones se asignan al cerrar (DECISIONES 2026-10-13): si otra entrega cierra antes, esta toma la siguiente libre. `docs/PLAN.md` está alineado (2026-10-31): `0.13.1` es de M8, `0.14.0` de M6 (hecha), `0.15.0` de esta ficha (hecha) y `0.15.1` de su segunda entrega, y M9a toma la siguiente libre al cerrar.
 > - **Cifras reales.** Las midió el revisor el 2026-10-30 en Vector2 (solo `SELECT`), sobre la única proyección en trabajo, que todavía es de **método 3** (calculada el 16/10, datos hasta 2026-09, sin decisiones ni cierre). Son: 1 606 filas base con venta en 24 meses; 509 con ≥ 100 u en 12 meses (97,1 % del volumen); 690 por el criterio real (propuesta de 2027 ≥ 100 o `revision_cola_larga`; 290 de ellas por revisión); con el método 5 se esperan **600 a 700 filas libres**. Cola larga: ≈ 1 097 filas con el 2,9 % del volumen. 36 GM con venta y 29 con alguna fila libre. Los dos GM más grandes, MUJER · URBANO (96 filas libres por venta, 120 en la proyección) y HOMBRE · URBANO (51, 62), suman el 44 % de las unidades: **el modo jerárquico es el camino principal, no un caso borde**. Hay 0 nodos GMLE. Datos publicados: 45 meses (2023-01 a 2026-09). **La tanda 1 vuelve a medir con la proyección de método 5** (§6.1) y rehace el costo de §3.9.
 > - **Vector-One** no usa ningún proveedor de IA: no hay nada que citar.
 > - Cifras de los ejemplos sintéticas. Ninguna tienda ni marca real aparece en esta ficha ni en los fixtures.
@@ -1136,6 +1136,8 @@ Javier hace con TIC las acciones de §6.2 (clave dedicada, límite de gasto, ret
 
 ## 8. Propuestas para `docs/DECISIONES.md`
 
+**Registradas el 2026-10-31.** 1, 3 y 4 → decisión 70; 2 → decisiones 70 y 75; 5 → decisión 76; 6 → decisiones 72 y 76; 7 → decisiones 71 y 78; 8 → decisiones 74 y 79; 9 → alineación de `docs/PLAN.md`. Construido, además: el adaptador por `fetch` (decisión 77) y lo diferido a `0.15.1` (decisión 80). El texto de abajo es el de la propuesta original.
+
 1. **La IA es una fuente más de la cifra decidida, no la propuesta.** M7 conserva la propuesta del método; las filas libres se siguen decidiendo a mano para cerrar (regla 37) y solo la cola larga se cierra sola. La IA muestra natural, cifra con meta, absorbido y brecha con su razón; «Aceptar IA» es una decisión manual con traza (`decision_ia_fila_id`), una fila a la vez, con la cifra que el planner vio. M8 no cambia.
 2. **(Matiza 07c, 2026-10-16.)** Dentro de un GM, el método sigue haciendo crecer a todas las filas el mismo %. La IA puede proponer crecimientos distintos por fila, siempre que las libres sumen exactamente la meta del GM (`Σ propuesta del método`, o la fórmula para las filas con % propio). Fijas: decididas, con % propio y cola larga. Aperturas, cierres y tiendas abiertas durante 2026 quedan fuera de la meta. En el Resto, cada GM tiene su meta con el % del Resto.
 3. **La meta es solo de lo existente** (Javier, 2026-10-30): filas con base en 2026. Las líneas o marcas nuevas de 2027 se trabajan aparte.
@@ -1237,7 +1239,7 @@ TIC no entrega API de Claude; Javier tiene una de OpenAI. El esquema de la `0030
 | 12 | Límite de gasto del proyecto: ¿corta o solo avisa? (TIC) | §5.5.9, §6.2 | pendiente (TIC) |
 | 13 | SDK oficial o `fetch`: versión, compatibilidad con el runtime de este Next (`node_modules/next/dist/docs/`) y duración máxima de una ruta en Railway | §3.10, §3.8 | **Decidido: `fetch` directo, sin dependencia nueva (2026-10-31).** La última versión del SDK (`openai@7.47.0`, npm) declara `engines.node >= 22.0.0`, y este proyecto declara `>=20`; con `fetch` no se añade ninguna dependencia, el adaptador es fácil de probar con un `fetch` falso (sin red) y el alcance es el mismo. `AbortSignal.any` exige Node >= 20.3. **Duración de una ruta:** la documentación de Next de este repositorio (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/02-route-segment-config/maxDuration.md`) solo describe `export const maxDuration` como dato para las plataformas de despliegue; las rutas de paso y de preparar lo exportan (300 s). **Pendiente:** probar en Railway que una petición de hasta 240 s no se corta. |
 
-### 11.3 Ajustes al código ya escrito de la tanda 1 (tanda 1b)
+### 11.3 Ajustes al código ya escrito de la tanda 1 (tanda 1b) — aplicados (commit `M7: ajuste del motor de IA a OpenAI…`)
 
 - `src/lib/ia/tipos-api.ts`: `PreciosIa` y `UsoTokensIa` pasan a `{ entrada, entrada_cache, salida }`; `MotivoServicioIa` suma `sin_proveedor`, `proveedor_distinto` y `modelo_no_permitido`; `ServicioIaApi` suma `proveedor` y `modelos_permitidos`; `CorridaApi`, `GMIaResumenApi.propuesta` y `GMIaDetalleApi.anteriores` suman `proveedor`.
 - `src/lib/ia/costo.ts`: fórmula de tres términos; la estimación sin caché (fuera `cache_escritura`, `cache_lectura` y `sistema_en_cache`; el texto fijo cuenta como entrada en cada llamada).
@@ -1250,6 +1252,47 @@ TIC no entrega API de Claude; Javier tiene una de OpenAI. El esquema de la `0030
 ### 11.4 Lo que no cambia
 
 El modelo de datos de la `0030` (ya aplicada), la lógica de meta, absorción, validación, alias, entrada, estados y evaluación, los contratos con M7 y M8, el prompt `v1` y el perímetro de privacidad (D12).
+
+## 12. Lo que se construyó en `0.15.0` (2026-10-31)
+
+Está escrito para quien retome el módulo sin contexto: qué quedó, en qué se apartó de la especificación y qué falta.
+
+### 12.1 Estado por hito (§6.3)
+
+| Paso del hito | Estado |
+|---|---|
+| 13 (`lint`, `tsc`, `vitest`, `build`; `APP_VERSION = "0.15.0 · M7"`) | cumplido: 5 882 pruebas en 278 archivos. La `0030` está aplicada en Vector2; su prueba de humo (`scripts/humo-0030.sql`) es solo para una base local |
+| 1 a 12 (sin clave, configuración, evaluación, generar, cuadre, aceptar, absorción, 2026 primero, desactualización, cerrar, comprador) | **pendientes de Javier**, con la IA apagada primero; los pasos 2 a 12 dependen de la clave de OpenAI y de las acciones de §6.2. Probado solo con proveedor falso y fixtures sintéticos, nunca contra OpenAI ni con datos reales |
+
+### 12.2 Cambios respecto a la especificación
+
+Cada uno salió de QA o de seguridad durante la tanda 3; ninguno cambia el modelo de datos de la `0030`.
+
+| Qué dice la ficha | Qué quedó construido | Por qué |
+|---|---|---|
+| El bloque de la llamada natural lleva la cola larga con su resumen (§3.5) | La cola larga viaja como `{ filas, base_corregida }`: no depende del crecimiento `g` del GM | QA: el resumen anterior dejaba pasar `g`, es decir, la meta encubierta que D9 prohíbe |
+| `GET …/ia` es lectura (§3.1) | Se verificó y corrigió: ningún `GET` del módulo escribe | QA: el estado escribía datos |
+| `precios.entrada_cache` en `0` ≤ `entrada` (§2.1) | `0` se acepta como un precio válido, no como ausente | QA |
+| R34, aviso de que `modelo_respuesta` difiere del evaluado | El aviso es visible en la pantalla | QA |
+| El control de salida corre sobre lo enviado (§3.5, R11) | `controlFinal` corre **por cada llamada**, antes de enviar | QA |
+| Con la IA apagada la pestaña lo dice (§6.3 paso 1) | La carga con la IA apagada no falla ni pide datos al proveedor | QA |
+| Los topes se comprueban «antes de una llamada» y el navegador procesa hasta 2 GM a la vez (§3.8, §3.9) | La comprobación va **dentro del semáforo**; hay **una sola llamada al proveedor en vuelo por corrida** (`MAX_LLAMADAS_POR_CORRIDA = 1`) y una cota superior de gasto | Seguridad: en paralelo los topes eran rebasables. El navegador sigue conduciendo varios GM, pero el servidor los atiende de uno en uno por corrida |
+| Los errores de base se traducen (§2.11) | Los errores de Postgres con datos no llegan a los logs (R26) | Seguridad |
+| `terminos_extra` opcional; §6.2 pedía escribir uno (§2.1) | Los términos privados incluyen también la razón social, la zona y el código de marca, y **guardar una configuración con una capacidad encendida exige al menos un término propio** (`terminos_extra_requeridos`) | Seguridad: el nombre de la empresa no está en ninguna tabla |
+| Sin tope de reintentos por GM (§3.8) | Un GM con 12 llamadas fallidas entre reinicios queda `fallido` y no se reinicia (`MAX_FALLOS_POR_GM`) | Seguridad |
+| El candado dura 300 s y se toma al empezar el paso (§2.4) | Al salir de la cola de llamadas (puede haber esperado minutos) el candado se **renueva** solo si sigue siendo del mismo token; si venció y otro lo tomó, no se llama (`409 gm_en_proceso`) | Seguridad: un paso en cola podía llamar con el candado vencido |
+| Tabla de costo en US$ en el ensayo en seco (§3.9, §6.1) | **No se produjo**: no hay precios verificados. Los volúmenes en tokens de §3.9 siguen siendo estimaciones | La web de OpenAI no fue accesible (§11.2) |
+| SDK de OpenAI o `fetch` (§3.10) | `fetch` directo, sin dependencia nueva (§11.2 punto 13, decisión 77) | Node 20 frente a 22 del SDK |
+
+### 12.3 Lo que sigue pendiente
+
+- **Verificar en la documentación de OpenAI** los puntos de §11.2 marcados como pendientes (modelos con salida estructurada estricta, subconjunto de JSON Schema, parámetros por modelo, precios, límites y cabeceras de límite, caché de prompt, cobro del razonamiento, ids fijos y retiro de modelos, duración de una ruta en Railway) y anotar el resultado en esa tabla. Los puntos 11 y 12 (retención y límite de gasto) los responde TIC con Javier. **Hasta entonces la IA no se enciende.**
+- **Acciones de Javier fuera del código** (§6.2): clave dedicada, variables en Railway, límite de gasto, cuotas, retención y al menos un término privado. Los pasos están en el CHANGELOG de `0.15.0`.
+- **Diferido a `0.15.1`** (decisión 80): sublíneas y cierre del año por IA (§10); defensa en profundidad en SQL de `registrar_propuesta_ia_gm` (que el reuso exija misma proyección y misma terna proveedor, modelo y prompt; hoy lo asegura la aplicación); alias difuso en `controlFinal` (marcas concatenadas, homoglifos); tope diario en las evaluaciones; tratar un `403` del proveedor como clave inválida solo por 10 minutos; columna de 2025 real y «Ver entrada» y las llamadas dentro de la pestaña; neutralizar fórmulas si algún día se exporta a CSV; y que `list_migrations` de Vector2 está vacío (las migraciones se aplican con `execute_sql`).
+
+### 12.4 Preguntas abiertas resueltas al construir
+
+Se construyeron las recomendaciones: la condición «gana en la mayoría de los GM» se mantiene (1); `IA_MODELO` es una lista de modelos permitidos (2); `IA_PROVEEDOR` no tiene valor por defecto (3). La pregunta 4 (retención y límite de gasto) sigue abierta y bloquea el encendido.
 
 ## Preguntas abiertas
 
