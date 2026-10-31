@@ -1,8 +1,8 @@
 import type { UsoTokensIa } from "./tipos-api";
 
 /**
- * Interfaz del proveedor de IA (ficha 07e, §3 y §3.8): tipos de petición y respuesta y errores tipados. SIN SDK: la implementación con
- * Anthropic vive en `proveedor-anthropic.ts` (tanda 2) y las pruebas usan `tests/ia.proveedor-falso.ts`. Nada de lo enviado ni lo recibido
+ * Interfaz del proveedor de IA (ficha 07e, §3 y §3.8): tipos de petición y respuesta y errores tipados. SIN SDK: el primer adaptador es
+ * OpenAI (`proveedor-openai.ts`, tanda 2); Claude quedaría como adaptador futuro y las pruebas usan `tests/ia.proveedor-falso.ts`. Nada de lo enviado ni lo recibido
  * va en los mensajes de error ni en los logs.
  */
 

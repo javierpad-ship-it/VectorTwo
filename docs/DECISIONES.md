@@ -1228,3 +1228,11 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 **Por qué.** Javier decidió (decisión 2 de la revisión de la ficha) empezar solo por la distribución y construir lo demás después de recorrer el hito de `0.15.0`. Una llamada por petición evita que un reintento del navegador duplique el gasto o deje una propuesta a medias. La ficha `07e` está lista y revisada; **no se ha construido**.
 
 **Descartado.** Entregar todo junto; procesar un GM entero en una sola petición.
+
+## 2026-10-31 · M7 (07e): el primer proveedor de IA es OpenAI; Claude queda como adaptador futuro (decisión 74)
+
+**Decisión.** El motor de IA arranca con **OpenAI**. El área de TIC no entrega una API de Claude y Javier dispone de una de OpenAI. El proveedor y el modelo se eligen por configuración (`IA_PROVEEDOR`, `IA_MODELO`), la clave vive solo como `OPENAI_API_KEY` en Railway y el esquema (`0030`) es neutral: `proveedor` y `modelo` son texto libre y los tokens tienen nombres neutros (`tokens_entrada`, `tokens_entrada_cache`, `tokens_salida`). El backtest de encendido queda atado a proveedor + modelo + versión del prompt, de modo que cambiar de proveedor exige una evaluación nueva.
+
+**Por qué.** La interfaz `ProveedorIA` ya era independiente del SDK, así que cambiar de proveedor solo cambia el adaptador. La exactitud de la meta sigue garantizada por el código y la IA solo propone pesos.
+
+**Descartado.** Esperar la API de Claude; cablear ids de modelo o precios de un proveedor en el código.
