@@ -4,8 +4,10 @@ import { Fragment, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatearNumero } from "@/lib/formato";
+import type { IaFilaApi } from "@/lib/ia/tipos-api";
 import type { AnioFilaApi, AvisoFila, FilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import { CeldaCrecimiento, CeldaDecision, type DecisionFila } from "./celda-decision";
+import { aceptarIaDe, CeldasIa, CeldasTotalIa, COLUMNAS_IA, EncabezadosIa, PorQueIa, textoPieIa, tieneExplicacionIa, totalesIa } from "./columnas-ia";
 import { Avisos, BotonEnlace, NUM } from "./comunes";
 import { basesDeLinea, esBruto, textoPieCrecimientoLinea } from "./crecimientos-vista";
 import {
@@ -84,6 +86,9 @@ export function TablaFilas({
   onVerTienda,
   onCsv,
   gmReaprobar,
+  verIa,
+  iaFilas,
+  onAceptarIa,
 }: {
   filas: readonly FilaApi[];
   lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio" | "filas_tienda">;
@@ -98,8 +103,21 @@ export function TablaFilas({
   onCsv: () => void;
   /** Nombres de los GM («HOMBRE · URBANO») cuya versión de antes de 0.14.0 hay que reaprobar para cerrar (`proyeccion.crecimientos_sin_aprobar.reaprobar`): su fila lleva el badge «reaprobar». */
   gmReaprobar?: readonly string[];
+  /**
+   * 07e (§4.2): con `verIa` la tabla gana «Natural IA», «IA con meta», «Absorbido» y «Brecha» entre la propuesta y la decisión de `Y+1`, y la celda de
+   * decisión ofrece «Aceptar IA». `iaFilas` es lo que dice la IA por `fila_id`; una fila sin cifras (o la lectura caída) muestra «—». Sin `verIa` la tabla es
+   * la de siempre.
+   */
+  verIa?: boolean;
+  iaFilas?: ReadonlyMap<string, IaFilaApi>;
+  /** «Aceptar IA» de una fila de `Y+1` con la cifra que se vio. */
+  onAceptarIa?: (fila: FilaApi, ia: IaFilaApi) => Promise<boolean>;
 }) {
   const y = anioEnCurso;
+  const conIa = verIa === true;
+  const colIa = conIa ? COLUMNAS_IA : 0;
+  const columnas = 11 + colIa;
+  const [porques, setPorques] = useState<ReadonlySet<string>>(new Set());
   const historicos = aniosHistoricos(y);
   const [abiertas, setAbiertas] = useState<ReadonlySet<string>>(new Set());
   const base = filas.filter((f) => f.tienda_id === null && f.activo);
@@ -125,6 +143,14 @@ export function TablaFilas({
       else sig.add(id);
       return sig;
     });
+  const alternarPorque = (id: string) =>
+    setPorques((prev) => {
+      const sig = new Set(prev);
+      if (sig.has(id)) sig.delete(id);
+      else sig.add(id);
+      return sig;
+    });
+  const totalIa = conIa && iaFilas ? totalesIa(base.flatMap((f) => iaFilas.get(f.id) ?? [])) : null;
 
   return (
     <div className="space-y-2">
@@ -154,13 +180,14 @@ export function TablaFilas({
                 Crec.
               </th>
               <th className={`${TH} text-right`}>{y + 1} propuesto</th>
+              {conIa && <EncabezadosIa y={y} />}
               <th className={`${TH} text-right`}>{y + 1} decidido</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-borde">
             {base.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-3 py-6 text-center text-tinta-suave">
+                <td colSpan={columnas} className="px-3 py-6 text-center text-tinta-suave">
                   La línea no tiene filas con venta en los últimos 24 meses.
                 </td>
               </tr>
@@ -171,6 +198,7 @@ export function TablaFilas({
               const avisos = avisosDeFila(f).filter((a) => AVISOS_EN_TABLA.has(a));
               const nombre = f.equivalencia ? `${f.equivalencia} · ${f.agrupacion_marca}` : f.agrupacion_marca;
               const seleccionada = filaSeleccionada === f.id;
+              const iaF = conIa ? iaFilas?.get(f.id) : undefined;
               return (
                 <Fragment key={f.id}>
                   <tr className={seleccionada ? "bg-marca-suave/60" : "hover:bg-fondo/60"}>
@@ -188,6 +216,11 @@ export function TablaFilas({
                         <button type="button" onClick={() => alternar(f.id)} aria-expanded={abiertas.has(f.id)} className="text-xs text-tinta-suave hover:text-tinta">
                           {abiertas.has(f.id) ? "▾ meses" : "▸ meses"}
                         </button>
+                        {tieneExplicacionIa(iaF) && (
+                          <button type="button" onClick={() => alternarPorque(f.id)} aria-expanded={porques.has(f.id)} title="Por qué la IA propone esta cifra" className="text-xs text-marca-oscura hover:underline">
+                            {porques.has(f.id) ? "▾ ¿por qué?" : "▸ ¿por qué?"}
+                          </button>
+                        )}
                       </div>
                     </td>
                     {historicos.map((h) => (
@@ -230,6 +263,7 @@ export function TablaFilas({
                       )}
                     </td>
                     <td className={`px-3 py-2 ${NUM}`}>{unidades(rS?.propuesto)}</td>
+                    {conIa && <CeldasIa ia={iaF} />}
                     <td className="px-3 py-2">
                       <CeldaDecision
                         key={`${f.id}-${y + 1}-${rS?.decidido}-${rS?.origen}`}
@@ -240,12 +274,20 @@ export function TablaFilas({
                         ocupado={ocupado}
                         etiqueta={`${nombre}, decidido ${y + 1}`}
                         onDecidir={(d) => onDecidir(f, y + 1, d)}
+                        aceptarIa={iaF && onAceptarIa ? aceptarIaDe(iaF, () => onAceptarIa(f, iaF)) : undefined}
                       />
                     </td>
                   </tr>
+                  {iaF && porques.has(f.id) && (
+                    <tr className="bg-marca-suave/30">
+                      <td colSpan={columnas} className="px-3 py-3">
+                        <PorQueIa ia={iaF} />
+                      </td>
+                    </tr>
+                  )}
                   {abiertas.has(f.id) && (
                     <tr className="bg-fondo/60">
-                      <td colSpan={11} className="px-3 py-3">
+                      <td colSpan={columnas} className="px-3 py-3">
                         <div className="grid gap-3 lg:grid-cols-2">
                           <MesesDeRegistro registro={rY} titulo={`${y} · real hasta el último mes cerrado, proyectado en cursiva`} />
                           <MesesDeRegistro registro={rS} titulo={`${y + 1} · proyectado con la curva vigente`} />
@@ -259,7 +301,7 @@ export function TablaFilas({
             {secciones.map((s) => (
               <Fragment key={s.clave}>
                 <tr className="bg-neutro-suave/60">
-                  <th colSpan={11} scope="colgroup" className="px-3 py-2 text-left text-xs font-normal">
+                  <th colSpan={columnas} scope="colgroup" className="px-3 py-2 text-left text-xs font-normal">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="font-semibold text-tinta">{tituloSeccionApertura(s)}</span>
                       <span className="text-tinta-suave">{textoTotalTienda(s.total_tienda)}</span>
@@ -275,7 +317,7 @@ export function TablaFilas({
                     return (
                       <tr key={`${s.clave}-${x.clave}`}>
                         <td className="px-3 py-2 pl-6 text-tinta-suave">{x.nombre}</td>
-                        <td colSpan={10} className="px-3 py-2 text-xs italic text-tinta-suave">
+                        <td colSpan={columnas - 1} className="px-3 py-2 text-xs italic text-tinta-suave">
                           Sin fila de apertura: el referente no vende esta agrupación.
                         </td>
                       </tr>
@@ -319,12 +361,13 @@ export function TablaFilas({
                           {sinDato(1)}
                           <td className={`px-3 py-2 ${NUM}`}>{unidades(r.propuesto)}</td>
                           <td className="px-3 py-2">{celda}</td>
-                          {sinDato(3)}
+                          {sinDato(3 + colIa)}
                         </>
                       ) : (
                         <>
                           {sinDato(8)}
                           <td className={`px-3 py-2 ${NUM}`}>{unidades(r.propuesto)}</td>
+                          {conIa && sinDato(colIa)}
                           <td className="px-3 py-2">{celda}</td>
                         </>
                       )}
@@ -366,6 +409,7 @@ export function TablaFilas({
                     )}
                   </td>
                   <td className={`px-3 py-2 ${NUM}`}>{unidades(tS.propuesto)}</td>
+                  {conIa && <CeldasTotalIa totales={totalIa} />}
                   <td className={`px-3 py-2 ${NUM}`}>
                     {unidades(tS.vigente)}
                     <span className="ml-1 font-sans text-xs font-normal text-tinta-suave">
@@ -380,14 +424,14 @@ export function TablaFilas({
                     <td className="px-3 py-2">Tiendas nuevas</td>
                     <td colSpan={6} />
                     <td className={`px-3 py-2 ${NUM}`}>{unidades(sumaApertura(lineas, y))}</td>
-                    <td colSpan={2} />
+                    <td colSpan={2 + colIa} />
                     <td className={`px-3 py-2 ${NUM}`}>{unidades(sumaApertura(lineas, y + 1))}</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2">Total línea</td>
                     <td colSpan={6} />
                     <td className={`px-3 py-2 ${NUM}`}>{unidades(totalLinea(lineas, y))}</td>
-                    <td colSpan={2} />
+                    <td colSpan={2 + colIa} />
                     <td className={`px-3 py-2 ${NUM}`}>{unidades(totalLinea(lineas, y + 1))}</td>
                   </tr>
                 </>
@@ -401,6 +445,7 @@ export function TablaFilas({
           Línea (mismas) {y + 1}: {pieCrecimiento}.
         </p>
       )}
+      {conIa && textoPieIa(totalIa) && <p className="text-xs text-tinta-suave">{textoPieIa(totalIa)}</p>}
     </div>
   );
 }

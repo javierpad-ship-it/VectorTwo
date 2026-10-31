@@ -13,7 +13,7 @@ export default async function ProyeccionPage() {
   // El panel lee el estado de la vista de la URL (proyección, pestaña, filtros, fila): useSearchParams pide Suspense.
   return (
     <Suspense fallback={<p className="py-10 text-center text-sm text-tinta-suave">Cargando…</p>}>
-      <ProyeccionPanel />
+      <ProyeccionPanel esAdmin={r.rol === "admin"} />
     </Suspense>
   );
 }

@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 const COLOR_Y_FORMA =
   "rounded-md border border-borde bg-superficie px-3 text-sm text-tinta placeholder:text-tinta-suave/70 focus:border-marca focus:outline-none focus:ring-2 focus:ring-marca/20 disabled:bg-neutro-suave";
@@ -46,4 +46,10 @@ export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInpu
 
 export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className={clasesControl(className)} {...props} />;
+}
+
+/** Área de texto de varias líneas; sin alto fijo (`h-10` no aplica), con la misma forma y color que `Input`. */
+export function Textarea({ className = "", rows = 3, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ancho = TRAE_ANCHO.test(className) ? "" : "w-full";
+  return <textarea rows={rows} className={[ancho, "py-2", COLOR_Y_FORMA, className].filter(Boolean).join(" ")} {...props} />;
 }

@@ -24,6 +24,9 @@ import { FormularioProyeccion } from "./formulario-proyeccion";
 import { LineaTab } from "./linea-tab";
 import { MatrizTab } from "./matriz-tab";
 import { MensualTab } from "./mensual-tab";
+import { PropuestaIaTab } from "./propuesta-ia-tab";
+import { claveGmValida } from "./propuesta-ia-vista";
+import type { DestinoLinea } from "./gm-ia-detalle";
 import { TiendasTab } from "./tiendas-tab";
 import { rutaProyeccion, useAccion, useLectura, useSondeo } from "./use-proyeccion";
 import { aplicarCambiosUrl, CLAVES_FILTRO, esPestana, leerFiltro, PESTANAS, puedeEditar, type FiltroVista, type Pestana } from "./vista";
@@ -42,13 +45,13 @@ function proyeccionPorDefecto(lista: readonly ProyeccionApi[]): ProyeccionApi | 
 
 /**
  * Pantalla /planificacion/proyeccion (M7). Proyección anual de unidades del año en curso y del siguiente, por GML ×
- * agrupación de marca. Seis pestañas en el orden de trabajo: Factores del Niño · Tiendas nuevas y cierres · Crecimientos
- * (resumen de solo lectura de los crecimientos aprobados, 06d) · Por línea (Parte 1) · Matriz (Parte 2) · Mensual (Parte 3, solo lectura). Todo el estado de la vista vive en la URL
+ * agrupación de marca. Siete pestañas en el orden de trabajo: Factores del Niño · Tiendas nuevas y cierres · Crecimientos
+ * (resumen de solo lectura de los crecimientos aprobados, 06d) · Propuesta IA (07e: la propuesta razonada de la IA por género × mundo) · Por línea (Parte 1) · Matriz (Parte 2) · Mensual (Parte 3, solo lectura). Todo el estado de la vista vive en la URL
  * (`?proyeccion=&pestana=&genero=&mundo=&linea=&temporada=&agrupacion_estacionalidad=&agrupacion_marca=&solo=&fila=&tienda=`):
  * recargar o compartir el enlace reabre la misma vista y cambiar de pestaña conserva el recorte. Admin y planner tienen las
  * mismas acciones; el comprador no entra (menú y página). Nada se aprueba en bloque.
  */
-export function ProyeccionPanel() {
+export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {}) {
   const params = useSearchParams();
   const pathname = usePathname();
   const idUrl = idONulo(params.get("proyeccion"));
@@ -57,6 +60,9 @@ export function ProyeccionPanel() {
   const filtro = useMemo(() => leerFiltro(params), [params]);
   const filaId = idONulo(params.get("fila"));
   const tiendaId = idONulo(params.get("tienda"));
+  // 0.15.0 (07e): el GM abierto en «Propuesta IA» (`<genero_id>.<mundo_id>`).
+  const gmIaUrl = params.get("gm_ia");
+  const gmIa = claveGmValida(gmIaUrl) ? gmIaUrl : null;
 
   const estado = useLectura<RespuestaProyeccionApi>("/api/proyeccion");
   const lista = useMemo(() => estado.datos?.proyecciones ?? [], [estado.datos]);
@@ -105,7 +111,7 @@ export function ProyeccionPanel() {
   );
 
   function elegirProyeccion(id: string) {
-    cambiarUrl({ proyeccion: id, fila: null, tienda: null });
+    cambiarUrl({ proyeccion: id, fila: null, tienda: null, gm_ia: null });
   }
 
   function cambiarPestana(p: Pestana) {
@@ -129,6 +135,10 @@ export function ProyeccionPanel() {
 
   function irALinea(ids: NodoMatrizApi["ids"]) {
     cambiarUrl({ pestana: "linea", genero: ids.genero_id ?? null, mundo: ids.mundo_id ?? null, linea: ids.linea_id ?? null, fila: null, tienda: null });
+  }
+
+  function irALineaDeIa(d: DestinoLinea) {
+    cambiarUrl({ pestana: "linea", genero: d.genero_id, mundo: d.mundo_id, linea: d.linea_id, fila: d.fila_id, tienda: null });
   }
 
   function irATiendas() {
@@ -275,6 +285,19 @@ export function ProyeccionPanel() {
 
       {proyeccion && pestana === "crecimientos" && (
         <CrecimientosTab proyeccion={proyeccion} bloqueada={!editable} onCambio={recargarTodo} onRecalcular={recalcular} />
+      )}
+
+      {proyeccion && pestana === "ia" && (
+        <PropuestaIaTab
+          proyeccion={proyeccion}
+          indice={indice}
+          gmClave={gmIa}
+          esAdmin={esAdmin}
+          bloqueada={!editable}
+          onGm={(clave) => cambiarUrl({ gm_ia: clave })}
+          onIrALinea={irALineaDeIa}
+          onIrAFactores={() => cambiarPestana("factores")}
+        />
       )}
 
       {proyeccion && pestana === "linea" && (

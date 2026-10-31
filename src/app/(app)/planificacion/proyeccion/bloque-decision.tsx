@@ -7,6 +7,7 @@ import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
 import { textoPropuestaCambio } from "./celda-decision";
+import { BadgeDecisionIa, BotonAceptarIa, textoDecisionIa, type AceptarIa } from "./columnas-ia";
 import { Avisos, NUM } from "./comunes";
 import { ayudaCrecimientoFila, equivalenteDeCrecimiento, textoEquivalente, textosDetalleCrecimiento } from "./crecimientos-vista";
 import { ETIQUETA_METODO, formatearAvance, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida, nombreMes, textoFactoresMes, unidades } from "./vista";
@@ -67,6 +68,7 @@ export function BloqueDecision({
   factoresMes,
   onDecidir,
   onAplicarCurva,
+  aceptarIa,
 }: {
   registro: AnioFilaApi | undefined;
   anio: number;
@@ -76,6 +78,8 @@ export function BloqueDecision({
   factoresMes: readonly number[] | null | undefined;
   onDecidir: (d: DecisionFila) => Promise<boolean>;
   onAplicarCurva: (registroId: string) => Promise<boolean>;
+  /** 07e: «Aceptar IA (cifra)» entre los botones; solo en `Y+1`, con la propuesta de la IA a la vista y la fila sin decidir. */
+  aceptarIa?: AceptarIa;
 }) {
   const [texto, setTexto] = useState(registro?.decidido === null || registro?.decidido === undefined ? "" : String(registro.decidido));
   const [nota, setNota] = useState(registro?.nota ?? "");
@@ -194,6 +198,14 @@ export function BloqueDecision({
         </p>
       )}
       {cambio && <p className="text-xs text-alerta">{cambio}</p>}
+      {decidida && registro.decision_ia && (
+        <p className="flex flex-wrap items-center gap-2 rounded-md border border-marca/30 bg-marca-suave px-3 py-2 text-sm text-marca-oscura">
+          <BadgeDecisionIa decision={registro.decision_ia} />
+          <span>
+            La cifra decidida salió de la IA: {textoDecisionIa(registro.decision_ia)}. «Volver a la propuesta» la quita y deja la propuesta del método.
+          </span>
+        </p>
+      )}
       <Avisos avisos={registro.avisos} />
 
       {hayCurvaNueva && (
@@ -258,6 +270,7 @@ export function BloqueDecision({
             <Button variante="secundario" tamano="sm" disabled={deshabilitada} onClick={() => void guardar()}>
               Guardar esta cifra
             </Button>
+            {aceptarIa && !decidida && <BotonAceptarIa aceptar={aceptarIa} deshabilitada={deshabilitada} etiqueta={`${anio}`} />}
             {decidida && (
               <Button variante="fantasma" tamano="sm" disabled={deshabilitada} onClick={() => void onDecidir({ decidido: null, origen: "manual" })}>
                 Volver a la propuesta

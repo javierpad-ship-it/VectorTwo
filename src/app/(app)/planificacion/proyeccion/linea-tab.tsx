@@ -8,15 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input } from "@/components/ui/form";
+import { Switch } from "@/components/ui/switch";
 import { formatearNumero, plural } from "@/lib/formato";
+import type { IaFilaApi } from "@/lib/ia/tipos-api";
 import type { FilaApi, FilaTiendaLineaApi, IndiceLineaApi, ProyeccionApi, RespuestaDecidirFilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
+import { textoAjusteMeta, textoCifraCambio } from "./columnas-ia";
 import { AlertaError, BadgeEstadoLinea, BotonEnlace, Cargando } from "./comunes";
 import { DetalleFila } from "./detalle-fila";
 import { SelectoresLinea } from "./filtros-vista";
 import { GraficoBarras } from "./grafico-barras";
 import { GraficoMarcas } from "./grafico-marcas";
 import { TablaFilas } from "./tabla-filas";
+import { aceptarIaFila, useIaFilas } from "./use-ia-filas";
 import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
 import {
   cabeceraCsvLinea,
@@ -32,6 +36,7 @@ import {
   resumenTiendasLinea,
   seccionesApertura,
   textoPruebaAnterior,
+  aplicarCambiosUrl,
   textoTotalTiendaTras,
   tiendasSinDecidirQueAlimentan,
   vecinas,
@@ -78,6 +83,9 @@ export function LineaTab({
   const accion = useAccion();
   const [aviso, setAviso] = useState<string | null>(null);
   const refDetalle = useRef<HTMLDivElement>(null);
+  // 07e: «Ver IA» (en la URL, `&ia=1`; apagado por defecto). Se lee una vez de la URL y se escribe con `replaceState`, como el resto de los filtros.
+  const [verIaPedido, setVerIaPedido] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("ia") === "1");
+  const [avisoIa, setAvisoIa] = useState<string | null>(null);
 
   const elegida = lineaElegida(indice, filtro);
   const visibles = useMemo(() => filtrarIndice(indice, filtro, q), [indice, filtro, q]);
@@ -86,6 +94,18 @@ export function LineaTab({
   const url = elegida ? `${ruta}/lineas?${filtroAQuery(filtro, ["genero", "mundo", "linea"]).toString()}` : null;
   const lineas = useLectura<RespuestaLineasApi>(url);
   const datos = lineas.datos;
+  // Lectura aparte de la IA (D15): sin propuesta vigente o con la IA apagada no trae filas y Por línea queda como siempre; si falla, un aviso que no bloquea.
+  const urlIa = elegida ? `${ruta}/ia/filas?${new URLSearchParams({ genero_id: elegida.genero_id, mundo_id: elegida.mundo_id, linea_id: elegida.linea_id }).toString()}` : null;
+  const iaFilas = useIaFilas(urlIa);
+  const hayIa = iaFilas.hay || iaFilas.error !== null;
+  const verIa = verIaPedido && hayIa;
+  const nombreGm = elegida ? `${elegida.genero} · ${elegida.mundo}` : "";
+
+  function cambiarVerIa(valor: boolean) {
+    setVerIaPedido(valor);
+    const q = aplicarCambiosUrl(window.location.search, { ia: valor ? "1" : null });
+    window.history.replaceState(null, "", q ? `${window.location.pathname}?${q}` : window.location.pathname);
+  }
 
   const barras = useMemo(() => (datos ? construirBarras({ anioEnCurso: y, lineas: datos, bloques: proyeccion.bloques }) : []), [datos, y, proyeccion.bloques]);
   const sinDecidir = datos ? tiendasSinDecidirQueAlimentan(datos, y) : [];
@@ -100,14 +120,37 @@ export function LineaTab({
   }, [filaId]);
 
   async function recargarTodo() {
-    await Promise.all([lineas.recargar(), onCambio()]);
+    // Al fijar una fila (IA o a mano) las demás libres del GM absorben la diferencia: las columnas de la IA se vuelven a pedir.
+    await Promise.all([lineas.recargar(), onCambio(), iaFilas.recargar()]);
+  }
+
+  /** «Aceptar IA» de una fila de Y+1 con la cifra que se vio. Con `409 ia_valor_cambio` no hay error rojo: se avisa de la cifra nueva y se releen las columnas. */
+  async function aceptarIa(fila: FilaApi, ia: IaFilaApi): Promise<boolean> {
+    setAviso(null);
+    setAvisoIa(null);
+    const r = await aceptarIaFila(accion, ruta, fila.id, y + 1, ia);
+    if (!r.ok) {
+      if (r.cambio) {
+        setAvisoIa(textoCifraCambio(r.valorActual));
+        await iaFilas.recargar();
+      }
+      return false;
+    }
+    await recargarTodo();
+    setAviso(`Aceptaste la cifra de la IA. ${textoAjusteMeta(nombreGm)}`);
+    return true;
   }
 
   async function decidir(fila: FilaApi, anio: number, cuerpo: DecisionFila): Promise<boolean> {
     setAviso(null);
+    setAvisoIa(null);
     const r = await accion.ejecutar(() => api.put<RespuestaDecidirFilaApi>(`${ruta}/filas/${fila.id}/anios/${anio}`, cuerpo));
     if (!r.ok) return false;
     await recargarTodo();
+    if (verIa && anio === y + 1) {
+      const estado = iaFilas.porFila.get(fila.id)?.estado_meta;
+      if (estado === "libre" || estado === "fija_decidida") setAviso(textoAjusteMeta(nombreGm));
+    }
     // Una fila de apertura mueve el total de su tienda (D + Δ): se dice el total ya actualizado.
     if (fila.tienda_id !== null && r.valor.tienda) setAviso(textoTotalTiendaTras((fila as Partial<FilaTiendaLineaApi>).tienda_codigo ?? "La tienda", r.valor.tienda));
     return true;
@@ -199,6 +242,17 @@ export function LineaTab({
 
             {lineas.error && <AlertaError error={lineas.error} onCerrar={() => lineas.setError(null)} onRecargar={() => void lineas.recargar()} />}
             {accion.error && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} onRecargar={() => void recargarTodo()} />}
+            {iaFilas.error && (
+              <Alert tono="alerta" onCerrar={() => iaFilas.setError(null)}>
+                No se pudieron leer las columnas de la IA ({iaFilas.error}). Por línea sigue funcionando; las columnas muestran «—».{" "}
+                <BotonEnlace onClick={() => void iaFilas.recargar()}>Reintentar</BotonEnlace>
+              </Alert>
+            )}
+            {avisoIa && (
+              <Alert tono="alerta" onCerrar={() => setAvisoIa(null)}>
+                {avisoIa}
+              </Alert>
+            )}
             {aviso && (
               <Alert tono="exito" onCerrar={() => setAviso(null)}>
                 {aviso}
@@ -236,7 +290,11 @@ export function LineaTab({
                   <GraficoBarras barras={barras} anioEnCurso={y} />
                 </Card>
 
-                <Card titulo="Filas de la línea (GML × agrupación de marca)" descripcion="Escribe la cifra y pulsa Enter, o ✓ para aceptar la propuesta. Nada se aprueba en bloque.">
+                <Card
+                  titulo="Filas de la línea (GML × agrupación de marca)"
+                  descripcion="Escribe la cifra y pulsa Enter, o ✓ para aceptar la propuesta. Nada se aprueba en bloque."
+                  acciones={hayIa ? <Switch checked={verIa} onChange={cambiarVerIa} label="Ver IA" /> : undefined}
+                >
                   <TablaFilas
                     filas={datos.filas}
                     lineas={datos}
@@ -250,6 +308,9 @@ export function LineaTab({
                     onDecidir={decidir}
                     onCsv={descargarCsvLinea}
                     gmReaprobar={proyeccion.crecimientos_sin_aprobar?.reaprobar?.map((r) => r.nombre)}
+                    verIa={verIa}
+                    iaFilas={iaFilas.porFila}
+                    onAceptarIa={aceptarIa}
                   />
                   <div className="mt-3 space-y-0.5 text-xs text-tinta-suave">
                     {resumenTiendasLinea(datos, y).map((t) => (
@@ -283,7 +344,7 @@ export function LineaTab({
 
             {filaId && (
               <div ref={refDetalle}>
-                <DetalleFila proyeccion={proyeccion} filaId={filaId} nombresAgrupacion={nombresAgrupacion} bloqueada={bloqueada} onCerrar={() => onFila(null)} onCambio={recargarTodo} onRecalcular={onRecalcular} />
+                <DetalleFila proyeccion={proyeccion} filaId={filaId} nombresAgrupacion={nombresAgrupacion} bloqueada={bloqueada} onCerrar={() => onFila(null)} onCambio={recargarTodo} onRecalcular={onRecalcular} ia={verIa ? (iaFilas.porFila.get(filaId) ?? null) : null} onFilaIaFijada={() => setAviso(textoAjusteMeta(nombreGm))} />
               </div>
             )}
           </>

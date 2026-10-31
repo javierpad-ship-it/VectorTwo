@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
 import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
+import { BadgeDecisionIa, BotonAceptarIa, textoDecisionIa, type AceptarIa } from "./columnas-ia";
 import { ayudaCrecimientoFila, marcadorCrecimiento } from "./crecimientos-vista";
 import { filaFijada, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida } from "./vista";
 
@@ -37,6 +38,7 @@ export function CeldaDecision({
   etiqueta,
   filaDeTienda,
   notaCambio,
+  aceptarIa,
 }: {
   registro: AnioFilaApi | undefined;
   anio: number;
@@ -52,6 +54,8 @@ export function CeldaDecision({
   filaDeTienda?: boolean;
   /** Nota que se muestra junto al campo según lo escrito (`null` = ninguna); para la fila de apertura: «el total de la tienda pasa a X». */
   notaCambio?: (nueva: number | null) => string | null;
+  /** 07e: «Aceptar IA (cifra)» junto al ✓ del método; solo con las columnas IA a la vista y en una fila sin decidir. */
+  aceptarIa?: AceptarIa;
 }) {
   const [texto, setTexto] = useState(registro?.decidido === null || registro?.decidido === undefined ? "" : String(registro.decidido));
   const [motivo, setMotivo] = useState<string | null>(null);
@@ -125,9 +129,10 @@ export function CeldaDecision({
           </Button>
         ) : (
           <>
-            <span className="text-exito" title={`Decidido (${registro.origen === "manual" ? "cifra escrita" : "propuesta aceptada"})`} aria-label="Decidido">
+            <span className="text-exito" title={`Decidido (${registro.decision_ia ? `cifra aceptada de la IA: ${textoDecisionIa(registro.decision_ia)}` : registro.origen === "manual" ? "cifra escrita" : "propuesta aceptada"})`} aria-label="Decidido">
               ✓
             </span>
+            {registro.decision_ia && <BadgeDecisionIa decision={registro.decision_ia} />}
             <Button
               variante="fantasma"
               tamano="sm"
@@ -152,6 +157,7 @@ export function CeldaDecision({
           </span>
         )}
       </div>
+      {aceptarIa && !decidida && !filaDeTienda && <BotonAceptarIa aceptar={aceptarIa} deshabilitada={deshabilitada} etiqueta={etiqueta} />}
       {motivo && <span className="max-w-48 text-right text-xs text-alerta">{motivo}</span>}
       {!motivo && nota && <span className="max-w-56 text-right text-xs text-tinta-suave">{nota}</span>}
     </div>

@@ -91,7 +91,11 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Administración",
     roles: ["admin"],
-    links: [{ href: "/usuarios", label: "Usuarios" }],
+    links: [
+      { href: "/usuarios", label: "Usuarios" },
+      // M7 (07e): configuración, evaluaciones (backtest) y uso del motor de IA. Solo admin, como toda la sección.
+      { href: "/administracion/ia", label: "Motor de IA" },
+    ],
   },
 ];
 

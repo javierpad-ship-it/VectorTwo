@@ -8,14 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { MiniCurva } from "@/components/curvas/mini-curva";
 import { formatearDecimal, formatearNumero, plural } from "@/lib/formato";
+import type { IaFilaApi } from "@/lib/ia/tipos-api";
 import type { FilaDetalleApi, ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { BloqueDecision } from "./bloque-decision";
 import { filaConNino } from "./crecimientos-vista";
 import type { DecisionFila } from "./celda-decision";
+import { aceptarIaDe, BloquePropuestaIa, textoCifraCambio } from "./columnas-ia";
 import { AlertaError, Avisos, Cargando, NUM } from "./comunes";
 import { ColaLargaDetalle } from "./cola-larga";
 import { GraficoMensualFila } from "./grafico-mensual-fila";
 import { MesesDeRegistro } from "./tabla-filas";
+import { aceptarIaFila } from "./use-ia-filas";
 import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
 import {
   ETIQUETA_CLASE,
@@ -43,6 +46,8 @@ export function DetalleFila({
   onCerrar,
   onCambio,
   onRecalcular,
+  ia,
+  onFilaIaFijada,
 }: {
   proyeccion: ProyeccionApi;
   filaId: string;
@@ -51,12 +56,17 @@ export function DetalleFila({
   onCerrar: () => void;
   onCambio: () => Promise<void> | void;
   onRecalcular: () => void;
+  /** 07e: lo que la IA propuso para esta fila (`GET …/ia/filas`), solo con «Ver IA» encendido en Por línea; `null`/ausente = el detalle de siempre. */
+  ia?: IaFilaApi | null;
+  /** 07e: se llama tras fijar una fila libre de la IA (a mano o con «Aceptar IA»): Por línea avisa una vez que las demás filas del GM se ajustaron. */
+  onFilaIaFijada?: () => void;
 }) {
   const y = proyeccion.anio_en_curso;
   const ruta = `${rutaProyeccion(proyeccion.id)}/filas/${filaId}`;
   const fila = useLectura<FilaDetalleApi>(ruta);
   const accion = useAccion();
   const [verStock, setVerStock] = useState(false);
+  const [avisoIa, setAvisoIa] = useState<string | null>(null);
   const d = fila.datos;
 
   const series = useMemo(() => (d ? seriesMensualesDeFila(d, y) : []), [d, y]);
@@ -66,6 +76,23 @@ export function DetalleFila({
     const r = await accion.ejecutar(() => api.put(`${ruta}/anios/${anio}`, cuerpo));
     if (!r.ok) return false;
     await Promise.all([fila.recargar(), onCambio()]);
+    if (anio === y + 1 && ia?.estado_meta === "libre") onFilaIaFijada?.();
+    return true;
+  }
+
+  /** «Aceptar IA» de Y+1: envía la cifra vista; con `409 ia_valor_cambio` avisa de la cifra nueva y relee (el error de verdad lo muestra `accion.error`). */
+  async function aceptarIa(f: IaFilaApi): Promise<boolean> {
+    setAvisoIa(null);
+    const r = await aceptarIaFila(accion, rutaProyeccion(proyeccion.id), filaId, y + 1, f);
+    if (!r.ok) {
+      if (r.cambio) {
+        setAvisoIa(textoCifraCambio(r.valorActual));
+        await onCambio();
+      }
+      return false;
+    }
+    await Promise.all([fila.recargar(), onCambio()]);
+    onFilaIaFijada?.();
     return true;
   }
 
@@ -101,6 +128,11 @@ export function DetalleFila({
       <div className="space-y-5">
         {fila.error && <AlertaError error={fila.error} onCerrar={() => fila.setError(null)} onRecargar={() => void fila.recargar()} />}
         {accion.error && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} onRecargar={() => void Promise.all([fila.recargar(), onCambio()])} />}
+        {avisoIa && (
+          <Alert tono="alerta" onCerrar={() => setAvisoIa(null)}>
+            {avisoIa}
+          </Alert>
+        )}
         {!d && (fila.cargando ? <Cargando /> : null)}
         {d && (
           <>
@@ -213,6 +245,7 @@ export function DetalleFila({
                 <MesesDeRegistro registro={d.anios.find((a) => a.anio === y)} titulo={`${y} · real en gris, proyectado en cursiva`} />
               </div>
               <div className="space-y-3">
+                {ia && <BloquePropuestaIa ia={ia} anio={y + 1} />}
                 <BloqueDecision
                   key={`${y + 1}-${d.anios.find((a) => a.anio === y + 1)?.decidido}-${d.anios.find((a) => a.anio === y + 1)?.origen}-${d.anios.find((a) => a.anio === y + 1)?.nota}-${d.anios.find((a) => a.anio === y + 1)?.crecimiento_pct}`}
                   registro={d.anios.find((a) => a.anio === y + 1)}
@@ -223,6 +256,7 @@ export function DetalleFila({
                   factoresMes={d.factores_mes?.[y + 1]}
                   onDecidir={(c) => decidir(y + 1, c)}
                   onAplicarCurva={aplicarCurva}
+                  aceptarIa={ia ? aceptarIaDe(ia, () => aceptarIa(ia)) : undefined}
                 />
                 {factorCorrige && (
                   <p className="text-xs text-tinta-suave">

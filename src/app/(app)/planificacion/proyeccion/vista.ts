@@ -41,7 +41,7 @@ import {
 
 // ─── Pestañas y estado en la URL ───
 
-export type Pestana = "factores" | "tiendas" | "crecimientos" | "linea" | "matriz" | "mensual";
+export type Pestana = "factores" | "tiendas" | "crecimientos" | "ia" | "linea" | "matriz" | "mensual";
 
 /** En el orden de trabajo de la ficha: primero los factores, después las tiendas (alimentan la base de cada línea). */
 export const PESTANAS: readonly { id: Pestana; etiqueta: string }[] = [
@@ -49,6 +49,8 @@ export const PESTANAS: readonly { id: Pestana; etiqueta: string }[] = [
   { id: "tiendas", etiqueta: "Tiendas nuevas y cierres" },
   // 0.10.8 (07c): los crecimientos por género × mundo van entre las tiendas (mueven la base B) y las líneas (que ellos alimentan).
   { id: "crecimientos", etiqueta: "Crecimientos" },
+  // 0.15.0 (07e): la propuesta de la IA por género × mundo va entre los crecimientos (la meta) y las líneas (donde se decide). Solo admin y planner (la página ya excluye al comprador).
+  { id: "ia", etiqueta: "Propuesta IA" },
   { id: "linea", etiqueta: "Por línea" },
   { id: "matriz", etiqueta: "Matriz" },
   { id: "mensual", etiqueta: "Mensual" },

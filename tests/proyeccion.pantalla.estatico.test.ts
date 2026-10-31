@@ -76,9 +76,12 @@ describe("estructura de la pantalla /planificacion/proyeccion", () => {
     expect(usos).toMatch(/api\.post/);
     expect(usos).toMatch(/api\.put/);
     expect(usos).toMatch(/api\.patch/);
-    // Lo único que se lee con `api.get` es lo que cargan los hooks (`useLectura`), nunca una acción.
-    for (const f of archivos.filter((x) => x !== "use-proyeccion.ts")) expect(fuente(`${DIR}${f}`), f).not.toMatch(/api\.get/);
+    // Lo único que se lee con `api.get` es lo que cargan los hooks (`useLectura` y, desde 0.15.0, `useIaFilas`: la lectura aparte de la IA), nunca una acción.
+    // Las lecturas de la pestaña «Propuesta IA» (Frontend A) son GET sin efectos, igual que las de los hooks.
+    const conLecturas = new Set(["use-proyeccion.ts", "use-ia-filas.ts", "use-propuesta-ia.ts", "propuesta-ia-tab.tsx", "gm-ia-detalle.tsx", "generar-ia-modal.tsx"]);
+    for (const f of archivos.filter((x) => !conLecturas.has(x))) expect(fuente(`${DIR}${f}`), f).not.toMatch(/api\.get/);
     expect(fuente(`${DIR}use-proyeccion.ts`)).toMatch(/api\s*\.get</);
+    expect(fuente(`${DIR}use-ia-filas.ts`)).toMatch(/api\s*\n?\s*\.get</);
   });
 
   it("los números usan el formato compartido (es-PE, punto decimal): ni toFixed ni toLocaleString('es-ES')", () => {

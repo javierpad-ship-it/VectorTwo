@@ -105,8 +105,8 @@ import { bloques, colaLarga, detalleFila, diagnosticoInvierno, diagnosticoVerano
 const params = (q: string) => new URLSearchParams(q);
 
 describe("estado en la URL", () => {
-  it("las pestañas van en el orden de trabajo: factores, tiendas, crecimientos, por línea, matriz, mensual", () => {
-    expect(PESTANAS.map((p) => p.id)).toEqual(["factores", "tiendas", "crecimientos", "linea", "matriz", "mensual"]);
+  it("las pestañas van en el orden de trabajo: factores, tiendas, crecimientos, propuesta IA, por línea, matriz, mensual", () => {
+    expect(PESTANAS.map((p) => p.id)).toEqual(["factores", "tiendas", "crecimientos", "ia", "linea", "matriz", "mensual"]);
     expect(esPestana("matriz")).toBe(true);
     expect(esPestana("otra")).toBe(false);
     expect(esPestana(null)).toBe(false);

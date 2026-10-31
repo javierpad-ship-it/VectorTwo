@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { hojasMatriz } from "@/lib/proyeccion/excel";
-import type { IndiceLineaApi, NodoMatrizApi, ProyeccionApi, RespuestaMatrizApi } from "@/lib/proyeccion/tipos-api";
+import type { IndiceLineaApi, MetaSiguienteApi, NodoMatrizApi, ProyeccionApi, RespuestaMatrizApi } from "@/lib/proyeccion/tipos-api";
+import { textoUPct } from "./columnas-ia";
 import { AlertaError, BadgeEstadoLinea, BotonEnlace, Cargando, NUM } from "./comunes";
 import { ComposicionBloques } from "./composicion-bloques";
 import { descargarLibro } from "./descarga-libro";
@@ -33,6 +34,63 @@ import {
 } from "./vista";
 
 const TH = "px-2 py-2 text-right font-medium";
+
+/** 07e §4.4: el desvío se pinta en alerta cuando pasa de ±1 % de la meta. */
+export const UMBRAL_DESVIO_META_PCT = 1;
+
+/** Título de la columna «Desvío frente a la meta» (§4.4). */
+export const TITULO_DESVIO_META = "Cuánto se apartan las cifras vigentes de 2027 (decididas o propuestas) de la meta aprobada. Es la garantía de la meta: cerrar no lo exige.";
+
+/** De dónde sale el % de la meta de un GM. */
+export const ETIQUETA_FUENTE_META: Record<MetaSiguienteApi["fuente"], string> = { gm: "GM aprobado", resto: "Resto aprobado", resto_provisional: "Resto provisional" };
+
+/** `+1,039 u (+4.0 %)`: lo vigente menos la meta. Pura. */
+export function textoDesvioMeta(m: Pick<MetaSiguienteApi, "desvio_u" | "desvio_pct">): string {
+  return textoUPct(m.desvio_u, m.desvio_pct);
+}
+
+/** ¿El desvío pasa de ±1 % de la meta? */
+export function desvioAlto(m: Pick<MetaSiguienteApi, "desvio_pct">): boolean {
+  return m.desvio_pct !== null && Math.abs(m.desvio_pct) > UMBRAL_DESVIO_META_PCT;
+}
+
+/**
+ * Las dos celdas de meta de un nodo. Solo el nodo del GM (mundo dentro de género) trae `meta_siguiente`: `null` = ese GM no tiene meta («—»);
+ * ausente = otro nivel (celda vacía).
+ */
+function CeldasMeta({ meta }: { meta: MetaSiguienteApi | null | undefined }) {
+  if (meta === undefined) {
+    return (
+      <>
+        <td className="px-2 py-2" />
+        <td className="px-2 py-2" />
+      </>
+    );
+  }
+  if (meta === null) {
+    return (
+      <>
+        <td className={`px-2 py-2 ${NUM} text-tinta-suave`} title="Este género · mundo no tiene meta aprobada">
+          —
+        </td>
+        <td className={`px-2 py-2 ${NUM} text-tinta-suave`}>—</td>
+      </>
+    );
+  }
+  return (
+    <>
+      <td className={`px-2 py-2 ${NUM}`} title={`Meta aprobada: Σ de lo que el método propondría con el % del ${ETIQUETA_FUENTE_META[meta.fuente]}`}>
+        {unidades(meta.meta_gm)}
+        {meta.fuente !== "gm" && (
+          <span className={`block font-sans text-[11px] font-normal ${meta.fuente === "resto_provisional" ? "text-alerta" : "text-tinta-suave"}`}>{ETIQUETA_FUENTE_META[meta.fuente]}</span>
+        )}
+      </td>
+      <td className={`px-2 py-2 ${NUM} ${desvioAlto(meta) ? "font-semibold text-alerta" : ""}`} title={TITULO_DESVIO_META}>
+        {textoDesvioMeta(meta)}
+      </td>
+    </>
+  );
+}
 
 /** Mapa `id → nombre` de lo que se puede filtrar, para que la hoja FILTROS diga «HOMBRE» y no un identificador. */
 export function nombresDeFiltro(indice: readonly IndiceLineaApi[], marcas: readonly OpcionCatalogo[], estacionalidad: readonly OpcionCatalogo[]): Record<string, string | null> {
@@ -195,6 +253,9 @@ export function TablaMatriz({
   const visibles = datos.nodos.filter((n) => nodoVisible(n, plegados));
   const conCierresY = hayCierres(datos.nodos, "en_curso");
   const conCierresS = hayCierres(datos.nodos, "siguiente");
+  // 07e: las columnas de la meta solo salen si algún GM la trae (en la vista por agrupación de marca no hay GM).
+  const conMeta = datos.nodos.some((n) => n.meta_siguiente !== undefined && n.meta_siguiente !== null);
+  const colMeta = conMeta ? 2 : 0;
   const bY = resumenBloquesAnio(proyeccion.bloques[y]);
   const bS = resumenBloquesAnio(proyeccion.bloques[y + 1]);
   const codigosY = (ts: { codigo: string }[]) => (ts.length === 0 ? "" : `(${ts.map((t) => t.codigo).join(", ")})`);
@@ -210,7 +271,7 @@ export function TablaMatriz({
                     <th colSpan={5 + (conCierresY ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
                       {y}
                     </th>
-                    <th colSpan={7 + (conCierresS ? 1 : 0)} className="border-l border-borde px-2 py-1 text-center font-medium">
+                    <th colSpan={7 + (conCierresS ? 1 : 0) + colMeta} className="border-l border-borde px-2 py-1 text-center font-medium">
                       {y + 1}
                     </th>
                     <th rowSpan={2} className="px-3 py-2 text-left font-medium">
@@ -248,12 +309,22 @@ export function TablaMatriz({
                     <th className={TH} title={titulos.real}>
                       Crec. sobre {y} real
                     </th>
+                    {conMeta && (
+                      <>
+                        <th className={TH} title="Meta aprobada de género · mundo: Σ de lo que el método propondría con el % aprobado">
+                          Meta {y + 1}
+                        </th>
+                        <th className={TH} title={TITULO_DESVIO_META}>
+                          Desvío frente a la meta
+                        </th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borde">
                   {visibles.length === 0 && (
                     <tr>
-                      <td colSpan={14 + (conCierresY ? 1 : 0) + (conCierresS ? 1 : 0)} className="px-3 py-6 text-center text-tinta-suave">
+                      <td colSpan={14 + (conCierresY ? 1 : 0) + (conCierresS ? 1 : 0) + colMeta} className="px-3 py-6 text-center text-tinta-suave">
                         Ninguna línea coincide con los filtros.
                       </td>
                     </tr>
@@ -299,6 +370,7 @@ export function TablaMatriz({
                         <td className={`px-2 py-2 ${NUM}`} title={titulos.real}>
                           {formatearPct(n.siguiente.crec_mismas_pct)}
                         </td>
+                        {conMeta && <CeldasMeta meta={n.meta_siguiente} />}
                         <td className="px-3 py-2">
                           <span className="inline-flex flex-wrap items-center gap-1.5">
                             <BadgeEstadoLinea estado={n.estado} />
@@ -316,6 +388,7 @@ export function TablaMatriz({
               </table>
             </div>
             <p className="mt-2 text-xs text-tinta-suave">{titulos.nota}</p>
+            {conMeta && <p className="mt-1 text-xs text-tinta-suave">Desvío frente a la meta ({y + 1}): {TITULO_DESVIO_META}</p>}
     </>
   );
 }

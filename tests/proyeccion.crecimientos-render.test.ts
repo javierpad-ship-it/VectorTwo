@@ -438,10 +438,11 @@ describe("Matriz (Parte 2): columnas «Crec. sobre 2026 corregido» y «Crec. so
 });
 
 describe("el resto de la pantalla (06d)", () => {
-  it("«Crecimientos» va entre «Tiendas nuevas y cierres» y «Por línea»", () => {
+  it("«Crecimientos» va entre «Tiendas nuevas y cierres» y «Propuesta IA» (que precede a «Por línea», 07e)", () => {
     const ids = PESTANAS.map((p) => p.id);
     expect(ids.indexOf("crecimientos")).toBe(ids.indexOf("tiendas") + 1);
-    expect(ids.indexOf("linea")).toBe(ids.indexOf("crecimientos") + 1);
+    expect(ids.indexOf("ia")).toBe(ids.indexOf("crecimientos") + 1);
+    expect(ids.indexOf("linea")).toBe(ids.indexOf("ia") + 1);
     expect(PESTANAS.find((p) => p.id === "crecimientos")?.etiqueta).toBe("Crecimientos");
   });
 });
