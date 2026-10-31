@@ -1,28 +1,31 @@
 import type { UsoTokensIa } from "./tipos-api";
 
 /**
- * Interfaz del proveedor de IA (ficha 07e, §3 y §3.8): tipos de petición y respuesta y errores tipados. SIN SDK: el primer adaptador es
- * OpenAI (`proveedor-openai.ts`, tanda 2); Claude quedaría como adaptador futuro y las pruebas usan `tests/ia.proveedor-falso.ts`. Nada de lo enviado ni lo recibido
- * va en los mensajes de error ni en los logs.
+ * Interfaz del proveedor de IA (ficha 07e, §3.8 y §3.11): tipos de petición y respuesta NEUTRALES y errores tipados. SIN SDK: el primer
+ * adaptador es OpenAI (`proveedor-openai.ts`, tanda 2) y las pruebas usan `tests/ia.proveedor-falso.ts`; Claude sería un adaptador futuro.
+ * La petición no lleva ningún campo de caché. Nada de lo enviado ni lo recibido va en los mensajes de error ni en los logs.
  */
 
-export type StopReasonIa = "end_turn" | "max_tokens" | "stop_sequence" | "tool_use" | "refusal" | "pause_turn" | "otro";
+/** Motivo de fin neutral (§3.11): el adaptador traduce el del proveedor. */
+export type FinIa = "normal" | "limite_salida" | "rechazo" | "otro";
 
 export type PeticionIa = {
   modelo: string;
-  /** Texto fijo del prompt (punto de caché 1). */
+  /** Texto fijo del prompt: va siempre primero (prefijo estable). */
   sistema: string;
-  /** JSON canónico del bloque del lote (punto de caché 2: idéntico en `natural` y `reparto`). */
+  /** JSON canónico del bloque del lote, después del texto fijo (idéntico en `natural` y `reparto`: prefijo estable). */
   bloque: string;
-  /** JSON canónico del sufijo de la tarea; va sin caché. */
+  /** JSON canónico del sufijo de la tarea; va al final. */
   sufijo: string;
   /** JSON Schema de la salida (subconjunto que admite el proveedor). */
   esquema: Record<string, unknown>;
   nombre_esquema: string;
   max_tokens: number;
-  /** `null` = la temperatura mínima que admita el modelo; con razonamiento extendido no se fija. */
+  /** `null` = la temperatura mínima que admita el modelo; con razonamiento no se fija. El adaptador omite lo que el modelo no admita. */
   temperatura: number | null;
-  /** Tokens de razonamiento extendido; 0 = sin. */
+  /** Semilla fija por corrida si el proveedor la admite; `null` = no se envía. No garantiza la misma salida (determinismo parcial). */
+  semilla: number | null;
+  /** Presupuesto de razonamiento; 0 = sin. El adaptador lo traduce a lo que admita el modelo. */
   presupuesto_razonamiento: number;
   timeout_ms: number;
   /** Reintento por salida inválida: errores resumidos SIN datos («faltan 3 filas»). */
@@ -32,8 +35,9 @@ export type PeticionIa = {
 export type RespuestaIa = {
   /** Lo que devolvió el modelo (el JSON de la salida estructurada). Se valida siempre con zod. */
   texto: string;
+  /** Tokens disjuntos: `entrada` sin la parte servida desde caché, `entrada_cache` y `salida` (con el razonamiento si se cobra como salida). */
   uso: UsoTokensIa;
-  stop_reason: StopReasonIa;
+  fin: FinIa;
   /** Id de la petición en el proveedor (soporte); nunca cabeceras. */
   id_solicitud: string | null;
   modelo_respuesta: string | null;
@@ -49,7 +53,7 @@ export type TipoErrorProveedor = "limite" | "servicio" | "tiempo_agotado" | "sol
 /** Error base del proveedor. El mensaje es genérico: nunca lleva la clave, cabeceras ni datos. */
 export class ErrorProveedorIa extends Error {
   readonly tipo: TipoErrorProveedor;
-  /** Código para `ia_llamadas.error_codigo`: `429`, `529`, `500`, `tiempo`, `400`, `401`. */
+  /** Código para `ia_llamadas.error_codigo`: `429`, `500`, `503`, `tiempo`, `400`, `401` (el código HTTP que corresponda). */
   readonly codigo: string;
   /** Lo que pidió el proveedor (`retry-after` o cabeceras de límite), en milisegundos. */
   readonly esperar_ms: number | null;
@@ -70,7 +74,7 @@ export class ErrorLimiteProveedor extends ErrorProveedorIa {
   }
 }
 
-/** `500`, `502`, `503`, `504`, `529` o error de red: hasta 3 intentos por paso. */
+/** `500`, `502`, `503`, `504`, sobrecarga del proveedor (el código que use) o error de red: hasta 3 intentos por paso. */
 export class ErrorServicioProveedor extends ErrorProveedorIa {
   constructor(codigo: string = "500", esperar_ms: number | null = null) {
     super("servicio", codigo, "El proveedor no respondió bien.", esperar_ms);

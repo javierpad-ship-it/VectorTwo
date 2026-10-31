@@ -27,7 +27,7 @@ describe("R32 · contenido de v1", () => {
   it("rol de analista de planeamiento sin nombrar la empresa ni ningún término prohibido", () => {
     expect(v1).toMatch(/analista de planeamiento/);
     expect(v1).toMatch(/tiendas de ropa en Perú/);
-    for (const prohibido of ["lukers", "vector", "marcax", "z901", "anthropic", "claude", "sunat", "http", "@"]) expect(v1.toLowerCase()).not.toContain(prohibido);
+    for (const prohibido of ["lukers", "vector", "marcax", "z901", "anthropic", "claude", "openai", "gpt", "sunat", "http", "@"]) expect(v1.toLowerCase()).not.toContain(prohibido);
   });
 
   it("ningún año real, ni uuid, ni fecha", () => {

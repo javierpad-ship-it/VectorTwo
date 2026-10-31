@@ -10,9 +10,9 @@ import {
   type PeticionIa,
 } from "@/lib/ia/proveedor";
 import { urlBloqueada } from "./setup-sin-red";
-import { claveInvalida401, error529, jsonInvalido, limite429, negativa, ProveedorFalso, tiempoAgotado, truncada, valida } from "./ia.proveedor-falso";
+import { claveInvalida401, jsonInvalido, limite429, negativa, ProveedorFalso, sobrecarga, tiempoAgotado, truncada, valida } from "./ia.proveedor-falso";
 
-/** Las pruebas nunca llaman a la red (ficha 07e, §5.7): `fetch` a `anthropic.com` lanza; el proveedor falso es la única salida. */
+/** Las pruebas nunca llaman a la red (ficha 07e, §5.7): `fetch` a `openai.com` o `anthropic.com` lanza; el proveedor falso es la única salida. */
 
 const peticion: PeticionIa = {
   modelo: "m",
@@ -23,13 +23,22 @@ const peticion: PeticionIa = {
   nombre_esquema: "x",
   max_tokens: 10,
   temperatura: null,
+  semilla: null,
   presupuesto_razonamiento: 0,
   timeout_ms: 1000,
 };
 
 describe("bloqueo de la red", () => {
-  it("un fetch a anthropic.com (con cualquier forma de la URL) lanza antes de salir", async () => {
-    for (const url of ["https://api.anthropic.com/v1/messages", "https://anthropic.com", "https://eu.api.anthropic.com/x"]) {
+  it("un fetch a openai.com o anthropic.com (con cualquier forma de la URL) lanza antes de salir", async () => {
+    const urls = [
+      "https://api.openai.com/v1/chat/completions",
+      "https://openai.com",
+      "https://eu.api.openai.com/x",
+      "https://api.anthropic.com/v1/messages",
+      "https://anthropic.com",
+      "https://eu.api.anthropic.com/x",
+    ];
+    for (const url of urls) {
       let error: unknown = null;
       try {
         await fetch(url, { method: "POST" });
@@ -37,8 +46,10 @@ describe("bloqueo de la red", () => {
         error = e;
       }
       expect(error, url).toBeInstanceOf(Error);
-      expect(String((error as Error).message)).toMatch(/anthropic\.com/);
+      expect(String((error as Error).message)).toMatch(/openai\.com/);
     }
+    await expect(Promise.resolve().then(() => fetch(new URL("https://api.openai.com/v1/responses")))).rejects.toThrow();
+    await expect(Promise.resolve().then(() => fetch(new Request("https://api.openai.com/v1/responses")))).rejects.toThrow();
     await expect(Promise.resolve().then(() => fetch(new URL("https://api.anthropic.com/v1/messages")))).rejects.toThrow();
     await expect(Promise.resolve().then(() => fetch(new Request("https://api.anthropic.com/v1/messages")))).rejects.toThrow();
   });
@@ -49,6 +60,10 @@ describe("bloqueo de la red", () => {
   });
 
   it("urlBloqueada reconoce el dominio y sus subdominios, no los parecidos", () => {
+    expect(urlBloqueada("https://api.openai.com/v1")).toBe(true);
+    expect(urlBloqueada("https://openai.com")).toBe(true);
+    expect(urlBloqueada("https://notopenai.com")).toBe(false);
+    expect(urlBloqueada("https://openai.com.evil.example")).toBe(false);
     expect(urlBloqueada("https://api.anthropic.com/v1")).toBe(true);
     expect(urlBloqueada("https://notanthropic.com")).toBe(false);
     expect(urlBloqueada("https://anthropic.com.evil.example")).toBe(false);
@@ -61,15 +76,15 @@ describe("proveedor falso", () => {
     const p = new ProveedorFalso([valida({ ok: 1 }), jsonInvalido(), truncada(), negativa()]);
     expect(JSON.parse((await p.llamar(peticion)).texto)).toEqual({ ok: 1 });
     expect((await p.llamar(peticion)).texto).toBe("{ esto no es json");
-    expect((await p.llamar(peticion)).stop_reason).toBe("max_tokens");
-    expect((await p.llamar(peticion)).stop_reason).toBe("refusal");
+    expect((await p.llamar(peticion)).fin).toBe("limite_salida");
+    expect((await p.llamar(peticion)).fin).toBe("rechazo");
     expect(p.llamadas).toBe(4);
     expect(p.peticiones).toHaveLength(4);
     await expect(p.llamar(peticion)).rejects.toThrow(/sin respuestas guionadas/);
   });
 
-  it("lanza los errores guionados: 429 con retry-after, 529, tiempo agotado y 401", async () => {
-    const p = new ProveedorFalso([limite429(2000), error529(), tiempoAgotado(), claveInvalida401()]);
+  it("lanza los errores guionados: 429 con retry-after, sobrecarga, tiempo agotado y 401", async () => {
+    const p = new ProveedorFalso([limite429(2000), sobrecarga(), tiempoAgotado(), claveInvalida401()]);
     const errores = [] as ErrorProveedorIa[];
     for (let i = 0; i < 4; i++) {
       try {
@@ -78,7 +93,7 @@ describe("proveedor falso", () => {
         errores.push(e as ErrorProveedorIa);
       }
     }
-    expect(errores.map((e) => [e.tipo, e.codigo, e.esperar_ms])).toEqual([["limite", "429", 2000], ["servicio", "529", null], ["tiempo_agotado", "tiempo", null], ["clave_invalida", "401", null]]);
+    expect(errores.map((e) => [e.tipo, e.codigo, e.esperar_ms])).toEqual([["limite", "429", 2000], ["servicio", "503", null], ["tiempo_agotado", "tiempo", null], ["clave_invalida", "401", null]]);
     expect(p.llamadas).toBe(4);
   });
 });

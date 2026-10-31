@@ -3,17 +3,17 @@ import type { UsoTokensIa } from "@/lib/ia/tipos-api";
 
 /**
  * Proveedor falso para las pruebas (ficha 07e, §5.7): implementa `ProveedorIA` con respuestas guionadas, cuenta las llamadas y guarda las
- * peticiones recibidas. Nunca toca la red.
+ * peticiones recibidas. Nunca toca la red. Habla el vocabulario neutral de §3.11: uso `{ entrada, entrada_cache, salida }` y `fin`.
  */
 
 export type RespuestaGuionada = RespuestaIa | Error;
 
-export const USO_BASE: UsoTokensIa = { entrada: 4200, salida: 1900, cache_escritura: 0, cache_lectura: 5400 };
+export const USO_BASE: UsoTokensIa = { entrada: 4200, entrada_cache: 5400, salida: 1900 };
 
 export const respuesta = (texto: string, extra: Partial<RespuestaIa> = {}): RespuestaIa => ({
   texto,
   uso: USO_BASE,
-  stop_reason: "end_turn",
+  fin: "normal",
   id_solicitud: "req_falso",
   modelo_respuesta: "modelo-falso",
   duracion_ms: 10,
@@ -22,10 +22,11 @@ export const respuesta = (texto: string, extra: Partial<RespuestaIa> = {}): Resp
 
 export const valida = (salida: unknown, extra: Partial<RespuestaIa> = {}): RespuestaIa => respuesta(JSON.stringify(salida), extra);
 export const jsonInvalido = (): RespuestaIa => respuesta("{ esto no es json");
-export const truncada = (): RespuestaIa => respuesta('{"version_salida":2,"filas":[', { stop_reason: "max_tokens" });
-export const negativa = (): RespuestaIa => respuesta("", { stop_reason: "refusal" });
+export const truncada = (): RespuestaIa => respuesta('{"version_salida":2,"filas":[', { fin: "limite_salida" });
+export const negativa = (): RespuestaIa => respuesta("", { fin: "rechazo" });
 export const limite429 = (esperar_ms: number | null = 1500): Error => new ErrorLimiteProveedor(esperar_ms);
-export const error529 = (): Error => new ErrorServicioProveedor("529");
+/** Sobrecarga del proveedor: el código HTTP lo decide el adaptador (por defecto `503`). */
+export const sobrecarga = (codigo = "503"): Error => new ErrorServicioProveedor(codigo);
 export const tiempoAgotado = (): Error => new ErrorTiempoAgotado();
 export const claveInvalida401 = (): Error => new ErrorClaveInvalida();
 

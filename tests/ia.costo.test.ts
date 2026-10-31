@@ -18,20 +18,25 @@ import { ProveedorFalso, USO_BASE, valida } from "./ia.proveedor-falso";
 
 /** R14 (ficha 07e, §3.9 y ejemplo G): costo de una llamada, estimación y topes. */
 
-const PRECIOS: PreciosIa = { entrada: 3, salida: 15, cache_escritura: 3.75, cache_lectura: 0.3 };
+/** Precios SINTÉTICOS (§5.6, ejemplo G): no son de ningún proveedor. */
+const PRECIOS: PreciosIa = { entrada: 2, entrada_cache: 0.5, salida: 8 };
 
 describe("R14 · ejemplo G", () => {
-  it("4 200 de entrada, 5 400 de lectura de caché y 1 900 de salida → US$ 0,0427", () => {
-    const c = costoUsd({ entrada: 4200, salida: 1900, cache_escritura: 0, cache_lectura: 5400 }, PRECIOS);
-    expect(c).toBeCloseTo(0.04272, 6);
-    expect(redondearUsd(c)).toBe(0.0427);
+  it("4 200 de entrada, 5 400 de entrada en caché y 1 900 de salida → US$ 0,0263", () => {
+    const c = costoUsd({ entrada: 4200, entrada_cache: 5400, salida: 1900 }, PRECIOS);
+    expect(c).toBeCloseTo(0.0263, 6);
+    expect(redondearUsd(c)).toBe(0.0263);
+  });
+  it("sin caché, los mismos 9 600 tokens de entrada cuestan US$ 0,0344", () => {
+    const c = costoUsd({ entrada: 9600, entrada_cache: 0, salida: 1900 }, PRECIOS);
+    expect(c).toBeCloseTo(0.0344, 6);
+    expect(redondearUsd(c)).toBe(0.0344);
   });
   it("cada tipo de token usa su precio", () => {
-    expect(costoUsd({ entrada: 1e6, salida: 0, cache_escritura: 0, cache_lectura: 0 }, PRECIOS)).toBe(3);
-    expect(costoUsd({ entrada: 0, salida: 1e6, cache_escritura: 0, cache_lectura: 0 }, PRECIOS)).toBe(15);
-    expect(costoUsd({ entrada: 0, salida: 0, cache_escritura: 1e6, cache_lectura: 0 }, PRECIOS)).toBe(3.75);
-    expect(costoUsd({ entrada: 0, salida: 0, cache_escritura: 0, cache_lectura: 1e6 }, PRECIOS)).toBe(0.3);
-    expect(costoUsd({ entrada: 0, salida: 0, cache_escritura: 0, cache_lectura: 0 }, PRECIOS)).toBe(0);
+    expect(costoUsd({ entrada: 1e6, entrada_cache: 0, salida: 0 }, PRECIOS)).toBe(2);
+    expect(costoUsd({ entrada: 0, entrada_cache: 1e6, salida: 0 }, PRECIOS)).toBe(0.5);
+    expect(costoUsd({ entrada: 0, entrada_cache: 0, salida: 1e6 }, PRECIOS)).toBe(8);
+    expect(costoUsd({ entrada: 0, entrada_cache: 0, salida: 0 }, PRECIOS)).toBe(0);
   });
 });
 
@@ -43,23 +48,28 @@ describe("R14 · estimación", () => {
   });
 
   it("la salida de una llamada: 85 por fila (natural) + 110 por fila (reparto) + 150 por llamada", () => {
-    expect(estimarUsoLlamada({ tipo: "natural", tokens_bloque: 1000, filas_libres: 20, sistema_en_cache: true }).salida).toBe(85 * 20 + 150);
+    expect(estimarUsoLlamada({ tipo: "natural", tokens_bloque: 1000, filas_libres: 20 }).salida).toBe(85 * 20 + 150);
     expect(estimarUsoLlamada({ tipo: "reparto", tokens_bloque: 1000, filas_libres: 20 }).salida).toBe(110 * 20 + 150);
   });
 
-  it("la natural escribe el bloque en caché y la de reparto lo lee; el sistema se escribe una sola vez por corrida", () => {
-    const primera = estimarUsoLlamada({ tipo: "natural", tokens_bloque: 1000, filas_libres: 5, sistema_en_cache: false });
-    const siguiente = estimarUsoLlamada({ tipo: "natural", tokens_bloque: 1000, filas_libres: 5, sistema_en_cache: true });
-    expect(primera.cache_escritura).toBe(1000 + TOKENS_SISTEMA);
-    expect(siguiente.cache_escritura).toBe(1000);
-    expect(siguiente.cache_lectura).toBe(TOKENS_SISTEMA);
-    expect(estimarUsoLlamada({ tipo: "reparto", tokens_bloque: 1000, filas_libres: 5 }).cache_lectura).toBe(1000 + TOKENS_SISTEMA);
+  it("sin caché: cada llamada cuenta el texto fijo, el bloque y el sufijo como entrada y nada como entrada en caché", () => {
+    const natural = estimarUsoLlamada({ tipo: "natural", tokens_bloque: 1000, filas_libres: 5 });
+    const reparto = estimarUsoLlamada({ tipo: "reparto", tokens_bloque: 1000, filas_libres: 5 });
+    const lineas = estimarUsoLlamada({ tipo: "lineas", tokens_entrada: 400, lineas: 3 });
+    expect(natural.entrada).toBeGreaterThanOrEqual(TOKENS_SISTEMA + 1000);
+    expect(reparto.entrada).toBeGreaterThanOrEqual(TOKENS_SISTEMA + 1000);
+    expect(lineas.entrada).toBe(TOKENS_SISTEMA + 400);
+    for (const u of [natural, reparto, lineas]) expect(u.entrada_cache).toBe(0);
+    // El texto fijo se cuenta en cada llamada: no hay «sistema en caché» que abarate la segunda.
+    const dos = estimarGM({ lotes: [{ bytes_bloque: 3000, filas_libres: 5 }] }, PRECIOS);
+    expect(dos.uso.entrada).toBe(natural.entrada + reparto.entrada);
+    expect(dos.uso.entrada_cache).toBe(0);
   });
 
   it("un GM directo son 2 llamadas; uno jerárquico de k lotes, 2k + 1; un GM reusable no cuesta nada", () => {
     expect(estimarGM({ lotes: [{ bytes_bloque: 30000, filas_libres: 22 }] }, PRECIOS).llamadas).toBe(2);
     expect(estimarGM({ lotes: [{ bytes_bloque: 30000, filas_libres: 60 }, { bytes_bloque: 9000, filas_libres: 20 }], lineas: { bytes: 2000, lineas: 5 } }, PRECIOS).llamadas).toBe(5);
-    expect(estimarGM({ lotes: [{ bytes_bloque: 30000, filas_libres: 22 }], reusable: true }, PRECIOS)).toEqual({ llamadas: 0, uso: { entrada: 0, salida: 0, cache_escritura: 0, cache_lectura: 0 }, costo_usd: 0 });
+    expect(estimarGM({ lotes: [{ bytes_bloque: 30000, filas_libres: 22 }], reusable: true }, PRECIOS)).toEqual({ llamadas: 0, uso: { entrada: 0, entrada_cache: 0, salida: 0 }, costo_usd: 0 });
   });
 
   it("la estimación (con margen) nunca queda por debajo de lo que reporta el proveedor falso", async () => {
@@ -86,8 +96,9 @@ describe("R14 · estimación", () => {
     expect(tres.gms).toBe(2);
     expect(tres.reusables).toBe(1);
     expect(tres.llamadas).toBe(4);
-    // El texto fijo del sistema se escribe una vez en la corrida: dos GM salen más baratos que el doble de uno.
-    expect(tres.costo_usd).toBeLessThan(uno.costo_usd * 2);
+    // Sin caché, cada GM cuesta lo mismo: dos GM son el doble de uno (salvo el redondeo a 4 decimales).
+    expect(tres.costo_usd).toBeCloseTo(uno.costo_usd * 2, 3);
+    expect(tres.tokens_entrada).toBeGreaterThanOrEqual(uno.tokens_entrada * 2 - 1);
     expect(tres.tope_usd).toBe(10);
   });
 });

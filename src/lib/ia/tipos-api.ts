@@ -54,11 +54,24 @@ export const MAX_RAZON_GM = 600;
 
 // ─── Servicio, configuración y estados ───
 
-export type MotivoServicioIa = "sin_clave" | "desactivada_entorno" | "sin_configuracion" | "sin_capacidades" | "clave_invalida" | "tope_mensual";
+export type MotivoServicioIa =
+  | "sin_clave"
+  | "desactivada_entorno"
+  | "sin_configuracion"
+  | "sin_capacidades"
+  | "clave_invalida"
+  | "tope_mensual"
+  | "sin_proveedor"
+  | "proveedor_distinto"
+  | "modelo_no_permitido";
 export type VeredictoCapacidadIa = "gana" | "no_gana" | "sin_dato";
 export type ServicioIaApi = {
   disponible: boolean;
   motivo: MotivoServicioIa | null;
+  /** `IA_PROVEEDOR` (§3.10); `null` si falta o no tiene adaptador. */
+  proveedor: string | null;
+  /** `IA_MODELO`: los ids que el servidor permite usar (el primero es el que proponen los formularios); vacío si no hay variable. */
+  modelos_permitidos: string[];
   modelo: string | null;
   version_prompt: string | null;
   capacidades: CapacidadIa[];
@@ -178,7 +191,7 @@ export type GMIaResumenApi = {
   filas_que_ceden: number;
   absorcion: AbsorcionApi | null;
   filas_y_sin_decidir: number;
-  propuesta: { id: string; created_at: string; usuario_nombre: string | null; modelo: string; version_prompt: string; razon_gm: string | null; costo_usd: number } | null;
+  propuesta: { id: string; created_at: string; usuario_nombre: string | null; proveedor: string; modelo: string; version_prompt: string; razon_gm: string | null; costo_usd: number } | null;
 };
 export type GMIaDetalleApi = GMIaResumenApi & {
   filas: (IaFilaApi & {
@@ -196,7 +209,7 @@ export type GMIaDetalleApi = GMIaResumenApi & {
     decidida_y: boolean;
   })[];
   contexto: { aperturas_y1: number; cierres_y1: number; cola_larga: { filas: number; unidades: number }; vista_previa_curvas: number | null };
-  anteriores: { id: string; created_at: string; modelo: string; version_prompt: string }[];
+  anteriores: { id: string; created_at: string; proveedor: string; modelo: string; version_prompt: string }[];
 };
 export type EstimacionApi = {
   gms: number;
@@ -217,6 +230,7 @@ export type CorridaApi = {
   gm_fallidos: number;
   costo_usd: number;
   costo_estimado_usd: number;
+  proveedor: string;
   modelo: string;
   version_prompt: string;
   usuario_nombre: string | null;
@@ -239,9 +253,13 @@ export type EstadoEvaluacionIa = "en_curso" | "completa" | "fallida" | "cancelad
 
 // ─── Costo ───
 
-/** USD por millón de tokens (la página de precios vigente del proveedor). */
-export type PreciosIa = { entrada: number; salida: number; cache_escritura: number; cache_lectura: number };
-export type UsoTokensIa = { entrada: number; salida: number; cache_escritura: number; cache_lectura: number };
+/**
+ * USD por millón de tokens (la página de precios vigente del proveedor; los escribe el admin). `entrada_cache` es la tarifa de la
+ * entrada servida desde la caché del proveedor (si no hay caché, igual a `entrada`).
+ */
+export type PreciosIa = { entrada: number; entrada_cache: number; salida: number };
+/** Tokens de una llamada, DISJUNTOS: `entrada` no incluye `entrada_cache`; `salida` incluye el razonamiento si se cobra como salida. */
+export type UsoTokensIa = { entrada: number; entrada_cache: number; salida: number };
 
 // ─── Evaluación (backtest, §5.4) ───
 
@@ -283,6 +301,7 @@ export type VeredictoEvaluacionApi = { distribucion_y1: VeredictoCapacidadIa; re
 export type EvaluacionApi = {
   id: string;
   intento: number;
+  proveedor: string;
   modelo: string;
   version_prompt: string;
   estado: EstadoEvaluacionIa;
@@ -299,6 +318,7 @@ export type ConfiguracionIaApi = {
   id: string;
   version: number;
   estado: "vigente" | "reemplazada";
+  proveedor: string;
   modelo: string;
   version_prompt: string;
   capacidades: CapacidadIa[];

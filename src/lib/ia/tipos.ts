@@ -51,7 +51,7 @@ export type FilaEntradaIa = {
   senales: { lista: SenalIa[]; meses_quiebre_w12: number; disponibilidad: number | null; meses_desde_primera_venta: number; meses_con_venta_24: number };
 };
 
-/** Idéntico en la llamada natural y en la de reparto del mismo lote: se cachea en el proveedor. */
+/** Idéntico en la llamada natural y en la de reparto del mismo lote: forma un prefijo estable. */
 export type BloqueGMIa = {
   version_entrada: 2;
   contexto: ContextoEntradaIa;

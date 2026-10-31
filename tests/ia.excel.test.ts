@@ -20,7 +20,7 @@ const resumen: GMIaResumenApi = {
   filas_que_ceden: 0,
   absorcion: { delta_meta_u: 0, desviacion_fijadas_u: 1039, otros_u: 0, absorbido_u: -1039, absorbido_pct: 8.9112 },
   filas_y_sin_decidir: 2,
-  propuesta: { id: "p1", created_at: "2026-10-30T15:00:00Z", usuario_nombre: "J. Pérez", modelo: "m", version_prompt: "v1", razon_gm: null, costo_usd: 0.12 },
+  propuesta: { id: "p1", created_at: "2026-10-30T15:00:00Z", usuario_nombre: "J. Pérez", proveedor: "p", modelo: "m", version_prompt: "v1", razon_gm: null, costo_usd: 0.12 },
 };
 
 const fila = (linea: string, contra: number): GMIaDetalleApi["filas"][number] => ({

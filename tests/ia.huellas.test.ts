@@ -32,21 +32,23 @@ describe("R12 · huellas de entrada y de llamada", () => {
     expect(huellaEntrada({ filas: [{ f: "f001", meses: [1, 2, 4] }], gm: { id: "g1" } })).not.toBe(huellaEntrada(contenido));
   });
 
-  it("la de llamada cambia con el modelo, el prompt, el bloque o el sufijo", () => {
-    const base = { version_prompt: "v1", modelo: "m1", bloque: contenido, sufijo: { tarea: "natural" } };
+  it("la de llamada cambia con el proveedor, el modelo, el prompt, el bloque o el sufijo", () => {
+    const base = { proveedor: "p1", version_prompt: "v1", modelo: "m1", bloque: contenido, sufijo: { tarea: "natural" } };
     const h = huellaLlamada(base);
     expect(huellaLlamada({ ...base })).toBe(h);
+    expect(huellaLlamada({ ...base, proveedor: "p2" })).not.toBe(h);
     expect(huellaLlamada({ ...base, version_prompt: "v2" })).not.toBe(h);
     expect(huellaLlamada({ ...base, modelo: "m2" })).not.toBe(h);
     expect(huellaLlamada({ ...base, bloque: { ...contenido, gm: { id: "g2" } } })).not.toBe(h);
     expect(huellaLlamada({ ...base, sufijo: { tarea: "reparto" } })).not.toBe(h);
   });
 
-  it("la de GM cambia con el prompt, el modelo, los bloques y la meta; ignora lo que no es de la meta", () => {
+  it("la de GM cambia con el proveedor, el prompt, el modelo, los bloques y la meta; ignora lo que no es de la meta", () => {
     const meta = { pct: 8, sobre: "corregida" as const, total: 26006, fijas: 3386, libre: 22620, provisional: false };
-    const base = { version_prompt: "v1", modelo: "m1", bloques: ["a".repeat(64)], meta };
+    const base = { proveedor: "p1", version_prompt: "v1", modelo: "m1", bloques: ["a".repeat(64)], meta };
     const h = huellaGM(base);
     expect(huellaGM({ ...base })).toBe(h);
+    expect(huellaGM({ ...base, proveedor: "p2" })).not.toBe(h);
     expect(huellaGM({ ...base, version_prompt: "v2" })).not.toBe(h);
     expect(huellaGM({ ...base, modelo: "m2" })).not.toBe(h);
     expect(huellaGM({ ...base, bloques: ["b".repeat(64)] })).not.toBe(h);

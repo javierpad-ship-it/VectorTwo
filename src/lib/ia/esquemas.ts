@@ -116,9 +116,8 @@ export const aceptarIaSchema = z.strictObject({
 
 export const preciosSchema = z.strictObject({
   entrada: dinero(1000, "El precio de entrada"),
+  entrada_cache: dinero(1000, "El precio de entrada en caché"),
   salida: dinero(1000, "El precio de salida"),
-  cache_escritura: dinero(1000, "El precio de escritura en caché"),
-  cache_lectura: dinero(1000, "El precio de lectura de caché"),
 });
 
 const termino = z.string("Cada término debe ser texto.").trim().min(2, "Cada término debe tener al menos 2 caracteres.").max(60, "Cada término puede tener hasta 60 caracteres.").refine(sinProhibidos, "Un término no puede llevar caracteres de control.");

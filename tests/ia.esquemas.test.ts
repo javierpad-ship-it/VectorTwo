@@ -147,7 +147,7 @@ describe("cuerpos de las rutas", () => {
     max_filas_llamada: 60,
     incluir_cola_larga: false,
     presupuesto_razonamiento: 0,
-    precios: { entrada: 3, salida: 15, cache_escritura: 3.75, cache_lectura: 0.3 },
+    precios: { entrada: 3, entrada_cache: 0.3, salida: 15 },
     terminos_extra: ["Sigla Interna"],
     version_vigente: null,
   };
@@ -172,7 +172,7 @@ describe("cuerpos de las rutas", () => {
       { ...config, presupuesto_razonamiento: 32001 },
       { ...config, precios: { ...config.precios, entrada: 0 } },
       { ...config, precios: { ...config.precios, salida: 1001 } },
-      { ...config, precios: { entrada: 1, salida: 1, cache_escritura: 1 } },
+      { ...config, precios: { entrada: 1, salida: 1 } },
       { ...config, terminos_extra: ["a"] },
       { ...config, terminos_extra: ["a".repeat(61)] },
       { ...config, terminos_extra: Array.from({ length: 51 }, (_, i) => `término ${i}`) },

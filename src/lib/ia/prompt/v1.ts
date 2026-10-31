@@ -1,5 +1,5 @@
 /**
- * Prompt `v1` (ficha 07e, §3.7). Texto fijo, sin datos: describe las DOS tareas (así es idéntico en las dos llamadas y se cachea); el
+ * Prompt `v1` (ficha 07e, §3.7). Texto fijo, sin datos: describe las DOS tareas (así es idéntico en las dos llamadas y forma un prefijo estable); el
  * final del mensaje del usuario dice cuál toca. No nombra la empresa, ninguna marca ni ningún año real. Cambiar una letra sube la versión
  * (`v2`) y esa versión necesita su propia evaluación ganadora: una prueba fija la huella de este texto.
  */

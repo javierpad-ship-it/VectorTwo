@@ -11,16 +11,17 @@ export const sha256 = (texto: string): string => createHash("sha256").update(tex
 /** Huella de una entrada: sha-256 de `canonico(contenido)`. */
 export const huellaEntrada = (contenido: ValorCanonico): string => sha256(canonico(contenido));
 
-/** Huella de una llamada: `{ version_prompt, modelo, bloque, sufijo }`. */
-export function huellaLlamada(args: { version_prompt: string; modelo: string; bloque: ValorCanonico; sufijo: ValorCanonico }): string {
-  return huellaEntrada({ version_prompt: args.version_prompt, modelo: args.modelo, bloque: args.bloque, sufijo: args.sufijo });
+/** Huella de una llamada: `{ proveedor, version_prompt, modelo, bloque, sufijo }` (un mismo id de modelo no debe confundirse entre proveedores). */
+export function huellaLlamada(args: { proveedor: string; version_prompt: string; modelo: string; bloque: ValorCanonico; sufijo: ValorCanonico }): string {
+  return huellaEntrada({ proveedor: args.proveedor, version_prompt: args.version_prompt, modelo: args.modelo, bloque: args.bloque, sufijo: args.sufijo });
 }
 
 export type MetaParaHuella = { pct: number; sobre: "corregida" | "bruta"; total: number; fijas: number; libre: number; provisional: boolean };
 
-/** Huella de un GM: la clave del reuso. Se calcula en el primer paso, antes de llamar. */
-export function huellaGM(args: { version_prompt: string; modelo: string; bloques: readonly string[]; meta: MetaParaHuella | null }): string {
+/** Huella de un GM: la clave del reuso (incluye proveedor, modelo y prompt). Se calcula en el primer paso, antes de llamar. */
+export function huellaGM(args: { proveedor: string; version_prompt: string; modelo: string; bloques: readonly string[]; meta: MetaParaHuella | null }): string {
   return huellaEntrada({
+    proveedor: args.proveedor,
     version_prompt: args.version_prompt,
     modelo: args.modelo,
     bloques: [...args.bloques],
