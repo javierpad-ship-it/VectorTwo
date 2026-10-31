@@ -1,4 +1,6 @@
 import { pendienteDeRevision } from "./cola-larga";
+import { crearCrecimientoDe, type MatrizCrecimientos } from "./crecimientos";
+import { metaDeGM, type FilaParaMeta, type FuenteMeta } from "./meta-gm";
 import {
   SOLO_MATRIZ,
   UMBRAL_COLA_LARGA,
@@ -8,8 +10,10 @@ import {
   type EstadoLinea,
   type FiltroMatrizApi,
   type FilaApi,
+  type MetaSiguienteApi,
   type NodoMatrizApi,
   type Participaciones,
+  type SobreBase,
   type SoloMatriz,
 } from "./tipos-api";
 
@@ -294,7 +298,7 @@ function estadoDeHijos(hijos: readonly EstadoLinea[]): EstadoLinea {
   return "parcial";
 }
 
-function nodoDe(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMatrizApi["ids"], hijos: readonly Linea[]): NodoMatrizApi {
+function nodoDe(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMatrizApi["ids"], hijos: readonly Linea[], meta?: MetaSiguienteApi | null): NodoMatrizApi {
   const en = cero();
   const sg = cero();
   let baseSig = 0;
@@ -329,6 +333,7 @@ function nodoDe(nivel: NodoMatrizApi["nivel"], nombre: string, ids: NodoMatrizAp
     variacion_pct: en.total > 0 ? (sg.total / en.total - 1) * 100 : null,
     estado: estadoDeHijos(hijos.map((h) => h.estado)),
     avisos: [...new Set(hijos.flatMap((h) => h.avisos))].sort(),
+    ...(meta === undefined ? {} : { meta_siguiente: meta }),
   };
 }
 
@@ -339,6 +344,53 @@ export type ResultadoMatriz = {
 
 const comparar = (a: string, b: string) => a.localeCompare(b, "es");
 
+// ─── Meta del GM y cuadre (07e §5.1, R31) ───
+
+/** De dónde sale la meta de un GM en la foto de la proyección: su % (`g`), sobre qué base y qué fuente. `null` = el GM no tiene meta. */
+export type FuenteMetaGM = { g: number; sobre_base: SobreBase; fuente: FuenteMeta };
+/** `genero_id, mundo_id → FuenteMetaGM`. Lo arma el servicio con la foto de los crecimientos (`crecimientoDeGMDeFoto`); sin él la matriz no calcula metas. */
+export type CrecimientoDeGM = (generoId: string, mundoId: string) => FuenteMetaGM | null;
+
+/**
+ * El % de la meta de cada GM, desde la FOTO de lo aplicado por el último cálculo (`proyeccion_crecimientos` para HOMBRE y MUJER, `crecimiento_resto_usado`
+ * para el Resto), con la misma precedencia que el método (`crearCrecimientoDe`): celda del GM → Resto. Nunca lee el global ni tablas `ia_*`.
+ */
+export function crecimientoDeGMDeFoto(foto: { matriz: MatrizCrecimientos; resto: { pct: number } }): CrecimientoDeGM {
+  return (generoId, mundoId) => {
+    const e = crearCrecimientoDe({ matriz: foto.matriz, resto: foto.resto.pct, gmDe: () => ({ genero_id: generoId, mundo_id: mundoId, nombre: "" }) })("|", null);
+    return { g: e.pct, sobre_base: e.sobre_base ?? "bruta", fuente: e.origen === "celda" ? "gm" : e.provisional ? "resto_provisional" : "resto" };
+  };
+}
+
+/**
+ * `meta_siguiente` de un GM (`Meta_GM`, `Σ vigente` y su desvío) con `metaDeGM`, sobre TODAS las filas base activas del GM de `Y+1` (nunca el recorte de un
+ * filtro: es la garantía de la meta). `desvio_u = Σ_{f con P^M no nulo} V_f − Meta_GM`; `desvio_pct = desvio_u ÷ Meta_GM` en %. `null` si el GM no tiene `g`
+ * o ninguna fila con propuesta.
+ */
+export function metaSiguienteDeGM(filas: readonly FilaPlana[], anio: number, fuente: FuenteMetaGM | null): MetaSiguienteApi | null {
+  if (fuente === null) return null;
+  const paraMeta: FilaParaMeta[] = [];
+  let vigente = 0;
+  for (const f of filas) {
+    if (!f.activo || f.tienda_id !== null) continue;
+    const r = registro(f, anio + 1);
+    if (!r) continue;
+    paraMeta.push({
+      fila_id: f.id,
+      propuesto: r.propuesto,
+      base: r.base_siguiente ?? null,
+      base_corregida: r.base_normalizada ?? null,
+      crecimiento_pct: r.crecimiento_pct,
+      vigente: vigenteDe(r),
+    });
+    if (r.propuesto !== null) vigente += vigenteDe(r);
+  }
+  const m = metaDeGM({ filas: paraMeta, g: fuente.g, sobre_base: fuente.sobre_base, fuente: fuente.fuente });
+  if (m.meta_gm === null || m.p_gm.size === 0) return null;
+  const desvio_u = vigente - m.meta_gm;
+  return { meta_gm: m.meta_gm, desvio_u, desvio_pct: m.meta_gm > 0 ? (desvio_u / m.meta_gm) * 100 : null, fuente: m.fuente };
+}
+
 /**
  * Regla 28. Sumas exactas por línea, mundo, género y compañía: `total_Z = mismas + nuevas_anterior + aperturas +
  * cierres`; `venta_a_la_fecha = Σ vendido` de todos los registros del año en curso. Con filtro, las sumas se
@@ -347,13 +399,17 @@ const comparar = (a: string, b: string) => a.localeCompare(b, "es");
  */
 export function armarMatriz(
   filas: readonly FilaPlana[],
-  opciones: { anio: number; filtro?: Partial<FiltroMatrizApi>; umbralColaLarga?: number }
+  opciones: { anio: number; filtro?: Partial<FiltroMatrizApi>; umbralColaLarga?: number; crecimientoGM?: CrecimientoDeGM }
 ): ResultadoMatriz {
   const umbral = opciones.umbralColaLarga ?? UMBRAL_COLA_LARGA;
   const filtro = { ...FILTRO_VACIO, ...opciones.filtro };
   const anio = opciones.anio;
 
   const todas = filas.filter((f) => f.activo);
+  // 07e: la meta de cada género × mundo sale de TODAS las filas del GM (no del recorte del filtro) y solo con la foto de los crecimientos.
+  const porGM = agruparPor(todas, (f) => `${f.genero_id}|${f.mundo_id}`);
+  const metaDe = (generoId: string, mundoId: string): MetaSiguienteApi | null =>
+    opciones.crecimientoGM ? metaSiguienteDeGM(porGM.get(`${generoId}|${mundoId}`) ?? [], anio, opciones.crecimientoGM(generoId, mundoId)) : null;
   const lineasTotal = agruparPor(todas, (f) => f.gml_id);
   const totalSinFiltro = [...lineasTotal.values()].reduce((s, l) => s + cifrasDeAnio(l, anio, false).total, 0);
 
@@ -391,7 +447,9 @@ export function armarMatriz(
       nodos.push(nodoDe("genero", delGenero[0].genero, { genero_id: delGenero[0].ids.genero_id }, delGenero));
       const porMundo = agruparPor(delGenero, (l) => l.ids.mundo_id as string);
       for (const [, delMundo] of [...porMundo].sort((a, b) => comparar(a[1][0].mundo, b[1][0].mundo))) {
-        nodos.push(nodoDe("mundo", delMundo[0].mundo, { genero_id: delMundo[0].ids.genero_id, mundo_id: delMundo[0].ids.mundo_id }, delMundo));
+        nodos.push(
+          nodoDe("mundo", delMundo[0].mundo, { genero_id: delMundo[0].ids.genero_id, mundo_id: delMundo[0].ids.mundo_id }, delMundo, metaDe(delMundo[0].ids.genero_id as string, delMundo[0].ids.mundo_id as string))
+        );
         for (const l of [...delMundo].sort((a, b) => comparar(a.linea, b.linea))) nodos.push(nodoDe("linea", l.linea, l.ids, [l]));
       }
     }

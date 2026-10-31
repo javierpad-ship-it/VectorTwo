@@ -76,6 +76,7 @@ import {
   payloadFila,
   payloadTiendaCalculo,
   payloadTiendaDecision,
+  trazasIaDe,
   aFilaPlana,
   comoAvisos,
   type FilaConAnios,
@@ -832,11 +833,14 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   const tiendasPropias = await leerTiendasProyeccion(d, proy.id);
   if (tiendasPropias.error) return fallaDb(tiendasPropias.error, "proyección: leer tiendas");
   let previas: PreviasCalculo = aPrevias(propias.data, tiendasPropias.data);
+  // 07e: al copiar las decisiones, las trazas de «Aceptar IA» (`decision_ia_fila_id`) viajan con ellas; `calcular` a secas no las toca.
+  let trazasIa: ReadonlyMap<string, string> = new Map();
   if (o.previasDe) {
     const f = await leerFilasConAnios(d, o.previasDe.id, { columnas: "previas" });
     const t = await leerTiendasProyeccion(d, o.previasDe.id);
     if (f.error ?? t.error) return fallaDb((f.error ?? t.error) as NonNullable<typeof f.error>, "proyección: leer la proyección de origen");
     previas = aPrevias(f.data, t.data);
+    trazasIa = trazasIaDe(f.data);
   }
   const plan = await leerPlanAnterior(d, Y);
   if (plan.respuesta) return falla(plan.respuesta);
@@ -878,7 +882,7 @@ async function calcularYGuardar(d: Db, proy: ProyeccionDb, ctx: ContextoCalculo,
   const vigente = await leerProyeccionDb(d, proy.id);
   if (vigente.error) return fallaDb(vigente.error, "proyección: comprobar estado");
   if (!vigente.data || vigente.data.estado !== "en_trabajo" || !vigente.data.calculando_desde || Date.parse(vigente.data.calculando_desde) !== Date.parse(valorTomado)) return cambioDuranteCalculo();
-  const guardado = await guardarCalculo(d, proy.id, salida, propias.data, tiendasPropias.data, !!o.previasDe);
+  const guardado = await guardarCalculo(d, proy.id, salida, propias.data, tiendasPropias.data, !!o.previasDe, trazasIa);
   if (guardado.respuesta) return falla(guardado.respuesta);
   // 0.12.1: la foto de lo aplicado (`proyeccion_crecimientos`) se reescribe con los GM vigentes que usó este cálculo. Dentro del mismo candado; si falla, el
   // cálculo responde con error y el candado se libera como en cualquier otro fallo (sin transacción: recalcular lo repara).
@@ -938,6 +942,9 @@ function cambioDuranteCalculo(): Salida<never> {
  * `upsert` de filas, registros y tiendas por tandas. Lo que ya no aparece se marca `activo = false` (conserva sus decisiones y
  * no cuenta). Nunca escribe `decidido`, `origen`, `nota`, `propuesta_al_decidir` ni `decidido_*` (lo prueba la forma de
  * `payloadAnioCalculo`). Si un registro decidido cambió de bloque (una fecha de M4 corregida), queda `bloque_cambiado`.
+ *
+ * 07e: tampoco escribe `decision_ia_fila_id` al recalcular (sobrevive con la decisión que la sostiene); solo `copiar_de` la copia, junto con la decisión.
+ * Ni el cálculo ni el cierre leen las tablas `ia_*`.
  */
 async function guardarCalculo(
   d: Db,
@@ -945,7 +952,9 @@ async function guardarCalculo(
   salida: ReturnType<typeof calcularProyeccion>,
   existentes: readonly FilaConAnios[],
   tiendasExistentes: readonly Tables<"proyeccion_tiendas">[],
-  copiando: boolean
+  copiando: boolean,
+  /** Solo al copiar: `${clave}#${anio}` → `decision_ia_fila_id` de la proyección de origen. */
+  trazasCopiadas: ReadonlyMap<string, string> = new Map()
 ): Promise<Salida<null>> {
   const idsFilas = await upsertFilas(d, salida.filas.map((f) => payloadFila(proyeccionId, f)));
   if (idsFilas.error) return fallaDb(idsFilas.error, "proyección: guardar filas");
@@ -968,7 +977,9 @@ async function guardarCalculo(
       const extra: AvisoFila[] = [];
       if (!copiando && antes && antes.decidido !== null && (antes.bloque !== r.bloque || (antes.subbloque ?? null) !== (r.subbloque ?? null))) extra.push("bloque_cambiado");
       // Al copiar las decisiones de otra proyección, las decisiones se escriben (la proyección nueva no tiene ninguna); al recalcular, nunca.
-      registros.push(copiando ? { ...payloadAnioDecision(filaId, r, undefined), avisos: payloadAnioCalculo(filaId, r, extra).avisos } : payloadAnioCalculo(filaId, r, extra));
+      // La traza solo se copia con la cifra manual que la sostiene (la base lo exige); sin traza, la columna ni se escribe (queda `null`).
+      const traza = copiando && r.decidido !== null && r.origen === "manual" ? trazasCopiadas.get(`${f.clave}#${r.anio}`) : undefined;
+      registros.push(copiando ? { ...payloadAnioDecision(filaId, r, undefined, traza), avisos: payloadAnioCalculo(filaId, r, extra).avisos } : payloadAnioCalculo(filaId, r, extra));
     }
   }
   const up = await upsertAnios(d, registros);

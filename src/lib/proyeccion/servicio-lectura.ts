@@ -3,14 +3,15 @@ import { eatM6DeLinea } from "./calculo";
 import { cargarCatalogo } from "./contexto";
 import { leerFilaCompleta, leerFilasConAnios, leerNombresMarcas, leerTiendasProyeccion } from "./consultas";
 import { claveTiendaAnio, filasTiendaDeLinea, marcasDeFilaApi, marcasQueNecesitanNombre, resumenFilasDeTienda } from "./apertura-linea";
-import { baseDeAnio, filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
+import { baseDeAnio, crecimientoDeGMDeFoto, filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
 import { armarMensual } from "./mensual";
-import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, ordenMarcaDe, type Catalogo } from "./persistencia";
+import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, decisionesIaDeFilas, ordenMarcaDe, propuestasFilaDeTrazas, type Catalogo, type FilaConAnios } from "./persistencia";
+import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
 import { aTiendaApi, cargarMatriz, crecimientoParaApi, falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
 import { fraccionDeTienda } from "./decision";
 import type { CrecimientoDeApi } from "./persistencia";
 import type { ProyeccionDb } from "./consultas";
-import type { FiltroMatrizApi, HistoricoFila, FilaDetalleApi, MarcasDeFilaApi, OrigenComposicion, RespuestaLineasApi, TiendaLineaApi, TiendaLineaBaseApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
+import type { DecisionIaApi, FiltroMatrizApi, HistoricoFila, FilaDetalleApi, MarcasDeFilaApi, OrigenComposicion, RespuestaLineasApi, TiendaLineaApi, TiendaLineaBaseApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
 import { UMBRAL_COLA_LARGA } from "./tipos";
 
 /**
@@ -41,6 +42,28 @@ async function planas(d: Db, b: Base, columnas: "ligeras" | "cerrada" = "ligeras
   const filas = await leerFilasConAnios(d, b.p.id, { columnas, soloActivas: true });
   if (filas.error) return fallaDb(filas.error, "proyección: leer filas");
   return listo(filas.data.map((f) => aFilaPlana(f, b.catalogo, b.k, b.p.anio_en_curso)).filter((f): f is FilaPlana => f !== null));
+}
+
+/**
+ * 07e: de qué propuesta de IA salió la cifra decidida de cada registro (`decision_ia_fila_id`), SOLO para mostrar. Lee `ia_propuestas_filas` (y su
+ * `ia_propuestas_gm`: proveedor, modelo, prompt y fecha) únicamente por los ids que las filas ya traen: sin trazas no toca ninguna tabla `ia_*`,
+ * así que con la IA apagada (o sin ninguna decisión aceptada) esta lectura no hace nada. Ni `calcular` ni `cerrar` ni la Matriz pasan por aquí.
+ * Devuelve `registro (proyeccion_fila_anios.id) → DecisionIaApi`.
+ */
+export async function leerDecisionesIa(d: Db, filas: readonly FilaConAnios[]): Promise<Salida<Map<string, DecisionIaApi>>> {
+  const ids = propuestasFilaDeTrazas(filas);
+  if (ids.length === 0) return listo(new Map<string, DecisionIaApi>());
+  const porPropuestaFila = new Map<string, DecisionIaApi>();
+  for (const tanda of enTandas(ids, TANDA_IN)) {
+    const r = await d.from("ia_propuestas_filas").select("id, ia_propuestas_gm(proveedor, modelo, version_prompt, created_at)").in("id", tanda);
+    if (r.error) return fallaDb(r.error, "proyección: leer la propuesta de IA aceptada");
+    for (const x of r.data ?? []) {
+      const gm = x.ia_propuestas_gm;
+      if (!gm) continue;
+      porPropuestaFila.set(x.id, { propuesta_fila_id: x.id, proveedor: gm.proveedor, modelo: gm.modelo, version_prompt: gm.version_prompt, generada_at: gm.created_at });
+    }
+  }
+  return listo(decisionesIaDeFilas(filas, porPropuestaFila));
 }
 
 const sinAcentos = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -128,7 +151,9 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
       (x.equivalencia_id ?? "").localeCompare(y.equivalencia_id ?? "") ||
       ordenMarcaDe(x.agrupacion_marca_id, b.catalogo) - ordenMarcaDe(y.agrupacion_marca_id, b.catalogo)
   );
-  const apis = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y, crec.data));
+  const decisionesIa = await leerDecisionesIa(d, base_);
+  if (decisionesIa.respuesta) return falla(decisionesIa.respuesta);
+  const apis = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y, crec.data, decisionesIa.data));
   const filasApi = apis.filter((x): x is NonNullable<typeof x> => x !== null);
   const modelos = base_.map((x) => aFilaModelo(x, b.k, Y));
 
@@ -264,7 +289,9 @@ export async function leerFilaDetalle(id: string, filaId: string): Promise<Salid
   if (!r.data) return fallaMensaje("Fila no encontrada.", 404);
   const crec = await crecimientoDeLectura(d, b);
   if (crec.respuesta) return falla(crec.respuesta);
-  const api = aFilaApi(r.data, b.catalogo, b.k, b.p.anio_en_curso, crec.data);
+  const decisionesIa = await leerDecisionesIa(d, [r.data]);
+  if (decisionesIa.respuesta) return falla(decisionesIa.respuesta);
+  const api = aFilaApi(r.data, b.catalogo, b.k, b.p.anio_en_curso, crec.data, decisionesIa.data);
   if (!api) return fallaMensaje("Fila no encontrada.", 404);
   const m = aFilaModelo(r.data, b.k, b.p.anio_en_curso);
   return listo({
@@ -274,7 +301,7 @@ export async function leerFilaDetalle(id: string, filaId: string): Promise<Salid
     curva_origen: m.curva_origen,
     factores_mes: m.factores_mes,
     participaciones: m.participaciones,
-    anios: aAniosApi(m, b.p.anio_en_curso, crec.data),
+    anios: aAniosApi(m, b.p.anio_en_curso, crec.data, decisionesIa.data),
   });
 }
 
@@ -307,8 +334,11 @@ export async function leerMatriz(id: string, q: ConsultaMatriz & { por: "arbol" 
   const b = bR.data;
   const pR = await planas(d, b);
   if (pR.respuesta) return falla(pR.respuesta);
+  // 07e: la foto de los crecimientos (lo que aplicó el último cálculo) da el % de la meta de cada GM; la Matriz no lee tablas `ia_*`.
+  const foto = await cargarMatriz(d, b.p);
+  if (foto.respuesta) return falla(foto.respuesta);
   const filtro = { ...filtroDe(q), por: q.por };
-  const m = armarMatriz(pR.data, { anio: b.p.anio_en_curso, filtro, umbralColaLarga: b.umbral });
+  const m = armarMatriz(pR.data, { anio: b.p.anio_en_curso, filtro, umbralColaLarga: b.umbral, crecimientoGM: crecimientoDeGMDeFoto({ matriz: foto.data.matriz, resto: foto.data.resto }) });
   const resumen = b.p.resumen as unknown as ResumenProyeccion | null;
   return listo({
     filtro,

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { hojasMatriz, hojasMensual } from "@/lib/proyeccion/excel";
-import { armarMatriz, estadoLinea, filtrarFilas, indiceDeLineas, type FilaPlana } from "@/lib/proyeccion/matriz";
+import { armarMatriz, crecimientoDeGMDeFoto, estadoLinea, filtrarFilas, indiceDeLineas, metaSiguienteDeGM, type FilaPlana } from "@/lib/proyeccion/matriz";
+import { claveGM, type MatrizCrecimientos } from "@/lib/proyeccion/crecimientos";
 import { armarFilasCerradas, armarMensual } from "@/lib/proyeccion/mensual";
 import { calcularProyeccion } from "@/lib/proyeccion/modelo";
 import type { DecisionPrevia, PreviasCalculo } from "@/lib/proyeccion/tipos";
-import { AM, N, Y, aPlanas, clave, entrada, hechosBase, tiendas } from "./proyeccion.fixture";
+import { AM, GEN, MUN, N, Y, aPlanas, clave, entrada, hechosBase, tiendas } from "./proyeccion.fixture";
 
 const decision = (d: Partial<DecisionPrevia>): DecisionPrevia => ({ decidido: null, origen: null, nota: null, propuesta_al_decidir: null, crecimiento_pct: null, decidido_por_nombre: null, decidido_at: null, meses: null, curva_origen_usada: [], ...d });
 const previas = (filas: [string, DecisionPrevia][]): PreviasCalculo => ({ filas: new Map(filas), tiendas: new Map() });
@@ -286,6 +287,121 @@ describe("hojas de Excel (caso 23; regla 32)", () => {
     const h = hojasMensual({ filas: t.filas, bloques: salida.bloques, anio: Y, filtro: { genero_id: null, mundo_id: null, linea_id: null, temporada: null, agrupacion_estacionalidad_id: null, agrupacion_marca_id: null, solo: null, por: "arbol", bloque: "mismas", por_agrupacion: true }, datosHasta });
     const col = h.MENSUAL[0].indexOf("ORIGEN_2026");
     expect(h.MENSUAL[1][col]).toBe("real:9/proy:3");
+  });
+});
+
+describe("07e R31: meta_siguiente (cuadre del GM) en la Matriz y su Excel", () => {
+  const foto = (g: number, sobre: "bruta" | "corregida" = "corregida", opciones: { restoId?: string | null; restoPct?: number } = {}) => {
+    const matriz: MatrizCrecimientos = {
+      celdas: new Map([[claveGM(GEN.hombre, MUN.urbano), g]]),
+      generos: new Set([GEN.hombre]),
+      sobre: new Map([[claveGM(GEN.hombre, MUN.urbano), sobre]]),
+      resto: { id: opciones.restoId === undefined ? "resto-1" : opciones.restoId, version: 1, sobre_base: "corregida" },
+    };
+    return crecimientoDeGMDeFoto({ matriz, resto: { pct: opciones.restoPct ?? 5 } });
+  };
+  const mundo = (nodos: ReturnType<typeof armarMatriz>["nodos"], nombre: string, genero: string) => nodos.find((n) => n.nivel === "mundo" && n.nombre === nombre && n.ids.genero_id === genero)!;
+  const denim = planas.filter((f) => f.gml_id === N.denim && f.tienda_id === null);
+  const r27 = (f: FilaPlana) => f.anios.find((a) => a.anio === Y + 1)!;
+  const conCambio = (cambio: (a: FilaPlana["anios"][number], f: FilaPlana) => Partial<FilaPlana["anios"][number]>) =>
+    planas.map((f) => (f.gml_id === N.denim && f.tienda_id === null ? { ...f, anios: f.anios.map((a) => (a.anio === Y + 1 ? { ...a, ...cambio(a, f) } : a)) } : f));
+
+  it("Meta_GM = Σ propuesto de 2027 de las filas base del GM (sin % propio) y desvio_u = Σ vigente − Meta_GM; solo el nodo de mundo la trae", () => {
+    const { nodos } = armarMatriz(planas, { anio: Y, crecimientoGM: foto(5) });
+    const m = mundo(nodos, "URBANO", GEN.hombre).meta_siguiente!;
+    const suma = denim.reduce((s, f) => s + (r27(f).propuesto ?? 0), 0);
+    expect(suma).toBeGreaterThan(0);
+    expect(m.meta_gm).toBe(suma);
+    expect(m.desvio_u).toBe(0);
+    expect(m.desvio_pct).toBe(0);
+    expect(m.fuente).toBe("gm");
+    for (const n of nodos.filter((x) => x.nivel !== "mundo")) expect(n.meta_siguiente).toBeUndefined();
+  });
+
+  it("el desvío es Σ vigente − Meta_GM, en u y en %; con las filas decididas de modo que sumen la meta (todas las libres aceptadas), 0", () => {
+    const base = denim.filter((f) => r27(f).propuesto !== null);
+    expect(base.length).toBeGreaterThanOrEqual(2);
+    const [a, b] = [base[0].id, base[1].id];
+    const sube = conCambio((x, f) => (f.id === a ? { decidido: (x.propuesto as number) + 40, origen: "manual", vigente: (x.propuesto as number) + 40 } : {}));
+    const m = mundo(armarMatriz(sube, { anio: Y, crecimientoGM: foto(5) }).nodos, "URBANO", GEN.hombre).meta_siguiente!;
+    expect(m.desvio_u).toBe(40);
+    expect(m.desvio_pct).toBeCloseTo((40 / m.meta_gm) * 100, 10);
+    // Lo que sube una fila lo baja otra (la IA reparte la meta, no la cambia): cuadra en 0.
+    const cuadra = conCambio((x, f) => (f.id === a ? { decidido: (x.propuesto as number) + 40, origen: "manual", vigente: (x.propuesto as number) + 40 } : f.id === b ? { decidido: (x.propuesto as number) - 40, origen: "manual", vigente: (x.propuesto as number) - 40 } : {}));
+    expect(mundo(armarMatriz(cuadra, { anio: Y, crecimientoGM: foto(5) }).nodos, "URBANO", GEN.hombre).meta_siguiente).toMatchObject({ desvio_u: 0, desvio_pct: 0 });
+  });
+
+  it("con % propio la fila entra con round(B^s × (1 + g/100)) y no con su propuesto: bruta usa B y corregida usa B'", () => {
+    const f0 = denim.find((f) => r27(f).propuesto !== null && (r27(f).base_siguiente ?? 0) > 0)!;
+    const prop = conCambio((x, f) => (f.id === f0.id ? { crecimiento_pct: 30, propuesto: Math.round((x.base_normalizada ?? x.base_siguiente ?? 0) * 1.3), vigente: Math.round((x.base_normalizada ?? x.base_siguiente ?? 0) * 1.3) } : {}));
+    const sumaPropuesto = prop.filter((f) => f.gml_id === N.denim && f.tienda_id === null).reduce((s, f) => s + (r27(f).propuesto ?? 0), 0);
+    const x0 = r27(f0);
+    const resto = denim.filter((f) => f.id !== f0.id).reduce((s, f) => s + (r27(f).propuesto ?? 0), 0);
+
+    const corregida = mundo(armarMatriz(prop, { anio: Y, crecimientoGM: foto(5, "corregida") }).nodos, "URBANO", GEN.hombre).meta_siguiente!;
+    expect(corregida.meta_gm).toBe(resto + Math.round((x0.base_normalizada as number) * 1.05));
+    expect(corregida.meta_gm).not.toBe(sumaPropuesto);
+    const bruta = mundo(armarMatriz(prop, { anio: Y, crecimientoGM: foto(5, "bruta") }).nodos, "URBANO", GEN.hombre).meta_siguiente!;
+    expect(bruta.meta_gm).toBe(resto + Math.round((x0.base_siguiente as number) * 1.05));
+    // El desvío mide lo vigente (con el 30 % propio) contra esa meta.
+    expect(corregida.desvio_u).toBe(sumaPropuesto - corregida.meta_gm);
+  });
+
+  it("una fila sin propuesto (sin base o sin curva) queda fuera de la meta y de Σ vigente", () => {
+    const f0 = denim.find((f) => r27(f).propuesto !== null)!;
+    const sin = conCambio((x, f) => (f.id === f0.id ? { propuesto: null, vigente: 777, decidido: 777, origen: "manual" } : {}));
+    const m = mundo(armarMatriz(sin, { anio: Y, crecimientoGM: foto(5) }).nodos, "URBANO", GEN.hombre).meta_siguiente!;
+    const otras = denim.filter((f) => f.id !== f0.id).reduce((s, f) => s + (r27(f).propuesto ?? 0), 0);
+    expect(m.meta_gm).toBe(otras);
+    expect(m.desvio_u).toBe(0);
+  });
+
+  it("las fuentes: celda del GM, Resto aprobado y Resto provisional; el Resto usa el % del Resto", () => {
+    const f = foto(8, "corregida", { restoId: null, restoPct: 6 });
+    expect(f(GEN.hombre, MUN.urbano)).toEqual({ g: 8, sobre_base: "corregida", fuente: "gm" });
+    expect(f(GEN.mujer, MUN.casual)).toEqual({ g: 6, sobre_base: "corregida", fuente: "resto_provisional" });
+    expect(foto(8, "bruta", { restoPct: 6 })(GEN.mujer, MUN.casual)).toEqual({ g: 6, sobre_base: "corregida", fuente: "resto" });
+    expect(foto(8, "bruta")(GEN.hombre, MUN.urbano)?.sobre_base).toBe("bruta");
+    const { nodos } = armarMatriz(planas, { anio: Y, crecimientoGM: f });
+    expect(mundo(nodos, "CASUAL", GEN.mujer).meta_siguiente?.fuente).toBe("resto_provisional");
+  });
+
+  it("sin la foto no hay meta (null en el nodo de mundo); un GM sin ninguna fila con propuesto tampoco; un filtro no recorta la meta", () => {
+    expect(mundo(armarMatriz(planas, { anio: Y }).nodos, "URBANO", GEN.hombre).meta_siguiente).toBeNull();
+    expect(metaSiguienteDeGM([], Y, { g: 5, sobre_base: "corregida", fuente: "gm" })).toBeNull();
+    expect(metaSiguienteDeGM(denim, Y, null)).toBeNull();
+    const completa = mundo(armarMatriz(planas, { anio: Y, crecimientoGM: foto(5) }).nodos, "URBANO", GEN.hombre).meta_siguiente;
+    const unaMarca = denim[0].agrupacion_marca_id;
+    const filtrada = armarMatriz(planas, { anio: Y, filtro: { agrupacion_marca_id: unaMarca }, crecimientoGM: foto(5) });
+    expect(mundo(filtrada.nodos, "URBANO", GEN.hombre).meta_siguiente).toEqual(completa);
+  });
+
+  it("la matriz por agrupación de marca no tiene nodos de GM: ninguno trae meta_siguiente", () => {
+    const { nodos } = armarMatriz(planas, { anio: Y, filtro: { por: "agrupacion_marca" }, crecimientoGM: foto(5) });
+    expect(nodos.some((n) => n.meta_siguiente !== undefined)).toBe(false);
+  });
+
+  it("el Excel de la Matriz lleva «META 2027» y el desvío (u y %) solo en la fila de cada GM", () => {
+    const sube = conCambio((x, f) => (f.id === denim[0].id ? { decidido: (x.propuesto as number) + 25, origen: "manual", vigente: (x.propuesto as number) + 25 } : {}));
+    const { nodos } = armarMatriz(sube, { anio: Y, crecimientoGM: foto(5) });
+    const h = hojasMatriz({ nodos, bloques: salida.bloques, anio: Y, filtro: {}, datosHasta: "2026-09" });
+    const cab = h.MATRIZ[0];
+    const iMeta = cab.indexOf(`META ${Y + 1}`);
+    const iU = cab.indexOf(`DESVÍO FRENTE A LA META ${Y + 1}`);
+    const iPct = cab.indexOf(`DESVÍO FRENTE A LA META ${Y + 1} %`);
+    expect(iMeta).toBeGreaterThan(0);
+    expect(iU).toBe(iMeta + 1);
+    expect(iPct).toBe(iMeta + 2);
+    expect(cab[cab.length - 1]).toBe("ESTADO");
+    const m = mundo(nodos, "URBANO", GEN.hombre).meta_siguiente!;
+    const filaGm = h.MATRIZ.find((f) => f[0] === "MUNDO" && f[1] === "URBANO")!;
+    expect(filaGm[iMeta]).toBe(m.meta_gm);
+    expect(filaGm[iU]).toBe(25);
+    expect(filaGm[iPct]).toBe(Math.round(m.desvio_pct! * 10) / 10);
+    for (const fila of h.MATRIZ.slice(1).filter((f) => f[0] !== "MUNDO")) expect([fila[iMeta], fila[iU], fila[iPct]]).toEqual([null, null, null]);
+    // Sin la foto, las celdas del GM van vacías (no 0).
+    const sinFoto = hojasMatriz({ nodos: armarMatriz(planas, { anio: Y }).nodos, bloques: salida.bloques, anio: Y, filtro: {}, datosHasta: "2026-09" });
+    for (const fila of sinFoto.MATRIZ.slice(1)) expect([fila[iMeta], fila[iU], fila[iPct]]).toEqual([null, null, null]);
   });
 });
 

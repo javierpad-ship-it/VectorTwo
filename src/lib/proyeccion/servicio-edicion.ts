@@ -19,6 +19,7 @@ import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, crecimientoD
 import { notaMoverTotal, totalTiendaTrasMover } from "./apertura-linea";
 import { conteosResumen } from "./resumen";
 import { ninoDeFilas } from "./servicio";
+import { leerDecisionesIa } from "./servicio-lectura";
 import { GENEROS_MATRIZ } from "./tipos-api";
 import { explicar, textoCurva } from "./explicar";
 import { anioMaduroSoles, mesesCompletos, unidadesMadurasEntero, ventaAnioApertura } from "./tiendas-nuevas";
@@ -43,7 +44,7 @@ import {
   type Salida,
 } from "./servicio-base";
 import type { DecisionCuerpo, DecisionTiendaCuerpo } from "./esquemas";
-import { claveBaseDe, type FilaModelo, type RegistroModelo, type RespuestaDecidirFilaApi, type ResumenProyeccion, type TiendaProyeccionApi } from "./tipos";
+import { claveBaseDe, type DecisionIaApi, type FilaModelo, type RegistroModelo, type RespuestaDecidirFilaApi, type ResumenProyeccion, type TiendaProyeccionApi } from "./tipos";
 
 /**
  * Escrituras de las decisiones sobre una proyección en trabajo (Parte 1 y tiendas nuevas) y "aplicar curva nueva". Todas
@@ -73,15 +74,23 @@ async function sigueEditable(d: Db, id: string): Promise<Salida<null>> {
   return listo(null);
 }
 
+/**
+ * Qué pasa con `decision_ia_fila_id` (07e) del registro cuya decisión se cambia: `string` la escribe («Aceptar IA»), `null` la limpia (cualquier otra
+ * decisión) y `undefined` la deja como está (la decisión no cambió). Solo afecta a ese registro; los demás que se reescriben (el año siguiente
+ * recalculado por B2, las otras filas de la tienda) conservan su decisión, y con ella su traza.
+ */
+type TrazaIa = { clave: string; anio: number; decision_ia_fila_id: string | null | undefined };
+
 /** Escribe los registros de varias filas con su decisión (los decididos ahora llevan quién los decidió). */
-async function guardarRegistros(d: Db, filas: readonly FilaModelo[], ids: ReadonlyMap<string, string>, anios: readonly number[], selloDecision: string, actor: Actor) {
+async function guardarRegistros(d: Db, filas: readonly FilaModelo[], ids: ReadonlyMap<string, string>, anios: readonly number[], selloDecision: string, actor: Actor, traza?: TrazaIa) {
   const payloads: TablesInsert<"proyeccion_fila_anios">[] = [];
   for (const f of filas) {
     const filaId = ids.get(f.clave);
     if (!filaId) continue;
     for (const r of f.registros) {
       if (!anios.includes(r.anio)) continue;
-      payloads.push(payloadAnioDecision(filaId, r, r.decidido_at === selloDecision ? actor.id : undefined));
+      const esElDeLaTraza = traza !== undefined && traza.clave === f.clave && traza.anio === r.anio;
+      payloads.push(payloadAnioDecision(filaId, r, r.decidido_at === selloDecision ? actor.id : undefined, esElDeLaTraza ? traza.decision_ia_fila_id : undefined));
     }
   }
   return upsertAnios(d, payloads);
@@ -150,12 +159,23 @@ async function grupoDe(d: Db, proyeccionId: string, gmlId: string, agrupacionMar
  * Decide el total de un año de una fila: `decidido = null` vuelve a la propuesta, `origen = propuesta` copia la propuesta, `manual`
  * escribe la cifra. En una fila base del año en curso recalcula en el acto la propuesta del año siguiente (B2).
  *
+ * `0.15.0` (07e): `opciones.decision_ia_fila_id` lo pasa SOLO la ruta de «Aceptar IA»: escribe `proyeccion_fila_anios.decision_ia_fila_id` (la traza de la
+ * propuesta de IA aceptada; la base exige `origen = manual`). Sin él, toda decisión que cambia el registro (cifra a mano, «Aceptar» del método, «Volver a la
+ * propuesta») la deja en `null`; solo una petición que no toca la decisión (solo el crecimiento propio) la conserva. El `PUT` de decisión no pasa opciones.
+ *
  * `0.10.7` (07b), fila de tienda: aceptar la propuesta la FIJA (`manual`, D1). Si la tienda ya tiene total decidido `D`, el total pasa a
  * `D + Δ` («solo se mueve lo modificado», decisión de Javier) y se guarda como decisión del planner (quién, cuándo y «ajustado desde la
  * línea …»); las demás filas no se mueven y `Σ fijadas ≤ D'` siempre (D3). Sin `D`, solo se fija la fila (la tienda sigue sin decidir) y el
  * año siguiente de la fila se rehace (D2). Con `409 menor_que_vendido` si el total movido queda bajo lo vendido de la tienda en `Y`.
  */
-export async function decidirFila(id: string, filaId: string, anio: number, cuerpo: DecisionCuerpo, actor: Actor): Promise<Salida<RespuestaDecidirFilaApi>> {
+export async function decidirFila(
+  id: string,
+  filaId: string,
+  anio: number,
+  cuerpo: DecisionCuerpo,
+  actor: Actor,
+  opciones?: { decision_ia_fila_id?: string }
+): Promise<Salida<RespuestaDecidirFilaApi>> {
   const d = db();
   const pR = await proyeccionOr404(d, id);
   if (pR.respuesta) return falla(pR.respuesta);
@@ -225,15 +245,28 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
     ctx
   );
 
+  // Traza de «Aceptar IA» del registro decidido (ver `TrazaIa`). Con la opción y una cifra manual: se escribe; sin ella: se limpia; sin cambio de decisión: se conserva.
+  const registroDecidido = registroDe(nuevo, anio);
+  const traza: TrazaIa = {
+    clave: modelo.clave,
+    anio,
+    decision_ia_fila_id: soloCrecimiento
+      ? undefined
+      : opciones?.decision_ia_fila_id !== undefined && registroDecidido?.origen === "manual" && registroDecidido.decidido !== null
+        ? opciones.decision_ia_fila_id
+        : null,
+  };
+
   if (modelo.tienda_id === null) {
     // Justo antes de la primera escritura: cuanto menos se lee entre esta comprobación y el guardado, menos crece la ventana con un cierre.
     const editable = await sigueEditable(d, id);
     if (editable.respuesta) return falla(editable.respuesta);
-    const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [Y, Y + 1], ahora, actor);
+    const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [Y, Y + 1], ahora, actor, traza);
     if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
     await refrescarResumen(d, p, cat.data.catalogo);
     const r = registroDe(nuevo, anio) as NonNullable<ReturnType<typeof registroDe>>;
-    return listo(conCamposBrutos(aAnioApi(r), nuevo, Y, ctx.crecimientoDe));
+    const api = conCamposBrutos(aAnioApi(r), nuevo, Y, ctx.crecimientoDe);
+    return listo({ ...api, decision_ia: await decisionIaGuardada(d, objetivo, anio, traza.decision_ia_fila_id) });
   }
 
   // Una fila de tienda: se guarda su cifra y, si la tienda ya tiene total decidido, ese total se mueve en lo que cambió la fila.
@@ -279,7 +312,7 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
     if (bloqueo.error) return fallaDb(bloqueo.error, "proyección: mover el total de la tienda");
     if (!bloqueo.data) return fallaMensaje(MENSAJE_TIENDA_CAMBIO, 409, "conflicto");
   }
-  const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [anio], ahora, actor);
+  const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [anio], ahora, actor, traza);
   if (w.error) {
     // La fila no se escribió: se devuelve el total a como estaba (solo si nadie lo movió después).
     if (mover && filaTienda) {
@@ -303,6 +336,21 @@ export async function decidirFila(id: string, filaId: string, anio: number, cuer
   const reg = r ? aFilaModelo(r, k, Y).registros.find((x) => x.anio === anio) : undefined;
   const t = fila.data.tienda;
   return listo({ ...aAnioApi(reg ?? registro), tienda: { anio, decidido: t.decidido, suma_filas: t.suma_filas ?? 0 } });
+}
+
+/**
+ * La traza de IA que quedó en el registro tras decidir, lista para la respuesta: la recién escrita, `null` si se limpió, o la que ya tenía el registro
+ * si la decisión no cambió. Es solo para mostrar: si la lectura falla se responde sin traza (la decisión ya está guardada; el siguiente refresco la trae).
+ */
+async function decisionIaGuardada(d: Db, objetivo: FilaConAnios, anio: number, escrita: string | null | undefined): Promise<DecisionIaApi | null> {
+  const id = escrita === undefined ? (objetivo.proyeccion_fila_anios.find((a) => a.anio === anio)?.decision_ia_fila_id ?? null) : escrita;
+  if (id === null) return null;
+  const registro = objetivo.proyeccion_fila_anios.find((a) => a.anio === anio);
+  if (!registro) return null;
+  // `leerDecisionesIa` lee por las trazas que traen las filas: se le pasa el registro con la traza que quedó.
+  const r = await leerDecisionesIa(d, [{ ...objetivo, proyeccion_fila_anios: [{ ...registro, decision_ia_fila_id: id }] }]);
+  if (r.respuesta) return null;
+  return r.data.get(registro.id) ?? null;
 }
 
 /** Fallo de base a mitad de `propagarTienda`: lo ya guardado puede ser parcial. Detalle crudo al log; al usuario, que recargue. */

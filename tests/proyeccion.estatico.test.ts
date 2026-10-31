@@ -30,7 +30,7 @@ const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && 
 /** Lógica pura: ni base ni HTTP ni pantalla. */
 const PURAS = [
   "apertura-linea", "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "crecimientos", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
-  "explicar", "cola-larga", "resumen", "matriz", "mensual", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
+  "explicar", "cola-larga", "resumen", "matriz", "mensual", "meta-gm", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
 ];
 
 describe("0.14.0 F1: los meses del periodo que se comparan en un factor salen de UNA sola función", () => {
@@ -317,5 +317,63 @@ describe("M7: humo SQL de la migración 0018", () => {
     expect(t.match(/^\s*begin;/gim)?.length ?? 0).toBeGreaterThan(5);
     expect((t.match(/\brollback;/gi) ?? []).length).toBeGreaterThanOrEqual(t.match(/\bbegin;/gi)?.length ?? 0);
     expect(t).not.toMatch(/\bcommit\b/i);
+  });
+});
+
+describe("07e R24: M7 no depende de la IA (ni en el código ni en las lecturas del cálculo, el cierre, la Matriz, la mensual y la cerrada)", () => {
+  const sin = (ruta: string) => sinComentarios(fuente(ruta));
+  const delModulo = src.filter((f) => f.ruta.startsWith(LIB));
+  /** Nombra una tabla `ia_*` como cadena (`from("ia_…")`, `"ia_propuestas_filas"`, …); `decision_ia_fila_id` no cuenta (es una columna de M7). */
+  const NOMBRA_TABLA_IA = /["'`]ia_[a-z_]+["'`]|\bia_(propuestas|corridas?|configuraciones|evaluaciones|entradas|llamadas)[a-z_]*\b/;
+
+  it("nada de src/lib/proyeccion/ importa de src/lib/ia/ (la Matriz usa proyeccion/meta-gm.ts)", () => {
+    for (const f of delModulo) for (const origen of importsDe(sinComentarios(f.texto))) expect(origen, `${f.ruta} importa ${origen}`).not.toMatch(/(^|\/)lib\/ia(\/|$)|^\.\.?\/.*\bia\//);
+    expect(importsDe(fuente(`${LIB}matriz.ts`))).toContain("./meta-gm");
+    expect(importsDe(fuente(`${LIB}meta-gm.ts`)).every((o) => o === "./tipos-api")).toBe(true);
+  });
+
+  it("ningún archivo de M7 nombra una tabla ia_* salvo servicio-lectura.ts (lectura de la traza, solo para mostrar)", () => {
+    const nombran = delModulo.filter((f) => NOMBRA_TABLA_IA.test(sinComentarios(f.texto))).map((f) => f.ruta);
+    expect(nombran).toEqual([`${LIB}servicio-lectura.ts`]);
+    // Y esa lectura solo ocurre en leerDecisionesIa, por los ids de las trazas que ya traen las filas.
+    const lectura = sin(`${LIB}servicio-lectura.ts`);
+    expect(lectura.match(/from\(\s*["']ia_[a-z_]+["']/g)).toEqual(['from("ia_propuestas_filas"']);
+    expect(lectura).toMatch(/export async function leerDecisionesIa[\s\S]*?if \(ids\.length === 0\) return listo/);
+  });
+
+  it("calcular, cerrar, matriz, mensual y cerrada: ni sus servicios ni sus rutas nombran tablas ia_* ni importan de la IA", () => {
+    const servicios = ["servicio", "servicio-base", "servicio-crecimientos", "consultas", "calculo", "modelo", "cierre", "mensual", "matriz", "desactualizado", "reglas", "contexto"].map((n) => `${LIB}${n}.ts`);
+    for (const ruta of servicios) {
+      expect(fuente(ruta).length, ruta).toBeGreaterThan(0);
+      expect(NOMBRA_TABLA_IA.test(sin(ruta)), ruta).toBe(false);
+    }
+    const rutas = src.filter((f) => /^src\/app\/api\/proyeccion\/(cerrada|proyecciones\/\[id\]\/(calcular|cerrar|matriz|mensual))\/route\.ts$/.test(f.ruta));
+    expect(rutas.map((r) => r.ruta).length).toBe(5);
+    for (const r of rutas) {
+      expect(NOMBRA_TABLA_IA.test(sinComentarios(r.texto)), r.ruta).toBe(false);
+      for (const origen of importsDe(r.texto)) expect(origen, `${r.ruta} importa ${origen}`).not.toMatch(/\/lib\/ia(\/|$)/);
+    }
+  });
+
+  it("decision_ia_fila_id: el cálculo no la escribe (payloadAnioCalculo), el PUT de decisión no pasa opciones y solo servicio-edicion la decide", () => {
+    const calculo = sin(`${LIB}persistencia.ts`).match(/export function payloadAnioCalculo[\s\S]*?\n\}\n/)?.[0] ?? "";
+    expect(calculo.length).toBeGreaterThan(100);
+    expect(calculo).not.toContain("decision_ia_fila_id");
+    const put = sinComentarios(fuente("src/app/api/proyeccion/proyecciones/[id]/filas/[filaId]/anios/[anio]/route.ts"));
+    expect(put).toMatch(/decidirFila\(s\.valores\.id, s\.valores\.filaId, s\.anio, datos, \{ id: perfil\.id, nombre: perfil\.nombre \}\)/);
+    expect(put).not.toContain("decision_ia");
+    // La firma de la ficha (contrato con Backend A).
+    expect(sin(`${LIB}servicio-edicion.ts`)).toMatch(/export async function decidirFila\(\s*id: string,\s*filaId: string,\s*anio: number,\s*cuerpo: DecisionCuerpo,\s*actor: Actor,\s*opciones\?: \{ decision_ia_fila_id\?: string \}\s*\)/);
+    // Quien nombra la columna: persistencia (payload y lectura de trazas) y servicio-edicion (decidir). `copiar_de` (servicio.ts) la copia solo por `trazasIaDe` + `payloadAnioDecision`.
+    const escriben = delModulo.filter((f) => /decision_ia_fila_id/.test(sinComentarios(f.texto))).map((f) => f.ruta).sort();
+    expect(escriben).toEqual([`${LIB}persistencia.ts`, `${LIB}servicio-edicion.ts`]);
+    const servicio = sin(`${LIB}servicio.ts`);
+    expect(servicio).toMatch(/trazasIa = trazasIaDe\(f\.data\)/);
+    expect(servicio).toMatch(/payloadAnioDecision\(filaId, r, undefined, traza\)/);
+  });
+
+  it("VERSION_METODO sigue en 5 y la cerrada no menciona la IA (contrato de M8 intacto)", () => {
+    expect(fuente(`${LIB}tipos-api.ts`)).toMatch(/export const VERSION_METODO = 5;/);
+    for (const ruta of [`${LIB}cierre.ts`, `${LIB}mensual.ts`, "src/app/api/proyeccion/cerrada/route.ts"]) expect(sin(ruta), ruta).not.toMatch(/decision_ia|meta_siguiente/);
   });
 });

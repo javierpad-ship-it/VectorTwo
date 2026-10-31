@@ -8,16 +8,20 @@ import {
   aPrevias,
   aRegistro,
   aTiendaModelo,
+  decisionesIaDeFilas,
   payloadAnioCalculo,
   payloadAnioDecision,
   payloadFila,
   payloadTiendaCalculo,
   payloadTiendaDecision,
+  propuestasFilaDeTrazas,
+  trazasIaDe,
   type AnioDb,
   type FilaConAnios,
   type TiendaPyDb,
 } from "@/lib/proyeccion/persistencia";
 import { filtrarUniverso, inicioDelUniverso } from "@/lib/proyeccion/universo";
+import type { DecisionIaApi } from "@/lib/proyeccion/tipos-api";
 import { AG, AM, N, Y, clave, entrada, hechosBase, serie, construirVenta, tiendas } from "./proyeccion.fixture";
 import { catalogoFalso } from "./proyeccion.contexto-falso";
 
@@ -59,7 +63,7 @@ describe("del modelo a la base y de vuelta", () => {
   it("payloadAnioCalculo NUNCA lleva las columnas de decisión (el upsert del cálculo no puede pisarlas)", () => {
     const r = fila(clave("denim", AM.rec)).registros[0];
     const p = payloadAnioCalculo("f", { ...r, decidido: 1900, origen: "manual", nota: "x", propuesta_al_decidir: 1800, decidido_at: "ahora", decidido_por_nombre: "Javier", crecimiento_pct: 7 });
-    for (const prohibida of ["decidido", "origen", "nota", "propuesta_al_decidir", "decidido_at", "decidido_por_id", "decidido_por_nombre", "crecimiento_pct"]) {
+    for (const prohibida of ["decidido", "origen", "nota", "propuesta_al_decidir", "decidido_at", "decidido_por_id", "decidido_por_nombre", "crecimiento_pct", "decision_ia_fila_id"]) {
       expect(Object.keys(p), prohibida).not.toContain(prohibida);
     }
     expect(Object.keys(p)).toEqual(expect.arrayContaining(["meses", "meses_propuestos", "curva_origen_usada", "curva_origen_propuesta", "propuesto", "metodo"]));
@@ -159,6 +163,63 @@ describe("06e: base corregida del Niño en el registro de Y+1", () => {
     const modelo = aFilaModelo(comoBase(abrigo), 9, Y);
     const sinBc = { ...modelo, registros: modelo.registros.map((r) => ({ ...r, base_normalizada: null })) };
     expect(aAniosApi(sinBc, Y, () => ({ pct: 5, origen: "resto", celda: null, gm: null })).find((a) => a.anio === Y + 1)?.pct_sobre_normalizada).toBeNull();
+  });
+});
+
+describe("07e: decision_ia_fila_id (traza de «Aceptar IA»)", () => {
+  const PF = "00000000-0000-4000-8000-0000000000b1";
+  const manual = () => ({ ...fila(clave("denim", AM.rec)).registros[1], decidido: 2100, origen: "manual" as const });
+
+  it("payloadAnioDecision: undefined no escribe la columna (conserva), null la limpia y un id la escribe solo con una cifra manual", () => {
+    const r = manual();
+    expect(Object.keys(payloadAnioDecision("f", r, undefined))).not.toContain("decision_ia_fila_id");
+    expect(Object.keys(payloadAnioDecision("f", r, undefined, undefined))).not.toContain("decision_ia_fila_id");
+    expect(payloadAnioDecision("f", r, undefined, null)).toMatchObject({ decision_ia_fila_id: null });
+    expect(payloadAnioDecision("f", r, undefined, PF)).toMatchObject({ decidido: 2100, origen: "manual", decision_ia_fila_id: PF });
+    // El `check` de la base: la traza exige origen manual. Una propuesta aceptada, un registro sin decidir o una escalada nunca la llevan.
+    expect(payloadAnioDecision("f", { ...r, origen: "propuesta" }, undefined, PF)).toMatchObject({ decision_ia_fila_id: null });
+    expect(payloadAnioDecision("f", { ...r, origen: "escalada" }, undefined, PF)).toMatchObject({ decision_ia_fila_id: null });
+    expect(payloadAnioDecision("f", { ...r, decidido: null, origen: null }, undefined, PF)).toMatchObject({ decidido: null, origen: null, decision_ia_fila_id: null });
+  });
+
+  it("el cálculo nunca la escribe y la API de un registro no filtra la columna cruda", () => {
+    const r = manual();
+    expect(Object.keys(payloadAnioCalculo("f", r))).not.toContain("decision_ia_fila_id");
+    const g = comoBase(clave("denim", AM.rec));
+    g.proyeccion_fila_anios[1] = { ...g.proyeccion_fila_anios[1], decidido: 2100, origen: "manual", decision_ia_fila_id: PF };
+    const modelo = aFilaModelo(g, 9, Y);
+    expect(Object.keys(modelo.registros[1])).not.toContain("decision_ia_fila_id");
+    for (const a of aAniosApi(modelo, Y)) {
+      expect(Object.keys(a)).not.toContain("decision_ia_fila_id");
+      expect(Object.keys(a)).not.toContain("decision_ia"); // sin las decisiones leídas, el campo no existe
+    }
+  });
+
+  const decision: DecisionIaApi = { propuesta_fila_id: PF, proveedor: "proveedor-falso", modelo: "modelo-falso-1", version_prompt: "v1", generada_at: "2026-10-30T15:00:00.000Z" };
+
+  it("trazasIaDe, propuestasFilaDeTrazas y decisionesIaDeFilas parten solo de los registros con traza (las columnas ligeras, sin ella, no rompen)", () => {
+    const con = comoBase(clave("denim", AM.rec));
+    con.proyeccion_fila_anios[1] = { ...con.proyeccion_fila_anios[1], decidido: 2100, origen: "manual", decision_ia_fila_id: PF };
+    const sin = comoBase(`|${N.abrigo}|e-parka|${AM.rec}`);
+    // Una lectura de columnas ligeras no trae la columna (llega `undefined`): no cuenta como traza.
+    const ligera: FilaConAnios = { ...sin, proyeccion_fila_anios: sin.proyeccion_fila_anios.map((a) => ({ ...a, decision_ia_fila_id: undefined as unknown as null })) };
+    expect([...trazasIaDe([con, sin, ligera])]).toEqual([[`${con.clave}#2027`, PF]]);
+    expect(propuestasFilaDeTrazas([con, sin, ligera])).toEqual([PF]);
+    expect(propuestasFilaDeTrazas([sin])).toEqual([]);
+    const porRegistro = decisionesIaDeFilas([con, sin], new Map([[PF, decision]]));
+    expect([...porRegistro]).toEqual([[con.proyeccion_fila_anios[1].id, decision]]);
+    // Una traza cuya propuesta no se encontró queda fuera: se muestra como sin traza.
+    expect(decisionesIaDeFilas([con], new Map()).size).toBe(0);
+  });
+
+  it("aAniosApi y aFilaApi: con las decisiones leídas cada registro trae decision_ia (la suya o null); sin ellas, ninguno", () => {
+    const g = comoBase(clave("denim", AM.rec));
+    g.proyeccion_fila_anios[1] = { ...g.proyeccion_fila_anios[1], decidido: 2100, origen: "manual", decision_ia_fila_id: PF };
+    const mapa = decisionesIaDeFilas([g], new Map([[PF, decision]]));
+    const api = aFilaApi(g, catalogoFalso(), 9, Y, undefined, mapa)!;
+    expect(api.anios.map((a) => [a.anio, a.decision_ia])).toEqual([[2026, null], [2027, decision]]);
+    expect(aFilaApi(g, catalogoFalso(), 9, Y, undefined, new Map())!.anios.map((a) => a.decision_ia)).toEqual([null, null]);
+    expect(aFilaApi(g, catalogoFalso(), 9, Y)!.anios.every((a) => !("decision_ia" in a))).toBe(true);
   });
 });
 

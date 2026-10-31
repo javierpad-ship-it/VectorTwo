@@ -615,6 +615,23 @@ export type AnioFilaApi = {
   pct_bruto?: number | null;
   /** `0.14.0`: `vigente ÷ B' − 1` en % («sobre 2026 corregido»); `null` sin `B'` (0 o nulo) o sin vigente. */
   pct_sobre_normalizada?: number | null;
+  /**
+   * `0.15.0` (07e): de dónde salió el `decidido` vigente. No nulo = salió de «Aceptar IA» (la propuesta de IA que el planner aceptó);
+   * `null` = decisión propia, de la propuesta del método o sin decidir. Ausente en las lecturas que no la piden (matriz, mensual, cerrada)
+   * y en el cálculo. Solo se lee para mostrar: ni `calcular` ni `cerrar` la usan.
+   */
+  decision_ia?: DecisionIaApi | null;
+};
+
+/** `0.15.0` (07e): la propuesta de IA aceptada que dejó la cifra decidida de un registro (`proyeccion_fila_anios.decision_ia_fila_id`). */
+export type DecisionIaApi = {
+  /** `ia_propuestas_filas.id`. */
+  propuesta_fila_id: string;
+  proveedor: string;
+  modelo: string;
+  version_prompt: string;
+  /** Cuándo se generó la propuesta del GM (ISO). */
+  generada_at: string;
 };
 
 export type FilaApi = {
@@ -774,6 +791,24 @@ export type NodoMatrizApi = {
   variacion_pct: number | null;
   estado: EstadoLinea;
   avisos: AvisoFila[];
+  /**
+   * `0.15.0` (07e §3.3 y §5.1, «cuadre»), solo en el nodo `mundo` (el género × mundo, GM) de la matriz por árbol: la meta aprobada de `Y+1` del
+   * GM y cuánto se apartan de ella las cifras vigentes. Se calcula SIEMPRE sobre todas las filas base activas del GM (no sobre el recorte
+   * del filtro): es la garantía de la meta, que cerrar no exige. `null` = el GM no tiene meta (sin filas con propuesta, o sin % en la foto).
+   * Ausente en los demás nodos.
+   */
+  meta_siguiente?: MetaSiguienteApi | null;
+};
+
+export type MetaSiguienteApi = {
+  /** `Meta_GM` = `Σ P^GM` de `Y+1` (unidades). */
+  meta_gm: number;
+  /** `Σ vigente − Meta_GM` en unidades, sobre las filas base del GM con propuesta. */
+  desvio_u: number;
+  /** `desvio_u ÷ Meta_GM` en % (`100` = 100 %, como el resto de los `*_pct`); `null` si `Meta_GM = 0`. */
+  desvio_pct: number | null;
+  /** De dónde sale el % de la meta: la celda del GM aprobada, el Resto aprobado o el Resto provisional. */
+  fuente: "gm" | "resto" | "resto_provisional";
 };
 
 export type FilaMensualApi = {

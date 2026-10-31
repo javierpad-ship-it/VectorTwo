@@ -12,7 +12,10 @@ export type ErrorFalso = { code: string; message: string; details: null; hint: n
 const COLUMNAS: Record<string, string[]> = {
   proyecciones: ["id", "anio_en_curso", "nombre", "estado", "hasta_periodo", "parametros", "resumen", "calculando_desde", "calculado_at", "cerrada_at", "cerrada_por_id", "cerrada_por_nombre", "nota", "perfil_id", "usuario_nombre", "activo", "created_at", "updated_at"],
   proyeccion_filas: ["id", "proyeccion_id", "tienda_id", "gml_id", "equivalencia_id", "agrupacion_marca_id", "clave", "nivel_proyectado", "agrupacion_estacionalidad_id", "temporada", "curva", "curva_origen", "factores_mes", "historico", "participaciones", "composicion", "avisos", "activo", "created_at", "updated_at"],
-  proyeccion_fila_anios: ["id", "fila_id", "anio", "bloque", "subbloque", "vendido", "propuesto", "metodo", "referencia_alternativa", "referencia_tres_meses", "explicacion", "crecimiento_pct", "base_siguiente", "base_normalizada", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "meses", "origen_meses", "curva_origen_usada", "meses_propuestos", "curva_origen_propuesta", "avisos", "activo", "created_at", "updated_at"],
+  proyeccion_fila_anios: ["id", "fila_id", "anio", "bloque", "subbloque", "vendido", "propuesto", "metodo", "referencia_alternativa", "referencia_tres_meses", "explicacion", "crecimiento_pct", "base_siguiente", "base_normalizada", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "decision_ia_fila_id", "meses", "origen_meses", "curva_origen_usada", "meses_propuestos", "curva_origen_propuesta", "avisos", "activo", "created_at", "updated_at"],
+  // 0030 (07e): solo lo que lee M7 para mostrar la traza de «Aceptar IA» (las tablas reales las llena el motor de IA, que no corre en estas pruebas).
+  ia_propuestas_gm: ["id", "proveedor", "modelo", "version_prompt", "created_at"],
+  ia_propuestas_filas: ["id", "propuesta_gm_id", "fila_id", "fila_clave", "created_at"],
   proyeccion_tiendas: ["id", "proyeccion_id", "tienda_id", "anio", "bloque", "subbloque", "fecha_usada", "venta_esperada_usada", "referente_id_usado", "origen_composicion", "rampa", "unidades_maduras", "vendido", "propuesto", "metodo", "decidido", "origen", "propuesta_al_decidir", "nota", "decidido_at", "decidido_por_id", "decidido_por_nombre", "explicacion", "referencia_alternativa", "referencia_tres_meses", "avisos", "activo", "created_at", "updated_at"],
   proyeccion_crecimientos: ["id", "proyeccion_id", "genero_id", "mundo_id", "pct", "sobre_base", "nota", "perfil_id", "usuario_nombre", "crecimiento_id", "version", "activo", "created_at", "updated_at"],
   crecimientos_genero_mundo: ["id", "anio_aplicacion", "alcance", "genero_id", "mundo_id", "version", "estado", "pct", "sobre_base", "nota", "base_tipo", "base_valor", "referencia", "proyeccion_referencia_id", "perfil_id", "usuario_nombre", "aprobada_at", "activo", "created_at", "updated_at"],
@@ -43,6 +46,7 @@ const ONCONFLICT: Record<string, string[]> = {
 const RELACIONES: Record<string, Record<string, { fk: string; tipo: "hijos" | "padre" }>> = {
   proyeccion_filas: { proyeccion_fila_anios: { fk: "fila_id", tipo: "hijos" } },
   proyeccion_fila_anios: { proyeccion_filas: { fk: "fila_id", tipo: "padre" } },
+  ia_propuestas_filas: { ia_propuestas_gm: { fk: "propuesta_gm_id", tipo: "padre" } },
 };
 
 export type EstadoFalso = {
@@ -220,6 +224,11 @@ class Consulta implements PromiseLike<Resultado> {
     }
     if (t === "proyeccion_fila_anios") {
       if (nulo(fila.decidido) !== nulo(fila.origen)) return err("23514", 'new row for relation "proyeccion_fila_anios" violates check constraint "proyeccion_fila_anios_decision_check"');
+      // 0030 (§2.9): la traza de IA solo con cifra manual (`decision_ia_fila_id is null or coalesce(origen = 'manual', false)`) y apuntando a una propuesta que existe.
+      if (!nulo(fila.decision_ia_fila_id)) {
+        if (fila.origen !== "manual") return err("23514", 'new row for relation "proyeccion_fila_anios" violates check constraint "proyeccion_fila_anios_decision_ia_origen_check"');
+        if (!(estado.tablas.ia_propuestas_filas ?? []).some((x) => x.id === fila.decision_ia_fila_id)) return err("23503", 'insert or update on table "proyeccion_fila_anios" violates foreign key constraint "proyeccion_fila_anios_decision_ia_fila_id_fkey"');
+      }
       for (const c of ["meses", "meses_propuestos", "origen_meses"]) {
         const v = fila[c];
         if (!nulo(v) && (!Array.isArray(v) || v.length !== 12)) return err("23514", `violates check constraint "proyeccion_fila_anios_${c}_check"`);

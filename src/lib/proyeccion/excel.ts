@@ -91,6 +91,10 @@ export function hojasMatriz(args: {
     // La variación (arriba) incluye además tiendas nuevas, aperturas y cierres.
     `CREC. SOBRE ${y} CORREGIDO %`,
     `CREC. SOBRE ${y} REAL %`,
+    // 07e (§4.4): solo el nodo de cada GM (mundo dentro de género) trae la meta aprobada de `Y+1` y cuánto se apartan de ella las cifras vigentes (`Σ vigente − Meta_GM`, en u y en %).
+    `META ${y + 1}`,
+    `DESVÍO FRENTE A LA META ${y + 1}`,
+    `DESVÍO FRENTE A LA META ${y + 1} %`,
     "ESTADO",
   ];
   const filas: Hoja = [cabecera];
@@ -112,6 +116,9 @@ export function hojasMatriz(args: {
       n.variacion_pct === null ? null : Math.round(n.variacion_pct * 10) / 10,
       redondear1(n.siguiente.crec_corregida_pct),
       redondear1(n.siguiente.crec_mismas_pct),
+      n.meta_siguiente?.meta_gm ?? null,
+      n.meta_siguiente?.desvio_u ?? null,
+      redondear1(n.meta_siguiente?.desvio_pct),
       n.estado,
     ]);
   }

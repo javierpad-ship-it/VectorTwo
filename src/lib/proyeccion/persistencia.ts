@@ -8,6 +8,7 @@ import {
   type AnioFilaApi,
   type AvisoFila,
   type CurvaOrigen,
+  type DecisionIaApi,
   type DecisionPrevia,
   type DecisionTiendaPrevia,
   type FilaApi,
@@ -175,8 +176,20 @@ export function payloadAnioCalculo(filaId: string, r: RegistroModelo, avisosExtr
   };
 }
 
-/** Registro completo (con decisión) para las decisiones en vivo. */
-export function payloadAnioDecision(filaId: string, r: RegistroModelo, decididoPorId: string | null | undefined): TablesInsert<"proyeccion_fila_anios"> {
+/**
+ * Registro completo (con decisión) para las decisiones en vivo.
+ *
+ * `decisionIaFilaId` (07e, `decision_ia_fila_id`): `undefined` NO escribe la columna (conserva lo que había; la mayoría de los registros que se
+ * reescriben no cambian de decisión); `null` la limpia; un id la escribe. Solo vale con una cifra decidida a mano (`origen = manual`): la base
+ * lo exige con un `check`, así que cualquier otro registro la lleva `null` aunque se pida un id (nunca se manda una combinación que la base rechace).
+ */
+export function payloadAnioDecision(
+  filaId: string,
+  r: RegistroModelo,
+  decididoPorId: string | null | undefined,
+  decisionIaFilaId?: string | null
+): TablesInsert<"proyeccion_fila_anios"> {
+  const trazaValida = r.decidido !== null && r.origen === "manual";
   return {
     ...payloadAnioCalculo(filaId, r),
     crecimiento_pct: r.crecimiento_pct,
@@ -188,7 +201,38 @@ export function payloadAnioDecision(filaId: string, r: RegistroModelo, decididoP
     // `undefined` deja la columna como está (el registro lo decidió otra persona antes).
     ...(r.decidido === null ? { decidido_por_id: null } : decididoPorId === undefined ? {} : { decidido_por_id: decididoPorId }),
     decidido_por_nombre: r.decidido_por_nombre,
+    ...(decisionIaFilaId === undefined ? {} : { decision_ia_fila_id: trazaValida ? decisionIaFilaId : null }),
   };
+}
+
+/**
+ * Las trazas de «Aceptar IA» de una proyección (`${clave}#${anio}` → `decision_ia_fila_id`): lo que `copiar_de` lleva a la proyección nueva. Solo
+ * los registros con traza; la traza apunta a la propuesta original (`ia_propuestas_filas`, que no pertenece a ninguna proyección).
+ */
+export function trazasIaDe(filas: readonly FilaConAnios[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const f of filas) for (const a of f.proyeccion_fila_anios ?? []) if (a.decision_ia_fila_id) m.set(`${f.clave}#${a.anio}`, a.decision_ia_fila_id);
+  return m;
+}
+
+/**
+ * Registro (`proyeccion_fila_anios.id`) → su `DecisionIaApi`, uniendo la traza guardada con lo que se leyó de la propuesta (`porPropuestaFila`:
+ * `ia_propuestas_filas.id` → datos de la propuesta). Una traza cuya propuesta no se encontró queda fuera (se muestra como sin traza).
+ */
+export function decisionesIaDeFilas(filas: readonly FilaConAnios[], porPropuestaFila: ReadonlyMap<string, DecisionIaApi>): Map<string, DecisionIaApi> {
+  const m = new Map<string, DecisionIaApi>();
+  for (const f of filas) {
+    for (const a of f.proyeccion_fila_anios ?? []) {
+      const d = a.decision_ia_fila_id ? porPropuestaFila.get(a.decision_ia_fila_id) : undefined;
+      if (d) m.set(a.id, d);
+    }
+  }
+  return m;
+}
+
+/** Los ids de propuesta de fila (`decision_ia_fila_id`) que llevan las filas, sin repetir: lo único que se le pide a las tablas `ia_*`. */
+export function propuestasFilaDeTrazas(filas: readonly FilaConAnios[]): string[] {
+  return [...new Set(filas.flatMap((f) => (f.proyeccion_fila_anios ?? []).flatMap((a) => (a.decision_ia_fila_id ? [a.decision_ia_fila_id] : []))))];
 }
 
 // ─── Tiendas ───
@@ -355,12 +399,14 @@ export function conCamposBrutos(api: AnioFilaApi, fila: Pick<FilaModelo, "tienda
  * Los registros de una fila a la API. `cola_larga` (la validación de disponibilidad, que vive en `historico`) solo se pone en el
  * registro de `Y` de una fila base; en el resto `null`.
  */
-export function aAniosApi(modelo: FilaModelo, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi): AnioFilaApi[] {
+export function aAniosApi(modelo: FilaModelo, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi, decisionesIa?: ReadonlyMap<string, DecisionIaApi>): AnioFilaApi[] {
   return modelo.registros.map((r) =>
     conCamposBrutos(
       {
         ...aAnioApi(r),
         cola_larga: modelo.tienda_id === null && r.anio === anioEnCurso ? (modelo.historico?.cola_larga ?? null) : null,
+        // 07e: con las decisiones de IA leídas (aunque sea un mapa vacío) cada registro dice si salió de «Aceptar IA»; sin ellas el campo no existe.
+        ...(decisionesIa ? { decision_ia: (r.id !== undefined ? decisionesIa.get(r.id) : undefined) ?? null } : {}),
       },
       modelo,
       anioEnCurso,
@@ -428,7 +474,7 @@ export function aFilaPlana(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso:
 }
 
 /** Fila de la API con sus años (`historico_anual` solo si se pide con `historico`). */
-export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi): FilaApi | null {
+export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi, decisionesIa?: ReadonlyMap<string, DecisionIaApi>): FilaApi | null {
   const n = nombresDe(f, c);
   if (!n) return null;
   const modelo = aFilaModelo(f, k, anioEnCurso);
@@ -452,7 +498,7 @@ export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: n
       completo: a.anio < anioEnCurso || k === 12,
       tiendas: a.tiendas.length,
     })),
-    anios: aAniosApi(modelo, anioEnCurso, crecimientoDe).filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false),
+    anios: aAniosApi(modelo, anioEnCurso, crecimientoDe, decisionesIa).filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false),
     avisos: modelo.avisos,
     activo: f.activo,
   };
