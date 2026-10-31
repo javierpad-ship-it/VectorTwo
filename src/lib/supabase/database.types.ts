@@ -1,6 +1,13 @@
 /**
  * Tipos de la base de datos.
  *
+ * Verificados el 2026-10-31 contra `generate_typescript_types` de `Vector2` (0030 M7 07e, propuesta de la IA, aplicada): 8 tablas
+ * nuevas (`ia_evaluaciones`, `ia_configuraciones`, `ia_corridas`, `ia_corrida_gms`, `ia_entradas`, `ia_llamadas`, `ia_propuestas_gm`,
+ * `ia_propuestas_filas`), `proyeccion_fila_anios.decision_ia_fila_id` (uuid null, FK a `ia_propuestas_filas`) y las funciones
+ * `venta_lineas_ia` y `registrar_propuesta_ia_gm`. Neutral al proveedor: `proveedor` y `modelo` son `string` libres. El generador
+ * ademas lista `prueba_conexion` (tabla de pruebas previa, no se usa) y ordena las columnas alfabeticamente: aqui solo cambian lo que
+ * toca la 0030.
+ *
  * Actualizados a mano el 2026-10-27 con la 0025 (M8 0.13.0: tablas `proveedores`, `compras`, `compra_lineas`, `compra_linea_entregas`,
  * `compra_linea_repartos`, `compra_linea_recepciones`, `compra_eventos` y `flujo_parametros`, y las funciones `stock_flujo`, `flujo_huella_base`,
  * `compra_foto`, `compra_recalcular_estado`, `importar_compra`, `registrar_recepciones`, `quitar_recepcion` y `cancelar_compra`). PENDIENTE: la 0025
@@ -1321,6 +1328,718 @@ export type Database = {
         };
         Relationships: [];
       };
+      ia_configuraciones: {
+        Row: {
+          activo: boolean;
+          aprobada_at: string;
+          capacidades: string[];
+          created_at: string;
+          estado: string;
+          evaluacion_id: string | null;
+          id: string;
+          incluir_cola_larga: boolean;
+          max_filas_llamada: number;
+          modelo: string;
+          nota: string | null;
+          perfil_id: string | null;
+          precios: Json;
+          presupuesto_razonamiento: number;
+          proveedor: string;
+          terminos_extra: string[];
+          tope_usd_corrida: number;
+          tope_usd_dia_usuario: number;
+          tope_usd_mes: number;
+          updated_at: string;
+          usuario_nombre: string | null;
+          version: number;
+          version_prompt: string;
+        };
+        Insert: {
+          activo?: boolean;
+          aprobada_at?: string;
+          capacidades?: string[];
+          created_at?: string;
+          estado?: string;
+          evaluacion_id?: string | null;
+          id?: string;
+          incluir_cola_larga?: boolean;
+          max_filas_llamada?: number;
+          modelo: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          precios: Json;
+          presupuesto_razonamiento?: number;
+          proveedor: string;
+          terminos_extra?: string[];
+          tope_usd_corrida?: number;
+          tope_usd_dia_usuario?: number;
+          tope_usd_mes?: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version: number;
+          version_prompt: string;
+        };
+        Update: {
+          activo?: boolean;
+          aprobada_at?: string;
+          capacidades?: string[];
+          created_at?: string;
+          estado?: string;
+          evaluacion_id?: string | null;
+          id?: string;
+          incluir_cola_larga?: boolean;
+          max_filas_llamada?: number;
+          modelo?: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          precios?: Json;
+          presupuesto_razonamiento?: number;
+          proveedor?: string;
+          terminos_extra?: string[];
+          tope_usd_corrida?: number;
+          tope_usd_dia_usuario?: number;
+          tope_usd_mes?: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version?: number;
+          version_prompt?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_configuraciones_evaluacion_id_fkey";
+            columns: ["evaluacion_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_evaluaciones";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_configuraciones_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ia_corrida_gms: {
+        Row: {
+          bloque_ids: string[];
+          candado_desde: string | null;
+          candado_token: string | null;
+          corrida_id: string;
+          created_at: string;
+          error_codigo: string | null;
+          estado: string;
+          gm_clave: string;
+          huella_gm: string | null;
+          id: string;
+          modo: string | null;
+          parcial: Json;
+          plan: Json | null;
+          pliegue: string;
+          propuesta_gm_id: string | null;
+          referencia: Json | null;
+          updated_at: string;
+        };
+        Insert: {
+          bloque_ids?: string[];
+          candado_desde?: string | null;
+          candado_token?: string | null;
+          corrida_id: string;
+          created_at?: string;
+          error_codigo?: string | null;
+          estado?: string;
+          gm_clave: string;
+          huella_gm?: string | null;
+          id?: string;
+          modo?: string | null;
+          parcial?: Json;
+          plan?: Json | null;
+          pliegue?: string;
+          propuesta_gm_id?: string | null;
+          referencia?: Json | null;
+          updated_at?: string;
+        };
+        Update: {
+          bloque_ids?: string[];
+          candado_desde?: string | null;
+          candado_token?: string | null;
+          corrida_id?: string;
+          created_at?: string;
+          error_codigo?: string | null;
+          estado?: string;
+          gm_clave?: string;
+          huella_gm?: string | null;
+          id?: string;
+          modo?: string | null;
+          parcial?: Json;
+          plan?: Json | null;
+          pliegue?: string;
+          propuesta_gm_id?: string | null;
+          referencia?: Json | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_corrida_gms_corrida_id_fkey";
+            columns: ["corrida_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_corridas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_corrida_gms_propuesta_gm_id_fkey";
+            columns: ["propuesta_gm_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_propuestas_gm";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ia_corridas: {
+        Row: {
+          activo: boolean;
+          alcance: Json;
+          anio_en_curso: number | null;
+          calculado_at_proyeccion: string | null;
+          configuracion_id: string | null;
+          costo_estimado_usd: number;
+          created_at: string;
+          estado: string;
+          evaluacion_id: string | null;
+          id: string;
+          iniciada_at: string;
+          k: number | null;
+          modelo: string;
+          motivo_fin: string | null;
+          perfil_id: string | null;
+          proveedor: string;
+          proyeccion_id: string | null;
+          terminada_at: string | null;
+          tipo: string;
+          ultima_actividad_at: string;
+          updated_at: string;
+          usuario_nombre: string | null;
+          version_prompt: string;
+        };
+        Insert: {
+          activo?: boolean;
+          alcance: Json;
+          anio_en_curso?: number | null;
+          calculado_at_proyeccion?: string | null;
+          configuracion_id?: string | null;
+          costo_estimado_usd: number;
+          created_at?: string;
+          estado?: string;
+          evaluacion_id?: string | null;
+          id?: string;
+          iniciada_at?: string;
+          k?: number | null;
+          modelo: string;
+          motivo_fin?: string | null;
+          perfil_id?: string | null;
+          proveedor: string;
+          proyeccion_id?: string | null;
+          terminada_at?: string | null;
+          tipo: string;
+          ultima_actividad_at?: string;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version_prompt: string;
+        };
+        Update: {
+          activo?: boolean;
+          alcance?: Json;
+          anio_en_curso?: number | null;
+          calculado_at_proyeccion?: string | null;
+          configuracion_id?: string | null;
+          costo_estimado_usd?: number;
+          created_at?: string;
+          estado?: string;
+          evaluacion_id?: string | null;
+          id?: string;
+          iniciada_at?: string;
+          k?: number | null;
+          modelo?: string;
+          motivo_fin?: string | null;
+          perfil_id?: string | null;
+          proveedor?: string;
+          proyeccion_id?: string | null;
+          terminada_at?: string | null;
+          tipo?: string;
+          ultima_actividad_at?: string;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          version_prompt?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_corridas_configuracion_id_fkey";
+            columns: ["configuracion_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_configuraciones";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_corridas_evaluacion_id_fkey";
+            columns: ["evaluacion_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_evaluaciones";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_corridas_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_corridas_proyeccion_id_fkey";
+            columns: ["proyeccion_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ia_entradas: {
+        Row: {
+          bytes: number;
+          contenido_gz: string;
+          corrida_id: string;
+          created_at: string;
+          diccionario: Json;
+          huella: string;
+          id: string;
+          tipo: string;
+        };
+        Insert: {
+          bytes: number;
+          contenido_gz: string;
+          corrida_id: string;
+          created_at?: string;
+          diccionario: Json;
+          huella: string;
+          id?: string;
+          tipo: string;
+        };
+        Update: {
+          bytes?: number;
+          contenido_gz?: string;
+          corrida_id?: string;
+          created_at?: string;
+          diccionario?: Json;
+          huella?: string;
+          id?: string;
+          tipo?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_entradas_corrida_id_fkey";
+            columns: ["corrida_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_corridas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ia_evaluaciones: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          estado: string;
+          id: string;
+          iniciada_at: string;
+          modelo: string;
+          parametros: Json;
+          perfil_id: string | null;
+          proveedor: string;
+          resultados: Json | null;
+          terminada_at: string | null;
+          tope_usd: number;
+          updated_at: string;
+          usuario_nombre: string | null;
+          veredicto: Json | null;
+          version_prompt: string;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          estado?: string;
+          id?: string;
+          iniciada_at?: string;
+          modelo: string;
+          parametros: Json;
+          perfil_id?: string | null;
+          proveedor: string;
+          resultados?: Json | null;
+          terminada_at?: string | null;
+          tope_usd?: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          veredicto?: Json | null;
+          version_prompt: string;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          estado?: string;
+          id?: string;
+          iniciada_at?: string;
+          modelo?: string;
+          parametros?: Json;
+          perfil_id?: string | null;
+          proveedor?: string;
+          resultados?: Json | null;
+          terminada_at?: string | null;
+          tope_usd?: number;
+          updated_at?: string;
+          usuario_nombre?: string | null;
+          veredicto?: Json | null;
+          version_prompt?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_evaluaciones_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ia_llamadas: {
+        Row: {
+          bytes_entrada: number;
+          corrida_gm_id: string;
+          corrida_id: string;
+          costo_usd: number;
+          created_at: string;
+          duracion_ms: number;
+          entrada_bloque_id: string | null;
+          entrada_sufijo_id: string | null;
+          error_codigo: string | null;
+          error_detalle: string | null;
+          esperar_ms: number | null;
+          estado: string;
+          filas_enviadas: number;
+          huella_llamada: string;
+          id: string;
+          id_solicitud: string | null;
+          intento: number;
+          modelo_respuesta: string | null;
+          paso: string;
+          perfil_id: string | null;
+          tipo_llamada: string;
+          tokens_entrada: number;
+          tokens_entrada_cache: number;
+          tokens_salida: number;
+        };
+        Insert: {
+          bytes_entrada: number;
+          corrida_gm_id: string;
+          corrida_id: string;
+          costo_usd?: number;
+          created_at?: string;
+          duracion_ms: number;
+          entrada_bloque_id?: string | null;
+          entrada_sufijo_id?: string | null;
+          error_codigo?: string | null;
+          error_detalle?: string | null;
+          esperar_ms?: number | null;
+          estado: string;
+          filas_enviadas: number;
+          huella_llamada: string;
+          id?: string;
+          id_solicitud?: string | null;
+          intento: number;
+          modelo_respuesta?: string | null;
+          paso: string;
+          perfil_id?: string | null;
+          tipo_llamada: string;
+          tokens_entrada?: number;
+          tokens_entrada_cache?: number;
+          tokens_salida?: number;
+        };
+        Update: {
+          bytes_entrada?: number;
+          corrida_gm_id?: string;
+          corrida_id?: string;
+          costo_usd?: number;
+          created_at?: string;
+          duracion_ms?: number;
+          entrada_bloque_id?: string | null;
+          entrada_sufijo_id?: string | null;
+          error_codigo?: string | null;
+          error_detalle?: string | null;
+          esperar_ms?: number | null;
+          estado?: string;
+          filas_enviadas?: number;
+          huella_llamada?: string;
+          id?: string;
+          id_solicitud?: string | null;
+          intento?: number;
+          modelo_respuesta?: string | null;
+          paso?: string;
+          perfil_id?: string | null;
+          tipo_llamada?: string;
+          tokens_entrada?: number;
+          tokens_entrada_cache?: number;
+          tokens_salida?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_llamadas_corrida_gm_id_fkey";
+            columns: ["corrida_gm_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_corrida_gms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_llamadas_corrida_id_fkey";
+            columns: ["corrida_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_corridas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_llamadas_entrada_bloque_id_fkey";
+            columns: ["entrada_bloque_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_entradas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_llamadas_entrada_sufijo_id_fkey";
+            columns: ["entrada_sufijo_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_entradas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_llamadas_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ia_propuestas_filas: {
+        Row: {
+          aporte_fijo_al_generar: number | null;
+          avisos: string[];
+          banderas: string[];
+          base_al_generar: number | null;
+          base_corregida_al_generar: number | null;
+          confianza: string | null;
+          created_at: string;
+          estado_meta: string;
+          fila_clave: string;
+          fila_id: string | null;
+          id: string;
+          meta_y1_al_generar: number | null;
+          meta_y1_modelo: number | null;
+          natural_y1: number | null;
+          p_gm_al_generar: number | null;
+          propuesta_gm_id: string;
+          razon: string | null;
+          razon_natural: string | null;
+          senales: string[];
+        };
+        Insert: {
+          aporte_fijo_al_generar?: number | null;
+          avisos?: string[];
+          banderas?: string[];
+          base_al_generar?: number | null;
+          base_corregida_al_generar?: number | null;
+          confianza?: string | null;
+          created_at?: string;
+          estado_meta: string;
+          fila_clave: string;
+          fila_id?: string | null;
+          id?: string;
+          meta_y1_al_generar?: number | null;
+          meta_y1_modelo?: number | null;
+          natural_y1?: number | null;
+          p_gm_al_generar?: number | null;
+          propuesta_gm_id: string;
+          razon?: string | null;
+          razon_natural?: string | null;
+          senales?: string[];
+        };
+        Update: {
+          aporte_fijo_al_generar?: number | null;
+          avisos?: string[];
+          banderas?: string[];
+          base_al_generar?: number | null;
+          base_corregida_al_generar?: number | null;
+          confianza?: string | null;
+          created_at?: string;
+          estado_meta?: string;
+          fila_clave?: string;
+          fila_id?: string | null;
+          id?: string;
+          meta_y1_al_generar?: number | null;
+          meta_y1_modelo?: number | null;
+          natural_y1?: number | null;
+          p_gm_al_generar?: number | null;
+          propuesta_gm_id?: string;
+          razon?: string | null;
+          razon_natural?: string | null;
+          senales?: string[];
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_propuestas_filas_fila_id_fkey";
+            columns: ["fila_id"];
+            isOneToOne: false;
+            referencedRelation: "proyeccion_filas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_propuestas_filas_propuesta_gm_id_fkey";
+            columns: ["propuesta_gm_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_propuestas_gm";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ia_propuestas_gm: {
+        Row: {
+          avisos: string[];
+          banderas_gm: string[];
+          capacidades: string[];
+          corrida_gm_id: string;
+          corrida_id: string;
+          created_at: string;
+          desvio_suma_modelo: number | null;
+          es_resto: boolean;
+          filas_pedidas: number;
+          filas_validas: number;
+          genero_id: string;
+          gm_clave: string;
+          huella_gm: string;
+          huella_historia: string;
+          id: string;
+          meta: Json | null;
+          modelo: string;
+          modo: string;
+          mundo_id: string;
+          perfil_id: string | null;
+          pliegue: string;
+          proveedor: string;
+          proyeccion_id: string | null;
+          razon_gm: string | null;
+          usuario_nombre: string | null;
+          version_metodo: number;
+          version_prompt: string;
+        };
+        Insert: {
+          avisos?: string[];
+          banderas_gm?: string[];
+          capacidades: string[];
+          corrida_gm_id: string;
+          corrida_id: string;
+          created_at?: string;
+          desvio_suma_modelo?: number | null;
+          es_resto: boolean;
+          filas_pedidas: number;
+          filas_validas: number;
+          genero_id: string;
+          gm_clave: string;
+          huella_gm: string;
+          huella_historia: string;
+          id?: string;
+          meta?: Json | null;
+          modelo: string;
+          modo: string;
+          mundo_id: string;
+          perfil_id?: string | null;
+          pliegue?: string;
+          proveedor: string;
+          proyeccion_id?: string | null;
+          razon_gm?: string | null;
+          usuario_nombre?: string | null;
+          version_metodo: number;
+          version_prompt: string;
+        };
+        Update: {
+          avisos?: string[];
+          banderas_gm?: string[];
+          capacidades?: string[];
+          corrida_gm_id?: string;
+          corrida_id?: string;
+          created_at?: string;
+          desvio_suma_modelo?: number | null;
+          es_resto?: boolean;
+          filas_pedidas?: number;
+          filas_validas?: number;
+          genero_id?: string;
+          gm_clave?: string;
+          huella_gm?: string;
+          huella_historia?: string;
+          id?: string;
+          meta?: Json | null;
+          modelo?: string;
+          modo?: string;
+          mundo_id?: string;
+          perfil_id?: string | null;
+          pliegue?: string;
+          proveedor?: string;
+          proyeccion_id?: string | null;
+          razon_gm?: string | null;
+          usuario_nombre?: string | null;
+          version_metodo?: number;
+          version_prompt?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ia_propuestas_gm_corrida_gm_id_fkey";
+            columns: ["corrida_gm_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_corrida_gms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_propuestas_gm_corrida_id_fkey";
+            columns: ["corrida_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_corridas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_propuestas_gm_genero_id_fkey";
+            columns: ["genero_id"];
+            isOneToOne: false;
+            referencedRelation: "generos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_propuestas_gm_mundo_id_fkey";
+            columns: ["mundo_id"];
+            isOneToOne: false;
+            referencedRelation: "mundos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_propuestas_gm_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ia_propuestas_gm_proyeccion_id_fkey";
+            columns: ["proyeccion_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       intercompany_reglas: {
         Row: {
           activo: boolean;
@@ -1878,6 +2597,7 @@ export type Database = {
           decidido_at: string | null;
           decidido_por_id: string | null;
           decidido_por_nombre: string | null;
+          decision_ia_fila_id: string | null;
           explicacion: string;
           fila_id: string;
           id: string;
@@ -1910,6 +2630,7 @@ export type Database = {
           decidido_at?: string | null;
           decidido_por_id?: string | null;
           decidido_por_nombre?: string | null;
+          decision_ia_fila_id?: string | null;
           explicacion?: string;
           fila_id: string;
           id?: string;
@@ -1942,6 +2663,7 @@ export type Database = {
           decidido_at?: string | null;
           decidido_por_id?: string | null;
           decidido_por_nombre?: string | null;
+          decision_ia_fila_id?: string | null;
           explicacion?: string;
           fila_id?: string;
           id?: string;
@@ -1965,6 +2687,13 @@ export type Database = {
             columns: ["decidido_por_id"];
             isOneToOne: false;
             referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_fila_anios_decision_ia_fila_id_fkey";
+            columns: ["decision_ia_fila_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_propuestas_filas";
             referencedColumns: ["id"];
           },
           {
@@ -3085,6 +3814,21 @@ export type Database = {
           p_compra: string;
           p_motivo: string;
           p_revision: number;
+        };
+        Returns: Json;
+      };
+      registrar_propuesta_ia_gm: {
+        Args: {
+          p: Json;
+        };
+        Returns: string;
+      };
+      venta_lineas_ia: {
+        Args: {
+          p_desde: string;
+          p_gml_ids: string[];
+          p_grupos: Json;
+          p_hasta: string;
         };
         Returns: Json;
       };

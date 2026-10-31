@@ -1068,6 +1068,18 @@ revoke all on public.ia_propuestas_filas from public, anon, authenticated;
 grant all on public.ia_propuestas_filas to service_role;
 
 -- ---------------------------------------------------------------------------
--- MEDICIÓN 0030 (venta_lineas_ia en vector-two)
+-- MEDICIÓN 0030 (venta_lineas_ia en vector-two, 2026-10-31)
 -- ---------------------------------------------------------------------------
--- (se completa tras medir; ver más abajo)
+-- GM más grande por filas base: MUJER · URBANO (55 nodos GML, 182 filas base de la proyección en trabajo, 11 tiendas de tipo
+-- Tienda), ventana de 24 meses (2024-10 a 2026-09), todas las tiendas con la misma clave de pertenencia '11111'.
+-- `explain (analyze, buffers)` de `select venta_lineas_ia(...)`:
+--   pasada 1 (caché fría): 1 655,8 ms, 437 968 buffers (hit) y 6 (read);
+--   pasada 2 (caliente):     505,3 ms, 437 974 buffers (hit).
+-- Resultado: 65 872 bytes de JSON, 3 268 tuplas (f, c, p, u), 184 filas en `dic.filas`, 1 clave, 24 cargas. Sin ninguna
+-- aparición de soles, costo ni stock en el documento.
+-- Presupuesto de la ficha (<= 1 s y <= 500 KB): el tamaño sobra por mucho (66 KB); el tiempo cumple en caliente (0,5 s) y NO
+-- en frío (1,7 s). Con las claves reales de pertenencia el número de tuplas sube (una por fila x clave x mes, de 2 a 4 claves
+-- por fila en la práctica); el backend lo vuelve a medir en el ensayo en seco de la tanda 2. La lectura es de solo lectura y
+-- una por GM (no una por llamada al proveedor), así que un primer paso de 1,7 s es aceptable.
+-- Otras cifras: `proyeccion_filas.historico` de las 1 606 filas base de la proyección en trabajo pesa 12,6 MB como texto
+-- (7,8 KB de media, 10,5 KB como máximo) y se lee en ~110 ms en el servidor (para la caché de `huella_historia`).
