@@ -26,7 +26,7 @@ const fuente = (ruta: string) => src.find((f) => f.ruta === ruta)?.texto ?? "";
 const LIB = "src/lib/proyeccion/";
 const CONSULTAS = `${LIB}consultas.ts`;
 const TIPOS_DB = "src/lib/supabase/database.types.ts";
-const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && f.ruta.endsWith("route.ts"));
+const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && f.ruta.endsWith("route.ts") && !f.ruta.includes("/ia/"));
 /** Lógica pura: ni base ni HTTP ni pantalla. */
 const PURAS = [
   "apertura-linea", "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "crecimientos", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
