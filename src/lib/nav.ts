@@ -32,11 +32,41 @@ const PLANIFICACION: Rol[] = ["admin", "planner"];
  * se muestran deshabilitados para que el menú ya refleje el plan completo
  * de la Fase 1 (docs/PLAN.md §4).
  */
+// Orden fijado por Javier (2026-11-02): Inicio, Compras, Planificación, Maestros, Administración.
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: "General",
     roles: TODOS,
     links: [{ href: "/", label: "Inicio", exact: true }],
+  },
+  {
+    // M8: huecos, flujo mensual y compras. La sección es de TODOS los roles: el comprador mira los huecos y el flujo y registra sus
+    // compras (M9a). `puedeVerRuta` usa esta misma lista como guard de la ruta, así que `/compras/registro` también va con TODOS en
+    // lectura; los botones de escritura (importar, confirmar ingreso, quitar, cancelar) se ocultan por rol en la pantalla y la API
+    // los exige con `requirePlanner`.
+    title: "Compras",
+    roles: TODOS,
+    links: [
+      { href: "/compras", label: "Huecos", exact: true },
+      { href: "/compras/flujo", label: "Flujo mensual" },
+      { href: "/compras/registro", label: "Compras" },
+    ],
+  },
+  {
+    // Fase 2: venta y costo son las cifras más sensibles del sistema; la
+    // sección es solo de planificación (M5, M6 y M7; M8 después).
+    title: "Planificación",
+    roles: PLANIFICACION,
+    links: [
+      { href: "/planificacion/venta-stock", label: "Carga de venta y stock" },
+      { href: "/planificacion/curvas-estacionalidad", label: "Curvas de estacionalidad", sinPestanas: ["genero-mundo"] },
+      // 06d: el crecimiento por género × mundo vive en la página de curvas (pestaña propia) y tiene entrada propia en el menú.
+      { href: "/planificacion/curvas-estacionalidad", label: "Crecimiento por GM", pestana: "genero-mundo" },
+      // M7: proyección anual de unidades (año en curso y año siguiente). Solo admin y planner, como toda la sección.
+      { href: "/planificacion/proyeccion", label: "Proyección de unidades" },
+      // M12: análisis de las marcas al barrer por GML y reparto aprobado de una compra de la marca. Solo admin y planner.
+      { href: "/planificacion/marcas-barrer", label: "Marcas al barrer por GML" },
+    ],
   },
   {
     // La sección la ven todos porque el árbol de producto es el vocabulario
@@ -57,35 +87,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/maestros/tiendas", label: "Tiendas y aperturas", roles: PLANIFICACION },
       // M13: reglas de intercompany (rango IMI y % directo por marca × GML). El comprador ve el efecto en el flujo (M8), no la tabla.
       { href: "/maestros/intercompany", label: "Intercompany", roles: PLANIFICACION },
-    ],
-  },
-  {
-    // Fase 2: venta y costo son las cifras más sensibles del sistema; la
-    // sección es solo de planificación (M5, M6 y M7; M8 después).
-    title: "Planificación",
-    roles: PLANIFICACION,
-    links: [
-      { href: "/planificacion/venta-stock", label: "Carga de venta y stock" },
-      { href: "/planificacion/curvas-estacionalidad", label: "Curvas de estacionalidad", sinPestanas: ["genero-mundo"] },
-      // 06d: el crecimiento por género × mundo vive en la página de curvas (pestaña propia) y tiene entrada propia en el menú.
-      { href: "/planificacion/curvas-estacionalidad", label: "Crecimiento por GM", pestana: "genero-mundo" },
-      // M7: proyección anual de unidades (año en curso y año siguiente). Solo admin y planner, como toda la sección.
-      { href: "/planificacion/proyeccion", label: "Proyección de unidades" },
-      // M12: análisis de las marcas al barrer por GML y reparto aprobado de una compra de la marca. Solo admin y planner.
-      { href: "/planificacion/marcas-barrer", label: "Marcas al barrer por GML" },
-    ],
-  },
-  {
-    // M8: huecos, flujo mensual y compras. La sección es de TODOS los roles: el comprador mira los huecos y el flujo y registra sus
-    // compras (M9a). `puedeVerRuta` usa esta misma lista como guard de la ruta, así que `/compras/registro` también va con TODOS en
-    // lectura; los botones de escritura (importar, confirmar ingreso, quitar, cancelar) se ocultan por rol en la pantalla y la API
-    // los exige con `requirePlanner`.
-    title: "Compras",
-    roles: TODOS,
-    links: [
-      { href: "/compras", label: "Huecos", exact: true },
-      { href: "/compras/flujo", label: "Flujo mensual" },
-      { href: "/compras/registro", label: "Compras" },
     ],
   },
   {
