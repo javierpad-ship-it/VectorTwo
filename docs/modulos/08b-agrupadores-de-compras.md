@@ -1,6 +1,6 @@
 # 08b · Agrupadores de compras: viajes de compras, embarques y paquetes (con el viaje activo, el comprador responsable y las fechas de recepción alineadas)
 
-> **Estado: especificada el 2026-11-02 y ajustada el mismo día con las respuestas de Javier y la revisión independiente del `arquitecto-revisor` (bloqueantes B1–B3, importantes I1–I9 y menores, todos incorporados). Quedan cuatro preguntas de Javier (§10).** Es una mejora de la parte de compras de M8 (ficha [08](08-flujo-y-compras.md)) y se construye en **dos entregas, 08b-1 y 08b-2** (§0.2).
+> **Estado: especificada el 2026-11-02 y ajustada el mismo día con las respuestas de Javier y la revisión independiente del `arquitecto-revisor` (bloqueantes B1–B3, importantes I1–I9 y menores, todos incorporados), y de nuevo con las respuestas de Javier a sus cuatro preguntas (2026-11-02, e–h). **No quedan preguntas abiertas (§10).** Es una mejora de la parte de compras de M8 (ficha [08](08-flujo-y-compras.md)) y se construye en **dos entregas, 08b-1 y 08b-2** (§0.2).
 >
 > **Pedido de Javier** (2026-11-02, textual): «en el modulo de compras necesito poder generar agrupadores de compras. que son los siguientes: Viaje de compras. Embarque. Paquete. Necesitamos un modulo para gestionar estas agrupaciones. y las fechas de recepción van alineadas a ellos. Tambien tendriamos que incluir un comprador responsable. Tambien hay compras locales que si las clasificamos con embarque y paquete.»
 >
@@ -11,9 +11,13 @@
 >
 > **Respuestas de Javier (2026-11-02; mandan sobre lo que propuso la ficha):**
 > - **a)** El paquete es una subdivisión de **un** embarque y no cruza embarques.
-> - **b)** «El comprador añade mercadería a los pedidos; el planner y el comprador pueden modificar la fecha de salida y de recepción de la mercadería»: **los compradores escriben agrupadores desde esta entrega** (§0.3, decisión 87).
+> - **b)** «El comprador añade mercadería a los pedidos; el planner y el comprador pueden modificar la fecha de salida y de recepción de la mercadería»: **los compradores escriben agrupadores desde esta entrega** (§0.3, decisión 92).
 > - **c)** Código alfanumérico con formato **`aamm##`** (año de dos dígitos, mes y correlativo de dos dígitos, p. ej. `261101`) más un **nombre libre** (§2.2).
 > - **d)** Compras y proyección van por caminos separados. No se fija fecha; se construye por entregas.
+> - **e)** Un viaje **cerrado** sigue aceptando que se le añadan o quiten compras, y **lo hace también el comprador** (§0.3, decisión 95).
+> - **f)** El **admin** también puede ser responsable: compradores y admin; el planner no (§2.8, decisión 85).
+> - **g)** El puerto real se guarda **por embarque** (`compra_embarques.puerto_embarque`), con el puerto habitual del proveedor (08c) como sugerencia (decisión 96).
+> - **h)** Habrá **más de 15 viajes y embarques abiertos** al arrancar: el **importador de agrupadores** se adelanta a 08b-1 (§3.11, decisión 97).
 >
 > **Numeración.** Aplicadas: `0000`–`0025`, `0027`, `0029` y `0030`. Reservadas: `0026` (`0.13.1 · M8`), `0028` (M9a) y `0031` (07f).
 > - **Migraciones de esta ficha**: se citan con marcador, como hace la 08c: **`00B1_agrupadores_compras.sql`** (08b-1) y **`00B2_recibir_embarque.sql`** (08b-2), con `scripts/humo-00B1.sql` y `scripts/humo-00B2.sql`. `datos` les pone el número libre al construir (decisión 48). La 08c usa `00E1` y `00E2`, y la primera que se construya toma la `0032`.
@@ -43,25 +47,26 @@
 
 | Entrega | Qué trae | Migración | Requiere |
 |---|---|---|---|
-| **08b-1** | Viajes, embarques y paquetes (alta, edición, estados y códigos `aamm##`), **asignación** de compras a viajes y de entregas a embarques y paquetes, **alinear y mover fechas** de salida y de llegada, puerto real del embarque, **comprador responsable**, **viaje activo**, pestaña Sin agrupador, columnas `VIAJE`, `EMBARQUE` y `PAQUETE` del importador de compras, Excel. **El flujo no cambia de método** (sigue leyendo las mismas entregas) | `00B1` (todas las tablas y columnas, también `compra_linea_recepciones.asignacion_id`, que usará 08b-2; funciones de 08b-1) | `0.13.0` validada; **en serie con la E1 de 08c** (comparten `nav.ts`, `src/lib/compras/tipos-api.ts` y `src/components/compras/**`) |
+| **08b-1** | Viajes, embarques y paquetes (alta, edición, estados y códigos `aamm##`), **asignación** de compras a viajes y de entregas a embarques y paquetes, **alinear y mover fechas** de salida y de llegada, puerto real del embarque, **comprador responsable**, **viaje activo**, pestaña Sin agrupador, **importador de agrupadores** con su plantilla (§3.11), columnas `VIAJE`, `EMBARQUE` y `PAQUETE` del importador de compras, Excel. **El flujo no cambia de método** (sigue leyendo las mismas entregas) | `00B1` (todas las tablas y columnas, también `compra_linea_recepciones.asignacion_id`, que usará 08b-2; funciones de 08b-1, incluida `importar_agrupadores`) | `0.13.0` validada; **en serie con la E1 de 08c** (comparten `nav.ts`, `src/lib/compras/tipos-api.ts` y `src/components/compras/**`) |
 | **08b-2** | **«Recibir embarque»**, «Registrar otra llegada», volver de recibido a en tránsito, **recepciones vinculadas** al embarque, pendiente por asignación, `pendientesPorEntrega` que respeta el vínculo y **`VERSION_METODO_FLUJO` de 3 a 4** | `00B2` (solo funciones: `recibir_embarque` y `revertir_recepcion_embarque`) | 08b-1 |
 
 Javier no fija fecha (respuesta d). Dentro del camino de compras, el orden que recomiendan las dos fichas es `0.13.0` validada, después E1 (08c), después 08b-1, 08b-2, E2 y E3 (08c), `0.13.1` y M9a. Nunca dos de ellas en paralelo. El contrato de §3.10 vale para cualquier orden respecto de `0.13.1`.
 
-### 0.3 Permisos: el comprador escribe agrupadores (decisión 87, nueva)
+### 0.3 Permisos: el comprador escribe agrupadores (decisiones 92 y 95, nuevas)
 
 Javier (b): el comprador añade mercadería a los pedidos, y planner y comprador cambian las fechas de salida y de llegada. Hoy hay 0 planners, así que **sin escritura del comprador nadie salvo el admin podría operar el módulo**.
 
 | Acción | admin | planner | comprador | Por qué |
 |---|:-:|:-:|:-:|---|
 | Leer todo, Excel, viaje activo | ✓ | ✓ | ✓ | Decisión 28 |
-| Crear y editar viaje, embarque y paquete (nombre, tipo, viaje del embarque, responsable, referencia logística, puerto, nota) | ✓ | ✓ | ✓ | Es su trabajo diario |
+| Crear y editar viaje, embarque y paquete (nombre, tipo, viaje del embarque, responsable, referencia logística, puerto, nota), también los de un viaje cerrado; **importar agrupadores** (§3.11) | ✓ | ✓ | ✓ | Es su trabajo diario; al arrancar hay más de 15 abiertos (Javier, h) |
 | Cambiar la **fecha de salida** y la **fecha de llegada estimada** (mueve las entregas) | ✓ | ✓ | ✓ | Respuesta b, textual |
-| Asignar o quitar compras de un viaje **abierto**; asignar, quitar o mover entregas entre paquetes y embarques; pasar pendientes; mover un paquete; marcar en tránsito | ✓ | ✓ | ✓ | «Añade mercadería a los pedidos» |
+| Asignar o quitar compras de un viaje **abierto o cerrado** (con el aviso `viaje_cerrado`; Javier, e); asignar, quitar o mover entregas entre paquetes y embarques; pasar pendientes; mover un paquete; marcar en tránsito | ✓ | ✓ | ✓ | «Añade mercadería a los pedidos» |
 | **Recibir embarque** y Registrar otra llegada (08b-2) | ✓ | ✓ | ✓ | Es confirmar ingreso, que en M9a también tiene el comprador (ficha 08 §0.7); recibe quien llega con la mercadería |
-| **Cerrar o reabrir un viaje**; **cancelar** viaje, embarque o paquete | ✓ | ✓ | — | Son irreversibles (cancelar) o sacan algo del trabajo de todos (cerrar). Hoy los hace Javier como admin |
+| **Cerrar o reabrir un viaje**; **cancelar** viaje, embarque o paquete | ✓ | ✓ | — | Cancelar es irreversible. Cerrar o reabrir cambia el estado de un viaje compartido y su lugar en los selectores y en el viaje activo de todos; como cerrado ya no bloquea nada (decisión 95), basta con que lo decida admin o planner. Hoy los hace Javier como admin |
 | Volver de recibido a en tránsito (08b-2) | ✓ | ✓ | — | Deshace un ingreso confirmado por otros; quien se equivocó puede quitar su recepción en M8 |
-| Asignar compras a un viaje **cerrado** | ✓ | ✓ | — | Pregunta 1 (carga inicial) |
+
+**Qué significa «cerrado» (decisión 95).** Un viaje cerrado es **un estado informativo**: el viaje terminó y sale del uso diario. Sus diferencias con uno abierto son tres: no es el viaje activo por defecto (§3.8); en los selectores aparece al final, marcado «(cerrado)»; y toda operación sobre él muestra el aviso `viaje_cerrado` («El viaje 261001 está cerrado: igual se registra»). **No bloquea nada**: los tres roles le añaden o le quitan compras, crean o asignan embarques del viaje y lo editan, también desde los dos importadores. Solo **`cancelado`** bloquea (`viaje_cancelado`).
 
 **Matiz con la decisión 28.** El permiso es **por rol, no por responsable**: cualquier comprador edita cualquier agrupador, sea o no el responsable, y «Mis…» sigue siendo un filtro. **Adelanto a M9a**: el comprador escribe las funciones de agrupadores, que tocan las entregas y las recepciones de compras de otros, antes de tener escritura en el resto de Compras (captura y edición), que sigue en `0.13.1` y M9a. Guards: `requireUser` más la lista blanca de la tabla para lo de los tres roles; `requirePlanner` para lo de admin y planner. La 08c ya da `requireUser` al comprador en proveedores: **las dos fichas quedan alineadas en que los compradores escriben**.
 
@@ -118,7 +123,7 @@ compra_agrupador_eventos (inmutable)
 | `fecha_inicio` | `date not null` | El «periodo» de COTV |
 | `fecha_fin` | `date null` | `check (fecha_fin is null or fecha_fin >= fecha_inicio)` |
 | `responsable_id` | `uuid null → perfiles on delete set null` | Índice. Obligatorio al crear (§2.8); nulo solo si se borra el perfil |
-| `estado` | `text not null default 'abierto'` | zod: `abierto`, `cerrado`, `cancelado` |
+| `estado` | `text not null default 'abierto'` | zod: `abierto`, `cerrado` (informativo, no bloquea: decisión 95), `cancelado` |
 | `nota` | `text null` | ≤ 500 |
 | `revision` | `integer not null default 0` | `check (revision >= 0)` |
 | `perfil_id`, `usuario_nombre`, `updated_by_id`, `updated_by_nombre` | | Autoría (`perfiles set null`) |
@@ -135,7 +140,7 @@ compra_agrupador_eventos (inmutable)
 | `viaje_id` | `uuid null → compra_viajes on delete restrict` | Índice |
 | `responsable_id` | `uuid null → perfiles set null` | Nulo = hereda del viaje |
 | `referencia_logistica` | `text null` | ≤ 80 (BL, contenedor o guía) |
-| **`puerto_embarque`** | `text null` | ≤ 80. **Puerto real de este envío** (revisión I8; lo da por existente la 08c §2.1, cuyo `proveedores.puerto_embarque` es el puerto habitual y se muestra aquí como sugerencia). Texto con sugerencias de los valores ya usados, sin catálogo (pregunta 4) |
+| **`puerto_embarque`** | `text null` | ≤ 80. **Puerto real de este envío** (revisión I8; lo da por existente la 08c §2.1, cuyo `proveedores.puerto_embarque` es el puerto habitual y se muestra aquí como sugerencia). Javier (g): **se guarda por embarque**. Texto con sugerencias (el habitual de cada proveedor del embarque primero, después los valores ya usados), sin catálogo |
 | `fecha_salida_estimada` | `date null` | La editan planner y comprador (respuesta b) |
 | `fecha_llegada_estimada` | `date not null` | **Llegada al CD**; alinea las entregas |
 | `fecha_llegada_real` | `date null` | Solo la escriben las funciones de 08b-2 |
@@ -173,7 +178,7 @@ compra_agrupador_eventos (inmutable)
 
 ### 2.8 Comprador responsable
 
-- **Asignables**: perfiles activos con rol `comprador`. Además el **admin**, si Javier lo confirma (pregunta 3; recomendado, porque hoy hay 2 compradores). Planner no. Se reutiliza la consulta de asignables de M1b, ampliada con un parámetro `incluirAdmin`, sin cambiar M1b.
+- **Asignables** (Javier, f): perfiles activos con rol **`comprador` o `admin`**; el **planner, no**. Se reutiliza la consulta de asignables de M1b con un parámetro nuevo, `incluirAdmin` (por defecto `false`, así M1b no cambia). Un admin desactivado o que pasa a planner cuenta como faltante, igual que un comprador.
 - **Uno por nivel**, obligatorio solo en el viaje. **Efectivo**: `paquete ?? embarque ?? viaje`; se calcula al leer (`{ perfil_id, nombre, origen: 'propio' | 'embarque' | 'viaje' } | null`).
 - **Faltante** (`sin_responsable`): sin efectivo, o con un efectivo que ya no es asignable. Desactivarlo o cambiarle el rol conserva la asignación; borrar el perfil la deja en nulo.
 - «Mis viajes», «Mis embarques» y «Mis paquetes» filtran por el responsable efectivo; nunca son permiso.
@@ -197,12 +202,13 @@ compra_agrupador_eventos (inmutable)
 | Función | Entrega | Qué hace | Motivos |
 |---|---|---|---|
 | `guardar_viaje(p_viaje, p_revision, p_actor)` | 1 | Crea (revisión nula) o edita; código §2.2 | `agrupador_cambio`, `codigo_duplicado`, `codigo_invalido`, `correlativo_agotado`, `no_encontrado`, `no_editable`, `responsable_no_asignable` |
-| `guardar_embarque(p_embarque, p_revision, p_actor)` | 1 | Crea o edita **todo menos `fecha_llegada_estimada`** después de creado (esa va por movimiento). `fecha_salida_estimada` sí se edita aquí, porque no mueve entregas | Los anteriores y `fecha_por_movimiento`, `salida_despues_de_llegada`, `local_con_viaje`, `viaje_no_abierto` |
+| `guardar_embarque(p_embarque, p_revision, p_actor)` | 1 | Crea o edita **todo menos `fecha_llegada_estimada`** después de creado (esa va por movimiento). `fecha_salida_estimada` sí se edita aquí, porque no mueve entregas | Los anteriores y `fecha_por_movimiento`, `salida_despues_de_llegada`, `local_con_viaje`, `viaje_cancelado`; aviso `viaje_cerrado` |
 | `guardar_paquete(p_paquete, p_revision_embarque, p_actor)` | 1 | Crea o edita un paquete | `agrupador_cambio`, `codigo_duplicado`, `embarque_no_editable` |
 | `cambiar_estado_agrupador(p_tipo, p_id, p_accion, p_revision, p_motivo, p_actor)` | 1 | Transiciones de R13 (las de 08b-2, por su función) | `transicion_invalida`, `tiene_asignaciones_activas`, `tiene_compras`, `tiene_recepciones`, `motivo_requerido` |
-| `asignar_viaje_compras(p_viaje, p_compras, p_actor)` | 1 | Pone o quita el viaje de compras `[{ id, revision }]`. Bloquea primero el viaje y después las compras; revisión +1 y evento `asignar_viaje` por compra | `compra_cambio`, `no_editable`, `viaje_no_abierto` |
+| `asignar_viaje_compras(p_viaje, p_compras, p_actor)` | 1 | Pone o quita el viaje de compras `[{ id, revision }]`. Bloquea primero el viaje y después las compras; revisión +1 y evento `asignar_viaje` por compra | `compra_cambio`, `no_editable`, `viaje_cancelado`; aviso `viaje_cerrado` |
 | **`aplicar_movimiento_agrupador(p_plan, p_actor)`** | 1 | Función central de 08b-1: aplica asignar, quitar, mover a paquete, cambiar la fecha de llegada, pasar pendientes y mover un paquete. Bloquea en el orden global; comprueba pertenencia; escribe entregas (upsert por `(linea_id, periodo)` **conservando el `id`** de las que sobreviven; borra una entrega solo si queda en 0 y sin asignaciones; las nuevas con `origen = 'embarque'`), repartos de las entregas tocadas **de origen y de destino**, asignaciones (con fusión) y la fecha del embarque; verifica I1 a I3 e I5; llama a `compra_recalcular_estado` de M8; sube las revisiones; registra los eventos | `agrupador_cambio`, `compra_cambio`, `no_pertenece`, `embarque_no_editable`, `embarque_con_recepciones`, `asignacion_con_recepciones`, `excede_entrega`, `compra_no_asignable`, `saldo_cerrado`, `max_entregas`, `sin_pendientes`, `paquete_de_otro_embarque`, `reparto_sin_vector` |
 | `agrupador_mover_entregas(p_movimientos jsonb)` | 1 | **Ayudante interno**, sin candados ni eventos: el paso de escritura de entregas, repartos y asignaciones que comparten `aplicar_movimiento_agrupador` y `recibir_embarque`. Solo lo llaman ellas | — |
+| `importar_agrupadores(p_lote jsonb, p_actor jsonb)` | 1 | Aplica el importador de §3.11 en **una** transacción. Toma el candado consultivo `agrupador_importar` y los de los códigos (§2.2); vuelve a comprobar cada clave y cada referencia; crea viajes, después embarques y después paquetes (autonumerando los que vengan sin código); deja un evento `crear` por agrupador, con motivo «Importado de <archivo>». **Solo crea**: nunca edita, mueve ni asigna compras | `clave_existente` (alguien creó la misma clave entre previsualizar y aplicar: la API responde `409 vuelve_a_previsualizar`), `viaje_cancelado`, `embarque_no_editable`, `responsable_no_asignable`, `correlativo_agotado`, `codigo_duplicado` |
 | `compra_foto_entregas(p_compra)` | 1 | Ayudante de solo lectura (revisión I9): entregas, repartos y asignaciones de la compra. El evento guarda `antes` y `despues` como `compra_foto(c) \|\| compra_foto_entregas(c)`. **No se reemplaza `compra_foto` de M8** | — |
 | `agrupadores_desalineados()` | 1 | Solo lectura: asignaciones activas con `entrega.periodo ≠ periodo_llegada`. Para el humo y el aviso `desalineada` | — |
 | `recibir_embarque(p_plan, p_actor)` | 2 | Recibir y Registrar otra llegada (§3.6). Bloquea en el orden global y verifica I1 a I5 | `agrupador_cambio`, `compra_cambio`, `no_pertenece`, `no_confirmada`, `excede_pendiente`, `recepcion_antes_de_compra`, `sin_unidades`, `llegada_futura`, `embarque_no_editable`, `recepcion_cambio`, `reparto_sin_vector` |
@@ -234,7 +240,7 @@ select to_regclass('public.compra_viajes'), to_regclass('public.compra_embarques
 
 Handlers en `src/app/api/compras/{viajes,embarques,paquetes,agrupadores,viaje-activo}/**`. **La primera sentencia es el guard.** Solo `supabaseAdmin()`. `leerCuerpo` y respuestas `ok({ … })` o `errorConCodigo` de `src/lib/api/respuestas.ts`. Lectura con `leerTodo`. **Ninguna escritura directa** sobre las tablas nuevas ni sobre las de compras: solo `.rpc(` (prueba estática). Lógica pura en `src/lib/compras/agrupadores/`.
 
-**Guards**: lecturas, `requireUser`. Escrituras: `requireUser` para lo que permite a los tres roles la tabla de §0.3, y **`requirePlanner`** para cerrar, reabrir y cancelar, revertir una recepción y asignar a un viaje cerrado.
+**Guards**: lecturas, `requireUser`. Escrituras: `requireUser` para lo que permite a los tres roles la tabla de §0.3, y **`requirePlanner`** solo para cerrar, reabrir y cancelar, y para revertir una recepción. Asignar a un viaje cerrado y los dos importadores son de los tres roles (`requireUser`).
 
 **Concurrencia y reintentos** (revisión I2):
 - Viajes y embarques llevan `revision`; asignar y quitar llevan además la `revision` de cada compra vista.
@@ -284,6 +290,13 @@ recibirEmbarqueSchema = z.object({ revision: z.number().int().min(0),
   nota: z.string().trim().max(200).nullable().optional() })
   .refine(v => v.items ? v.items.some(i => i.unidades > 0) : v.total_confirmado !== undefined, "sin_unidades");
 viajeActivoSchema = z.object({ viaje_id: z.union([z.uuid(), z.literal("todos"), z.literal("sin_viaje")]) });
+// Importador de agrupadores (§3.11): las filas llegan ya leídas por el navegador (`src/components/importador`), como texto.
+filaAgrupadorSchema = z.object({ fila: z.number().int().min(1), tipo: z.string(), codigo: z.string().optional(), nombre: z.string().optional(),
+  viaje: z.string().optional(), embarque: z.string().optional(), tipo_embarque: z.string().optional(), destino: z.string().optional(),
+  fecha_inicio: z.string().optional(), fecha_fin: z.string().optional(), fecha_salida: z.string().optional(), fecha_llegada: z.string().optional(),
+  puerto: z.string().optional(), referencia_logistica: z.string().optional(), responsable: z.string().optional(), nota: z.string().optional() });
+importarAgrupadoresSchema = z.object({ modo: z.enum(["previsualizar", "aplicar"]), archivo_nombre: z.string().trim().max(200),
+  filas: z.array(filaAgrupadorSchema).min(1).max(MAX_FILAS_IMPORTAR_AGRUPADORES) });   // 1 000
 ```
 
 `MAX_ASIGNACIONES_RECIBIR = 2000` es el tope propio de una llegada. **No es** `MAX_RECEPCIONES_POR_LLAMADA = 50` de M8, que limita el «Confirmar ingreso» a mano de una sola compra; una llegada consolida decenas de compras en una transacción, y lo mide `datos` (≤ 2 s con 500 asignaciones).
@@ -294,9 +307,9 @@ viajeActivoSchema = z.object({ viaje_id: z.union([z.uuid(), z.literal("todos"), 
 `EmbarqueApi { id, codigo, nombre, tipo, viaje, referencia_logistica, puerto_embarque, puertos_habituales: string[] (de los proveedores, si existe la 08c), fecha_salida_estimada, fecha_llegada_estimada, fecha_llegada_real, periodo_llegada, estado, recepcion: 'sin_recibir' | 'parcial' | 'completa' | 'vacio', revision, responsable_efectivo, totales { paquetes, compras, lineas, unidades, recibidas, pendientes, historicas, costo { PEN, USD } }, proveedores, avisos }`.
 `EmbarqueDetalleApi = EmbarqueApi & { paquetes: PaqueteApi[], asignaciones: AsignacionApi[] }`.
 `AsignacionApi { id, entrega_id, periodo, paquete_id, unidades, recibidas, recibidas_estimadas: boolean, pendiente, historica, compra { id, numero, revision, estado, proveedor, viaje_id, fecha_compra }, linea { id, tipo, gml, marca, agrupacion_marca, tallas, costo_unitario, moneda } }`. En 08b-1 `recibidas` sale del FIFO de M8 y siempre lleva `recibidas_estimadas = true` (se rotula «estimado»); en 08b-2 lo vinculado es exacto.
-`PlanMovimientoApi { operacion, huella_plan, compras_afectadas, lineas, unidades_movidas, movimientos: { compra_numero, linea, de, a, unidades }[], avisos }`. `RespuestaMovimientoApi { embarque, embarques_tocados, compras: { id, revision }[], avisos }`. `SinAgrupadorApi { entregas[], compras_sin_viaje[] }`.
+`PlanMovimientoApi { operacion, huella_plan, compras_afectadas, lineas, unidades_movidas, movimientos: { compra_numero, linea, de, a, unidades }[], avisos }`. `RespuestaMovimientoApi { embarque, embarques_tocados, compras: { id, revision }[], avisos }`. `SinAgrupadorApi { entregas[], compras_sin_viaje[] }`. `ReporteImportacionAgrupadoresApi { modo, resumen { nuevas, iguales, cambiadas, omitidas, por_tipo }, filas: { fila, tipo, clave, clasificacion: 'nueva' | 'igual' | 'cambiada' | 'omitida', codigo_final: string | null, motivo?, detalle?, avisos[] }[], creados?: { tipo, id, codigo }[] }` (`codigo_final` es nulo en `previsualizar` para las nuevas sin código: «se numera al aplicar»).
 
-**Avisos**: `atrasado`, `sin_responsable`, `viaje_distinto`, `cambia_temporada`, `fecha_en_mes_cerrado`, `llegada_antes_de_compra` (el mes de llegada es anterior al de alguna compra asignada; la recepción se rechazará), `entregas_fusionadas`, `desalineada`, `asignaciones_historicas`, `linea_recibida`, `en_embarque_cancelado` (asignación activa en un embarque cancelado; se ofrece «Quitar del embarque», B1), `pendientes_tras_recibir` (08b-2), `borradores_excluidos` (08b-2).
+**Avisos**: `viaje_cerrado` (decisión 95), `atrasado`, `sin_responsable`, `viaje_distinto`, `cambia_temporada`, `fecha_en_mes_cerrado`, `llegada_antes_de_compra` (el mes de llegada es anterior al de alguna compra asignada; la recepción se rechazará), `entregas_fusionadas`, `desalineada`, `asignaciones_historicas`, `linea_recibida`, `en_embarque_cancelado` (asignación activa en un embarque cancelado; se ofrece «Quitar del embarque», B1), `pendientes_tras_recibir` (08b-2), `borradores_excluidos` (08b-2).
 
 ### 3.3 Rutas
 
@@ -306,8 +319,8 @@ viajeActivoSchema = z.object({ viaje_id: z.union([z.uuid(), z.literal("todos"), 
 | `/api/compras/viajes` | POST | `requireUser` | `guardarViajeSchema` | `{ viaje }` | 400; 409 `codigo_duplicado`, `codigo_invalido`, `correlativo_agotado`, `responsable_no_asignable` |
 | `/api/compras/viajes/[id]` | GET · PATCH | `requireUser` | — · con `revision` | `{ viaje, compras, embarques }` · `{ viaje }` | 404; 409 `agrupador_cambio`, `no_editable` |
 | `/api/compras/viajes/[id]/estado` | POST | `requirePlanner` | `cambiarEstadoSchema` | `{ viaje }` | 409 `transicion_invalida`, `tiene_compras`, `motivo_requerido` |
-| `/api/compras/viajes/[id]/compras` | POST | `requireUser` (viaje abierto) · `requirePlanner` (viaje cerrado, pregunta 1) | `asignarViajeSchema` | `{ viaje, compras }` | 403 `solo_planner_viaje_cerrado`; 409 `compra_cambio`, `viaje_no_abierto`, `no_editable` |
-| `/api/compras/embarques` | GET · POST | `requireUser` | filtros (`?estado&tipo&viaje_id\|sin_viaje&desde&hasta&responsable_id&mio=1&atrasados=1&q`) · `guardarEmbarqueSchema` | `{ embarques }` · `{ embarque }` | 409 `local_con_viaje`, `salida_despues_de_llegada`, `viaje_no_abierto`, `codigo_duplicado` |
+| `/api/compras/viajes/[id]/compras` | POST | `requireUser` (abierto o cerrado; aviso `viaje_cerrado`) | `asignarViajeSchema` | `{ viaje, compras, avisos }` | 409 `compra_cambio`, `viaje_cancelado`, `no_editable` |
+| `/api/compras/embarques` | GET · POST | `requireUser` | filtros (`?estado&tipo&viaje_id\|sin_viaje&desde&hasta&responsable_id&mio=1&atrasados=1&q`) · `guardarEmbarqueSchema` | `{ embarques }` · `{ embarque }` | 409 `local_con_viaje`, `salida_despues_de_llegada`, `viaje_cancelado`, `codigo_duplicado` |
 | `/api/compras/embarques/[id]` | GET · PATCH | `requireUser` | — · sin fecha de llegada | `{ embarque: EmbarqueDetalleApi }` | 404; 409 `fecha_por_movimiento`, `salida_despues_de_llegada`, `embarque_no_editable` |
 | `/api/compras/embarques/[id]/estado` | POST | `requireUser` para `en_transito` y `volver_a_planificado`; `requirePlanner` para `cancelar` | `cambiarEstadoSchema` | `{ embarque }` | 403; 409 `transicion_invalida`, `tiene_asignaciones_activas`, `tiene_recepciones` |
 | `/api/compras/embarques/[id]/paquetes` · `/api/compras/paquetes/[id]` | POST · PATCH | `requireUser` | `guardarPaqueteSchema` | `{ embarque }` | 409 `agrupador_cambio`, `codigo_duplicado`, `embarque_no_editable` |
@@ -321,6 +334,7 @@ viajeActivoSchema = z.object({ viaje_id: z.union([z.uuid(), z.literal("todos"), 
 | `/api/compras/embarques/[id]/recibir` (08b-2) | POST | `requireUser` | `recibirEmbarqueSchema` | ídem | 409 `no_confirmada`, `excede_pendiente`, `recepcion_antes_de_compra`, `sin_unidades`, `llegada_futura`, `recepcion_cambio`, `embarque_no_editable` |
 | `/api/compras/embarques/[id]/revertir-recepcion` (08b-2) | POST | `requirePlanner` | `{ revision, huella_plan }` | ídem | 409 `tiene_recepciones` |
 | `/api/compras/agrupadores/sin-asignar` · `/opciones` · `/historial` | GET | `requireUser` | filtros · — · `?viaje_id\|embarque_id\|paquete_id` | `SinAgrupadorApi` · selectores · `{ eventos }` | 404 |
+| `/api/compras/agrupadores/importar` | POST | `requireUser` | `importarAgrupadoresSchema` | `ReporteImportacionAgrupadoresApi` | 400 validación (más de 1 000 filas, cuerpo > 6 MB); 409 `vuelve_a_previsualizar` |
 | `/api/compras/viaje-activo` | PUT | `requireUser` | `viajeActivoSchema` | `{ viaje_activo }` (cookie) | 404 `no_encontrado` |
 
 **Cambios aditivos en M8** (dueño `backend`): `GET /api/compras` acepta `?viaje_id=…|sin_viaje&embarque_id=…`. `CompraApi` suma `viaje` y, en cada entrega, `asignaciones[]` y `sin_embarque`. El importador suma las columnas de §3.9.
@@ -369,7 +383,7 @@ Por cada ítem:
 
 1. **Primero se clasifica la fila** como en M8 (`nueva`, `igual` o `cambiada`), con la huella **de lo que dice el archivo**. Las columnas de agrupador **no** entran en la huella. Una entrega que después movió un embarque sigue dando `igual`, porque se compara contra la huella guardada, no contra la base.
 2. **Las reglas de agrupador se aplican solo a `nueva` y a `igual` sin asignación.** A una `igual` ya asignada a otro embarque se le aplica `agrupador_distinto`, y no se toca: los cambios se hacen en pantalla. Una `cambiada` sigue su regla de M8.
-3. **Con `EMBARQUE`**, `LLEGADA` sigue siendo **obligatoria** y debe caer en el mes del embarque (`llegada_distinta_del_embarque`). `ENTREGAS` con más de una entrega da `entregas_con_embarque`. `PAQUETE` sin `EMBARQUE`, `paquete_sin_embarque`. Los códigos desconocidos dan `viaje_desconocido`, `embarque_desconocido` y `paquete_desconocido` (el importador no crea agrupadores). Un `VIAJE` cerrado, `viaje_no_abierto`, salvo planner y admin (pregunta 1).
+3. **Con `EMBARQUE`**, `LLEGADA` sigue siendo **obligatoria** y debe caer en el mes del embarque (`llegada_distinta_del_embarque`). `ENTREGAS` con más de una entrega da `entregas_con_embarque`. `PAQUETE` sin `EMBARQUE`, `paquete_sin_embarque`. Los códigos desconocidos dan `viaje_desconocido`, `embarque_desconocido` y `paquete_desconocido` (el importador no crea agrupadores). Un `VIAJE` cerrado se acepta con el aviso `viaje_cerrado`, para los tres roles (decisión 95); uno cancelado se omite (`viaje_cancelado`).
 4. **Tres llamadas en tres transacciones** por compra: `importar_compra` (M8, sin cambios), `asignar_viaje_compras` y `aplicar_movimiento_agrupador`. Un corte deja la compra sin agrupador; reimportar lo completa y el reporte lo dice.
 
 ### 3.10 Contrato con `0.13.1` (para su ficha)
@@ -380,6 +394,39 @@ Por cada ítem:
 - Las entregas nuevas nacen sin embarque. La captura ofrece Viaje (por defecto el activo) y Embarque o paquete por entrega.
 - **Si `0026` ya existe cuando se construya 08b-1**, `00B1` le añade estas comprobaciones con `create or replace` de esas funciones; si no existe, las escribe `0026` desde el principio.
 
+### 3.11 Importador de agrupadores (08b-1; Javier, h)
+
+Se adelanta porque al arrancar habrá más de 15 viajes y embarques abiertos. **Solo crea viajes, embarques y paquetes**: no asigna compras (eso lo hacen las columnas de §3.9 o la pantalla) y nunca edita ni mueve uno existente.
+
+- **Archivo**: CSV (UTF-8, coma o punto y coma) o Excel (`.xlsx`). Se lee **en el navegador** con el importador compartido (`src/components/importador`: `use-importador`, `csv.ts`, `excel.ts`, `mapeo.ts`, los cuatro pasos archivo → columnas → reporte → aplicar) y el servidor recibe filas de texto, como en los demás importadores del repositorio (tiendas, M3, compras). Hasta **1 000 filas**.
+- **Una sola hoja, con una columna `TIPO`**: así sirve también en CSV.
+
+| Columna | Viaje | Embarque | Paquete | Formato |
+|---|---|---|---|---|
+| `TIPO` | `VIAJE` | `EMBARQUE` | `PAQUETE` | obligatoria |
+| `CODIGO` | opcional | opcional | opcional | `aamm##` u otro `^[A-Z0-9-]{1,30}$`; vacío = se numera al aplicar (§2.2) |
+| `NOMBRE` | obligatoria | obligatoria | obligatoria | 1–120, libre |
+| `VIAJE` | — | opcional | — | código de un viaje existente o de una fila `VIAJE` del archivo |
+| `EMBARQUE` | — | — | obligatoria | código de un embarque existente o de una fila `EMBARQUE` del archivo |
+| `TIPO_EMBARQUE` | — | `IMPORTACION` (por defecto) o `LOCAL` | — | |
+| `DESTINO` | opcional | — | — | ≤ 120 |
+| `FECHA_INICIO` · `FECHA_FIN` | obligatoria · opcional | — | — | `aaaa-mm-dd` o número de serie de Excel |
+| `FECHA_SALIDA` · `FECHA_LLEGADA` | — | opcional · **obligatoria** | — | ídem |
+| `PUERTO` · `REFERENCIA_LOGISTICA` | — | opcionales | — | ≤ 80 |
+| `RESPONSABLE` | **obligatoria** | opcional | opcional | correo de un perfil asignable (comprador o admin activos, §2.8) |
+| `NOTA` | opcional | opcional | opcional | ≤ 500 / 500 / 300 |
+
+- **Orden y referencias**: se procesan viajes, después embarques y después paquetes, sin importar el orden de las filas. Un embarque puede apuntar a un viaje y un paquete a un embarque **del mismo archivo**, pero solo por código: la fila referida debe traer `CODIGO` (si no, `referencia_sin_codigo`).
+- **Clave e idempotencia**:
+  - Con `CODIGO`, la clave es (tipo, código).
+  - Sin `CODIGO`, la clave natural es: viaje (`NOMBRE` en mayúsculas, `FECHA_INICIO`); embarque (`NOMBRE` en mayúsculas, `FECHA_LLEGADA`); paquete (`EMBARQUE`, `NOMBRE` en mayúsculas).
+  - Contra la base, cada fila es `nueva`, `igual` (existe con el mismo contenido normalizado: no hace nada) o `cambiada` (existe con otro contenido: se omite con `cambiada_requiere_edicion` y el detalle de qué difiere; se corrige en pantalla). **Reimportar el mismo archivo no duplica nada.**
+  - La plantilla recomienda escribir el código.
+- **Omisiones**: `tipo_invalido`, `nombre_requerido`, `nombre_largo`, `codigo_invalido`, `codigo_repetido_en_archivo`, `fila_repetida` (misma clave dos veces), `fecha_requerida`, `fecha_invalida`, `fin_antes_de_inicio`, `salida_despues_de_llegada`, `local_con_viaje`, `viaje_desconocido`, `viaje_cancelado`, `embarque_desconocido`, `embarque_requerido`, `embarque_no_editable` (paquete en un embarque cancelado o recibido), `responsable_requerido`, `responsable_desconocido`, `responsable_no_asignable`, `referencia_sin_codigo`, `referencia_omitida` (apunta a una fila del archivo que se omitió), `cambiada_requiere_edicion`, `correlativo_agotado`, `campo_largo`.
+- **Avisos**: `viaje_cerrado`, `sin_responsable` (embarque o paquete sin responsable propio ni heredable), `puerto_distinto_del_habitual` (informativo, si existe la 08c).
+- **Aplicar**: una sola llamada a `importar_agrupadores` (§2.9), todo o nada. Si entre previsualizar y aplicar alguien creó una de las claves, `409 vuelve_a_previsualizar`. El reporte final da los códigos asignados.
+- **Plantilla**: en la pestaña Importar, **Descargar plantilla** (CSV y Excel) con el encabezado y una fila de ejemplo de cada tipo (sintética). La exportación Excel de Viajes y embarques suma una hoja `AGRUPADORES` con las mismas columnas, así que se puede bajar, completar y volver a subir: lo existente sale `igual`.
+
 ## 4. Pantallas (kit de Vector2: `Tabs`, `DataTable`, `Modal`, `Form`, `Chips`, `Badge`, `Alert`, `EmptyState`; `useColeccion`; `es-PE`; 390 px)
 
 **Menú** (`nav.ts`, sección Compras, `TODOS`): Huecos · Flujo mensual · Compras · **Viajes y embarques** (`/compras/agrupadores`). La 08c añade sus entradas en la misma sección.
@@ -387,6 +434,8 @@ Por cada ítem:
 **Barra de viaje activo** en Compras y en Viajes y embarques: «Todos», «Sin viaje (locales)» y viajes abiertos y cerrados. Texto: «Las listas de Compras y de Viajes y embarques muestran solo este viaje».
 
 **Qué ve cada rol**: los tres ven los botones de §0.3 que les corresponden. Cerrar, reabrir y cancelar, y volver a en tránsito, solo admin y planner. El comprador abre con «Mis embarques» activo si es responsable de alguno. Los costos se ven como en Compras (decisión pendiente de la ficha 08 §0.16).
+
+**Pestañas de `/compras/agrupadores`**: Embarques (por defecto) · Viajes · Sin agrupador · **Importar**. En todos los selectores de viaje, los cerrados van al final y marcados «(cerrado)».
 
 ### 4.1 Pestaña Embarques (por defecto)
 
@@ -416,6 +465,10 @@ Por cada ítem:
 
 «Entregas sin embarque» (compras en borrador o confirmadas, por mes) con «Asignar a embarque…», y «Compras sin viaje» con «Asignar a viaje…». Es el backfill manual de lo ya cargado y respeta el viaje activo.
 
+### 4.4b Pestaña Importar (para los tres roles)
+
+Los cuatro pasos del importador compartido: (1) elegir un archivo CSV o Excel, o **Descargar plantilla**; (2) confirmar el mapeo de columnas; (3) **reporte** con totales por tipo y por clasificación, una tabla de filas omitidas con su motivo, una de cambiadas con su diferencia y una de nuevas con el código que tendrán o «se numera al aplicar»; (4) **Aplicar** con un `confirm` («Se crearán 12 viajes, 18 embarques y 30 paquetes»), y el reporte final con los códigos asignados y un enlace a cada agrupador. Al cerrar el último paso se refrescan las listas.
+
 ### 4.5 Compras (`/compras/registro`)
 
 - **Lista**: columnas y filtros de Viaje y de Embarque.
@@ -438,9 +491,9 @@ Por cada ítem:
 | R10 | Revertir pone `fecha_llegada_real = null` y realinea al mes estimado; solo sin recepciones vinculadas | 2 |
 | R11 | `pendientesPorEntrega`: primero lo vinculado y después FIFO; **sin recepciones vinculadas da idéntico a M8** (todas las pruebas de M8 en verde sin tocarlas) | 2 |
 | R12 | Asignaciones históricas (compra recibida o cancelada, línea inactiva o recibida al 100 %): no se mueven, no son pendientes, no bloquean cancelar y se informan; `desalineada`, `linea_recibida` y `en_embarque_cancelado` con su acción | 1 |
-| R13 | **Estados.** **Viaje**: `abierto ⇄ cerrado`, y `→ cancelado` solo sin compras no canceladas ni embarques no cancelados; `cancelado` es inmutable. **Embarque**: `planificado ⇄ en_transito`; `→ recibido` solo al recibir (08b-2); `recibido → en_transito` solo al revertir; `→ cancelado` solo sin asignaciones activas ni recepciones vinculadas. En `cancelado` y en `recibido` solo se permite «Quitar del embarque» (más, en `recibido`, «Registrar otra llegada» y «Pasar pendientes»). **Paquete**: `abierto → cancelado` solo sin asignaciones activas | 1 y 2 |
+| R13 | **Estados.** **Viaje**: `abierto ⇄ cerrado` (solo admin y planner); **un viaje cerrado no bloquea ninguna operación, solo avisa `viaje_cerrado`** (decisión 95); `→ cancelado` solo sin compras no canceladas ni embarques no cancelados; `cancelado` es inmutable y bloquea (`viaje_cancelado`). **Embarque**: `planificado ⇄ en_transito`; `→ recibido` solo al recibir (08b-2); `recibido → en_transito` solo al revertir; `→ cancelado` solo sin asignaciones activas ni recepciones vinculadas. En `cancelado` y en `recibido` solo se permite «Quitar del embarque» (más, en `recibido`, «Registrar otra llegada» y «Pasar pendientes»). **Paquete**: `abierto → cancelado` solo sin asignaciones activas | 1 y 2 |
 | R14 | Códigos `aamm##`: el mes de la fecha de referencia al crear, el máximo más uno con candado, sin reutilizar, `correlativo_agotado` en 99; los escritos a mano siguen `^[A-Z0-9-]{1,30}$` y son únicos por tipo | 1 |
-| R15 | Permisos de §0.3: el comprador escribe lo suyo y lo de los demás; recibe `403` en cerrar, reabrir y cancelar, revertir y asignar a un viaje cerrado | 1 y 2 |
+| R15 | Permisos de §0.3: el comprador escribe lo suyo y lo de los demás, también en viajes cerrados y en los dos importadores; recibe `403` solo en cerrar, reabrir y cancelar, y en revertir | 1 y 2 |
 | R16 | Solo `.rpc(`: ningún `.insert`, `.update`, `.upsert` ni `.delete` sobre las tablas nuevas o de compras | 1 |
 | R17 | Eventos inmutables: `UPDATE`, `DELETE` y **`TRUNCATE`** rechazados en `compra_agrupador_eventos` **y en `compra_eventos`** (trigger de sentencia nuevo), también con `service_role`; salvo `perfil_id → NULL` | 1 |
 | R18 | I5: todo cambio de `asignacion.entrega_id`, de sus unidades o de `recepciones.asignacion_id` sube la revisión de la compra y deja un evento | 1 y 2 |
@@ -449,6 +502,8 @@ Por cada ítem:
 | R21 | Importador: clasificar primero; reglas solo para `nueva` e `igual` sin asignación; huella del archivo; `LLEGADA` obligatoria y alineada; tres llamadas | 1 |
 | R22 | La cookie del viaje activo no es permiso, ninguna ruta de la API la lee y una cookie inválida se ignora | 1 |
 | R23 | IDOR: asignaciones, paquetes, entregas y recepciones de otro embarque o de otra compra dan `no_pertenece` en todas las rutas | 1 y 2 |
+| R25 | **Importador de agrupadores**: solo crea; clave por código o natural; `nueva`, `igual` o `cambiada`; reimportar no duplica; referencias dentro del archivo solo por código; orden viajes → embarques → paquetes; todo o nada al aplicar; las omisiones de §3.11 | 1 |
+| R26 | Responsables asignables: comprador o admin activos; planner, `responsable_no_asignable` (Javier, f) | 1 |
 | R24 | I4: la recepción vinculada es de la línea de la entrega de su asignación, y `Σ` vinculadas `≤` las unidades de la asignación | 2 |
 
 ### Casos sintéticos (`tests/agrupadores.fixture.ts`; `k' = 2026-09`; temporadas por defecto)
@@ -474,7 +529,7 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 | 6 | Con `261101` y `261102` ya creados (el segundo a mano), crear otro embarque que llega en nov-26 sin código | Recibe `261103`. Escribir `261101` a mano da `codigo_duplicado`; con `261199` ya usado, `correlativo_agotado`; el viaje `261101` puede convivir con el embarque `261101` |
 | 7 | Cancelar C-000102 (M8) y después cancelar 261201 como admin | La asignación pasa a histórica; el embarque se cancela si no quedan activas; C1 recibe `403` al cancelar |
 | 8 | Una línea de 261201 vuelve a ser activa (quitar una recepción en M8) | Aviso `en_embarque_cancelado`; «Quitar del embarque» funciona |
-| 9 | Responsables efectivos | P261101 → C2; P261102 → C1 (del viaje); 270301 → `sin_responsable`; 261102 → C3, faltante; A asignable solo si se confirma la pregunta 3 |
+| 9 | Responsables efectivos | P261101 → C2; P261102 → C1 (del viaje); 270301 → `sin_responsable`; 261102 → C3, faltante; A (admin) asignable; un planner da `responsable_no_asignable` |
 | 10 | Embarque local con viaje; salida posterior a la llegada | `409 local_con_viaje` y `409 salida_despues_de_llegada` |
 | 11 | Dos pestañas sobre 261201 | La segunda recibe `agrupador_cambio`. Una compra que cambió después de la vista previa: reintenta si la huella es igual y, si no, `409 plan_cambio` |
 | 12 | Importar `EMBARQUE = 261201` en una línea `igual` sin asignación | Se asigna |
@@ -484,6 +539,9 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 | 16 | Una llegada en ago-26 (≤ `k'`) | `fecha_en_mes_cerrado`; el flujo espera lo pendiente en oct-26 |
 | 17 | Asignar a 261201 (dic) 300 de una entrega nov de 500, con 100 sin embarque en dic | Quedan nov 200 y dic 400 (300 en el embarque y 100 sin embarque) |
 | 18 | La línea alcanza 25 entregas | `max_entregas` |
+| 19a | Cerrar 261001 como admin; C2 le añade C-000102 y crea un embarque del viaje | Se aplica con el aviso `viaje_cerrado`; 261001 deja de ser el viaje activo por defecto; C2 recibe `403` al reabrirlo |
+| 19b | Importar un archivo con 2 viajes (uno con código `261201`, otro sin código), 3 embarques (uno que apunta al viaje `261201` del archivo y otro a 261001) y 4 paquetes | Previsualizar: 9 nuevas, la del viaje sin código «se numera al aplicar». Aplicar crea todo en una transacción. Reimportar da 9 `igual` |
+| 19c | El mismo archivo con la fecha de llegada de un embarque cambiada; un paquete cuyo embarque del archivo no trae código; un responsable planner | `cambiada_requiere_edicion` con la diferencia; `referencia_sin_codigo`; `responsable_no_asignable`; lo demás, `igual` |
 | 19 | Viaje activo 261001 | Compras lista C-000101 y no C-000102; la API sin `viaje_id` devuelve todo; Flujo no cambia; una cookie con texto basura se ignora |
 | **20** (08b-2) | Recibir 261101 el 22-nov con P261101 = 250 de 300 | Recepción vinculada de 250 en nov; el embarque queda recibido parcial; pasar 50 a 261201 deja nov 250 · dic 250 |
 | 21 (08b-2) | Registrar otra llegada de 30 en dic | `fecha_llegada_real` sigue en 22-nov y las entregas no se mueven |
@@ -500,7 +558,9 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 - [ ] lint, `tsc`, vitest (casos 1–19, con las pruebas de M8 en verde sin tocarlas) y build.
 - [ ] «Viajes y embarques» aparece dentro de Compras para los tres roles.
 - [ ] **Como comprador (C1 o C2)**: crear el viaje con código propuesto `aamm##` y nombre libre, embarques con puerto y paquetes, un embarque local sin viaje; asignar compras de la carga inicial desde Sin agrupador; cambiar la salida y la llegada, ver la vista previa y después las entregas en el mes nuevo en **Flujo mensual**; historial con motivo y autor. Al intentar cerrar o cancelar, `403`.
-- [ ] **Como admin**: cerrar y cancelar.
+- [ ] **Como admin**: cerrar y cancelar. Con el viaje cerrado, **un comprador** le añade y le quita compras y ve el aviso; al reabrir recibe `403`.
+- [ ] **Importador de agrupadores, como comprador**: descargar la plantilla, cargar **todos los viajes y embarques abiertos reales** (más de 15) con sus paquetes, puerto y responsables (comprador o admin), revisar el reporte, aplicar y reimportar sin duplicar; un responsable planner se rechaza.
+- [ ] El puerto real se ve y se edita por embarque, con el habitual del proveedor como sugerencia si la 08c ya está construida.
 - [ ] Un lote que cruza de temporada muestra `cambia_temporada`.
 - [ ] El viaje activo filtra Compras y no Flujo.
 - [ ] Importar con las columnas nuevas y reimportar sin duplicar.
@@ -517,7 +577,7 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 - OTB o presupuesto por viaje; el viaje no filtra Huecos ni Flujo.
 - Impacto en el IMI y justificación de exceso al mover un embarque: cuando `0.13.1` traiga `impacto`. Hasta entonces, mover solo pide motivo.
 - Vista del flujo por embarque o viaje.
-- **Importador de agrupadores** (pregunta 2).
+- Que el importador de agrupadores **edite** lo existente o asigne compras: solo crea (las compras se asignan con las columnas de §3.9 o en pantalla).
 - Acompañantes de viaje, costos logísticos, documentos y seguimiento naviero.
 - Fecha propia del paquete.
 - Captura manual y edición de cronogramas: `0.13.1`, con el contrato de §3.10.
@@ -529,10 +589,10 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 | Tanda | Agente | Depende de | Archivos | Se da por buena cuando |
 |---|---|---|---|---|
 | T0 · Contratos | `backend` | — | `src/lib/compras/agrupadores/{tipos-api,tipos,esquemas}.ts`, `tests/agrupadores.fixture.ts`, `tests/agrupadores.esquemas.test.ts` | `tsc` limpio; esquemas probados |
-| T1 · Datos | `datos` | — | `supabase/migrations/00B1_agrupadores_compras.sql` (renombrada al número libre), `scripts/humo-00B1.sql`, `src/lib/supabase/database.types.ts` | Consultas de §2.10 anotadas; aplica dos veces; humo verde; tiempos medidos |
-| T2 · Lógica pura | `backend` | T0 | `src/lib/compras/agrupadores/{codigos,movimiento,responsable,estados,avisos,permisos,viaje-activo,excel}.ts`, `tests/agrupadores.{codigos,movimiento,estados,responsable,permisos}.test.ts`; `src/lib/compras/tipos.ts` (catálogos de §2.7); **aditivo** `leerRepartosPorId` en `src/lib/marcas-barrer/servicio.ts` | R1–R6, R12–R15, R20 y R21 en verde; M8 y M12 en verde sin tocar sus pruebas |
-| T3a · Pantallas con fixtures | `frontend` | T0 | `src/app/(app)/compras/agrupadores/**`, `src/components/compras/agrupadores/**` (incluida la barra de viaje activo), `src/lib/compras/agrupadores/use-agrupadores.ts`, `src/lib/nav.ts`, `tests/agrupadores.pantalla.estatico.test.ts` | build y `tsc` limpios |
-| T3b · Servicio y API | `backend` | T1, T2 | `src/lib/compras/agrupadores/{consultas,servicio}.ts`, `src/app/api/compras/{viajes,embarques,paquetes,agrupadores,viaje-activo}/**`, `tests/agrupadores.{handlers,estatico}.test.ts`; aditivos en `src/lib/compras/{consultas,servicio,tipos-api,importar}.ts`, `src/app/api/compras/route.ts` y `src/app/api/compras/importar/route.ts`; altas en `tests/api.guards.roles.test.ts`; casos en `tests/compras.importar.test.ts` | R15–R19, R21–R23 en verde |
+| T1 · Datos | `datos` | — | `supabase/migrations/00B1_agrupadores_compras.sql` (renombrada al número libre; incluye `importar_agrupadores`), `scripts/humo-00B1.sql`, `src/lib/supabase/database.types.ts` | Consultas de §2.10 anotadas; aplica dos veces; humo verde (también importar el mismo lote dos veces); tiempos medidos (1 000 filas ≤ 3 s) |
+| T2 · Lógica pura | `backend` | T0 | `src/lib/compras/agrupadores/{codigos,movimiento,responsable,estados,avisos,permisos,viaje-activo,excel,importar,plantilla}.ts`, `tests/agrupadores.{codigos,movimiento,estados,responsable,permisos,importar}.test.ts`; `src/lib/compras/tipos.ts` (catálogos de §2.7); **aditivo** `leerRepartosPorId` en `src/lib/marcas-barrer/servicio.ts` | R1–R6, R12–R15, R20, R21, R25 y R26 en verde; M8 y M12 en verde sin tocar sus pruebas |
+| T3a · Pantallas con fixtures | `frontend` | T0 | `src/app/(app)/compras/agrupadores/**`, `src/components/compras/agrupadores/**` (incluida la barra de viaje activo), `src/lib/compras/agrupadores/use-agrupadores.ts`, `src/lib/nav.ts`, `tests/agrupadores.pantalla.estatico.test.ts` (la pestaña Importar **reutiliza** `src/components/importador/**` sin modificarlo; si hiciera falta un cambio, lo hace `frontend` y lo avisa) | build y `tsc` limpios |
+| T3b · Servicio y API | `backend` | T1, T2 | `src/lib/compras/agrupadores/{consultas,servicio}.ts`, `src/app/api/compras/{viajes,embarques,paquetes,agrupadores,viaje-activo}/**` (incluida `agrupadores/importar`), `tests/agrupadores.{handlers,estatico}.test.ts`; aditivos en `src/lib/compras/{consultas,servicio,tipos-api,importar}.ts`, `src/app/api/compras/route.ts` y `src/app/api/compras/importar/route.ts`; altas en `tests/api.guards.roles.test.ts`; casos en `tests/compras.importar.test.ts` | R15–R19, R21–R23 en verde |
 | T4 · Integración | `frontend` | T3a, T3b | Los de T3a, más `src/app/(app)/compras/registro/**` y `src/components/compras/**` que toque | Contra la API real en local; Excel; 390 px |
 | T5 · Cierre | `qa`, `seguridad` (sonnet), `documentador` | T4 | solo lectura · `docs/**`, `src/lib/version.ts` | Hito 08b-1 |
 
@@ -550,21 +610,26 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 
 ## 9. Decisiones nuevas propuestas (para `docs/DECISIONES.md`)
 
+La última registrada en `DECISIONES.md` es la 80. Las 81–86 son de esta ficha, las **87–91 las toma la 08c** y por eso esta ficha sigue en la 92. Si el `documentador` registra antes las de la 08c, el orden se mantiene.
+
 | N.º | Decisión |
 |---|---|
 | 81 | El viaje es contexto y filtro, nunca presupuesto. Cumple el papel de `campaigns` de COTV con un viaje activo por navegador, que no da permisos. Matiza «No se adopta: campañas» de la ficha 08 §4.0 |
 | 82 | El viaje va en la compra; el embarque y el paquete van en la entrega, por unidades; el paquete pertenece a un único embarque (Javier, a). Tabla de asignaciones para no tocar `unique (linea_id, periodo)` |
 | 83 | La fecha de llegada al CD vive en el embarque y alinea las entregas que toca cada operación. Cambiarla mueve en bloque, con motivo. Lo recibido no se mueve |
 | 84 | (08b-2) Recibir un embarque es confirmar el ingreso en bloque por una persona; las recepciones quedan vinculadas y `pendientesPorEntrega` las respeta (`VERSION_METODO_FLUJO = 4`) |
-| 85 | Un responsable por nivel, heredado, obligatorio en el viaje y filtro, no permiso |
+| 85 | Un responsable por nivel, heredado, obligatorio en el viaje y filtro, no permiso. **Pueden ser responsables los compradores y el admin activos; el planner, no** (Javier, f) |
 | 86 | Un lote movido se reparte de nuevo con la misma versión de M12 y la temporada del mes |
-| 87 | **El comprador escribe agrupadores desde 08b-1** (Javier, b): crear y editar, asignar, cambiar la salida y la llegada, pasar pendientes y recibir. Cerrar, reabrir y cancelar, revertir una recepción y asignar a un viaje cerrado quedan para admin y planner. Permiso por rol, no por responsable (matiz de la 28). Adelanta a M9a solo esta parte de la escritura |
-| 88 | Códigos `aamm##` por tipo (Javier, c): mes de la fecha de referencia al crear, máximo más uno con candado, sin reutilizar, códigos a mano permitidos y nombre libre |
-| 89 | Orden global de candados viaje → embarques → compras; `0.13.1` nunca escribe asignaciones |
+| 92 | **El comprador escribe agrupadores desde 08b-1** (Javier, b y e): crear, editar e importar; asignar compras, también a un viaje cerrado; cambiar la salida y la llegada; pasar pendientes y recibir. Cerrar, reabrir y cancelar, y revertir una recepción, quedan para admin y planner. Permiso por rol, no por responsable (matiz de la 28). Adelanta a M9a solo esta parte de la escritura |
+| 93 | Códigos `aamm##` por tipo (Javier, c): mes de la fecha de referencia al crear, máximo más uno con candado, sin reutilizar, códigos a mano permitidos y nombre libre |
+| 94 | Orden global de candados viaje → embarques → compras; `0.13.1` nunca escribe asignaciones |
+| 95 | **Un viaje cerrado es solo un estado informativo** (Javier, e): sigue aceptando que los tres roles le añadan o quiten compras y embarques, con el aviso `viaje_cerrado`; deja de ser el viaje activo por defecto y va al final de los selectores. Solo `cancelado` bloquea. Cerrar, reabrir y cancelar, solo admin y planner |
+| 96 | **El puerto real va por embarque** (`compra_embarques.puerto_embarque`), con el puerto habitual del proveedor (08c) como sugerencia (Javier, g) |
+| 97 | **Importador de agrupadores en 08b-1** (Javier, h: más de 15 abiertos al arrancar): una hoja con `TIPO`, CSV o Excel, previsualizar y aplicar, solo crea, idempotente por código o por clave natural, todo o nada, para los tres roles, con plantilla |
 
 ## 10. Preguntas abiertas para Javier
 
-1. **¿Un viaje ya cerrado acepta compras de la carga inicial?** Recomendación: sí, solo para planner y admin, con aviso; el comprador no.
-2. **¿Cuántos viajes y embarques abiertos habrá al arrancar?** Si son más de unos 15, se adelanta a 08b-1 un importador de agrupadores (código, nombre, tipo, viaje, salida, llegada, puerto, responsable). Si son menos, se crean en pantalla.
-3. **¿El admin puede ser responsable de un viaje, embarque o paquete?** Recomendación: sí, porque hoy hay 2 compradores y el admin viaja o coordina. Planner, no.
-4. **¿El puerto real se guarda por embarque** (`puerto_embarque`, con el puerto habitual del proveedor de la 08c como sugerencia)? Recomendación: sí.
+**No quedan.** Las cuatro de la versión anterior las respondió Javier el 2026-11-02 (e–h en la cabecera, decisiones 85 y 95–97). Lo que el arquitecto decidió sin preguntar, y Javier puede corregir antes de construir, es esto:
+- El mes del código `aamm##` sale de la fecha de referencia al crear (decisión 93).
+- El importador de agrupadores solo crea, nunca edita (decisión 97).
+- Cerrar y reabrir un viaje siguen siendo de admin y planner (decisión 95).
