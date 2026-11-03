@@ -452,7 +452,7 @@ function filaDeGrupo(p: FilaPlanificada, registros: readonly RegistroAEscribir[]
  * - un grupo `metodo` (o `revertir`) POR FILA: cada fila se escribe entera o no se escribe, sin arrastrar a las demás. `registros_lectura` = los registros
  *   de tienda que B2 leyó para esa fila.
  * `registros` trae, por `fila_id#anio`, lo que se escribe de cada fila aplicada (la lista y los `set` los arma el servicio con `payloadAnioDecision`). Orden estable:
- * los grupos por su primera `fila_id` y las filas por `(fila_id, anio)`, el mismo que usa la función para bloquear sin interbloquearse.
+ * primero los grupos `ia`, después los demás; dentro de cada clase, por su primera `fila_id`; las filas por `(fila_id, anio)`, el mismo orden que usa la función para bloquear sin interbloquearse.
  */
 export function armarGrupos(a: {
   plan: PlanLote;
@@ -489,5 +489,8 @@ export function armarGrupos(a: {
       filas: ordenadas.map((p) => filaDeGrupo(p, a.registros.get(`${p.fila_id}#${p.anio}`))),
     });
   }
-  return grupos.sort((x, y) => porTexto(x.filas[0].fila_id, y.filas[0].fila_id) || porTexto(x.tipo, y.tipo));
+  // Defensa (H1): los grupos `ia` van ANTES que los `metodo`, de modo que un grupo de método no escriba antes de que la función haya comprobado la lectura del grupo de IA.
+  // La función SQL ya verifica todos los `registros_lectura` contra el estado del inicio del lote, así que el orden no cambia el resultado; esto solo lo hace estable y legible.
+  const rango = (g: GrupoLote): number => (g.tipo === "ia" ? 0 : 1);
+  return grupos.sort((x, y) => rango(x) - rango(y) || porTexto(x.filas[0].fila_id, y.filas[0].fila_id) || porTexto(x.tipo, y.tipo));
 }

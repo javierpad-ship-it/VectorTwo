@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { estado as base, reiniciar, estadoAprobacion, type Fila } from "./aprobacion.fake-db";
+import { estado as base, reiniciar, estadoAprobacion, clienteAprobacionFalso, type Fila } from "./aprobacion.fake-db";
 import { sembrarIa, ProveedorDinamico } from "./ia.fake-db";
 import { ctxIa, reiniciarCtxIa, sembrarCorrida } from "./ia.contexto-falso";
-import { CLAVE_GM, FILAS_A, sembrarConfig, sembrarGM, type EscenarioSembrado } from "./ia.escenario";
+import { GEN } from "./proyeccion.fixture";
+import { CLAVE_GM, FILAS_A, sembrarConfig, sembrarGM, type EscenarioSembrado, type FilaSemilla } from "./ia.escenario";
 import { valida } from "./ia.proveedor-falso";
 import { aprobarCrecimientosFalsos, reiniciarContexto } from "./proyeccion.contexto-falso";
 
@@ -511,16 +512,25 @@ describe("revertir (R11) y reaprobar (R24)", () => {
     expect((await falla(revertirConfirmacion(esc.proyeccionId, uuid("8"), { lote_ids: [uuid("7")], simular: false }, ACTOR))).status).toBe(404);
   });
 
-  it("una tanda de la confirmación sin ninguna fila aplicada se ignora al revertir la confirmación", async () => {
-    const { a, c } = await aprobarTodo();
-    const denim = porLinea(a, "DENIM");
-    const vacia: LoteCuerpo = { lote_id: uuid("1"), confirmacion_id: c.confirmacion_id, tipo: "aprobar", anio: 2027, simular: true, revision_confirmada: false, filas: [{ fila_id: denim.fila_id, fuente: "metodo", valor_esperado: 10800 }] };
+  it("una tanda de la confirmación sin ninguna fila aplicada (la función las rechazó todas) se ignora al revertir la confirmación", async () => {
+    iniciar(false);
+    const a = await get();
+    const primera = await simularYAplicar(a, ["DENIM", "POLO"]);
+    const c = primera.c;
+    const r1 = await ok(primera.real);
+    expect(r1.totales.aplicadas).toBe(2);
+    // Segunda tanda de la misma confirmación: entre la foto y la función alguien decide CASACA; la función rechaza la fila y el lote queda con 0 aplicadas.
+    const casaca = porLinea(a, "CASACA");
+    const vacia: LoteCuerpo = { lote_id: uuid("1"), confirmacion_id: c.confirmacion_id, tipo: "aprobar", anio: 2027, simular: true, revision_confirmada: true, filas: [{ fila_id: casaca.fila_id, fuente: "metodo", valor_esperado: casaca.metodo.valor }] };
     const sim = await ok(aplicarLote(esc.proyeccionId, vacia, ACTOR));
+    estadoAprobacion.antesDeRpc = () => {
+      Object.assign(registro("CASACA"), { decidido: 5000, origen: "manual" });
+    };
     const r = await ok(aplicarLote(esc.proyeccionId, { ...vacia, simular: false, huella_simulacion: sim.huella_simulacion }, ACTOR));
     expect(r.lote?.resumen).toMatchObject({ pedidas: 1, aplicadas: 0, rechazadas: { ya_decidida: 1 } });
     const todo = await ok(revertirConfirmacion(esc.proyeccionId, c.confirmacion_id, { lote_ids: [uuid("7")], simular: false }, ACTOR));
     expect(todo).toHaveLength(1);
-    expect(todo[0].totales.aplicadas).toBe(3);
+    expect(todo[0].totales.aplicadas).toBe(2);
   });
 
   it("revertir es idempotente con el mismo `lote_id`", async () => {
@@ -580,6 +590,336 @@ describe("2026 con el método (B2, D15)", () => {
     expect(registro("DENIM", 2026)).toMatchObject({ decidido: 9600, origen: "propuesta", decision_lote_id: r.lote?.id });
     // Una decisión individual limpia la marca del lote (la hace M7, no este módulo) y entonces el lote ya no la puede revertir.
     expect(registro("DENIM", 2027).decision_lote_id ?? null).toBeNull();
+  });
+});
+
+
+// ─── Correcciones tras QA y seguridad (H1 a H8, M2, M4, I4) ───
+
+/** Genera la propuesta de IA con el proveedor dinámico (responde lo que pide la entrada), sobre un escenario ya sembrado. */
+async function generarDinamico(configId: string) {
+  ctxIa.proveedor = new ProveedorDinamico([]);
+  for (const c of filas("ia_corridas")) if (c.estado === "en_curso") c.estado = "cancelada";
+  const { corridaId } = sembrarCorrida(esc.proyeccionId, { configuracionId: configId, corrida: { ultima_actividad_at: new Date().toISOString(), alcance: { gms: "todos", regenerar: false, semilla: null } } });
+  for (let i = 0; i < 8; i++) {
+    const r = await pasoGM(esc.proyeccionId, corridaId, CLAVE_GM, ACTOR);
+    if (r.respuesta) throw new Error(`paso falló ${r.respuesta.status}`);
+    if ((r.data as PasoGMApi).siguiente === "hecho") return;
+  }
+  throw new Error("no terminó");
+}
+
+/** El GM A con una fila de % propio (método) en la posición `pos` de las cinco: la IA reparte las libres y la de % propio se aprueba con el método. */
+const conPctPropio = (pos: number): FilaSemilla[] => FILAS_A.map((f, i) => (i === pos ? { ...f, crecimiento_pct: 5, P: Math.round(f.Bc * 1.05) } : f));
+
+describe("H1 · caso mixto IA + método en el mismo GM, en ambos órdenes de id", () => {
+  for (const [pos, linea] of [[0, "DENIM"], [2, "CASACA"]] as const) {
+    it(`la fila con % propio es ${linea} (${pos === 0 ? "la primera" : "la tercera"} por id): las libres con IA y esa con método se aplican juntas`, async () => {
+      esc = sembrarGM(conPctPropio(pos));
+      ctxIa.catalogo = esc.catalogo;
+      await generarDinamico(sembrarConfig().id as string);
+      const a = await get();
+      const sugeridas = a.filas.filter((f) => f.fuente_sugerida !== null);
+      expect(sugeridas.map((f) => [f.linea, f.fuente_sugerida])).toEqual(expect.arrayContaining([[linea, "metodo"]]));
+      expect(sugeridas.filter((f) => f.fuente_sugerida === "ia")).toHaveLength(2);
+      const { real, c } = await simularYAplicar(a, sugeridas.map((f) => f.linea));
+      const r = await ok(real);
+      expect(r.filas.map((f) => f.codigo ?? "aplicada")).toEqual(["aplicada", "aplicada", "aplicada"]);
+      expect(r.lote?.resumen).toMatchObject({ aplicadas: 3, por_fuente: { ia: { filas: 2 }, metodo: { filas: 1 } } });
+      expect(registro(linea)).toMatchObject({ origen: "propuesta", decision_lote_id: c.lote_id });
+      expect(registro(linea).decision_ia_fila_id ?? null).toBeNull();
+      for (const f of sugeridas.filter((x) => x.fuente_sugerida === "ia")) expect(registro(f.linea)).toMatchObject({ origen: "manual", decision_lote_id: c.lote_id });
+      // El payload lleva el grupo de IA ANTES que el de método (defensa de `armarGrupos`).
+      const payload = estadoAprobacion.payloads[estadoAprobacion.payloads.length - 1] as { grupos: { tipo: string }[] };
+      expect(payload.grupos.map((g) => g.tipo)).toEqual(["ia", "metodo"]);
+    });
+  }
+
+  it("la función SQL verifica TODOS los `registros_lectura` contra el estado del inicio del lote: el orden de los grupos no cambia el resultado (método antes que IA)", async () => {
+    esc = sembrarGM(conPctPropio(0));
+    ctxIa.catalogo = esc.catalogo;
+    await generarDinamico(sembrarConfig().id as string);
+    const a = await get();
+    const lineas = a.filas.filter((f) => f.fuente_sugerida !== null).map((f) => f.linea);
+    const c = cuerpoDe(a, lineas);
+    const sim = await ok(aplicarLote(esc.proyeccionId, { ...c, simular: true }, ACTOR));
+    // Se captura el payload sin escribir (la función falla antes) y se manda a mano con los grupos al revés.
+    estadoAprobacion.falloRpc = { code: "55P03", message: "lock_timeout" };
+    await falla(aplicarLote(esc.proyeccionId, { ...c, huella_simulacion: sim.huella_simulacion }, ACTOR));
+    const payload = estadoAprobacion.payloads[estadoAprobacion.payloads.length - 1] as { lote: Record<string, unknown>; grupos: unknown[] };
+    expect(registro("DENIM").decidido).toBeNull();
+    const alReves = { ...payload, grupos: [...payload.grupos].reverse() };
+    const r = (await clienteAprobacionFalso().rpc("aplicar_lote_proyeccion", { p: alReves })) as { data: { filas: { resultado: string; fuente: string }[] }; error: unknown };
+    expect(r.error).toBeNull();
+    expect(r.data.filas.map((f) => f.resultado)).toEqual(["aplicada", "aplicada", "aplicada"]);
+    expect(registro("DENIM")).toMatchObject({ origen: "propuesta" });
+    expect(registro("POLO").decidido).not.toBeNull();
+    expect(registro("CASACA").decidido).not.toBeNull();
+  });
+
+  it("un cambio de TERCEROS sigue dando `cambio_concurrente`: en una fila no seleccionada rechaza el grupo IA entero y el de método se aplica", async () => {
+    esc = sembrarGM(conPctPropio(0));
+    ctxIa.catalogo = esc.catalogo;
+    await generarDinamico(sembrarConfig().id as string);
+    const a = await get();
+    const { real } = await simularYAplicar(a, a.filas.filter((f) => f.fuente_sugerida !== null).map((f) => f.linea));
+    estadoAprobacion.antesDeRpc = () => {
+      registro("BUZO").updated_at = "2026-11-03T13:00:00.000Z";
+    };
+    const r = await ok(real);
+    const porFuente = (fuente: string) => r.filas.filter((f) => f.fuente === fuente).map((f) => f.codigo ?? "aplicada");
+    expect(porFuente("ia")).toEqual(["cambio_concurrente", "cambio_concurrente"]);
+    expect(porFuente("metodo")).toEqual(["aplicada"]);
+    expect(registro("DENIM").decision_lote_id).toBe(r.lote?.id);
+    expect(registro("POLO").decidido).toBeNull();
+  });
+
+  it("un tercero que cambia la fila de método antes de la función: esa fila y el grupo IA (que la lee) dan `cambio_concurrente`", async () => {
+    esc = sembrarGM(conPctPropio(0));
+    ctxIa.catalogo = esc.catalogo;
+    await generarDinamico(sembrarConfig().id as string);
+    const a = await get();
+    const { real } = await simularYAplicar(a, a.filas.filter((f) => f.fuente_sugerida !== null).map((f) => f.linea));
+    estadoAprobacion.antesDeRpc = () => {
+      registro("DENIM").updated_at = "2026-11-03T13:00:00.000Z";
+    };
+    const r = await ok(real);
+    expect(r.filas.map((f) => f.codigo)).toEqual(["cambio_concurrente", "cambio_concurrente", "cambio_concurrente"]);
+    expect(r.totales.aplicadas).toBe(0);
+  });
+});
+
+describe("H2 · el volumen leído por petición no arrastra el `historico` entero", () => {
+  /** Rellena el `historico` de cada fila con una clave que ninguna escritura necesita: si se lee, el volumen se dispara. */
+  function engordarHistorico() {
+    for (const f of filas("proyeccion_filas")) f.historico = { ...(f.historico as Record<string, unknown>), relleno: "x".repeat(40_000) };
+  }
+
+  for (const anio of [2026, 2027]) {
+    it(`lote de ${anio}: simular y aplicar leen mucho menos que el relleno del historico (5 filas × 40 KB)`, async () => {
+      iniciar(false);
+      engordarHistorico();
+      const a = await get(anio);
+      const lineas = a.filas.map((f) => f.linea);
+      expect(lineas.length).toBeGreaterThan(0);
+      estadoAprobacion.medir = true;
+      const { sim, real } = await simularYAplicar(a, lineas, { anio, revision_confirmada: true });
+      await ok(real);
+      estadoAprobacion.medir = false;
+      expect(sim.totales.aplicadas).toBe(lineas.length);
+      // Cinco filas con 40 KB de relleno son 200 KB por lectura completa: dos peticiones (simular y aplicar) que lo leyeran pasarían de 400 KB.
+      expect(estadoAprobacion.bytes.total).toBeLessThan(anio === 2026 ? 160_000 : 60_000);
+    });
+  }
+
+  it("2026: el efecto sigue usando lo vendido en 2025 del histórico (crecimiento implícito de 2026) aunque solo se lea `historico->anios`", async () => {
+    iniciar(false);
+    const a = await get(2026);
+    const sim = await ok(aplicarLote(esc.proyeccionId, { ...cuerpoDe(a, ["DENIM"], { anio: 2026 }), simular: true }, ACTOR));
+    expect(sim.efecto_gm[0].crecimiento_implicito_antes_pct).not.toBeNull();
+    expect(sim.efecto_gm[0].crecimiento_implicito_despues_pct).not.toBeNull();
+  });
+});
+
+describe("H3 · `crecimientos_sin_aprobar` no frena las tandas siguientes de la MISMA confirmación", () => {
+  /**
+   * Lo que un lote de 2026 con el Niño puede dejar entre dos tandas (D15): el cierre empieza a exigir crecimientos de `Y+1` (en producción, un GM «bruto» con Niño material que hay que
+   * reaprobar; aquí, un GM exigido sin versión vigente). El escenario sintético de la IA no comparte nodos con el contexto falso, así que el Niño real no se puede armar: se
+   * fabrica el estado que deja y se comprueba que el bloqueo es el real (`crecimientosDeHoy` → `crecimientos_sin_aprobar`). Que un lote de `Y` deja GM por reaprobar lo cubre `aprobacion.efecto.test.ts`.
+   */
+  const exigirCrecimientos = () => {
+    const resumen = base.tablas.proyecciones[0].resumen as Record<string, unknown>;
+    base.tablas.proyecciones[0].resumen = { ...resumen, gm_gml: { [esc.gmlIds[0]]: `${GEN.hombre}|00000000-0000-4000-8000-00000000ffff` } };
+  };
+
+  it("la primera tanda y toda confirmación nueva se bloquean; la segunda tanda de la misma confirmación pasa", async () => {
+    iniciar(false);
+    const a = await get(2026);
+    expect(a.bloqueos).toEqual([]);
+
+    const confirmacion = uuid("2");
+    const tanda1 = await simularYAplicar(a, ["DENIM"], { anio: 2026, confirmacion_id: confirmacion });
+    expect((await ok(tanda1.real)).totales.aplicadas).toBe(1);
+
+    exigirCrecimientos();
+    const b = await get(2026);
+    expect(b.bloqueos.map((x) => x.codigo)).toContain("crecimientos_sin_aprobar");
+    expect(b.editable).toBe(false);
+
+    // Una confirmación NUEVA (su primera tanda) sí se bloquea.
+    const nueva = cuerpoDe(b, ["POLO"], { anio: 2026, simular: true, confirmacion_id: uuid("2") });
+    expect(await falla(aplicarLote(esc.proyeccionId, nueva, ACTOR))).toMatchObject({ status: 409, cuerpo: { codigo: "crecimientos_sin_aprobar" } });
+
+    // La segunda tanda de la MISMA confirmación pasa (simula y aplica).
+    const tanda2 = await simularYAplicar(b, ["POLO"], { anio: 2026, confirmacion_id: confirmacion });
+    const r2 = await ok(tanda2.real);
+    expect(r2.totales.aplicadas).toBe(1);
+    expect(r2.lote?.confirmacion_id).toBe(confirmacion);
+
+    // Los demás bloqueos no se relajan: con la proyección desactualizada la misma confirmación se frena igual.
+    const parametros = base.tablas.proyecciones[0].parametros as Record<string, unknown>;
+    base.tablas.proyecciones[0].parametros = { ...parametros, recalculo_pendiente: true };
+    const c3 = cuerpoDe(b, ["CASACA"], { anio: 2026, simular: true, confirmacion_id: confirmacion });
+    expect((await falla(aplicarLote(esc.proyeccionId, c3, ACTOR))).cuerpo.codigo).toBe("proyeccion_desactualizada");
+  });
+
+  it("la primera tanda de una confirmación con crecimientos sin aprobar se bloquea aunque su `confirmacion_id` no exista todavía", async () => {
+    iniciar(false);
+    const a = await get(2026);
+    exigirCrecimientos();
+    const c = cuerpoDe(a, ["DENIM"], { anio: 2026, simular: true });
+    expect((await falla(aplicarLote(esc.proyeccionId, c, ACTOR))).cuerpo.codigo).toBe("crecimientos_sin_aprobar");
+  });
+
+  it("tras un recálculo (otro `calculado_at`) la confirmación ya no está «empezada»: vuelve a exigirse todo", async () => {
+    iniciar(false);
+    const a = await get(2026);
+    const confirmacion = uuid("2");
+    await ok((await simularYAplicar(a, ["DENIM"], { anio: 2026, confirmacion_id: confirmacion })).real);
+    exigirCrecimientos();
+    const b = await get(2026);
+    base.tablas.proyecciones[0].calculado_at = "2026-11-03T09:00:00.000Z";
+    const c = cuerpoDe(b, ["POLO"], { anio: 2026, simular: true, confirmacion_id: confirmacion });
+    expect((await falla(aplicarLote(esc.proyeccionId, c, ACTOR))).cuerpo.codigo).toBe("crecimientos_sin_aprobar");
+  });
+
+  it("una confirmación cuyas tandas no aplicaron ninguna fila no cuenta como empezada", async () => {
+    iniciar(false);
+    const a = await get(2026);
+    const confirmacion = uuid("2");
+    const c = cuerpoDe(a, ["DENIM"], { anio: 2026, simular: true, confirmacion_id: confirmacion });
+    const sim = await ok(aplicarLote(esc.proyeccionId, c, ACTOR));
+    estadoAprobacion.antesDeRpc = () => {
+      Object.assign(registro("DENIM", 2026), { decidido: 9000, origen: "manual" });
+    };
+    const vacia = await ok(aplicarLote(esc.proyeccionId, { ...c, simular: false, huella_simulacion: sim.huella_simulacion }, ACTOR));
+    expect(vacia.totales.aplicadas).toBe(0);
+    exigirCrecimientos();
+    const b = await get(2026);
+    const otra = cuerpoDe(b, ["POLO"], { anio: 2026, simular: true, confirmacion_id: confirmacion });
+    expect((await falla(aplicarLote(esc.proyeccionId, otra, ACTOR))).cuerpo.codigo).toBe("crecimientos_sin_aprobar");
+  });
+});
+
+describe("H6 · el contador `reaprobables` solo cuenta lo que «Reaprobar» podría tomar", () => {
+  it("con la IA al día cuenta las aprobadas en bloque que cambiaron; si el GM queda desactualizado, ya no cuenta ninguna", async () => {
+    await generar(iniciar()!.id as string);
+    const a = await get();
+    await ok((await simularYAplicar(a, ["DENIM", "POLO", "CASACA"])).real);
+    registro("DENIM").propuesto = 11340;
+    expect((await get(2027, "reaprobar")).reaprobables.y1).toBe(3);
+    // La historia del GM cambió: su propuesta de IA queda desactualizada y sus filas saldrían excluidas (`ia_desactualizada`).
+    filas("ia_propuestas_gm")[0].huella_historia = "otra-historia";
+    const b = await get(2027, "reaprobar");
+    expect(b.gms[0].estado_ia).toBe("desactualizada");
+    expect(b.reaprobables.y1).toBe(0);
+    expect(b.filas.every((f) => f.fuente_sugerida === null && f.excluida === "ia_desactualizada")).toBe(true);
+  });
+
+  it("las aprobadas en bloque con el método (GM sin IA) siguen contando cuando su propuesta cambia", async () => {
+    iniciar(false);
+    const a = await get();
+    await ok((await simularYAplicar(a, ["DENIM", "POLO", "CASACA"])).real);
+    registro("DENIM").propuesto = 11340;
+    expect((await get(2027, "reaprobar")).reaprobables.y1).toBe(1);
+  });
+});
+
+describe("H8 · errores de tiempo de la base se reintentan igual que un interbloqueo", () => {
+  it("40P01, 55P03 y 57014 son 409 `conflicto_reintentar`; otro código sigue siendo 500", async () => {
+    iniciar(false);
+    const a = await get();
+    const c = cuerpoDe(a, ["DENIM"]);
+    const sim = await ok(aplicarLote(esc.proyeccionId, { ...c, simular: true }, ACTOR));
+    for (const code of ["40P01", "55P03", "57014"]) {
+      estadoAprobacion.falloRpc = { code, message: "error de la base" };
+      expect(await falla(aplicarLote(esc.proyeccionId, { ...c, huella_simulacion: sim.huella_simulacion }, ACTOR)), code).toMatchObject({ status: 409, cuerpo: { codigo: "conflicto_reintentar" } });
+    }
+    estadoAprobacion.falloRpc = { code: "XX000", message: "otra cosa" };
+    expect((await falla(aplicarLote(esc.proyeccionId, { ...c, huella_simulacion: sim.huella_simulacion }, ACTOR))).status).toBe(500);
+    // Nada se escribió y el reintento con el mismo `lote_id` funciona.
+    expect(registro("DENIM").decidido).toBeNull();
+    expect((await ok(aplicarLote(esc.proyeccionId, { ...c, huella_simulacion: sim.huella_simulacion }, ACTOR))).totales.aplicadas).toBe(1);
+  });
+});
+
+describe("M2 · sin ninguna fila aplicable no se llama a la función SQL", () => {
+  it("aprobar: todas las filas rechazadas en TypeScript → 409 `sin_filas_aplicables`, sin llamada ni lote vacío; simular sí responde", async () => {
+    iniciar(false);
+    const a = await get();
+    await ok(decidirFila(esc.proyeccionId, porLinea(a, "DENIM").fila_id, 2027, { decidido: 11500, origen: "manual" }, ACTOR));
+    const c = cuerpoDe(a, ["DENIM"]);
+    const sim = await ok(aplicarLote(esc.proyeccionId, { ...c, simular: true }, ACTOR));
+    expect(sim.totales).toMatchObject({ aplicadas: 0, rechazadas: 1 });
+    const r = await falla(aplicarLote(esc.proyeccionId, { ...c, huella_simulacion: sim.huella_simulacion }, ACTOR));
+    expect(r).toMatchObject({ status: 409, cuerpo: { codigo: "sin_filas_aplicables" } });
+    expect(String(r.cuerpo.error)).toContain("Ninguna de las filas elegidas se puede aprobar ahora");
+    expect(estadoAprobacion.llamadas).toBe(0);
+    expect(filas("proyeccion_lotes")).toHaveLength(0);
+  });
+
+  it("revertir: un lote cuyas filas ya cambiaron a mano → 409 `sin_filas_aplicables` sin llamar a la función; revertir una confirmación tolera las tandas vacías", async () => {
+    iniciar(false);
+    const a = await get();
+    const { c, real } = await simularYAplicar(a, ["DENIM", "POLO"]);
+    const lote = (await ok(real)).lote!;
+    for (const l of ["DENIM", "POLO"]) await ok(decidirFila(esc.proyeccionId, registro(l).fila_id as string, 2027, { decidido: 12000, origen: "manual" }, ACTOR));
+    const llamadas = estadoAprobacion.llamadas;
+    const sim = await ok(revertirLote(esc.proyeccionId, lote.id, { lote_id: uuid("5"), simular: true }, ACTOR));
+    expect(sim.totales.aplicadas).toBe(0);
+    expect(await falla(revertirLote(esc.proyeccionId, lote.id, { lote_id: uuid("5"), simular: false }, ACTOR))).toMatchObject({ status: 409, cuerpo: { codigo: "sin_filas_aplicables" } });
+    expect(await falla(revertirConfirmacion(esc.proyeccionId, c.confirmacion_id, { lote_ids: [uuid("6")], simular: false }, ACTOR))).toMatchObject({ status: 409, cuerpo: { codigo: "sin_filas_aplicables" } });
+    expect(estadoAprobacion.llamadas).toBe(llamadas);
+    expect(filas("proyeccion_lotes").filter((l) => l.tipo === "revertir")).toHaveLength(0);
+  });
+});
+
+describe("I4 · revertir busca el lote repetido ANTES de mirar si la proyección se cerró o se está calculando", () => {
+  it("el reintento con el mismo `lote_id` devuelve lo guardado aunque la proyección ya esté cerrada o calculándose; sin reintento, 409", async () => {
+    iniciar(false);
+    const a = await get();
+    const { real } = await simularYAplicar(a, ["DENIM", "POLO", "CASACA"]);
+    const lote = (await ok(real)).lote!;
+    const idRev = uuid("5");
+    const primera = await ok(revertirLote(esc.proyeccionId, lote.id, { lote_id: idRev, simular: false }, ACTOR));
+    expect(primera.repetido).toBe(false);
+    base.tablas.proyecciones[0].estado = "cerrada";
+    const otra = await ok(revertirLote(esc.proyeccionId, lote.id, { lote_id: idRev, simular: false }, ACTOR));
+    expect(otra).toMatchObject({ repetido: true, lote: { id: idRev } });
+    expect((await falla(revertirLote(esc.proyeccionId, lote.id, { lote_id: uuid("6"), simular: false }, ACTOR))).cuerpo.codigo).toBe("cerrada");
+    base.tablas.proyecciones[0].estado = "en_trabajo";
+    base.tablas.proyecciones[0].calculando_desde = new Date().toISOString();
+    expect((await ok(revertirLote(esc.proyeccionId, lote.id, { lote_id: idRev, simular: false }, ACTOR))).repetido).toBe(true);
+    expect((await falla(revertirLote(esc.proyeccionId, lote.id, { lote_id: uuid("7"), simular: false }, ACTOR))).cuerpo.codigo).toBe("calculo_en_curso");
+    // Mismo `lote_id` con otro cuerpo sigue siendo `lote_ajeno`, también con la proyección cerrada.
+    base.tablas.proyecciones[0].calculando_desde = null;
+    base.tablas.proyecciones[0].estado = "cerrada";
+    expect((await falla(revertirLote(esc.proyeccionId, lote.id, { lote_id: idRev, nota: "otra", simular: false }, ACTOR))).cuerpo.codigo).toBe("lote_ajeno");
+  });
+});
+
+describe("Entrada a la IA con filas `libre_en_bloque` (QA y seguridad)", () => {
+  it("una fila aprobada en bloque con IA se pide de nuevo a la IA: `y1.fija_en` nulo y `pedir` verdadero; la decidida a mano sigue fija", async () => {
+    const cfg = iniciar()!.id as string;
+    await generar(cfg);
+    const a = await get();
+    await ok((await simularYAplicar(a, ["DENIM", "POLO", "CASACA"])).real);
+    expect(registro("DENIM")).toMatchObject({ decision_lote_id: expect.any(String), decision_ia_fila_id: expect.any(String) });
+    await generar(cfg, true);
+    const peticiones = (ctxIa.proveedor as unknown as { peticiones: { bloque: string }[] }).peticiones;
+    expect(peticiones.length).toBeGreaterThan(0);
+    const filasDe = peticiones.flatMap((p) => ((JSON.parse(p.bloque) as { filas?: { f: string; estado?: string; y1: { fija_en: number | null; pedir: boolean } }[] }).filas ?? []));
+    // Las tres aprobadas en bloque (f001 a f003) se piden de nuevo: no llegan como fijas.
+    for (const f of ["f001", "f002", "f003"]) {
+      const x = filasDe.find((r) => r.f === f);
+      expect(x, f).toBeDefined();
+      expect(x?.y1.fija_en, f).toBeNull();
+      expect(x?.y1.pedir, f).toBe(true);
+    }
+    // BUZO (decidida a mano, f004) sigue fija y no se pide.
+    const buzo = filasDe.find((r) => r.f === "f004");
+    expect(buzo?.y1.fija_en).toBe(3300);
+    expect(buzo?.y1.pedir).toBe(false);
   });
 });
 

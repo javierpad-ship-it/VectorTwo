@@ -4,8 +4,9 @@
 --   * FK diferibles (`proyeccion_lote_filas.lote_id` y `proyeccion_fila_anios.decision_lote_id`) y su comportamiento al
 --     comprometer (R19): sin cabecera, la comprobación falla; con la cabecera insertada después, pasa;
 --   * `check` de `decision_lote_id` (implica decidido no nulo);
---   * inmutabilidad (R19): update, delete y truncate fallan también con `service_role`; solo se admite poner en NULL una FK
---     `set null` (perfil, proyección, fila), de verdad con el `delete` del padre;
+--   * inmutabilidad (R19): `service_role` solo tiene select e insert (update, delete y truncate fallan por PERMISO); como
+--     postgres (dueño) los rechaza el trigger; solo se admite poner en NULL una FK `set null` (perfil, proyección, fila), de
+--     verdad con el `delete` del padre, también cuando lo emite `service_role` (la FK corre con los privilegios del dueño);
 --   * `aplicar_lote_proyeccion`: aprobar por método, reaprobar, revertir, grupo IA entero o nada, método atómico por fila,
 --     lista fija de columnas, `updated_at` exacto (1 microsegundo de diferencia), `registros_lectura`, `activo`, propuesta
 --     vigente con el orden `created_at desc, id asc`, idempotencia (`repetido`, `lote_ajeno`), estado, cálculo vivo y
@@ -82,11 +83,18 @@ insert into r (caso, ok) values
     (select count(*) from pg_class c join pg_namespace s on s.oid = c.relnamespace
       where s.nspname = 'public' and c.relname in (select n from tablas_lote) and c.relrowsecurity) = 2
     and (select count(*) from pg_policies where schemaname = 'public' and tablename in (select n from tablas_lote)) = 0),
-  ('anon y authenticated sin ningun permiso sobre las 2 tablas; service_role con select, insert, update y delete',
-    (select count(*) from tablas_lote t, unnest(array['select', 'insert', 'update', 'delete', 'truncate']) p(priv)
+  ('anon y authenticated sin ningun permiso sobre las 2 tablas; service_role SOLO con select e insert (sin update, delete, truncate, trigger ni references)',
+    (select count(*) from tablas_lote t, unnest(array['select', 'insert', 'update', 'delete', 'truncate', 'trigger', 'references']) p(priv)
       where has_table_privilege('anon', 'public.' || t.n, p.priv) or has_table_privilege('authenticated', 'public.' || t.n, p.priv)) = 0
-    and (select count(*) from tablas_lote t, unnest(array['select', 'insert', 'update', 'delete']) p(priv)
-      where not has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0),
+    and (select count(*) from tablas_lote t, unnest(array['select', 'insert']) p(priv)
+      where not has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0
+    and (select count(*) from tablas_lote t, unnest(array['update', 'delete', 'truncate', 'trigger', 'references']) p(priv)
+      where has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0),
+  ('ningun rol salvo el dueño y service_role aparece en las ACL de las 2 tablas (y service_role solo con select e insert)',
+    (select count(*) from pg_class c cross join lateral aclexplode(c.relacl) x
+      where c.oid in (select ('public.' || n)::regclass from tablas_lote)
+        and x.grantee <> c.relowner
+        and not (x.grantee = 'service_role'::regrole and x.privilege_type in ('SELECT', 'INSERT'))) = 0),
   ('las 2 tablas inmutables NO llevan activo ni updated_at',
     (select count(*) from information_schema.columns where table_schema = 'public' and table_name in (select n from tablas_lote)
        and column_name in ('activo', 'updated_at')) = 0),
@@ -878,6 +886,152 @@ insert into r (caso, ok) values
     pg_temp.rc('s10c', 'H31-F7', 2026) = 'cambio_concurrente' and pg_temp.v('H31-F7', 2026, 'decidido') is null);
 
 -- ---------------------------------------------------------------------------------------------------------------------
+-- 10d. Grupos ia y metodo del MISMO GM en un lote: el orden de los grupos no cambia el resultado (H1 de QA)
+-- ---------------------------------------------------------------------------------------------------------------------
+-- El grupo ia (F1 y F2 de 2027) lee en `registros_lectura` los registros de F1..F4 (los dos años); el grupo metodo escribe F3
+-- 2026, que ESTA en esa lectura. Antes, si el metodo se escribia primero, el updated_at de F3 2026 cambiaba por una escritura
+-- del propio lote y el grupo ia salia entero `cambio_concurrente`. Ahora las dos pasadas (verificar todo contra el estado del
+-- inicio y despues escribir) hacen que dé igual el orden. Cada ejecucion corre en una subtransaccion que se deshace (un
+-- `raise` final): el estado de F1..F3 se repone antes (sin decision, `updated_at` antiguo con el trigger apagado) y no queda nada
+-- para las secciones siguientes. Las variables de plpgsql sobreviven al rollback de la subtransaccion: de ahi sale el resultado.
+create or replace function pg_temp.mezcla(p_caso text, p_orden text, p_n integer) returns jsonb language plpgsql as $f$
+declare
+  v_l uuid := pg_temp.id(p_n);
+  v_vig uuid := (select p_vig from ids);
+  v_ia jsonb;
+  v_me jsonb;
+  v_p jsonb;
+  v_out jsonb;
+begin
+  begin
+    set constraints all immediate;
+    alter table public.proyeccion_fila_anios disable trigger set_updated_at;
+    update public.proyeccion_fila_anios a
+       set decidido = null, origen = null, propuesta_al_decidir = null, nota = null, decidido_at = null, decidido_por_id = null,
+           decidido_por_nombre = null, decision_ia_fila_id = null, decision_lote_id = null, activo = true,
+           updated_at = timestamptz '2026-11-01 07:00:00.000123+00'
+      from public.proyeccion_filas f
+     where f.id = a.fila_id and f.clave in ('H31-F1', 'H31-F2', 'H31-F3');
+    alter table public.proyeccion_fila_anios enable trigger set_updated_at;
+    set constraints all deferred;
+    v_ia := pg_temp.grupo('ia', 'GM-UNO',
+      case when p_caso = 'ya'
+        then jsonb_build_array(pg_temp.fila_ia('H31-F1', 1150, v_l, v_vig), pg_temp.fila_ia('H31-F2', 1100, v_l, v_vig),
+                               pg_temp.fila_ia('H31-F4', 1000, v_l, v_vig))
+        else jsonb_build_array(pg_temp.fila_ia('H31-F1', 1150, v_l, v_vig), pg_temp.fila_ia('H31-F2', 1100, v_l, v_vig))
+      end,
+      pg_temp.lectura(array['H31-F1', 'H31-F2', 'H31-F3', 'H31-F4']), v_vig);
+    v_me := pg_temp.grupo('metodo', 'GM-UNO', jsonb_build_array(pg_temp.fila_met('H31-F3', 1000, v_l)));
+    v_p := pg_temp.payload(pg_temp.lote(v_l, 'aprobar'),
+             case p_orden when 'ia_primero' then jsonb_build_array(v_ia, v_me) else jsonb_build_array(v_me, v_ia) end);
+    if p_caso = 'cambio_f4' then
+      perform pg_temp.toca('H31-F4', 2027);
+    elsif p_caso = 'cambio_f3' then
+      perform pg_temp.toca('H31-F3', 2026);
+    end if;
+    v_out := jsonb_build_object('res', pg_temp.aplica(v_p),
+      'f1_27', pg_temp.v('H31-F1', 2027, 'decidido'), 'f2_27', pg_temp.v('H31-F2', 2027, 'decidido'),
+      'f3_26', pg_temp.v('H31-F3', 2026, 'decidido'), 'f3_27', pg_temp.v('H31-F3', 2027, 'decidido'),
+      'f1_lote', pg_temp.v('H31-F1', 2027, 'decision_lote_id') = v_l::text);
+    raise exception 'deshacer' using errcode = 'XX999';
+  exception when sqlstate 'XX999' then
+    null;
+  end;
+  set constraints all deferred;
+  return v_out;
+end
+$f$;
+
+-- Los codigos de las filas, ordenados: lo que debe ser igual en los dos ordenes de grupos.
+create or replace function pg_temp.codigos(p_out jsonb) returns jsonb language sql as $f$
+  select coalesce(jsonb_agg(jsonb_build_array(e ->> 'fila_clave', e ->> 'anio', coalesce(e ->> 'codigo', 'aplicada'), e ->> 'fuente')
+                            order by e ->> 'fila_clave', e ->> 'anio'), '[]'::jsonb)
+    from jsonb_array_elements(p_out -> 'res' -> 'filas') e $f$;
+
+create temp table mezcla (k text primary key, v jsonb);
+insert into mezcla
+select c || '_' || o, pg_temp.mezcla(c, o, n)
+  from (values ('ok', 'ia_primero', 3301), ('ok', 'metodo_primero', 3302),
+               ('cambio_f4', 'ia_primero', 3303), ('cambio_f4', 'metodo_primero', 3304),
+               ('cambio_f3', 'ia_primero', 3305), ('cambio_f3', 'metodo_primero', 3306),
+               ('ya', 'ia_primero', 3307), ('ya', 'metodo_primero', 3308)) as v(c, o, n);
+
+create or replace function pg_temp.mz(p_k text) returns jsonb language sql as $f$ select v from mezcla where k = p_k $f$;
+
+insert into r (caso, ok) values
+  ('H1 mixto ia+metodo del mismo GM (ia primero): las 3 filas aplicadas y escritas, el ia NO sale cambio_concurrente',
+    (select count(*) from jsonb_array_elements(pg_temp.mz('ok_ia_primero') -> 'res' -> 'filas') e where e ->> 'codigo' is null) = 3
+    and pg_temp.mz('ok_ia_primero') ->> 'f1_27' = '1150' and pg_temp.mz('ok_ia_primero') ->> 'f2_27' = '1100'
+    and pg_temp.mz('ok_ia_primero') ->> 'f3_26' = '1000' and (pg_temp.mz('ok_ia_primero') ->> 'f1_lote')::boolean),
+  ('H1 mixto ia+metodo del mismo GM (metodo primero): las 3 filas aplicadas y escritas (el bug reproducido por QA)',
+    (select count(*) from jsonb_array_elements(pg_temp.mz('ok_metodo_primero') -> 'res' -> 'filas') e where e ->> 'codigo' is null) = 3
+    and pg_temp.mz('ok_metodo_primero') ->> 'f1_27' = '1150' and pg_temp.mz('ok_metodo_primero') ->> 'f2_27' = '1100'
+    and pg_temp.mz('ok_metodo_primero') ->> 'f3_26' = '1000' and (pg_temp.mz('ok_metodo_primero') ->> 'f1_lote')::boolean),
+  ('H1 mixto: el resumen es el mismo en los dos ordenes (3 aplicadas; ia 2 filas y 2250 unidades; metodo 1 fila y 1000)',
+    pg_temp.mz('ok_ia_primero') -> 'res' -> 'resumen' = pg_temp.mz('ok_metodo_primero') -> 'res' -> 'resumen'
+    and pg_temp.mz('ok_ia_primero') -> 'res' -> 'resumen' -> 'por_fuente' = '{"ia": {"filas": 2, "unidades": 2250}, "metodo": {"filas": 1, "unidades": 1000}}'::jsonb),
+  ('H1 mixto: los codigos de todas las filas son iguales en los dos ordenes de grupos',
+    pg_temp.codigos(pg_temp.mz('ok_ia_primero')) = pg_temp.codigos(pg_temp.mz('ok_metodo_primero'))),
+  ('H1 cambio REAL de un registro solo de la lectura del ia (F4 2027): el ia sale entero cambio_concurrente, el metodo F3 se aplica; igual en los dos ordenes',
+    pg_temp.codigos(pg_temp.mz('cambio_f4_ia_primero')) = pg_temp.codigos(pg_temp.mz('cambio_f4_metodo_primero'))
+    and pg_temp.codigos(pg_temp.mz('cambio_f4_ia_primero')) =
+        '[["H31-F1", "2027", "cambio_concurrente", "ia"], ["H31-F2", "2027", "cambio_concurrente", "ia"], ["H31-F3", "2026", "aplicada", "metodo"]]'::jsonb
+    and pg_temp.mz('cambio_f4_ia_primero') ->> 'f1_27' is null and pg_temp.mz('cambio_f4_metodo_primero') ->> 'f1_27' is null
+    and pg_temp.mz('cambio_f4_ia_primero') ->> 'f3_26' = '1000' and pg_temp.mz('cambio_f4_metodo_primero') ->> 'f3_26' = '1000'),
+  ('H1 cambio REAL de F3 2026 (objetivo del metodo y presente en la lectura del ia): ni el ia ni F3 se escriben; igual en los dos ordenes',
+    pg_temp.codigos(pg_temp.mz('cambio_f3_ia_primero')) = pg_temp.codigos(pg_temp.mz('cambio_f3_metodo_primero'))
+    and pg_temp.codigos(pg_temp.mz('cambio_f3_ia_primero')) =
+        '[["H31-F1", "2027", "cambio_concurrente", "ia"], ["H31-F2", "2027", "cambio_concurrente", "ia"], ["H31-F3", "2026", "cambio_concurrente", "metodo"]]'::jsonb
+    and pg_temp.mz('cambio_f3_ia_primero') ->> 'f1_27' is null and pg_temp.mz('cambio_f3_metodo_primero') ->> 'f1_27' is null
+    and pg_temp.mz('cambio_f3_ia_primero') ->> 'f3_26' is null and pg_temp.mz('cambio_f3_metodo_primero') ->> 'f3_26' is null),
+  ('H1 atomicidad por tipo: F4 ya decidida en el grupo ia -> F4 ya_decidida y F1, F2 grupo_rechazado (el ia no escribe nada); el metodo F3 si; igual en los dos ordenes',
+    pg_temp.codigos(pg_temp.mz('ya_ia_primero')) = pg_temp.codigos(pg_temp.mz('ya_metodo_primero'))
+    and pg_temp.codigos(pg_temp.mz('ya_ia_primero')) =
+        '[["H31-F1", "2027", "grupo_rechazado", "ia"], ["H31-F2", "2027", "grupo_rechazado", "ia"], ["H31-F3", "2026", "aplicada", "metodo"], ["H31-F4", "2027", "ya_decidida", "ia"]]'::jsonb
+    and pg_temp.mz('ya_ia_primero') ->> 'f1_27' is null and pg_temp.mz('ya_metodo_primero') ->> 'f1_27' is null
+    and pg_temp.mz('ya_ia_primero') ->> 'f3_26' = '1000'),
+  ('H1: las ejecuciones de prueba se deshicieron (ningun lote 3301-3308 quedo escrito)',
+    (select count(*) from public.proyeccion_lotes where id in (select pg_temp.id(n) from generate_series(3301, 3308) n)) = 0
+    and pg_temp.v('H31-F1', 2027, 'decision_lote_id') is distinct from pg_temp.id(3301)::text
+    and pg_temp.v('H31-F1', 2027, 'decision_lote_id') is distinct from pg_temp.id(3302)::text);
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- 10e. I2: una linea rechazada no guarda un fila_id que no sea de esta proyeccion (queda NULL; la de esta proyeccion lo conserva)
+-- ---------------------------------------------------------------------------------------------------------------------
+create or replace function pg_temp.rechazo_ajeno() returns jsonb language plpgsql as $f$
+declare
+  v_l uuid := pg_temp.id(3310);
+  v_out jsonb;
+begin
+  begin
+    v_out := pg_temp.aplica(pg_temp.payload(pg_temp.lote(v_l, 'aprobar'), jsonb_build_array(
+      pg_temp.grupo('metodo', 'GM-DOS', jsonb_build_array(
+        pg_temp.fila('H31-B1', 2026, 'metodo', null, '[]'::jsonb, '{"rechazo": "sin_valor"}'::jsonb),
+        jsonb_build_object('fila_id', gen_random_uuid(), 'fila_clave', 'H31-INEXISTENTE', 'anio', 2026, 'fuente', 'metodo', 'rechazo', 'sin_valor', 'registros', '[]'::jsonb),
+        pg_temp.fila('H31-F7', 2026, 'metodo', null, '[]'::jsonb, '{"rechazo": "sin_valor"}'::jsonb))))));
+    v_out := jsonb_build_object('res', v_out,
+      'b1', (select fila_id is null from public.proyeccion_lote_filas where lote_id = v_l and fila_clave = 'H31-B1'),
+      'inex', (select fila_id is null from public.proyeccion_lote_filas where lote_id = v_l and fila_clave = 'H31-INEXISTENTE'),
+      'f7', (select fila_id = (select id from public.proyeccion_filas where clave = 'H31-F7') from public.proyeccion_lote_filas where lote_id = v_l and fila_clave = 'H31-F7'));
+    raise exception 'deshacer' using errcode = 'XX999';
+  exception when sqlstate 'XX999' then
+    null;
+  end;
+  set constraints all deferred;
+  return v_out;
+end
+$f$;
+insert into res values ('s10e', pg_temp.rechazo_ajeno());
+
+insert into r (caso, ok) values
+  ('I2: rechazo con un fila_id de OTRA proyeccion (B) se guarda con fila_id NULL; un id inexistente tambien; el de esta proyeccion lo conserva',
+    (select (v -> 'b1')::boolean and (v -> 'inex')::boolean and (v -> 'f7')::boolean and v -> 'res' ->> 'error' is null
+        and (v -> 'res' -> 'resumen' -> 'rechazadas' ->> 'sin_valor')::integer = 3 from res where k = 's10e')),
+  ('I2: la respuesta de la funcion devuelve fila_id null para esas lineas rechazadas ajenas',
+    (select count(*) from res, jsonb_array_elements(v -> 'res' -> 'filas') e
+      where k = 's10e' and e ->> 'fila_clave' in ('H31-B1', 'H31-INEXISTENTE') and e -> 'fila_id' = 'null'::jsonb) = 2);
+
+-- ---------------------------------------------------------------------------------------------------------------------
 -- 11. Auditoria (R19): el resumen de CADA lote creado coincide con sus proyeccion_lote_filas (tambien con rechazos)
 -- ---------------------------------------------------------------------------------------------------------------------
 insert into r (caso, ok) values
@@ -1024,6 +1178,7 @@ declare
   v_trunc_lotes boolean := false;
   v_upd_filas boolean := false;
   v_del_filas boolean := false;
+  v_ins_filas boolean := false;
   v_l uuid := pg_temp.id(3201);
 begin
   update public.proyeccion_fila_anios a set activo = true
@@ -1033,24 +1188,27 @@ begin
   set local role service_role;
   v_res := public.aplicar_lote_proyeccion(v_p);
   set constraints all immediate;
-  begin update public.proyeccion_lotes set nota = 'cambio' where id = v_l; exception when others then v_upd := sqlerrm like '%inmutable%'; end;
-  begin delete from public.proyeccion_lotes where id = v_l; exception when others then v_del := sqlerrm like '%inmutable%'; end;
-  begin update public.proyeccion_lote_filas set valor = 1 where lote_id = v_l; exception when others then v_upd_filas := sqlerrm like '%inmutable%'; end;
-  begin delete from public.proyeccion_lote_filas where lote_id = v_l; exception when others then v_del_filas := sqlerrm like '%inmutable%'; end;
-  begin truncate table public.proyeccion_lote_filas; exception when others then v_trunc_filas := sqlerrm like '%inmutable%'; end;
-  begin truncate table public.proyeccion_lotes, public.proyeccion_lote_filas, public.proyeccion_fila_anios; exception when others then v_trunc_lotes := sqlerrm like '%inmutable%'; end;
+  begin update public.proyeccion_lotes set nota = 'cambio' where id = v_l; exception when insufficient_privilege then v_upd := true; when others then null; end;
+  begin delete from public.proyeccion_lotes where id = v_l; exception when insufficient_privilege then v_del := true; when others then null; end;
+  begin update public.proyeccion_lote_filas set valor = 1 where lote_id = v_l; exception when insufficient_privilege then v_upd_filas := true; when others then null; end;
+  begin delete from public.proyeccion_lote_filas where lote_id = v_l; exception when insufficient_privilege then v_del_filas := true; when others then null; end;
+  begin truncate table public.proyeccion_lote_filas; exception when insufficient_privilege then v_trunc_filas := true; when others then null; end;
+  begin truncate table public.proyeccion_lotes; exception when insufficient_privilege then v_trunc_lotes := true; when others then null; end;
+  begin insert into public.proyeccion_lote_filas (lote_id, fila_clave, gm_clave, anio, fuente, resultado)
+        values (v_l, 'H31-ZZ', 'GM-UNO', 2026, 'metodo', 'aplicada'); v_ins_filas := true; raise exception 'deshacer'; exception when others then null; end;
   reset role;
   set constraints all deferred;
   insert into r (caso, ok) values
     ('service_role: aplicar_lote_proyeccion funciona con el rol de la API (permisos de funcion y de tablas) y aplica F7 2026',
       v_res ->> 'lote_id' = pg_temp.id(3201)::text and not (v_res ->> 'repetido')::boolean
       and pg_temp.v('H31-F7', 2026, 'decision_lote_id') = pg_temp.id(3201)::text),
-    ('service_role: update sobre proyeccion_lotes lo rechaza el trigger (no el permiso)', v_upd),
-    ('service_role: delete sobre proyeccion_lotes lo rechaza el trigger', v_del),
-    ('service_role: update sobre proyeccion_lote_filas lo rechaza el trigger', v_upd_filas),
-    ('service_role: delete sobre proyeccion_lote_filas lo rechaza el trigger', v_del_filas),
-    ('service_role: truncate sobre proyeccion_lote_filas lo rechaza el trigger', v_trunc_filas),
-    ('service_role: truncate sobre proyeccion_lotes (junto con sus tablas referentes) lo rechaza el trigger', v_trunc_lotes),
+    ('service_role: update sobre proyeccion_lotes lo rechaza el PERMISO (42501, ya ni llega al trigger)', v_upd),
+    ('service_role: delete sobre proyeccion_lotes lo rechaza el permiso', v_del),
+    ('service_role: update sobre proyeccion_lote_filas lo rechaza el permiso', v_upd_filas),
+    ('service_role: delete sobre proyeccion_lote_filas lo rechaza el permiso', v_del_filas),
+    ('service_role: truncate sobre proyeccion_lote_filas lo rechaza el permiso', v_trunc_filas),
+    ('service_role: truncate sobre proyeccion_lotes lo rechaza el permiso', v_trunc_lotes),
+    ('service_role: insert directo sobre proyeccion_lote_filas SI esta permitido (el privilegio insert se conserva)', v_ins_filas),
     ('service_role: tras los intentos el lote y su linea siguen intactos',
       pg_temp.nlote(pg_temp.id(3201)) = 1 and pg_temp.nfilas(pg_temp.id(3201)) = 1
       and (select nota from public.proyeccion_lotes where id = pg_temp.id(3201)) = 'humo');
@@ -1083,16 +1241,21 @@ insert into r (caso, ok) values
     pg_temp.acepta(format('update public.proyeccion_lotes set perfil_id = null where id = %L', pg_temp.id(3102))));
 
 -- La excepcion de verdad: borrar el perfil (FK set null a lotes), la proyeccion B (set null en lotes; set null de fila_id en
--- lineas) y una fila (set null). El historial sobrevive sin el vinculo.
+-- lineas) y una fila (set null). El historial sobrevive sin el vinculo. Los deletes los emite `service_role` (con delete sobre
+-- los padres concedido solo dentro de esta transaccion): service_role NO tiene update sobre las tablas de lotes, y aun asi
+-- las FK `on delete set null` funcionan porque se ejecutan con los privilegios del dueño de la tabla.
 do $$
 declare
   v_perfil_antes integer;
   v_lineas_b integer;
 begin
   select count(*) into v_perfil_antes from public.proyeccion_lotes where perfil_id = (select perfil_a from ids);
+  grant select, delete on public.perfiles, public.proyecciones to service_role;
+  set local role service_role;
   delete from public.perfiles where id = (select perfil_a from ids);
   select count(*) into v_lineas_b from public.proyeccion_lote_filas where lote_id = pg_temp.id(3176) and fila_id is not null;
   delete from public.proyecciones where nombre = 'HUMO 31 B';
+  reset role;
   insert into r (caso, ok) values
     ('borrar el perfil: los lotes que lo referian quedan con perfil_id NULL (set null) y siguen existiendo',
       v_perfil_antes > 0 and (select count(*) from public.proyeccion_lotes where perfil_id = (select perfil_a from ids)) = 0
@@ -1102,6 +1265,7 @@ begin
       and (select proyeccion_id is null from public.proyeccion_lotes where id = pg_temp.id(3176))
       and (select count(*) from public.proyeccion_lote_filas where lote_id = pg_temp.id(3176) and fila_id is null and fila_clave = 'H31-B1') = 1);
 exception when others then
+  reset role;
   insert into r (caso, ok) values ('borrar perfil y proyeccion: la FK set null debe pasar el trigger (fallo: ' || sqlerrm || ')', false);
 end
 $$;

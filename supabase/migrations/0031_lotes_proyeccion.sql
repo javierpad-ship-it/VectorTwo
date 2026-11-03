@@ -34,9 +34,11 @@
 -- `compra_eventos` y las `ia_*` inmutables): nunca cambian.
 --
 -- Seguridad: RLS activo y SIN políticas (solo entra el backend con `service_role`); `revoke` a public, anon y authenticated y
--- `grant` a service_role. Funciones `security invoker`, `search_path` vacío, solo `service_role`. El trigger de inmutabilidad
--- vale para TODOS los roles, `service_role` incluido: la API corre con él, así que un `revoke` no bastaría. El dueño de la
--- base puede desactivar triggers: queda fuera del alcance de la aplicación.
+-- `grant select, insert` a service_role (SIN update, delete, truncate, trigger ni references: defensa en profundidad, las
+-- tablas son de solo inserción). Funciones `security invoker`, `search_path` vacío, solo `service_role`. El trigger de
+-- inmutabilidad vale para TODOS los roles, también para el dueño (postgres), que conserva sus privilegios: las FK
+-- `on delete set null` se ejecutan con los privilegios del dueño de la tabla, no con los de service_role. El dueño de la base
+-- puede desactivar triggers: queda fuera del alcance de la aplicación.
 --
 -- Los cuerpos de las funciones van sin comentarios `--` (el SQL Editor de Supabase los parsea mal dentro de `$$`): lo que hay
 -- que saber de cada una está aquí, encima.
@@ -326,9 +328,16 @@ comment on function public.respuesta_lote_proyeccion(uuid, boolean) is
 --      cálculo vivo (`calculando_desde` de menos de 15 minutos) -> LP002; `calculado_at` distinto del esperado -> LP003. En
 --      `revertir`, el lote revertido debe existir, ser `aprobar` o `reaprobar` y de la misma proyección -> si no, LP005.
 --      `revertir` NO se bloquea por desactualizada: esa regla es de TypeScript y no se repite aquí.
---   4. Por GRUPO, en el orden recibido: `select ... for update` de todos los registros que se leen o se escriben, ordenados por
---      (fila_id, anio) (el orden que debe usar `guardarRegistros` para no interbloquearse), y solo de esta proyección (un id
---      de otra proyección cuenta como ausente: `cambio_concurrente`, nunca se escribe). Después se comprueba:
+--   4. CANDADOS y LECTURA, en DOS pasadas sobre el lote entero (el orden de los grupos NO cambia el resultado):
+--      PASADA 1 (nada se escribe): `select ... for update` UNA sola vez de todos los registros que se leen o se escriben en
+--      TODOS los grupos, ordenados por (fila_id, anio) (el orden que debe usar `guardarRegistros` para no interbloquearse), y
+--      solo de esta proyección (un id de otra proyección cuenta como ausente: `cambio_concurrente`, nunca se escribe). Con todo
+--      bloqueado, se comprueba cada grupo contra el estado del INICIO del lote y se guarda su veredicto (código del grupo y
+--      código de cada fila). Así las escrituras propias del lote nunca invalidan las lecturas de otro grupo (antes, un grupo
+--      `metodo` escrito antes que un `ia` del mismo GM cambiaba el `updated_at` de un registro de las `registros_lectura` del
+--      `ia`, y éste salía entero `cambio_concurrente` según el orden de los UUID). PASADA 2: escribe según los veredictos.
+--      Un mismo registro en dos filas del lote -> LP007 (antes la segunda fila salía `cambio_concurrente` por la escritura de
+--      la primera; ahora se rechaza el payload). Las comprobaciones por grupo:
 --        - `updated_at` de cada registro de las FILAS igual al esperado -> si no, `cambio_concurrente` en esa fila;
 --        - `registros_lectura` (todo el grupo): si alguno cambió o falta, las filas sin código propio salen
 --          `cambio_concurrente` (D7: la cifra de la IA depende de todo el GM);
@@ -339,18 +348,19 @@ comment on function public.respuesta_lote_proyeccion(uuid, boolean) is
 --        - grupo `ia`: `propuesta_gm_id` es la vigente de (proyección, GM) con el orden de `leerPropuestaVigenteDeGM`
 --          (`created_at desc, id asc`) -> si no, `ia_no_vigente`; y la `propuesta_fila_id` de cada fila es de esa propuesta
 --          -> si no, `ia_fila_ajena`.
---      ATOMICIDAD: un grupo `ia` se escribe ENTERO o NO SE ESCRIBE (D7): si una fila falla, la que falló lleva su código y las
+--      ATOMICIDAD (en la pasada 2, con los veredictos de la 1): un grupo `ia` se escribe ENTERO o NO SE ESCRIBE (D7): si una fila falla, la que falló lleva su código y las
 --      demás `grupo_rechazado` (o el código del grupo: `cambio_concurrente` o `ia_no_vigente`). Los grupos `metodo` y
 --      `revertir` son atómicos POR FILA (D9, «una fila entera o nada»: el 2026 y el 2027 de una fila se escriben juntos o
 --      ninguno): una fila que falla no arrastra a las demás, salvo que falle `registros_lectura`, que es del grupo. Las filas
 --      que TypeScript ya rechazó viajan con `rechazo` y sin registros; en un grupo `ia` también tumban al resto del grupo.
---   5. Escritura: el `update` de cada registro de una fila aplicable usa una LISTA FIJA de columnas (las de
+--   5. Escritura (pasada 2): el `update` de cada registro de una fila aplicable usa una LISTA FIJA de columnas (las de
 --      `payloadAnioDecision` sin `activo`, `id`, `fila_id` ni `anio`, más `decision_lote_id`). Una clave ausente de `set` deja la
 --      columna como está; una clave con `null` la pone en `null`. Una clave fuera de la lista (incluidas `activo`, `id`,
---      `fila_id` y `anio`) -> LP007 y se deshace todo; se comprueba en la pasada de lectura, para TODAS las filas con registros
+--      `fila_id` y `anio`) -> LP007 y se deshace todo; se comprueba en la pasada 1, para TODAS las filas con registros
 --      (también las que luego se rechazan), antes de escribir nada. `decision_lote_id` solo puede ser null o el id del lote (null siempre en
 --      `revertir`). El `where` exige `activo = true`: un lote nunca reactiva un registro.
---   6. Inserta las `proyeccion_lote_filas` (todas, aplicadas y rechazadas), calcula el `resumen` a partir de ellas y inserta la
+--   6. Inserta las `proyeccion_lote_filas` (todas, aplicadas y rechazadas; el `fila_id` se guarda solo si es de ESTA proyección,
+--      si no queda NULL: una fila rechazada por TypeScript puede traer un id ajeno o inexistente), calcula el `resumen` a partir de ellas y inserta la
 --      cabecera AL FINAL (las FK de `lote_filas.lote_id` y de `decision_lote_id` son diferibles: se comprueban al commit).
 --      Devuelve `{ lote_id, repetido: false, filas, resumen }` (ver `respuesta_lote_proyeccion`).
 --
@@ -389,6 +399,9 @@ declare
   v_gprop uuid;
   v_vig uuid;
   v_ids uuid[];
+  v_gi integer;
+  v_est jsonb := '{}'::jsonb;
+  v_vistos uuid[] := '{}'::uuid[];
   v_lect_mal integer;
   v_gcod text;
   v_cod text[];
@@ -468,8 +481,28 @@ begin
   end if;
 
   begin
-    for v_g in
-      select e.value
+    select coalesce(array_agg(distinct q.id), '{}'::uuid[]) into v_ids
+      from (
+        select (l ->> 'id')::uuid as id
+          from jsonb_array_elements(p -> 'grupos') as g
+          cross join lateral jsonb_array_elements(coalesce(g -> 'registros_lectura', '[]'::jsonb)) as l
+        union all
+        select (r ->> 'id')::uuid
+          from jsonb_array_elements(p -> 'grupos') as g
+          cross join lateral jsonb_array_elements(coalesce(g -> 'filas', '[]'::jsonb)) as f
+          cross join lateral jsonb_array_elements(coalesce(f -> 'registros', '[]'::jsonb)) as r
+      ) q;
+
+    perform 1
+       from public.proyeccion_fila_anios a
+       join public.proyeccion_filas pf on pf.id = a.fila_id
+      where a.id = any (v_ids)
+        and pf.proyeccion_id = v_proy_id
+      order by a.fila_id, a.anio
+        for update of a;
+
+    for v_g, v_gi in
+      select e.value, e.ord::integer
         from jsonb_array_elements(p -> 'grupos') with ordinality as e(value, ord)
        order by e.ord
     loop
@@ -478,24 +511,6 @@ begin
         raise exception 'payload_invalido: tipo de grupo incoherente con el tipo de lote' using errcode = 'LP007';
       end if;
       v_gprop := nullif(v_g ->> 'propuesta_gm_id', '')::uuid;
-
-      select coalesce(array_agg(distinct q.id), '{}'::uuid[]) into v_ids
-        from (
-          select (l ->> 'id')::uuid as id
-            from jsonb_array_elements(coalesce(v_g -> 'registros_lectura', '[]'::jsonb)) as l
-          union all
-          select (r ->> 'id')::uuid
-            from jsonb_array_elements(coalesce(v_g -> 'filas', '[]'::jsonb)) as f
-            cross join lateral jsonb_array_elements(coalesce(f -> 'registros', '[]'::jsonb)) as r
-        ) q;
-
-      perform 1
-         from public.proyeccion_fila_anios a
-         join public.proyeccion_filas pf on pf.id = a.fila_id
-        where a.id = any (v_ids)
-          and pf.proyeccion_id = v_proy_id
-        order by a.fila_id, a.anio
-          for update of a;
 
       select count(*) into v_lect_mal
         from jsonb_to_recordset(coalesce(v_g -> 'registros_lectura', '[]'::jsonb)) as l(id uuid, updated_at_esperado timestamptz)
@@ -544,6 +559,10 @@ begin
               from jsonb_array_elements(coalesce(v_f -> 'registros', '[]'::jsonb)) with ordinality as e(value, ord)
              order by e.ord
           loop
+            if (v_r ->> 'id')::uuid = any (v_vistos) then
+              raise exception 'payload_invalido: un registro aparece en mas de una fila del lote' using errcode = 'LP007';
+            end if;
+            v_vistos := v_vistos || (v_r ->> 'id')::uuid;
             v_set := coalesce(v_r -> 'set', '{}'::jsonb);
             if jsonb_typeof(v_set) <> 'object' then
               raise exception 'payload_invalido: set no es un objeto' using errcode = 'LP007';
@@ -624,6 +643,20 @@ begin
         end if;
       end loop;
 
+      v_est := v_est || jsonb_build_object(
+        v_gi::text,
+        jsonb_build_object('gcod', v_gcod, 'falla', v_falla, 'cod', to_jsonb(v_cod))
+      );
+    end loop;
+
+    for v_g, v_gi in
+      select e.value, e.ord::integer
+        from jsonb_array_elements(p -> 'grupos') with ordinality as e(value, ord)
+       order by e.ord
+    loop
+      v_gtipo := v_g ->> 'tipo';
+      v_gcod := v_est -> (v_gi::text) ->> 'gcod';
+      v_falla := (v_est -> (v_gi::text) ->> 'falla')::boolean;
       v_i := 0;
       for v_f in
         select e.value
@@ -631,7 +664,7 @@ begin
          order by e.ord
       loop
         v_i := v_i + 1;
-        v_cf := v_cod[v_i];
+        v_cf := v_est -> (v_gi::text) -> 'cod' ->> (v_i - 1);
         if v_cf is null then
           if v_gcod is not null then
             v_cf := v_gcod;
@@ -685,7 +718,9 @@ begin
         end if;
 
         v_fid := nullif(v_f ->> 'fila_id', '')::uuid;
-        if v_fid is not null and not exists (select 1 from public.proyeccion_filas where id = v_fid) then
+        if v_fid is not null and not exists (
+          select 1 from public.proyeccion_filas where id = v_fid and proyeccion_id = v_proy_id
+        ) then
           v_fid := null;
         end if;
         v_pfid := nullif(v_f ->> 'propuesta_fila_id', '')::uuid;
@@ -769,7 +804,7 @@ revoke execute on function public.aplicar_lote_proyeccion(jsonb) from public, an
 grant execute on function public.aplicar_lote_proyeccion(jsonb) to service_role;
 
 comment on function public.aplicar_lote_proyeccion(jsonb) is
-  'M7 07g 0.15.0: escribe un lote de aprobacion en bloque (aprobar, reaprobar o revertir) en una transaccion. Candado de la proyeccion (for no key update) antes de la idempotencia por lote.id (repetido, o LP004 lote_ajeno; tambien traduce la unique_violation). Comprueba estado (LP001), calculo vivo (LP002), calculado_at (LP003) y, en revertir, el lote revertido (LP005). Por grupo bloquea los registros en orden (fila_id, anio) y comprueba updated_at (timestamptz exacto), registros_lectura, activo, el objetivo segun el tipo y, en ia, la propuesta vigente. Grupo ia atomico entero; metodo y revertir atomicos por fila. Update con lista fija de columnas (sin activo, id, fila_id, anio; con decision_lote_id). Inserta lote_filas, calcula el resumen en SQL e inserta la cabecera al final (FK diferibles). Solo service_role.';
+  'M7 07g 0.15.0: escribe un lote de aprobacion en bloque (aprobar, reaprobar o revertir) en una transaccion. Candado de la proyeccion (for no key update) antes de la idempotencia por lote.id (repetido, o LP004 lote_ajeno; tambien traduce la unique_violation). Comprueba estado (LP001), calculo vivo (LP002), calculado_at (LP003) y, en revertir, el lote revertido (LP005). Pasada 1: bloquea una vez los registros de todos los grupos en orden (fila_id, anio) y comprueba cada grupo contra el estado del inicio del lote (updated_at timestamptz exacto, registros_lectura, activo, el objetivo segun el tipo y, en ia, la propuesta vigente); un registro en dos filas del lote es LP007. Pasada 2: escribe segun esos veredictos, asi el orden de los grupos no cambia el resultado. Grupo ia atomico entero; metodo y revertir atomicos por fila. fila_id ajeno a la proyeccion se guarda NULL. Update con lista fija de columnas (sin activo, id, fila_id, anio; con decision_lote_id). Inserta lote_filas, calcula el resumen en SQL e inserta la cabecera al final (FK diferibles). Solo service_role.';
 
 -- ---------------------------------------------------------------------------
 -- 7. RLS (sin políticas: solo el backend con service_role) y permisos
@@ -779,7 +814,9 @@ alter table public.proyeccion_lote_filas enable row level security;
 -- `proyeccion_fila_anios` ya tiene RLS (0018); repetirlo es inocuo.
 alter table public.proyeccion_fila_anios enable row level security;
 
-revoke all on public.proyeccion_lotes from public, anon, authenticated;
-grant all on public.proyeccion_lotes to service_role;
-revoke all on public.proyeccion_lote_filas from public, anon, authenticated;
-grant all on public.proyeccion_lote_filas to service_role;
+-- Tablas de solo inserción: service_role solo lee e inserta. Sin update, delete, truncate, trigger ni references (el trigger de
+-- inmutabilidad queda como segunda barrera para el dueño). `revoke all ... from service_role` y luego el grant exacto: repetible.
+revoke all on public.proyeccion_lotes from public, anon, authenticated, service_role;
+grant select, insert on public.proyeccion_lotes to service_role;
+revoke all on public.proyeccion_lote_filas from public, anon, authenticated, service_role;
+grant select, insert on public.proyeccion_lote_filas to service_role;

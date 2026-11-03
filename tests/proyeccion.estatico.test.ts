@@ -97,7 +97,11 @@ describe("M7 regla 44: la lectura de venta y las tablas", () => {
     expect(matriz).not.toContain("completas");
     expect(matriz).not.toContain("historico");
     const ligeras = sinComentarios(c).slice(sinComentarios(c).indexOf("const COLUMNAS_FILA"), sinComentarios(c).indexOf("export type OpcionesFilas"));
-    expect(ligeras.match(/historico/g) ?? []).toHaveLength(0);
+    // 07g: las columnas de `decision_historico` (solo la aprobación en bloque de `Y`) traen del `historico` únicamente `salientes` y `cola_larga`, como alias de jsonb.
+    const aliasHistorico = /const COLUMNAS_HISTORICO_DECISION = "([^"]*)"/.exec(sinComentarios(c))?.[1] ?? "";
+    expect(aliasHistorico.split(",").map((x) => x.trim()).sort()).toEqual(["cola_larga:historico->cola_larga", "salientes:historico->salientes"]);
+    const sinAlias = ligeras.replace(/const COLUMNAS_HISTORICO_DECISION = "[^"]*";/, "").replace(/decision_historico:[^\n]*\n/g, "");
+    expect(sinAlias.match(/historico/g) ?? []).toHaveLength(0);
   });
 });
 
@@ -484,9 +488,9 @@ describe("07g: M7 y la aprobación en bloque", () => {
     const anio = /export const COLUMNAS_ANIO_LIGERA =\s*"([^"]*)"/.exec(c)?.[1] ?? "";
     for (const col of ["updated_at", "decision_lote_id", "decision_ia_fila_id"]) expect(anio.split(",").map((x) => x.trim())).toContain(col);
     expect(anio).not.toContain("historico");
-    const decision = /decision: `\$\{COLUMNAS_FILA_LIGERA\}, ([^`]*)`/.exec(c)?.[1] ?? "";
+    const decision = /const COLUMNAS_FILA_DECISION = `\$\{COLUMNAS_FILA_LIGERA\}, ([^`]*)`/.exec(c)?.[1] ?? "";
     expect(decision.length).toBeGreaterThan(10);
     expect(decision).not.toContain("historico");
-    expect(c).toMatch(/export type ColumnasFilas = [^;]*"decision"/);
+    expect(c).toMatch(/export type ColumnasFilas = [^;]*"decision" \| "decision_historico"/);
   });
 });

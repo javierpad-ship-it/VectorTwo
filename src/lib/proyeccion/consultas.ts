@@ -151,7 +151,7 @@ export async function eliminarProyeccionCondicional(db: Db, id: string, limiteIs
  * escriben (la aprobación en bloque con las filas de `Y+1`, que no recalculan nada desde el histórico): el registro completo con su `updated_at`, `decision_lote_id`
  * y `decision_ia_fila_id`.
  */
-export type ColumnasFilas = "ligeras" | "cerrada" | "previas" | "completas" | "decision";
+export type ColumnasFilas = "ligeras" | "cerrada" | "previas" | "completas" | "decision" | "decision_historico";
 
 /** Sin `historico`: lo que leen `matriz`, `mensual` y el contrato de M8. */
 export const COLUMNAS_FILA_LIGERA =
@@ -162,12 +162,19 @@ export const COLUMNAS_FILA_LIGERA =
  */
 export const COLUMNAS_ANIO_LIGERA =
   "id, fila_id, anio, bloque, subbloque, vendido, propuesto, metodo, decidido, origen, propuesta_al_decidir, crecimiento_pct, base_siguiente, base_normalizada, meses, origen_meses, avisos, activo, decision_ia_fila_id, decision_lote_id, updated_at";
+const COLUMNAS_FILA_DECISION = `${COLUMNAS_FILA_LIGERA}, proyeccion_id, curva, curva_origen, factores_mes, participaciones, composicion, created_at, updated_at`;
+/**
+ * 07g: del `historico` solo lo que lee `aplicarDecision` en un año `Y` (B2, `recalcularBaseSiguiente`: `salientes` y `cola_larga`), como alias de PostgREST sobre el jsonb.
+ * Quien lo lee (la aprobación en bloque) arma con ellos un `historico` parcial; los totales de `Y-1` salen de `leerAniosHistoricoDeGML`.
+ */
+const COLUMNAS_HISTORICO_DECISION = "salientes:historico->salientes, cola_larga:historico->cola_larga";
 const COLUMNAS_FILA: Record<ColumnasFilas, string> = {
   ligeras: COLUMNAS_FILA_LIGERA,
   cerrada: `${COLUMNAS_FILA_LIGERA}, participaciones`,
   previas: "id, clave, tienda_id, gml_id, activo",
   completas: "*",
-  decision: `${COLUMNAS_FILA_LIGERA}, proyeccion_id, curva, curva_origen, factores_mes, participaciones, composicion, created_at, updated_at`,
+  decision: COLUMNAS_FILA_DECISION,
+  decision_historico: `${COLUMNAS_FILA_DECISION}, ${COLUMNAS_HISTORICO_DECISION}`,
 };
 const COLUMNAS_ANIO: Record<ColumnasFilas, string> = {
   ligeras: COLUMNAS_ANIO_LIGERA,
@@ -175,6 +182,7 @@ const COLUMNAS_ANIO: Record<ColumnasFilas, string> = {
   previas: "*",
   completas: "*",
   decision: "*",
+  decision_historico: "*",
 };
 
 export type OpcionesFilas = {
@@ -182,6 +190,10 @@ export type OpcionesFilas = {
   gmlId?: string;
   gmlIds?: readonly string[];
   agrupacionMarcaId?: string;
+  /** Solo estas filas (por `id`). */
+  ids?: readonly string[];
+  /** Solo el registro de ese año en cada fila (filtro del recurso embebido de PostgREST: la fila viaja aunque no lo tenga, con la lista vacía). */
+  soloAnio?: number;
   /** `null` = solo filas base; un id = solo las filas de esa tienda. */
   tiendaId?: string | null;
   /** Solo las filas de tienda (de cualquier tienda). */
@@ -194,13 +206,28 @@ export type OpcionesFilas = {
  * se selecciona `historico` (pesa cientos de KB por línea). El tipo de retorno es el de la fila completa: lo no seleccionado
  * llega `undefined` y quien lo lee elige las columnas que necesita.
  */
-export function leerFilasConAnios(db: Db, proyeccionId: string, o: OpcionesFilas = {}): Promise<Resultado<FilaConAnios[]>> {
+export async function leerFilasConAnios(db: Db, proyeccionId: string, o: OpcionesFilas = {}): Promise<Resultado<FilaConAnios[]>> {
+  // 07g: una lista larga de `ids` o de `gmlIds` iría en la URL de PostgREST: se lee por tandas de `TANDA_IN` (y se junta).
+  for (const clave of ["ids", "gmlIds"] as const) {
+    const lista = o[clave];
+    if (lista !== undefined && lista.length > TANDA_IN) {
+      const juntas: FilaConAnios[] = [];
+      for (const tanda of enTandas([...lista], TANDA_IN)) {
+        const r = await leerFilasConAnios(db, proyeccionId, { ...o, [clave]: tanda });
+        if (r.error) return { data: juntas, error: r.error };
+        juntas.push(...r.data);
+      }
+      return { data: juntas, error: null };
+    }
+  }
   const columnas = o.columnas ?? "completas";
   const seleccion = columnas === "completas" ? "*, proyeccion_fila_anios(*)" : `${COLUMNAS_FILA[columnas]}, proyeccion_fila_anios(${COLUMNAS_ANIO[columnas]})`;
   return leerTodo<FilaConAnios>((d, h) => {
     let c = db.from("proyeccion_filas").select(seleccion).eq("proyeccion_id", proyeccionId);
     if (o.gmlId !== undefined) c = c.eq("gml_id", o.gmlId);
     if (o.gmlIds !== undefined) c = c.in("gml_id", [...o.gmlIds]);
+    if (o.ids !== undefined) c = c.in("id", [...o.ids]);
+    if (o.soloAnio !== undefined) c = c.eq("proyeccion_fila_anios.anio", o.soloAnio);
     if (o.agrupacionMarcaId !== undefined) c = c.eq("agrupacion_marca_id", o.agrupacionMarcaId);
     if (o.tiendaId === null) c = c.is("tienda_id", null);
     else if (o.tiendaId !== undefined) c = c.eq("tienda_id", o.tiendaId);
@@ -208,6 +235,31 @@ export function leerFilasConAnios(db: Db, proyeccionId: string, o: OpcionesFilas
     if (o.soloActivas) c = c.eq("activo", true);
     return c.order("clave").order("id").range(d, h) as unknown as PromiseLike<{ data: FilaConAnios[] | null; error: PostgrestError | null }>;
   });
+}
+
+/**
+ * 07g: `historico->anios` (por año: `anio`, `total`, `meses`…) de las filas base activas de unos GML, sin ninguna otra columna. Lo usa el efecto de un lote de `Y`
+ * (el total vendido de `Y-1` de cada fila del GM); las filas de ese GM que no están en el lote no necesitan el resto del `historico`. Tandas de `TANDA_IN` nodos.
+ */
+export async function leerAniosHistoricoDeGML(db: Db, proyeccionId: string, gmlIds: readonly string[]): Promise<Resultado<Map<string, { anio: number; total: number }[]>>> {
+  const salida = new Map<string, { anio: number; total: number }[]>();
+  for (const tanda of enTandas([...gmlIds], TANDA_IN)) {
+    const r = await leerTodo<{ id: string; anios: { anio: number; total: number }[] | null }>((d, h) =>
+      db
+        .from("proyeccion_filas")
+        .select("id, anios:historico->anios")
+        .eq("proyeccion_id", proyeccionId)
+        .is("tienda_id", null)
+        .eq("activo", true)
+        .in("gml_id", tanda)
+        .order("clave")
+        .order("id")
+        .range(d, h) as unknown as PromiseLike<{ data: { id: string; anios: { anio: number; total: number }[] | null }[] | null; error: PostgrestError | null }>
+    );
+    if (r.error) return { data: salida, error: r.error };
+    for (const f of r.data) if (Array.isArray(f.anios)) salida.set(f.id, f.anios);
+  }
+  return { data: salida, error: null };
 }
 
 /** Lo mínimo de una fila base de la cerrada para decidir la aplicabilidad de M13: su nodo, sus `participaciones` y los años que tiene. */

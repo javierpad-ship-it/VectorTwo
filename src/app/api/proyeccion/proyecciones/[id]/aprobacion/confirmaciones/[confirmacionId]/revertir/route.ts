@@ -7,9 +7,13 @@ import { leerSegmentos } from "@/lib/proyeccion/rutas";
 
 type Params = { params: Promise<{ id: string; confirmacionId: string }> };
 
+/** Revierte una tanda tras otra (cada una lee la proyección y escribe con una función SQL): se pide margen para varias tandas. */
+export const maxDuration = 300;
+
 /**
  * Revierte una confirmación completa (`requirePlanner`, `POST`): un lote de reversión por cada tanda aprobada o reaprobada, con los `lote_ids` que genera el
- * navegador (uno por tanda). Responde un arreglo de resultados, uno por tanda; se detiene en el primer error. Con `simular` responde `200` sin escribir; si no, `201`.
+ * navegador (uno por tanda). Responde un arreglo de resultados, uno por tanda (`lote: null` si esa tanda ya no tenía nada que revertir); se detiene en el primer error, y si ninguna
+ * tanda tiene algo que revertir responde `409 sin_filas_aplicables`. Con `simular` responde `200` sin escribir; si no, `201`.
  * `404` confirmación no encontrada; `400` si faltan identificadores de tanda; `409`: los de revertir un lote.
  */
 export async function POST(request: NextRequest, { params }: Params) {

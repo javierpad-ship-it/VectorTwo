@@ -4,7 +4,7 @@ import { clienteIaFalso, estado, reiniciar as reiniciarIa, sembrar, type Fila } 
  * Base falsa de la aprobación en bloque (ficha 07g). Envuelve la base falsa de la propuesta con IA (que a su vez envuelve la de M7) y le añade la función
  * `aplicar_lote_proyeccion` (migración 0031) como un MODELO en TypeScript de lo que dice su documentación: candado, idempotencia por `lote.id` (`repetido` o
  * `LP004`), estado de la proyección (`LP001`), cálculo vivo (`LP002`), `calculado_at` (`LP003`), lote revertido (`LP005`), y por grupo la comprobación de
- * `updated_at` y de `registros_lectura` (`cambio_concurrente`), de `activo` (`fila_inactiva`), del objetivo según el tipo (`ya_decidida`, `cambiada_despues`), de la propuesta
+ * `updated_at` y de `registros_lectura` (`cambio_concurrente`, TODOS los grupos contra el estado del inicio del lote, antes de escribir el primero), de `activo` (`fila_inactiva`), del objetivo según el tipo (`ya_decidida`, `cambiada_despues`), de la propuesta
  * vigente (`ia_no_vigente`, `ia_fila_ajena`), la atomicidad (grupo `ia` entero; `metodo` y `revertir` por fila) y la lista fija de columnas (`LP007`). Calcula
  * el `resumen` con lo que de verdad escribió e inserta la cabecera AL FINAL. Lo que SQL garantiza de verdad (transacción, bloqueos, FK diferibles, triggers) lo prueba
  * el humo de `datos` (`scripts/humo-0031.sql`); aquí se prueba que TypeScript arma bien el payload y traduce bien la respuesta.
@@ -26,6 +26,9 @@ export const estadoAprobacion = {
   /** Gancho que corre justo antes de escribir (simula a otra persona que cambia algo entre la foto del servidor y la función). */
   antesDeRpc: null as null | (() => void),
   reloj: 0,
+  /** H2: con `true`, cada lectura (`select`) suma a `bytes` el tamaño en JSON de lo que devolvió, por tabla; sirve para comprobar el volumen que lee una petición. */
+  medir: false,
+  bytes: { total: 0, porTabla: {} as Record<string, number> },
 };
 
 export function reiniciar() {
@@ -35,6 +38,8 @@ export function reiniciar() {
   estadoAprobacion.falloRpc = null;
   estadoAprobacion.antesDeRpc = null;
   estadoAprobacion.reloj = 0;
+  estadoAprobacion.medir = false;
+  estadoAprobacion.bytes = { total: 0, porTabla: {} };
 }
 
 const tabla = (t: string): Fila[] => (estado.tablas[t] ??= []);
@@ -131,7 +136,10 @@ function aplicar(p: { lote: LotePayload; grupos: GrupoPayload[] }): { data: unkn
       return fila?.proyeccion_id === proy.id ? a : undefined;
     };
     const lineas: Fila[] = [];
-    for (const g of p.grupos) {
+    // Fase 1 (H1): TODOS los grupos se comprueban contra el estado del INICIO del lote, antes de escribir el primero. Así las escrituras propias del lote
+    // (p. ej. el `Y+1` que un grupo de método reescribe) no invalidan los `registros_lectura` de otro grupo, y el orden de los grupos no cambia el resultado.
+    // Un cambio de terceros sí: sigue dando `cambio_concurrente`, con la misma atomicidad por tipo de grupo (el grupo `ia` entero; `metodo` y `revertir` por fila).
+    const evaluados = p.grupos.map((g) => {
       if (!["ia", "metodo", "revertir"].includes(g.tipo) || (g.tipo === "revertir") !== (lote.tipo === "revertir")) throw new ErrorLote("LP007", "payload_invalido: tipo de grupo incoherente con el tipo de lote");
       const lecturaMal = g.registros_lectura.some((l) => {
         const r = delProy(l.id);
@@ -180,7 +188,11 @@ function aplicar(p: { lote: LotePayload; grupos: GrupoPayload[] }): { data: unkn
         }
         codigos.push(cf);
       }
-      const falla = codigos.some((c) => c !== null);
+      return { g, codigoGrupo, codigos, falla: codigos.some((c) => c !== null) };
+    });
+
+    // Fase 2: se escribe lo que pasó, grupo a grupo (el `updated_at` nuevo ya no se compara con nada: todo se comprobó arriba).
+    for (const { g, codigoGrupo, codigos, falla } of evaluados) {
       g.filas.forEach((f, i) => {
         let cf = codigos[i];
         if (cf === null) {
@@ -248,10 +260,25 @@ function aplicar(p: { lote: LotePayload; grupos: GrupoPayload[] }): { data: unkn
   }
 }
 
+type ConsultaMedible = { then: (ok?: (r: { data: unknown }) => unknown, ko?: (e: unknown) => unknown) => unknown };
+
 export function clienteAprobacionFalso() {
   const base = clienteIaFalso();
   return {
-    from: base.from,
+    from: (t: string) => {
+      const q = base.from(t);
+      if (!estadoAprobacion.medir) return q;
+      const c = q as unknown as ConsultaMedible;
+      const original = c.then.bind(c);
+      c.then = (ok, ko) =>
+        original((r) => {
+          const n = JSON.stringify(r.data ?? null).length;
+          estadoAprobacion.bytes.total += n;
+          estadoAprobacion.bytes.porTabla[t] = (estadoAprobacion.bytes.porTabla[t] ?? 0) + n;
+          return ok ? ok(r) : r;
+        }, ko);
+      return q;
+    },
     rpc: (nombre: string, args: Record<string, unknown>) => (nombre === "aplicar_lote_proyeccion" ? Promise.resolve(aplicar(args.p as never)) : base.rpc(nombre, args)),
   };
 }

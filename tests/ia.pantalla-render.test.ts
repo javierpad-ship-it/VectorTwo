@@ -77,11 +77,21 @@ describe("cabecera de servicio", () => {
     const h = html(createElement(CabeceraServicioIa, { servicio: servicio(), anioSiguiente: Y + 1, esAdmin: true }));
     expect(h).toContain("IA encendida · OpenAI · modelo modelo-a · prompt v1 · meta 2027");
     expect(h).toContain("gasto del mes US$ 3.20 de 60");
-    expect(h).toContain("Para cerrar, cada fila libre se decide a mano (por línea).");
+    // H4: las filas libres se deciden por línea o por lotes en Aprobación; ya no dice que todo se decide «a mano».
+    expect(h).toContain("Para cerrar, las filas libres se deciden por línea (en Por línea) o por lotes en la pestaña Aprobación, siempre con tu confirmación.");
+    expect(h).not.toContain("se decide a mano");
     expect(h).toContain("«Desvío frente a la meta» de la Matriz es la única garantía");
     expect(h).toContain('href="/administracion/ia"');
     const planner = html(createElement(CabeceraServicioIa, { servicio: servicio(), anioSiguiente: Y + 1, esAdmin: false }));
     expect(planner).not.toContain("/administracion/ia");
+  });
+
+  it("con enlace a Aprobación: un solo enlace, sin repetir la frase de la nota", () => {
+    const h = html(createElement(CabeceraServicioIa, { servicio: servicio(), anioSiguiente: Y + 1, esAdmin: false, enlaceAprobacion: "/planificacion/proyeccion?tab=aprobacion" }));
+    expect(h).toContain("Ir a Aprobación");
+    expect(h).toContain('href="/planificacion/proyeccion?tab=aprobacion"');
+    expect(h).not.toContain("también se pueden aprobar por lotes");
+    expect(h.match(/pestaña Aprobación/g)).toHaveLength(1);
   });
 
   it("apagada: dice el motivo con claridad, muestra el proveedor y el modelo y no es la línea de «encendida»", () => {

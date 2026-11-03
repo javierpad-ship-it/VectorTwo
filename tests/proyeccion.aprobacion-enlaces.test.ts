@@ -130,8 +130,9 @@ describe("Propuesta IA: aprobar en bloque", () => {
     const base = { estado: estadoIa(), anioSiguiente: Y + 1, esAdmin: true, bloqueada: false, onGenerar: nada, onVer: nada, onExcel: nada, onCancelarCorrida: nada, onIrAFactores: nada };
     const con = html(createElement(VistaPropuestaIa, { ...base, aprobar: { proyeccionId: "proy-1" } }));
     expect(con).toContain("Aprobar en bloque");
-    expect(con).toContain("en la pestaña <a");
-    expect(con).toContain("Aprobación</a>");
+    // H4: la nota dice que las filas libres se deciden por línea o por lotes en Aprobación, y el enlace es solo «Ir a Aprobación».
+    expect(con).toContain("por lotes en la pestaña Aprobación");
+    expect(con).toContain("Ir a Aprobación</a>");
     const sin = html(createElement(VistaPropuestaIa, base));
     expect(sin).not.toContain("Aprobar en bloque");
     expect(sin).not.toContain("pestana=aprobacion");

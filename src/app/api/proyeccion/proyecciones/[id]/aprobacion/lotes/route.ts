@@ -6,11 +6,16 @@ import { aplicarLote, listarLotes } from "@/lib/aprobacion/servicio";
 
 type Params = { params: Promise<{ id: string }> };
 
+/** Un lote de hasta 300 filas lee la proyección, simula y escribe con una función SQL (presupuesto de 8 s): se pide margen a la plataforma por si la base va lenta. */
+export const maxDuration = 60;
+
 /**
  * Aprueba o reaprueba un lote de filas (`requirePlanner`, `POST`). Con `simular` responde `200` con el resultado exacto SIN escribir y su `huella_simulacion`; si no,
  * `201` (o `200` con `repetido`, si el `lote_id` ya se aplicó con el mismo cuerpo). Los rechazos por fila van en `filas[]`.
  * `409`: `cerrada`, `archivada`, `calculo_en_curso`, `version_metodo`, `proyeccion_desactualizada`, los del Niño, `crecimientos_sin_aprobar`, `anio_no_admitido`,
- * `ia_no_disponible`, `capacidad_apagada`, `corrida_en_curso`, `datos_cambiaron`, `simulacion_distinta`, `revision_requerida`, `lote_ajeno`, `conflicto_reintentar`.
+ * `ia_no_disponible`, `capacidad_apagada`, `corrida_en_curso`, `datos_cambiaron`, `simulacion_distinta`, `revision_requerida`, `lote_ajeno`, `conflicto_reintentar`
+ * (también por `55P03` y `57014` de la base) y `sin_filas_aplicables` (ninguna fila se puede aprobar: no se llama a la función ni se guarda un lote vacío). `crecimientos_sin_aprobar` no se
+ * evalúa en las tandas siguientes de una confirmación que ya aplicó filas (H3).
  */
 export async function POST(request: NextRequest, { params }: Params) {
   const { perfil, response } = await requirePlanner();

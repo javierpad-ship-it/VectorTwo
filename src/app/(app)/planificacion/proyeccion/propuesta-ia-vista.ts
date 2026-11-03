@@ -137,7 +137,7 @@ export function textoTopes(s: ServicioIaApi): string[] {
 }
 
 export const NOTA_CERRAR_A_MANO =
-  "Para cerrar, cada fila libre se decide a mano (por línea). La IA propone; la columna «Desvío frente a la meta» de la Matriz es la única garantía de que lo decidido suma la meta.";
+  "Para cerrar, las filas libres se deciden por línea (en Por línea) o por lotes en la pestaña Aprobación, siempre con tu confirmación. La IA propone; la columna «Desvío frente a la meta» de la Matriz es la única garantía de que lo decidido suma la meta.";
 
 // ─── Prerrequisitos ───
 

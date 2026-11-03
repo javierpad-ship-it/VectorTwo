@@ -20,11 +20,12 @@ import {
   type ValoresIaAprobacion,
 } from "@/lib/ia/servicio";
 import { claveGM } from "@/lib/proyeccion/crecimientos";
-import { leerFilasConAnios, leerTiendasProyeccion, type ProyeccionDb } from "@/lib/proyeccion/consultas";
+import { leerAniosHistoricoDeGML, leerFilasConAnios, leerTiendasProyeccion, type ProyeccionDb } from "@/lib/proyeccion/consultas";
 import { cargarContextoCalculo } from "@/lib/proyeccion/contexto";
 import { registroDe, type ContextoModelo } from "@/lib/proyeccion/decision";
 import { metaDeGM, type FilaParaMeta, type FuenteMeta } from "@/lib/proyeccion/meta-gm";
 import { aFilaModelo, comoAvisos, payloadAnioDecision, type AnioDb, type FilaConAnios, type TiendaPyDb } from "@/lib/proyeccion/persistencia";
+import type { HistoricoFila } from "@/lib/proyeccion/tipos";
 import { filaBloqueaCierre } from "@/lib/proyeccion/reglas";
 import { bloqueosNinoDe, crecimientosDeHoy, desactualizadaDe, ninoDeFilas } from "@/lib/proyeccion/servicio";
 import { refrescarResumen } from "@/lib/proyeccion/servicio-edicion";
@@ -128,6 +129,8 @@ const estadoDe = (p: ProyeccionDb) => (p.estado === "cerrada" ? "cerrada" : p.es
 const regDe = (f: FilaConAnios, anio: number): AnioDb | undefined => f.proyeccion_fila_anios.find((a) => a.anio === anio);
 
 export const MENSAJE_LOTE_NO_ENCONTRADO = "Lote no encontrado.";
+const MENSAJE_SIN_FILAS_APROBAR = "Ninguna de las filas elegidas se puede aprobar ahora: vuelve a cargar la pantalla para ver cómo están.";
+const MENSAJE_SIN_FILAS_REVERTIR = "Ninguna de las filas elegidas se puede revertir ahora: alguien las cambió después del lote.";
 const MENSAJE_SIN_CALCULAR = "La proyección todavía no se calculó: calcúlala antes de aprobar en bloque.";
 
 /** `409 { error, codigo, ...extra }` con el detalle que la pantalla necesita para explicarse (sin caché). */
@@ -135,7 +138,7 @@ function fallaConCodigo(mensaje: string, status: number, codigo: string, extra: 
   return falla(NextResponse.json({ error: mensaje, codigo, ...extra }, { status, headers: { "Cache-Control": "no-store" } }));
 }
 
-/** SQLSTATE de `aplicar_lote_proyeccion` (LP001 a LP008, 40P01) → la respuesta HTTP que ve la pantalla. El resto, a `traducirErrorDb`. */
+/** SQLSTATE de `aplicar_lote_proyeccion` (LP001 a LP008, 40P01, 55P03, 57014) → la respuesta HTTP que ve la pantalla. El resto, a `traducirErrorDb`. */
 function traducirErrorLote(e: PostgrestError): Salida<never> {
   const mensaje = e.message ?? "";
   switch (e.code) {
@@ -153,8 +156,12 @@ function traducirErrorLote(e: PostgrestError): Salida<never> {
       return fallaConCodigo("Ese lote no se puede revertir: solo se revierte un lote aprobado o reaprobado de esta proyección.", 409, "no_revertible");
     case "LP006":
       return fallaMensaje("Proyección no encontrada.", 404);
+    // `40P01` interbloqueo, `55P03` no se obtuvo el candado a tiempo (`lock_timeout`), `57014` la consulta se cortó por tiempo (`statement_timeout`): en los tres casos la función no
+    // escribió nada y el navegador puede reintentar con el mismo `lote_id`.
     case "40P01":
-      return fallaConCodigo("Otra persona estaba guardando lo mismo: vuelve a intentarlo.", 409, "conflicto_reintentar");
+    case "55P03":
+    case "57014":
+      return fallaConCodigo("Otra persona estaba guardando lo mismo o la base tardó demasiado: vuelve a intentarlo.", 409, "conflicto_reintentar");
     default:
       return fallaDb(e, "aprobación en bloque: aplicar el lote");
   }
@@ -168,7 +175,7 @@ type Escenario = {
   p: ProyeccionDb;
   Y: number;
   umbral: number;
-  /** Filas base (activas e inactivas) con todos sus registros, SIN `historico` (columnas «previas» de M7). */
+  /** Filas base (activas e inactivas) con sus registros, SIN `historico` y sin las columnas pesadas de los registros (columnas «ligeras» de M7, con `updated_at` y las trazas del lote). */
   base: FilaConAnios[];
   porId: Map<string, FilaConAnios>;
   tiendas: TiendaPyDb[];
@@ -183,7 +190,7 @@ function completarClave(f: FilaConAnios): FilaConAnios {
 async function cargarEscenario(d: Db, id: string): Promise<Salida<Escenario>> {
   const pi = await cargarProyeccionIa(d, id);
   if (pi.respuesta) return falla(pi.respuesta);
-  const filas = await leerFilasConAnios(d, id, { columnas: "previas", tiendaId: null });
+  const filas = await leerFilasConAnios(d, id, { columnas: "ligeras", tiendaId: null });
   if (filas.error) return fallaDb(filas.error, "aprobación: leer las filas de la proyección");
   const tiendas = await leerTiendasProyeccion(d, id);
   if (tiendas.error) return fallaDb(tiendas.error, "aprobación: leer las tiendas de la proyección");
@@ -220,10 +227,22 @@ async function leerVigentesY1(d: Db, Y: number): Promise<Salida<VigenteCrecimien
 }
 
 /**
+ * H3 (decisión de diseño, D15). Un lote de `Y` puede dejar crecimientos de `Y+1` en `reaprobar` (B2 mueve `B'` con el Niño), y eso no debe frenar las tandas siguientes de la
+ * MISMA confirmación. Por eso `crecimientos_sin_aprobar` no se evalúa cuando `confirmacion_id` ya tiene un lote aprobado o reaprobado con filas aplicadas en esta proyección
+ * y con el mismo `calculado_at` (un recálculo en medio vuelve a exigirlo todo). Sí se evalúa en la primera tanda y en toda confirmación nueva. Los demás bloqueos (D14) no cambian.
+ */
+async function confirmacionEmpezada(d: Db, p: ProyeccionDb, confirmacionId: string): Promise<Salida<boolean>> {
+  const lotes = await leerLotesDeConfirmacionDb(d, p.id, confirmacionId);
+  if (lotes.error) return fallaDb(lotes.error, "aprobación: leer los lotes de la confirmación");
+  return listo(lotes.data.some((l) => (l.tipo === "aprobar" || l.tipo === "reaprobar") && aResumen(l).aplicadas > 0 && p.calculado_at !== null && l.calculado_at_proyeccion === p.calculado_at));
+}
+
+/**
  * D14. Se arma como el cierre: proyección en trabajo y sin cálculo, método vigente, desactualizada por CUALQUIER motivo, los del Niño y los crecimientos
  * de `Y+1` sin aprobar (con el Niño de las filas de HOY). Solo lee M7 y los crecimientos: nada de IA.
+ * `sinCrecimientos` (H3): omite solo el bloqueo `crecimientos_sin_aprobar`; todos los demás se evalúan igual.
  */
-async function leerBloqueos(d: Db, p: ProyeccionDb, base: readonly FilaConAnios[]): Promise<Salida<{ bloqueos: BloqueoLoteApi[]; vigentes: VigenteCrecimiento[] }>> {
+async function leerBloqueos(d: Db, p: ProyeccionDb, base: readonly FilaConAnios[], o: { sinCrecimientos?: boolean } = {}): Promise<Salida<{ bloqueos: BloqueoLoteApi[]; vigentes: VigenteCrecimiento[] }>> {
   const Y = p.anio_en_curso;
   const ctxR = await cargarContextoCalculo(d, { conEat: false, conFlujo: true });
   if (ctxR.respuesta) return falla(ctxR.respuesta);
@@ -242,7 +261,8 @@ async function leerBloqueos(d: Db, p: ProyeccionDb, base: readonly FilaConAnios[
     versionMetodo: typeof resumen?.version_metodo === "number" ? resumen.version_metodo : null,
     desactualizada: des.data,
     bloqueosNino: bloqueosNinoDe(p, ctx, des.data),
-    crecimientosSinAprobar: hoy.sinAprobar,
+    // H3: dentro de una confirmación ya empezada, `crecimientos_sin_aprobar` no se evalúa (ver `confirmacionEmpezada`).
+    crecimientosSinAprobar: o.sinCrecimientos ? null : hoy.sinAprobar,
   });
   return listo({ bloqueos, vigentes: vigentes.data });
 }
@@ -342,13 +362,6 @@ function sinDecidirConPropuesta(f: FilaConAnios | undefined, anio: number): bool
   return !!r && r.decidido === null && r.propuesto !== null;
 }
 
-/** `Σ vendido` de `Y−1` del histórico de la fila (solo si se leyó el `historico`): la base del crecimiento implícito de `Y`. */
-function vendidoAnioAnterior(f: FilaConAnios | undefined, Y: number): number | null {
-  const h = f?.historico as { anios?: { anio: number; total: number }[] } | null | undefined;
-  const a = h?.anios?.find((x) => x.anio === Y - 1);
-  return a ? a.total : null;
-}
-
 // ─── Pendientes para cerrar ───
 
 function contarPendientes(a: {
@@ -446,6 +459,8 @@ export async function leerAprobacion(id: string, q: { anio: number; modo: ModoAp
       const a = regDe(f, anio);
       if (!a || !a.activo || a.decidido === null || !a.decision_lote_id) continue;
       const fp = filaPlanDe(f, { ...h, anio }, []);
+      // H6: solo cuentan las filas que «Reaprobar» podría tomar de verdad. Las de un GM sin IA al día (desactualizado, sin propuesta, confianza baja…) saldrían excluidas.
+      if (fuentePermitida(fp, planes.get(gm), anio, Y).fuente === null) continue;
       const hoy = valorHoyDe(fp, a);
       if (hoy !== null && hoy !== a.decidido) {
         if (anio === Y) reaprobables.y += 1;
@@ -582,32 +597,55 @@ export async function leerAprobacion(id: string, q: { anio: number; modo: ModoAp
 
 // ─── Lo que comparten aprobar, reaprobar y revertir: leer lo necesario, aplicar en memoria, armar lo que escribe la función ───
 
-/** Las filas completas (con `historico`) que hacen falta para decidir en memoria: las de los nodos del lote y, en `Y`, las de tienda de esos nodos. */
+/** Lo que hace falta para decidir en memoria (§3.3 puntos 4 a 6), leído por columnas: nunca el `historico` entero (H2). */
 type Completas = {
-  /** `fila_id → fila base completa` de los nodos pedidos (y de todos los de cada GM en lotes de `Y`, para el efecto). */
+  /** `fila_id → fila base` de los ítems del lote (con `salientes` y `cola_larga` del `historico` solo si el lote es de `Y`, que es lo que B2 lee). */
   filas: Map<string, FilaConAnios>;
+  /** Filas de tienda de los nodos del lote (solo lotes de `Y`; columnas ligeras y solo el registro de `Y`). */
   tiendas: FilaConAnios[];
   ctx: ContextoModelo;
   modelos: Map<string, FilaModelo>;
+  /** `fila_id → total vendido en Y−1` de TODAS las filas base de cada GM del lote (solo lotes de `Y`): la base del crecimiento implícito de `Y`. */
+  vendidoAnterior: ReadonlyMap<string, number | null>;
 };
 
-async function leerCompletas(e: Escenario, a: { anio: number; gmlIds: readonly string[]; gmlIdsGM: readonly string[] }): Promise<Salida<Completas>> {
+/** Una fila leída con `decision_historico`: `salientes` y `cola_larga` (alias de PostgREST) pasan a un `historico` parcial, que es lo único que lee `aplicarDecision`. */
+function conHistoricoParcial(f: FilaConAnios): FilaConAnios {
+  const { salientes, cola_larga, ...resto } = f as FilaConAnios & { salientes?: HistoricoFila["salientes"] | null; cola_larga?: HistoricoFila["cola_larga"] };
+  const historico: HistoricoFila = { anios: [], tendencia: null, prueba_anterior: null, pesos_equivalencias: [], salientes: salientes ?? [], cola_larga: cola_larga ?? null };
+  return { ...resto, historico: historico as unknown as FilaConAnios["historico"] };
+}
+
+/**
+ * H2: antes se leían las filas completas (con todo su `historico`) de los nodos del lote y, en `Y`, de TODOS los nodos de cada GM. Ahora, por columnas:
+ * - las filas de los ítems del lote (`ids`), con las columnas de decisión y, en `Y`, `historico->salientes` y `historico->cola_larga` (lo que lee B2);
+ * - en `Y`, las filas de tienda de esos nodos, solo con su registro de `Y` y columnas ligeras (lo único que lee B2);
+ * - en `Y`, solo `historico->anios` de las filas base de cada GM (el total de `Y−1` del efecto).
+ */
+async function leerCompletas(e: Escenario, a: { anio: number; filaIds: readonly string[]; gmlIds: readonly string[]; gmlIdsGM: readonly string[] }): Promise<Salida<Completas>> {
   const { d, p, pi, Y } = e;
   const anioY = a.anio === Y;
-  // Lotes de `Y`: el efecto en 2027 (meta antes y después) y el crecimiento implícito de `Y` leen el `historico` de TODAS las filas base de cada GM.
-  const baseR = await leerFilasConAnios(d, p.id, { columnas: "completas", gmlIds: anioY ? a.gmlIdsGM : a.gmlIds, tiendaId: null, soloActivas: true });
-  if (baseR.error) return fallaDb(baseR.error, "aprobación: leer las filas completas");
+  const baseR = await leerFilasConAnios(d, p.id, { columnas: anioY ? "decision_historico" : "decision", ids: a.filaIds, tiendaId: null, soloActivas: true });
+  if (baseR.error) return fallaDb(baseR.error, "aprobación: leer las filas del lote");
+  const baseFilas = anioY ? baseR.data.map(conHistoricoParcial) : baseR.data;
   let tiendasFilas: FilaConAnios[] = [];
-  if (anioY && a.gmlIds.length > 0) {
-    const t = await leerFilasConAnios(d, p.id, { columnas: "completas", gmlIds: a.gmlIds, soloTiendas: true, soloActivas: true });
-    if (t.error) return fallaDb(t.error, "aprobación: leer las filas de tienda");
-    tiendasFilas = t.data;
+  const vendidoAnterior = new Map<string, number | null>();
+  if (anioY) {
+    if (a.gmlIds.length > 0) {
+      // Lo único que B2 lee de una fila de tienda es su registro de `Y` (bloque, vigente, meses): columnas ligeras y solo ese año.
+      const t = await leerFilasConAnios(d, p.id, { columnas: "ligeras", soloAnio: Y, gmlIds: a.gmlIds, soloTiendas: true, soloActivas: true });
+      if (t.error) return fallaDb(t.error, "aprobación: leer las filas de tienda");
+      tiendasFilas = t.data;
+    }
+    const anios = await leerAniosHistoricoDeGML(d, p.id, a.gmlIdsGM);
+    if (anios.error) return fallaDb(anios.error, "aprobación: leer el vendido del año anterior");
+    for (const [id, lista] of anios.data) vendidoAnterior.set(id, lista.find((x) => x.anio === Y - 1)?.total ?? null);
   }
   const k = kDe(p);
-  const modelosLista = baseR.data.map((f) => aFilaModelo(f, k, Y));
-  const modelos = new Map(baseR.data.map((f, i) => [f.id, modelosLista[i]]));
+  const modelosLista = baseFilas.map((f) => aFilaModelo(f, k, Y));
+  const modelos = new Map(baseFilas.map((f, i) => [f.id, modelosLista[i]]));
   const ctx = contextoModelo(p, parametrosDe(p.parametros), pi.catalogo, e.tiendas, [...modelosLista, ...tiendasFilas.map((f) => aFilaModelo(f, k, Y))], pi.foto);
-  return listo({ filas: new Map(baseR.data.map((f) => [f.id, f])), tiendas: tiendasFilas, ctx, modelos });
+  return listo({ filas: new Map(baseFilas.map((f) => [f.id, f])), tiendas: tiendasFilas, ctx, modelos, vendidoAnterior });
 }
 
 /** Qué sale de aplicar el plan en memoria. */
@@ -744,7 +782,7 @@ function evaluar(a: ArgsEvaluar): Evaluacion {
     const filas = delGM.flatMap((f) => {
       const r = regDe(f, Y);
       if (!r || !r.activo) return [];
-      return [{ fila_id: f.id, vigente_antes: r.decidido ?? r.propuesto, base_s: vendidoAnioAnterior(completas.filas.get(f.id), Y), libre_antes: r.decidido === null && r.propuesto !== null }];
+      return [{ fila_id: f.id, vigente_antes: r.decidido ?? r.propuesto, base_s: completas.vendidoAnterior.get(f.id) ?? null, libre_antes: r.decidido === null && r.propuesto !== null }];
     });
     entradas.push({ gm_clave: gm, meta_antes: antes.meta, meta_despues: despuesMeta.meta, filas });
   }
@@ -962,7 +1000,9 @@ export async function aplicarLote(id: string, cuerpo: LoteCuerpo, actor: Actor):
   if (rechazoAnio) return fallaRegla(rechazoAnio);
   if (p.calculado_at === null) return fallaConCodigo(MENSAJE_SIN_CALCULAR, 409, "datos_cambiaron");
 
-  const blq = await leerBloqueos(d, p, e.base);
+  const empezada = await confirmacionEmpezada(d, p, cuerpo.confirmacion_id);
+  if (empezada.respuesta) return falla(empezada.respuesta);
+  const blq = await leerBloqueos(d, p, e.base, { sinCrecimientos: empezada.data });
   if (blq.respuesta) return falla(blq.respuesta);
   if (blq.data.bloqueos.length > 0) {
     const primero = blq.data.bloqueos[0];
@@ -991,7 +1031,7 @@ export async function aplicarLote(id: string, cuerpo: LoteCuerpo, actor: Actor):
     }
   }
 
-  const compR = await leerCompletas(e, { anio: cuerpo.anio, gmlIds: nodos.gmlIds, gmlIdsGM: nodos.gmlIdsGM });
+  const compR = await leerCompletas(e, { anio: cuerpo.anio, filaIds: cuerpo.filas.map((f) => f.fila_id), gmlIds: nodos.gmlIds, gmlIdsGM: nodos.gmlIdsGM });
   if (compR.respuesta) return falla(compR.respuesta);
   const completas = compR.data;
   const h: HechosGM = { anio: cuerpo.anio, Y, umbral: e.umbral, pi, iaDisponible, valores, porGM: filasPorGM(e) };
@@ -1020,6 +1060,8 @@ export async function aplicarLote(id: string, cuerpo: LoteCuerpo, actor: Actor):
   if (cuerpo.huella_simulacion !== ev.huella) {
     return fallaConCodigo("El resultado cambió desde que lo revisaste: vuelve a simular y revisa el resumen.", 409, "simulacion_distinta");
   }
+  // M2: si TypeScript ya rechazó todas las filas, la función SQL no tiene nada que escribir: no se llama (ni se guarda un lote vacío).
+  if (!ev.plan.some((f) => f.resultado === "aplicada")) return fallaConCodigo(MENSAJE_SIN_FILAS_APROBAR, 409, "sin_filas_aplicables");
   if (requerida && !cuerpo.revision_confirmada) {
     return fallaConCodigo("Marca «Revisé el resumen por GM» para aprobar este lote.", 409, "revision_requerida");
   }
@@ -1047,19 +1089,24 @@ export async function aplicarLote(id: string, cuerpo: LoteCuerpo, actor: Actor):
 
 // ─── Revertir ───
 
-type ParametrosReversion = { lote_id: string; filas?: readonly string[]; nota?: string; simular: boolean; huella_simulacion?: string };
+type ParametrosReversion = {
+  lote_id: string;
+  filas?: readonly string[];
+  nota?: string;
+  simular: boolean;
+  huella_simulacion?: string;
+  /** Reversión de una confirmación: una tanda sin nada que revertir se omite en vez de cortar las demás (devuelve `lote: null`). */
+  tolerarSinFilas?: boolean;
+};
 
 /** Revierte UN lote (entero o las filas marcadas). Comparte todo con la ruta de la confirmación. */
 async function revertirUnLote(e: Escenario, lote: LoteDb, o: ParametrosReversion, actor: Actor): Promise<Salida<ResultadoLoteApi>> {
   const { d, p, pi, Y } = e;
   const tipo: TipoLote = (TIPOS_LOTE as readonly string[]).includes(lote.tipo) ? (lote.tipo as TipoLote) : "aprobar";
-  const noRevertible = motivoRechazoRevertir({ tipo, proyeccionIdDelLote: lote.proyeccion_id, proyeccionId: p.id });
-  if (noRevertible) return fallaRegla(noRevertible);
-  const bloqueo = bloqueoDeReversion({ estado: estadoDe(p), calculandoDesde: p.calculando_desde, ahora: sello() });
-  if (bloqueo) return fallaRegla(bloqueo);
-  if (p.calculado_at === null) return fallaConCodigo(MENSAJE_SIN_CALCULAR, 409, "datos_cambiaron");
-
   const huellaCuerpo = huellaCuerpoReversion({ lote_id: o.lote_id, confirmacion_id: lote.confirmacion_id, revierte_lote_id: lote.id, filas: o.filas, nota: o.nota });
+
+  // Idempotencia (D10, I4): igual que `aplicarLote`, un reintento con el mismo `lote_id` devuelve lo guardado ANTES de mirar si la proyección ya se cerró o se está calculando
+  // (el primer intento pudo haber terminado y la proyección cerrarse después).
   if (!o.simular) {
     const previo = await leerLoteDb(d, o.lote_id);
     if (previo.error) return fallaDb(previo.error, "aprobación: leer el lote de reversión");
@@ -1068,6 +1115,12 @@ async function revertirUnLote(e: Escenario, lote: LoteDb, o: ParametrosReversion
       return fallaConCodigo("Ese identificador de lote ya se usó con otra petición: vuelve a cargar la pantalla.", 409, "lote_ajeno");
     }
   }
+
+  const noRevertible = motivoRechazoRevertir({ tipo, proyeccionIdDelLote: lote.proyeccion_id, proyeccionId: p.id });
+  if (noRevertible) return fallaRegla(noRevertible);
+  const bloqueo = bloqueoDeReversion({ estado: estadoDe(p), calculandoDesde: p.calculando_desde, ahora: sello() });
+  if (bloqueo) return fallaRegla(bloqueo);
+  if (p.calculado_at === null) return fallaConCodigo(MENSAJE_SIN_CALCULAR, 409, "datos_cambiaron");
 
   const delLote = await leerFilasDeLoteDb(d, lote.id);
   if (delLote.error) return fallaDb(delLote.error, "aprobación: leer las filas del lote");
@@ -1078,7 +1131,7 @@ async function revertirUnLote(e: Escenario, lote: LoteDb, o: ParametrosReversion
   const nodos = nodosDeFilas(e, ids);
   const vig = await leerVigentesY1(d, Y);
   if (vig.respuesta) return falla(vig.respuesta);
-  const compR = await leerCompletas(e, { anio: lote.anio, gmlIds: nodos.gmlIds, gmlIdsGM: nodos.gmlIdsGM });
+  const compR = await leerCompletas(e, { anio: lote.anio, filaIds: ids, gmlIds: nodos.gmlIds, gmlIdsGM: nodos.gmlIdsGM });
   if (compR.respuesta) return falla(compR.respuesta);
   const completas = compR.data;
 
@@ -1097,6 +1150,13 @@ async function revertirUnLote(e: Escenario, lote: LoteDb, o: ParametrosReversion
   // Revertir no exige huella (decisión pendiente de confirmar, ficha §Preguntas B1): si el cuerpo trae una y el resultado es otro, no se escribe.
   if (o.huella_simulacion !== undefined && o.huella_simulacion !== ev.huella) {
     return fallaConCodigo("El resultado cambió desde que lo revisaste: vuelve a simular y revisa el resumen.", 409, "simulacion_distinta");
+  }
+  // M2: sin ninguna fila que revertir no se llama a la función ni se guarda un lote vacío.
+  if (!ev.plan.some((f) => f.resultado === "aplicada")) {
+    if (o.tolerarSinFilas) {
+      return listo(armarResultadoLote({ plan: ev.plan, efecto_gm: ev.efecto, crecimientos_a_reaprobar: ev.crecimientos, pendientes_cierre: ev.pendientes, huella_simulacion: ev.huella, simulado: false, repetido: false, lote: null }));
+    }
+    return fallaConCodigo(MENSAJE_SIN_FILAS_REVERTIR, 409, "sin_filas_aplicables");
   }
   const grupos = armarGrupos({ plan: { filas: ev.plan }, filas: filasPlan, gms: new Map(), registros: ev.registros });
   const cabecera: CabeceraLotePayload = {
@@ -1154,10 +1214,12 @@ export async function revertirConfirmacion(id: string, confirmacionId: string, c
     // Cada reversión puede mover la proyección (B2): se vuelve a leer lo necesario antes de la siguiente.
     const fresco = i === 0 ? esc : await cargarEscenario(d, id);
     if (fresco.respuesta) return falla(fresco.respuesta);
-    const r = await revertirUnLote(fresco.data, aRevertir[i], { lote_id: cuerpo.lote_ids[i], nota: cuerpo.nota, simular: cuerpo.simular }, actor);
+    const r = await revertirUnLote(fresco.data, aRevertir[i], { lote_id: cuerpo.lote_ids[i], nota: cuerpo.nota, simular: cuerpo.simular, tolerarSinFilas: true }, actor);
     if (r.respuesta) return falla(r.respuesta);
     salida.push(r.data);
   }
+  // M2: si ninguna tanda tenía algo que revertir (alguien cambió todo después), es el mismo 409 que revertir un solo lote.
+  if (!cuerpo.simular && salida.every((r) => r.lote === null)) return fallaConCodigo(MENSAJE_SIN_FILAS_REVERTIR, 409, "sin_filas_aplicables");
   return listo(salida);
 }
 

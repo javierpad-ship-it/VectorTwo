@@ -106,7 +106,24 @@ describe("R15 · loteSchema", () => {
     expect(error(lote({ filtro: { brecha_max_pct: -1 } }))).not.toBeNull();
     expect(error(lote({ filtro: { generos: Array.from({ length: 201 }, (_, i) => `g${i}`) } }))).not.toBeNull();
     expect(error(lote({ filtro: { lineas: ["x".repeat(121)] } }))).not.toBeNull();
+    // M2: tope de 5 listas × 50 valores × 80 caracteres; lo que manda la pantalla (un id de 36 o una clave de GM de 73) cabe de sobra.
+    const id = "00000000-0000-4000-8000-000000000001";
+    expect(error(lote({ filtro: { generos: Array.from({ length: 50 }, (_, i) => `g${i}`) } }))).toBeNull();
+    expect(error(lote({ filtro: { generos: Array.from({ length: 51 }, (_, i) => `g${i}`) } }))).not.toBeNull();
+    expect(error(lote({ filtro: { lineas: ["x".repeat(80)] } }))).toBeNull();
+    expect(error(lote({ filtro: { lineas: ["x".repeat(81)] } }))).not.toBeNull();
+    expect(error(lote({ filtro: { gms: [`${id}.${id}`], lineas: [id], agrupaciones: [id], mundos: [id], generos: [id] } }))).toBeNull();
+    expect(error(lote({ filtro: { lineas: [""] } }))).not.toBeNull();
     expect(filtroLoteSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("M4 · el filtro rechaza caracteres de control, de dirección de texto y saltos de línea, como la nota", () => {
+    for (const malo of ["a\nb", "a\u0000b", "a\u202Eb", "a\u2028b", "a\u200Bb", "a\tb"]) {
+      for (const clave of ["generos", "mundos", "lineas", "agrupaciones", "gms"]) {
+        expect(error(lote({ filtro: { [clave]: [malo] } })), `${clave} ${JSON.stringify(malo)}`).not.toBeNull();
+      }
+    }
+    expect(error(lote({ filtro: { generos: ["HOMBRE · URBANO"] } }))).toBeNull();
   });
 });
 

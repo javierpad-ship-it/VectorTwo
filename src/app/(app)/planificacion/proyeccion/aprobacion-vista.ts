@@ -580,6 +580,7 @@ const REGLAS_ERROR: Record<string, Regla> = {
   proyeccion_desactualizada: { mensaje: "La proyección está desactualizada: recalcula antes de aprobar en bloque, para no fijar cifras que ya no se propondrían.", accion: "recalcular" },
   version_metodo: { mensaje: "La proyección se calculó con una versión anterior del método: recalcúlala antes de aprobar en bloque.", accion: "recalcular" },
   crecimientos_sin_aprobar: { mensaje: "Faltan crecimientos del año siguiente por aprobar (o reaprobar). Hasta entonces no se aprueba en bloque.", accion: "crecimientos" },
+  sin_filas_aplicables: { mensaje: "Ninguna de las filas elegidas se puede aprobar ahora. Actualiza la pantalla para ver cómo están: puede que otra persona las haya decidido o que la propuesta haya cambiado.", accion: "recargar" },
   lote_ajeno: { mensaje: "Este identificador de lote ya se usó con otras filas. Actualiza la pantalla y confirma de nuevo.", accion: "recargar" },
   no_revertible: { mensaje: "Este lote no se puede revertir: una reversión no se revierte, o el lote no es de esta proyección.", accion: "recargar" },
   conflicto_reintentar: { mensaje: "Choque con otro cambio al escribir. Reintenta: se reenvía con el mismo lote, así que no se aprueba dos veces.", accion: "reintentar" },
@@ -609,7 +610,7 @@ export function traducirErrorAprobacion(e: ErrorAccion | string): ErrorTraducido
 }
 
 /** Los errores que reintentar tal cual no arregla: hay que releer y simular de nuevo. */
-export const CODIGOS_RELEER = ["simulacion_distinta", "datos_cambiaron", "proyeccion_desactualizada", "version_metodo", "crecimientos_sin_aprobar", "lote_ajeno", "calculo_en_curso", "cerrada", "ya_cerrada", "proyeccion_cerrada", "archivada", "proyeccion_archivada", "no_revertible"];
+export const CODIGOS_RELEER = ["simulacion_distinta", "datos_cambiaron", "proyeccion_desactualizada", "version_metodo", "crecimientos_sin_aprobar", "lote_ajeno", "sin_filas_aplicables", "calculo_en_curso", "cerrada", "ya_cerrada", "proyeccion_cerrada", "archivada", "proyeccion_archivada", "no_revertible"];
 
 // ─── Historial ───
 

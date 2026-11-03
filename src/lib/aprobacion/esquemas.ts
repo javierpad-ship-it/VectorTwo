@@ -12,7 +12,7 @@ import {
  * Esquemas zod de la aprobación en bloque (ficha 07g, §3.1 y §3.2; R15). Cada cuerpo se valida con `leerCuerpo`; los mensajes van en castellano llano
  * para mostrarse en pantalla. Lo que depende de los datos (bloqueos, valores de hoy, IA) lo valida el servidor.
  *
- * Congelado al cerrar la tanda 1.
+ * (`filtroLoteSchema` se acotó y endureció tras QA y seguridad: M2 y M4.)
  */
 
 export { MAX_FILAS_LOTE, REVISION_OBLIGATORIA_DESDE };
@@ -35,18 +35,28 @@ const nota = z
 
 const huella = z.string("La huella de la simulación debe ser texto.").regex(/^[0-9a-f]{64}$/, "La huella de la simulación no es válida: simula de nuevo.");
 
-const texto = (max: number) => z.string("Cada valor del filtro debe ser texto.").min(1).max(max);
-const lista = (max: number) => z.array(texto(max)).max(200, "El filtro tiene demasiados valores.");
+/**
+ * El `filtro` es solo contexto de pantalla y se guarda tal cual en `proyeccion_lotes.filtro`: se acota fuerte (M2) y se le aplican los mismos caracteres prohibidos que a la nota
+ * (M4). Hasta 5 listas × 50 valores × 80 caracteres; la pantalla manda un valor por lista (un id de 36 caracteres o la clave de un GM, de 73).
+ */
+export const MAX_VALORES_FILTRO = 50;
+export const MAX_LARGO_VALOR_FILTRO = 80;
+const texto = z
+  .string("Cada valor del filtro debe ser texto.")
+  .min(1, "Un valor del filtro no puede estar vacío.")
+  .max(MAX_LARGO_VALOR_FILTRO, `Un valor del filtro no puede superar ${MAX_LARGO_VALOR_FILTRO} caracteres.`)
+  .refine(sinProhibidos, "El filtro no puede llevar saltos de línea ni caracteres de control o de dirección de texto.");
+const lista = z.array(texto).max(MAX_VALORES_FILTRO, "El filtro tiene demasiados valores.");
 
 export const ESTADOS_IA_FILTRO = ["sin_propuesta", "sin_filas_libres", "al_dia", "meta_movida", "desactualizada", "fallida", "bloqueado_privacidad"] as const;
 
 /** §4.3: contexto de pantalla que se guarda con el lote (no cambia lo que se aprueba). */
 export const filtroLoteSchema: z.ZodType<FiltroLote> = z.strictObject({
-  generos: lista(80).optional(),
-  mundos: lista(80).optional(),
-  lineas: lista(120).optional(),
-  agrupaciones: lista(120).optional(),
-  gms: lista(80).optional(),
+  generos: lista.optional(),
+  mundos: lista.optional(),
+  lineas: lista.optional(),
+  agrupaciones: lista.optional(),
+  gms: lista.optional(),
   solo_sin_avisos_fuertes: z.boolean("«Solo sin avisos fuertes» debe ser verdadero o falso.").optional(),
   incluir_revision: z.boolean("«Para revisión» debe ser verdadero o falso.").optional(),
   confianza: z.array(z.enum(["alta", "media"])).max(2).optional(),

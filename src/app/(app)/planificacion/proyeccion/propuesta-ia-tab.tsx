@@ -75,9 +75,8 @@ export function CabeceraServicioIa({ servicio, anioSiguiente, esAdmin, enlaceApr
         {enlaceAprobacion && (
           <>
             {" "}
-            Las filas que bloquean el cierre también se pueden aprobar por lotes, con tu confirmación y el resumen por género × mundo, en la pestaña{" "}
             <Link href={enlaceAprobacion} className="font-medium underline underline-offset-2">
-              Aprobación
+              Ir a Aprobación
             </Link>
             .
           </>

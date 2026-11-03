@@ -109,6 +109,20 @@ describe("rutas de …/aprobacion", () => {
   });
 });
 
+describe("H2 · el servicio lee por columnas, nunca el `historico` entero", () => {
+  it("servicio.ts no pide columnas `completas` ni `previas`; la lectura de un lote usa `decision` (2027) o `decision_historico` (2026)", () => {
+    const t = sinComentarios(fuente(`${LIB}servicio.ts`));
+    expect(t).not.toMatch(/columnas: "(completas|previas)"/);
+    expect(t).toContain('"decision_historico" : "decision"');
+    expect(t).toContain('columnas: "ligeras"');
+    expect(t).toContain("leerAniosHistoricoDeGML(");
+  });
+
+  it("las rutas que escriben lotes declaran `maxDuration` (la IA ya lo hace en las suyas)", () => {
+    for (const r of RUTAS.filter((x) => /export async function POST\(/.test(x.texto))) expect(sinComentarios(r.texto), r.ruta).toMatch(/export const maxDuration = \d+;/);
+  });
+});
+
 describe("R13 · los bloqueos no dependen de src/lib/ia/", () => {
   it("servicio.ts importa de la IA solo `ia/servicio` y `leerBloqueos` no nombra nada de la IA", () => {
     const servicio = fuente(`${LIB}servicio.ts`);

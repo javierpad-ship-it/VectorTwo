@@ -106,6 +106,7 @@ type Resultado = { data: unknown; error: ErrorFalso | null };
 class Consulta implements PromiseLike<Resultado> {
   private modo: "select" | "insert" | "update" | "delete" | "upsert" = "select";
   private filtros: Array<(f: Fila) => boolean> = [];
+  private filtrosEmbebidos: Array<{ relacion: string; columna: string; valor: unknown }> = [];
   private ordenes: Array<[string, boolean]> = [];
   private carga: Fila | Fila[] = {};
   private una: "single" | "maybeSingle" | null = null;
@@ -149,6 +150,12 @@ class Consulta implements PromiseLike<Resultado> {
     return this;
   }
   eq(c: string, v: unknown) {
+    // `relacion.columna`: filtro del recurso embebido de PostgREST (sin `!inner`): no quita filas padre, solo los hijos que no cumplen.
+    const punto = c.indexOf(".");
+    if (punto > 0) {
+      this.filtrosEmbebidos.push({ relacion: c.slice(0, punto), columna: c.slice(punto + 1), valor: v });
+      return this;
+    }
     this.filtros.push((f) => f[c] === v);
     return this;
   }
@@ -335,7 +342,8 @@ class Consulta implements PromiseLike<Resultado> {
         if (!rel) throw new Error(`relación no soportada: ${this.tabla} → ${m[1]}`);
         const tablaRel = estado.tablas[m[1]] ?? [];
         if (rel.tipo === "hijos") {
-          salida[m[1]] = tablaRel.filter((h) => h[rel.fk] === f.id).map((h) => new Consulta(m[1]).proyectar(h, m[2]));
+          const embebidos = this.filtrosEmbebidos.filter((x) => x.relacion === m[1]);
+          salida[m[1]] = tablaRel.filter((h) => h[rel.fk] === f.id && embebidos.every((x) => h[x.columna] === x.valor)).map((h) => new Consulta(m[1]).proyectar(h, m[2]));
         } else {
           const padre = tablaRel.find((p) => p.id === f[rel.fk]);
           salida[m[1]] = padre ? new Consulta(m[1]).proyectar(padre, m[2]) : null;
