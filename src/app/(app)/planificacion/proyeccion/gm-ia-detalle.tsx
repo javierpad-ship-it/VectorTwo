@@ -44,6 +44,29 @@ import { formatearMomento, formatearPct, unidades } from "./vista";
 
 type Fila = GMIaDetalleApi["filas"][number];
 
+/**
+ * 07g §3.5: `libre_en_bloque` = una fila de 2027 que un lote aprobó con la IA. Para el reparto cuenta como libre (su `meta_y1` es lo que la IA le daría hoy);
+ * para decidir ya está decidida. Se compara como texto para no depender del orden en que llega el estado a los tipos de `src/lib/ia/`.
+ */
+export const esLibreEnBloque = (f: Pick<Fila, "estado_meta">): boolean => (f.estado_meta as string) === "libre_en_bloque";
+
+/** La etiqueta del estado de la fila: los estados que no conoce `ETIQUETA_ESTADO_META` se dicen con su texto. */
+export function etiquetaEstadoFila(f: Pick<Fila, "estado_meta">): string {
+  if (esLibreEnBloque(f)) return "libre · aprobada en bloque";
+  return ETIQUETA_ESTADO_META[f.estado_meta] ?? f.estado_meta;
+}
+
+/**
+ * La decisión de la fila. Una `libre_en_bloque` dice lo aprobado y lo que la IA daría hoy («aprobada en bloque: 10 961 · IA hoy: 11 223»), y avisa
+ * cuando difieren (se puede reaprobar en la pestaña Aprobación).
+ */
+export function textoDecisionFila(f: Pick<Fila, "estado_meta" | "decidida_y1" | "vigente_y1" | "meta_y1">): { texto: string; reaprobable: boolean } {
+  if (!esLibreEnBloque(f)) return { texto: textoDecision(f), reaprobable: false };
+  const hoy = f.meta_y1 === null ? "—" : unidades(f.meta_y1);
+  const reaprobable = f.meta_y1 !== null && f.vigente_y1 !== null && f.meta_y1 !== f.vigente_y1;
+  return { texto: `aprobada en bloque: ${unidades(f.vigente_y1)} · IA hoy: ${hoy}`, reaprobable };
+}
+
 export type DestinoLinea = { genero_id: string; mundo_id: string; linea_id: string | null; fila_id: string };
 
 function Chips({ titulo, items }: { titulo: string; items: { clave: string; texto: string; alerta?: boolean }[] }) {
@@ -82,7 +105,7 @@ function columnas(d: GMIaDetalleApi, anioEnCurso: number, indice: readonly Indic
         <div className="min-w-40">
           <p className="font-medium">{f.linea}</p>
           <p className="text-xs text-tinta-suave">{f.equivalencia ? `${f.equivalencia} · ${f.agrupacion_marca}` : f.agrupacion_marca}</p>
-          <Badge tono={f.estado_meta === "libre" ? "marca" : "neutro"}>{ETIQUETA_ESTADO_META[f.estado_meta] ?? f.estado_meta}</Badge>
+          <Badge tono={f.estado_meta === "libre" || esLibreEnBloque(f) ? "marca" : "neutro"}>{etiquetaEstadoFila(f)}</Badge>
         </div>
       ),
     },
@@ -148,7 +171,19 @@ function columnas(d: GMIaDetalleApi, anioEnCurso: number, indice: readonly Indic
     },
     // La razón la escribió el modelo: se pinta como texto (React escapa), con saltos de línea respetados.
     { clave: "razon", titulo: "Razón", render: (f) => <p className="min-w-56 max-w-sm whitespace-pre-line text-xs">{f.razon ?? "—"}</p> },
-    { clave: "decision", titulo: `Decisión ${y + 1}`, render: (f) => <span className="text-xs">{textoDecision(f)}</span> },
+    {
+      clave: "decision",
+      titulo: `Decisión ${y + 1}`,
+      render: (f) => {
+        const d = textoDecisionFila(f);
+        return (
+          <span className="block text-xs">
+            {d.texto}
+            {d.reaprobable && <span className="block text-alerta">La IA de hoy difiere: se puede reaprobar en Aprobación.</span>}
+          </span>
+        );
+      },
+    },
     {
       clave: "ir",
       titulo: "",

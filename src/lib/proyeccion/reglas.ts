@@ -125,13 +125,26 @@ export function motivoRechazoArchivarCerrada(args: { estado: EstadoProyeccion; a
 /** `avisos` del registro (`revision_cola_larga` bloquea el cierre aunque la propuesta quede bajo el umbral, p. ej. en `Y+1` con crecimiento negativo). */
 export type FilaParaCerrar = { clave: string; propuesto: number | null; decidido: number | null; avisos?: readonly string[] };
 
+export type MotivoBloqueoCierre = "umbral" | "revision_cola_larga";
+
 export type FilaSinDecidir = {
   clave: string;
   anio: number;
   propuesto: number;
   /** `umbral`: propuesta ≥ umbral de cola larga; `revision_cola_larga`: cola larga con quiebres relevantes y demanda corregida sobre el umbral. */
-  motivo: "umbral" | "revision_cola_larga";
+  motivo: MotivoBloqueoCierre;
 };
+
+/**
+ * 07g (D1, R2). LA definición de «esta fila base bloquea el cierre»: un registro sin decidir, con propuesta, que tiene el aviso `revision_cola_larga` o
+ * una propuesta de `umbral` unidades o más. `null` = no bloquea (decidido, sin propuesta o cola larga que se cierra sola). La usan el cierre
+ * (`motivoRechazoCerrar`) y la aprobación en bloque: no existe otra copia del predicado. El motivo `revision_cola_larga` manda sobre `umbral`.
+ */
+export function filaBloqueaCierre(registro: { propuesto: number | null; decidido: number | null; avisos?: readonly string[] }, umbral: number): MotivoBloqueoCierre | null {
+  if (registro.decidido !== null || registro.propuesto === null) return null;
+  if (registro.avisos?.includes("revision_cola_larga") === true) return "revision_cola_larga";
+  return registro.propuesto >= umbral ? "umbral" : null;
+}
 
 /**
  * `0.12.1` (06d §3.1): lo que falta aprobar para cerrar. `anio` es el año de aplicación (`Y+1`); `faltan` los GM de HOMBRE o MUJER con filas base sin
@@ -341,9 +354,8 @@ export function motivoRechazoCerrar(args: {
     for (const anio of [args.anioEnCurso, args.anioEnCurso + 1]) {
       const r = f.anios[anio];
       if (!r || r.decidido !== null) continue;
-      const revision = r.avisos?.includes("revision_cola_larga") === true;
-      if (r.propuesto !== null && revision) sinDecidir.push({ clave: f.clave, anio, propuesto: r.propuesto, motivo: "revision_cola_larga" });
-      else if (r.propuesto !== null && r.propuesto >= umbral) sinDecidir.push({ clave: f.clave, anio, propuesto: r.propuesto, motivo: "umbral" });
+      const motivo = filaBloqueaCierre(r, umbral);
+      if (motivo !== null && r.propuesto !== null) sinDecidir.push({ clave: f.clave, anio, propuesto: r.propuesto, motivo });
       else colaLarga += 1;
     }
   }

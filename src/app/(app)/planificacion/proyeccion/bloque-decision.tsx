@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
 import { formatearNumero } from "@/lib/formato";
 import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
-import { textoPropuestaCambio } from "./celda-decision";
+import { BadgeDecisionLote, decisionLoteDe, textoDecisionLote, textoPropuestaCambio } from "./celda-decision";
 import { BadgeDecisionIa, BotonAceptarIa, textoDecisionIa, type AceptarIa } from "./columnas-ia";
 import { Avisos, NUM } from "./comunes";
 import { ayudaCrecimientoFila, equivalenteDeCrecimiento, textoEquivalente, textosDetalleCrecimiento } from "./crecimientos-vista";
@@ -69,6 +70,7 @@ export function BloqueDecision({
   onDecidir,
   onAplicarCurva,
   aceptarIa,
+  enlaceLote,
 }: {
   registro: AnioFilaApi | undefined;
   anio: number;
@@ -80,6 +82,8 @@ export function BloqueDecision({
   onAplicarCurva: (registroId: string) => Promise<boolean>;
   /** 07e: «Aceptar IA (cifra)» entre los botones; solo en `Y+1`, con la propuesta de la IA a la vista y la fila sin decidir. */
   aceptarIa?: AceptarIa;
+  /** 07g: enlace a la pestaña Aprobación (donde está el historial del lote); solo se pinta si la cifra la decidió un lote. */
+  enlaceLote?: string;
 }) {
   const [texto, setTexto] = useState(registro?.decidido === null || registro?.decidido === undefined ? "" : String(registro.decidido));
   const [nota, setNota] = useState(registro?.nota ?? "");
@@ -92,6 +96,7 @@ export function BloqueDecision({
   const decidida = registro.decidido !== null;
   const deshabilitada = bloqueada || ocupado;
   const cambio = textoPropuestaCambio(registro);
+  const lote = decidida ? decisionLoteDe(registro) : null;
   const normal = textoFactoresMes(factoresMes);
   const paraRevision = registro.avisos.includes("revision_cola_larga");
   const detalleCrecimiento = textosDetalleCrecimiento(registro, anio, anioEnCurso);
@@ -204,6 +209,20 @@ export function BloqueDecision({
           <span>
             La cifra decidida salió de la IA: {textoDecisionIa(registro.decision_ia)}. «Volver a la propuesta» la quita y deja la propuesta del método.
           </span>
+        </p>
+      )}
+      {lote && (
+        <p className="flex flex-wrap items-center gap-2 rounded-md border border-borde bg-fondo px-3 py-2 text-sm">
+          <BadgeDecisionLote decision={lote} />
+          <span>
+            {textoDecisionLote(lote)}
+            {lote.usuario_nombre ? ` por ${lote.usuario_nombre}` : ""}. Si la cambias a mano, deja de ser parte del lote; «Volver a la propuesta» la quita.
+          </span>
+          {enlaceLote && (
+            <Link href={enlaceLote} className="font-medium text-marca-oscura underline underline-offset-2 hover:text-marca">
+              Ver el lote
+            </Link>
+          )}
         </p>
       )}
       <Avisos avisos={registro.avisos} />

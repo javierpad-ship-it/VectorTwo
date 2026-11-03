@@ -95,7 +95,12 @@ export type MotivoIa =
   | "sin_meta"
   | "decisiones_y_pendientes";
 
-export type EstadoMetaFila = "libre" | "fija_decidida" | "fija_pct" | "fija_cola_larga" | "sin_base";
+/**
+ * `libre_en_bloque` (07g §3.5): una fila de 2027 que un lote de aprobación en bloque decidió con la IA (`decision_lote_id` y `decision_ia_fila_id` no nulos). Solo lo ve la
+ * lectura del GM (`IaFilaApi.estado_meta`): para repartir la meta (al generar y al calcular `A`) cuenta como `libre`; para «Aceptar IA» ya no es aceptable; en la Matriz cuenta
+ * por su `decidido`, como siempre.
+ */
+export type EstadoMetaFila = "libre" | "libre_en_bloque" | "fija_decidida" | "fija_pct" | "fija_cola_larga" | "sin_base";
 export type MetaGMApi = {
   pct: number;
   sobre_base: "bruta" | "corregida";

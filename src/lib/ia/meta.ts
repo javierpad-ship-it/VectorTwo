@@ -27,18 +27,30 @@ export type FilaMeta = FilaParaMeta & {
   vigente: number | null;
   /** Aviso `revision_cola_larga` de la fila: una cola larga con quiebres relevantes es libre. */
   revision_cola_larga: boolean;
+  /**
+   * 07g (§3.5): quién dejó el `decidido` vigente de `Y+1`. Con los dos no nulos la fila está «aprobada en bloque con la IA» (`libre_en_bloque`). Ausentes o `null` = no;
+   * quien arma la fila y no los lee (o los lee de una lectura que no los trae) deja la clasificación de siempre.
+   */
+  decision_lote_id?: string | null;
+  decision_ia_fila_id?: string | null;
 };
+
+/** 07g: la fila la decidió un lote de aprobación en bloque con cifra de IA (y nadie la cambió a mano después: cualquier decisión individual limpia `decision_lote_id`). */
+export const esAprobadaEnBloqueConIa = (f: Pick<FilaMeta, "decision_lote_id" | "decision_ia_fila_id">): boolean =>
+  f.decision_lote_id !== undefined && f.decision_lote_id !== null && f.decision_ia_fila_id !== undefined && f.decision_ia_fila_id !== null;
 
 export type OpcionesMeta = { umbral_cola_larga: number; incluir_cola_larga: boolean };
 
 /**
  * Clasificación de una fila base de 2027, en el orden de §5.1: decidida, % propio, cola larga, sin base y libre.
+ * 07g (§3.5): una fila decidida por un lote con traza de IA (`libre_en_bloque`) se distingue de una decidida a mano (`fija_decidida`). `planMeta` la cuenta como libre;
+ * esta función solo la nombra.
  * Desviación: la fila sin `propuesto` (que `metaDeGM` deja fuera de la meta) es `sin_base` aunque tenga un `decidido`; si no, su
  * aporte restaría de `Meta_libre` algo que nunca sumó a `Meta_GM` y `Σ fijas + Σ A = Meta_GM` se rompería.
  */
 export function estadoFilaMeta(f: FilaMeta, o: OpcionesMeta): EstadoMetaFila {
   if (f.propuesto === null) return "sin_base";
-  if (f.decidido !== null) return "fija_decidida";
+  if (f.decidido !== null) return esAprobadaEnBloqueConIa(f) ? "libre_en_bloque" : "fija_decidida";
   if (f.crecimiento_pct !== null) return "fija_pct";
   if (!o.incluir_cola_larga && f.propuesto < o.umbral_cola_larga && !f.revision_cola_larga) return "fija_cola_larga";
   return "libre";
@@ -61,7 +73,13 @@ export type PlanMeta = {
   meta: MetaGMApi | null;
   /** `fila_id → P^GM` de las filas con base. */
   p_gm: ReadonlyMap<string, number>;
+  /**
+   * `fila_id → estado`. 07g: una `libre_en_bloque` figura aquí como `libre` (al generar y al calcular `A` cuenta como libre: quien consume el mapa no cambia); su condición
+   * de «aprobada en bloque» está en `en_bloque`.
+   */
   estados: ReadonlyMap<string, EstadoMetaFila>;
+  /** 07g: las filas `libre_en_bloque` (ya contadas como `libre` en `estados` y en `libres`). La lectura las muestra como tales y no las ofrece a «Aceptar IA». */
+  en_bloque: ReadonlySet<string>;
   /** `fila_id → aporte` de las fijas (su vigente). */
   aportes: ReadonlyMap<string, number>;
   /** Las libres, ordenadas por `clave`. */
@@ -73,12 +91,16 @@ export type PlanMeta = {
 export function planMeta(e: EntradaPlanMeta): PlanMeta {
   const m = metaDeGM({ filas: e.filas, g: e.g, sobre_base: e.sobre_base, fuente: e.fuente });
   const estados = new Map<string, EstadoMetaFila>();
+  const en_bloque = new Set<string>();
   const aportes = new Map<string, number>();
   const libres: FilaMeta[] = [];
   const detalle = { decididas: 0, pct_propio: 0, cola_larga: 0 };
   let filasFijas = 0;
   for (const f of e.filas) {
-    const estado = estadoFilaMeta(f, e.opciones);
+    const clasificada = estadoFilaMeta(f, e.opciones);
+    // 07g (§3.5): la aprobada en bloque con IA es libre para repartir: su `decidido` no resta de `Meta_libre` ni entra en las fijas.
+    if (clasificada === "libre_en_bloque") en_bloque.add(f.fila_id);
+    const estado: EstadoMetaFila = clasificada === "libre_en_bloque" ? "libre" : clasificada;
     estados.set(f.fila_id, estado);
     if (estado === "libre") {
       libres.push(f);
@@ -96,7 +118,7 @@ export function planMeta(e: EntradaPlanMeta): PlanMeta {
 
   const avisos: AvisoIa[] = [];
   if (e.fuente === "resto_provisional") avisos.push("meta_provisional");
-  if (m.meta_gm === null || e.g === null) return { meta: null, p_gm: m.p_gm, estados, aportes, libres, avisos };
+  if (m.meta_gm === null || e.g === null) return { meta: null, p_gm: m.p_gm, estados, en_bloque, aportes, libres, avisos };
 
   const fijas = detalle.decididas + detalle.pct_propio + detalle.cola_larga;
   const meta_libre = m.meta_gm - fijas;
@@ -118,6 +140,7 @@ export function planMeta(e: EntradaPlanMeta): PlanMeta {
     },
     p_gm: m.p_gm,
     estados,
+    en_bloque,
     aportes,
     libres,
     avisos,

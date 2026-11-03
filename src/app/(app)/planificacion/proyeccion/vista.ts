@@ -41,7 +41,7 @@ import {
 
 // ─── Pestañas y estado en la URL ───
 
-export type Pestana = "factores" | "tiendas" | "crecimientos" | "ia" | "linea" | "matriz" | "mensual";
+export type Pestana = "factores" | "tiendas" | "crecimientos" | "ia" | "linea" | "aprobacion" | "matriz" | "mensual";
 
 /** En el orden de trabajo de la ficha: primero los factores, después las tiendas (alimentan la base de cada línea). */
 export const PESTANAS: readonly { id: Pestana; etiqueta: string }[] = [
@@ -52,6 +52,8 @@ export const PESTANAS: readonly { id: Pestana; etiqueta: string }[] = [
   // 0.15.0 (07e): la propuesta de la IA por género × mundo va entre los crecimientos (la meta) y las líneas (donde se decide). Solo admin y planner (la página ya excluye al comprador).
   { id: "ia", etiqueta: "Propuesta IA" },
   { id: "linea", etiqueta: "Por línea" },
+  // 0.15.0 · M7 c (07g): la aprobación en bloque de las filas que bloquean el cierre va entre «Por línea» (donde se decide una a una) y «Matriz» (donde se ve el cuadre).
+  { id: "aprobacion", etiqueta: "Aprobación" },
   { id: "matriz", etiqueta: "Matriz" },
   { id: "mensual", etiqueta: "Mensual" },
 ];

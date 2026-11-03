@@ -621,6 +621,24 @@ export type AnioFilaApi = {
    * y en el cálculo. Solo se lee para mostrar: ni `calcular` ni `cerrar` la usan.
    */
   decision_ia?: DecisionIaApi | null;
+  /**
+   * `0.15.0 · M7 c` (07g): el lote de aprobación en bloque que dejó el `decidido` vigente del registro (`proyeccion_fila_anios.decision_lote_id`); `null` =
+   * decisión propia, o sin decidir. Ausente en las lecturas que no la piden (matriz, mensual, cerrada) y en el cálculo. Solo se lee para mostrar.
+   */
+  decision_lote?: DecisionLoteApi | null;
+};
+
+/**
+ * `0.15.0 · M7 c` (07g): el lote de aprobación en bloque que decidió un registro. Misma forma que `DecisionLoteApi` de `src/lib/aprobacion/tipos-api.ts`
+ * (`src/lib/proyeccion/` no importa ese módulo): si una cambia, cambia la otra. `fuente` sale de la línea del lote (`proyeccion_lote_filas.fuente`); `null` si
+ * no se encontró.
+ */
+export type DecisionLoteApi = {
+  lote_id: string;
+  tipo: "aprobar" | "reaprobar" | "revertir";
+  created_at: string;
+  usuario_nombre: string | null;
+  fuente: "ia" | "metodo" | null;
 };
 
 /** `0.15.0` (07e): la propuesta de IA aceptada que dejó la cifra decidida de un registro (`proyeccion_fila_anios.decision_ia_fila_id`). */

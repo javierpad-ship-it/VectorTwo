@@ -10,6 +10,7 @@ import { DataTable, type Columna } from "@/components/ui/data-table";
 import { hojasPropuestaIa } from "@/lib/ia/excel";
 import type { CorridaApi, GMIaDetalleApi, GMIaResumenApi, ServicioIaApi } from "@/lib/ia/tipos-api";
 import type { IndiceLineaApi, ProyeccionApi } from "@/lib/proyeccion/tipos-api";
+import { rutaAprobacion } from "./aprobacion-vista";
 import { AlertaError, BotonEnlace, Cargando, NUM } from "./comunes";
 import { descargarLibro } from "./descarga-libro";
 import { GenerarIaModal } from "./generar-ia-modal";
@@ -19,6 +20,7 @@ import {
   NOTA_CERRAR_A_MANO,
   claveGmValida,
   gmPendiente,
+  idsDeGm,
   lineaServicioEncendido,
   llevaAFactores,
   metaProvisional,
@@ -44,7 +46,7 @@ import { formatearPct, unidades } from "./vista";
 const RUTA_ADMIN_IA = "/administracion/ia";
 
 /** Cabecera de servicio (§4.1): encendida con proveedor y modelo vigentes, o apagada con el motivo y sin ofrecer generar. */
-export function CabeceraServicioIa({ servicio, anioSiguiente, esAdmin }: { servicio: ServicioIaApi; anioSiguiente: number; esAdmin: boolean }) {
+export function CabeceraServicioIa({ servicio, anioSiguiente, esAdmin, enlaceAprobacion }: { servicio: ServicioIaApi; anioSiguiente: number; esAdmin: boolean; enlaceAprobacion?: string }) {
   const apagada = textoServicioApagado(servicio);
   return (
     <div className="space-y-2">
@@ -68,7 +70,19 @@ export function CabeceraServicioIa({ servicio, anioSiguiente, esAdmin }: { servi
           </Link>
         </p>
       )}
-      <Alert tono="info">{NOTA_CERRAR_A_MANO}</Alert>
+      <Alert tono="info">
+        {NOTA_CERRAR_A_MANO}
+        {enlaceAprobacion && (
+          <>
+            {" "}
+            Las filas que bloquean el cierre también se pueden aprobar por lotes, con tu confirmación y el resumen por género × mundo, en la pestaña{" "}
+            <Link href={enlaceAprobacion} className="font-medium underline underline-offset-2">
+              Aprobación
+            </Link>
+            .
+          </>
+        )}
+      </Alert>
     </div>
   );
 }
@@ -98,16 +112,38 @@ export function PrerrequisitosIa({ estado, onIrAFactores }: { estado: EstadoIaPr
   );
 }
 
+type GmParaAprobar = Pick<GMIaResumenApi, "gm_clave" | "propuesta" | "estado" | "filas_y_sin_decidir">;
+
+/**
+ * 07g §4.0: con qué se puede aprobar este GM en bloque. Con propuesta de IA aceptable (al día o con la meta movida) se aprueba 2027 con la IA; si no, y hay filas
+ * del año en curso sin decidir, el método de ese año. Sin ninguna de las dos, `null`. Pura.
+ */
+export function fuenteAprobarGm(g: GmParaAprobar): "ia" | "metodo" | null {
+  if (g.propuesta !== null && (g.estado === "al_dia" || g.estado === "meta_movida")) return "ia";
+  return g.filas_y_sin_decidir > 0 ? "metodo" : null;
+}
+
+/** A dónde lleva «Aprobar este GM» (la pestaña Aprobación con el año y el género · mundo ya elegidos); `null` si no hay qué aprobar o el GM no tiene ids. Pura. */
+export function destinoAprobarGm(g: GmParaAprobar, proyeccionId: string, anioEnCurso: number): string | null {
+  const fuente = fuenteAprobarGm(g);
+  const ids = idsDeGm(g.gm_clave);
+  if (fuente === null || !ids) return null;
+  return rutaAprobacion(proyeccionId, { anio: fuente === "ia" ? anioEnCurso + 1 : anioEnCurso, genero: ids.genero_id, mundo: ids.mundo_id });
+}
+
 /** La tabla de GM (HOMBRE, MUJER y los del Resto agrupados al final). */
 export function TablaGmIa({
   gms,
   onVer,
   onReintentar,
   motivoSinDetalle = null,
+  aprobar,
 }: {
   gms: readonly GMIaResumenApi[];
   onVer: (clave: string) => void;
   onReintentar?: (clave: string) => void;
+  /** 07g: con esto, cada GM con propuesta aceptable o con filas por decidir lleva «Aprobar este GM» (hacia la pestaña Aprobación, ya filtrada). */
+  aprobar?: { proyeccionId: string; anioEnCurso: number };
   /** Con la IA apagada el servidor no entrega el detalle del GM (409): «Ver» queda deshabilitado y este es el motivo. */
   motivoSinDetalle?: string | null;
 }) {
@@ -180,18 +216,28 @@ export function TablaGmIa({
       clave: "ver",
       titulo: "",
       className: "whitespace-nowrap",
-      render: (g) => (
-        <Button
-          variante="secundario"
-          tamano="sm"
-          aria-label={`Ver ${nombreGm(g)}`}
-          disabled={motivoSinDetalle !== null}
-          title={motivoSinDetalle ? `El detalle no está disponible con la IA apagada. ${motivoSinDetalle}` : undefined}
-          onClick={() => onVer(g.gm_clave)}
-        >
-          Ver
-        </Button>
-      ),
+      render: (g) => {
+        const destino = aprobar ? destinoAprobarGm(g, aprobar.proyeccionId, aprobar.anioEnCurso) : null;
+        return (
+          <span className="flex flex-wrap items-center gap-2">
+            <Button
+              variante="secundario"
+              tamano="sm"
+              aria-label={`Ver ${nombreGm(g)}`}
+              disabled={motivoSinDetalle !== null}
+              title={motivoSinDetalle ? `El detalle no está disponible con la IA apagada. ${motivoSinDetalle}` : undefined}
+              onClick={() => onVer(g.gm_clave)}
+            >
+              Ver
+            </Button>
+            {destino && (
+              <Link href={destino} aria-label={`Aprobar este GM: ${nombreGm(g)}`} className="text-xs font-medium text-marca-oscura underline underline-offset-2 hover:text-marca">
+                Aprobar este GM
+              </Link>
+            )}
+          </span>
+        );
+      },
     },
   ];
   return (
@@ -221,6 +267,7 @@ export function VistaPropuestaIa({
   onExcel,
   onCancelarCorrida,
   onIrAFactores,
+  aprobar,
 }: {
   estado: EstadoIaProyeccionApi;
   anioSiguiente: number;
@@ -234,14 +281,19 @@ export function VistaPropuestaIa({
   onExcel: () => void;
   onCancelarCorrida: (c: CorridaApi) => void;
   onIrAFactores: () => void;
+  /** 07g: enlaces «Aprobar en bloque» hacia la pestaña Aprobación; sin esto (pruebas, solo lectura) no se pintan. */
+  aprobar?: { proyeccionId: string };
 }) {
   const permiso = permiteGenerar(estado, bloqueada);
   const motivoApagada = estado.servicio.disponible ? null : (textoServicioApagado(estado.servicio) ?? "la IA está apagada");
   const pendientes = estado.gms.filter(gmPendiente).length;
   const corrida = estado.corrida_en_curso;
+  // 07g: hay algo que aprobar en bloque si algún GM tiene IA aceptable (2027) o filas del año en curso sin decidir.
+  const hayConIa = estado.servicio.disponible && estado.gms.some((g) => fuenteAprobarGm(g) === "ia");
+  const hayPorAprobar = estado.gms.some((g) => fuenteAprobarGm(g) !== null);
   return (
     <div className="space-y-4">
-      <CabeceraServicioIa servicio={estado.servicio} anioSiguiente={anioSiguiente} esAdmin={esAdmin} />
+      <CabeceraServicioIa servicio={estado.servicio} anioSiguiente={anioSiguiente} esAdmin={esAdmin} enlaceAprobacion={aprobar ? rutaAprobacion(aprobar.proyeccionId, { anio: anioSiguiente }) : undefined} />
       <PrerrequisitosIa estado={estado} onIrAFactores={onIrAFactores} />
       {corrida && !corridaPropia && (
         <Alert tono="info">
@@ -257,6 +309,11 @@ export function VistaPropuestaIa({
           {estado.gms.length} GM · {pendientes} pendientes o desactualizados
         </p>
         <div className="flex flex-wrap items-center gap-2">
+          {aprobar && hayPorAprobar && (
+            <Link href={rutaAprobacion(aprobar.proyeccionId, { anio: hayConIa ? anioSiguiente : anioSiguiente - 1 })} className="text-sm font-medium text-marca-oscura underline underline-offset-2 hover:text-marca">
+              Aprobar en bloque
+            </Link>
+          )}
           {/* El Excel arma su hoja FILAS con el detalle de cada GM, que el servidor no entrega con la IA apagada. */}
           <Button
             variante="secundario"
@@ -275,7 +332,7 @@ export function VistaPropuestaIa({
         </div>
       </div>
 
-      <TablaGmIa gms={estado.gms} onVer={onVer} motivoSinDetalle={motivoApagada} onReintentar={estado.servicio.disponible && permiso.ok ? (clave) => onGenerar([clave]) : undefined} />
+      <TablaGmIa gms={estado.gms} onVer={onVer} motivoSinDetalle={motivoApagada} aprobar={aprobar ? { proyeccionId: aprobar.proyeccionId, anioEnCurso: anioSiguiente - 1 } : undefined} onReintentar={estado.servicio.disponible && permiso.ok ? (clave) => onGenerar([clave]) : undefined} />
     </div>
   );
 }
@@ -284,7 +341,8 @@ export function VistaPropuestaIa({
  * Pestaña «Propuesta IA» (ficha 07e, §4.1; solo admin y planner: el comprador no entra a la proyección y la API le responde 403). Lee
  * `GET …/ia`, muestra el servicio, los prerrequisitos y una fila por género × mundo con la meta, el natural de la IA, el esfuerzo, lo
  * absorbido y el estado; «Ver» abre el detalle del GM (`?gm_ia=`). «Generar propuesta IA» abre el modal que conduce la corrida. La
- * propuesta del método no cambia: aquí solo se mira y se pide la de la IA; aceptarla es fila a fila en Por línea.
+ * propuesta del método no cambia: aquí solo se mira y se pide la de la IA; aceptarla es fila a fila en Por línea o por lotes en Aprobación (07g: los
+ * enlaces «Aprobar este GM» y «Aprobar en bloque» llevan allí).
  */
 export function PropuestaIaTab({
   proyeccion,
@@ -345,7 +403,7 @@ export function PropuestaIaTab({
   return (
     <div className="space-y-4">
       <p className="text-sm text-tinta-suave">
-        La meta de {proyeccion.anio_siguiente} por género × mundo se aprueba en Curvas. La IA hace una primera propuesta razonada de cada fila (su natural y cuánto se aparta para cumplir la meta); tú decides, fila por fila, en la pestaña Por línea.
+        La meta de {proyeccion.anio_siguiente} por género × mundo se aprueba en Curvas. La IA hace una primera propuesta razonada de cada fila (su natural y cuánto se aparta para cumplir la meta); tú decides en la pestaña Por línea, fila por fila, o por lotes en la pestaña Aprobación.
       </p>
 
       {lectura.error && <AlertaError error={lectura.error} onCerrar={() => lectura.setError(null)} onRecargar={() => void lectura.recargar()} />}
@@ -370,6 +428,7 @@ export function PropuestaIaTab({
             onExcel={() => void descargarExcel()}
             onCancelarCorrida={(c) => void cancelarCorrida(c)}
             onIrAFactores={onIrAFactores}
+            aprobar={{ proyeccionId: proyeccion.id }}
           />
         )
       )}

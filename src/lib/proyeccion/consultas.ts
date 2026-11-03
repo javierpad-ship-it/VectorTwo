@@ -11,6 +11,9 @@ import { TANDA_UPSERT, type ColaLargaApi, type VentaProyeccion } from "./tipos";
  * escribe `proyecciones`, `proyeccion_filas`, `proyeccion_fila_anios`, `proyeccion_tiendas` y `factores_volumen_atipico`
  * (ficha 07, sección 7 y regla 44). La venta se lee SOLO con la función `jsonb`, por tandas de nodos (un solo estado de
  * los datos por tanda); nada pagina una vista. Todo lo que puede crecer va paginado con `leerTodo` o en tandas.
+ *
+ * 07g: además LEE (nunca escribe) las tablas de lotes de aprobación en bloque, solo para decir quién decidió un registro (`leerLotesDeDecision`, `leerFuentesDeLote`). Su escritura
+ * es la función SQL `aplicar_lote_proyeccion`, que llama la aprobación (`src/lib/aprobacion/consultas.ts`).
  */
 
 type Db = SupabaseClient<Database>;
@@ -143,24 +146,35 @@ export async function eliminarProyeccionCondicional(db: Db, id: string, limiteIs
 
 // ─── Filas con sus años ───
 
-export type ColumnasFilas = "ligeras" | "cerrada" | "previas" | "completas";
+/**
+ * `decision` (07g): todas las columnas de la fila y del registro SIN `historico` (que pesa cientos de KB por fila). Es lo que necesitan las lecturas que deciden y
+ * escriben (la aprobación en bloque con las filas de `Y+1`, que no recalculan nada desde el histórico): el registro completo con su `updated_at`, `decision_lote_id`
+ * y `decision_ia_fila_id`.
+ */
+export type ColumnasFilas = "ligeras" | "cerrada" | "previas" | "completas" | "decision";
 
 /** Sin `historico`: lo que leen `matriz`, `mensual` y el contrato de M8. */
 export const COLUMNAS_FILA_LIGERA =
   "id, clave, tienda_id, gml_id, equivalencia_id, agrupacion_marca_id, nivel_proyectado, agrupacion_estacionalidad_id, temporada, avisos, activo";
+/**
+ * 07g: `updated_at` (lo que comparan las escrituras condicionales), `decision_lote_id` (aprobado en bloque y sin tocar) y `decision_ia_fila_id` (de dónde salió la cifra de
+ * IA): con ellas la IA distingue una fila `libre_en_bloque` (07g §3.5) sin releer. `aRegistro` no las copia: ninguna respuesta de matriz, mensual o cerrada las lleva.
+ */
 export const COLUMNAS_ANIO_LIGERA =
-  "id, fila_id, anio, bloque, subbloque, vendido, propuesto, metodo, decidido, origen, propuesta_al_decidir, crecimiento_pct, base_siguiente, base_normalizada, meses, origen_meses, avisos, activo";
+  "id, fila_id, anio, bloque, subbloque, vendido, propuesto, metodo, decidido, origen, propuesta_al_decidir, crecimiento_pct, base_siguiente, base_normalizada, meses, origen_meses, avisos, activo, decision_ia_fila_id, decision_lote_id, updated_at";
 const COLUMNAS_FILA: Record<ColumnasFilas, string> = {
   ligeras: COLUMNAS_FILA_LIGERA,
   cerrada: `${COLUMNAS_FILA_LIGERA}, participaciones`,
   previas: "id, clave, tienda_id, gml_id, activo",
   completas: "*",
+  decision: `${COLUMNAS_FILA_LIGERA}, proyeccion_id, curva, curva_origen, factores_mes, participaciones, composicion, created_at, updated_at`,
 };
 const COLUMNAS_ANIO: Record<ColumnasFilas, string> = {
   ligeras: COLUMNAS_ANIO_LIGERA,
   cerrada: `${COLUMNAS_ANIO_LIGERA}, curva_origen_usada`,
   previas: "*",
   completas: "*",
+  decision: "*",
 };
 
 export type OpcionesFilas = {
@@ -313,6 +327,46 @@ export async function leerAniosPorIds(db: Db, ids: readonly string[]) {
 export async function actualizarAnio(db: Db, id: string, cambio: TablesUpdate<"proyeccion_fila_anios">) {
   const { error } = await db.from("proyeccion_fila_anios").update(cambio).eq("id", id);
   return { error };
+}
+
+/**
+ * 07g (§3.6). Bloqueo optimista de un registro que solo se RECALCULA (la base de `Y+1` que B2 reescribe): actualiza SOLO si `updated_at` sigue siendo el que se
+ * leyó (el texto tal como lo devolvió la base, con microsegundos, nunca pasado por `Date`). `data` es `null` si otro proceso lo tocó entretanto (no se escribió nada).
+ */
+export async function actualizarAnioCondicional(db: Db, id: string, updatedAtLeido: string, cambio: TablesUpdate<"proyeccion_fila_anios">) {
+  const { data, error } = await db.from("proyeccion_fila_anios").update(cambio).eq("id", id).eq("updated_at", updatedAtLeido).select("id").maybeSingle();
+  return { data, error };
+}
+
+// ─── Lotes de aprobación en bloque (07g): solo lectura, para mostrar quién decidió un registro ───
+
+export type LoteDeDecisionDb = { id: string; tipo: string; created_at: string; usuario_nombre: string | null };
+
+/** Cabecera de los lotes por id (`tipo`, cuándo y quién): lo único que M7 pide para pintar «En bloque · IA/Método». Las escrituras de los lotes son de la aprobación. */
+export async function leerLotesDeDecision(db: Db, ids: readonly string[]): Promise<Resultado<Map<string, LoteDeDecisionDb>>> {
+  const salida = new Map<string, LoteDeDecisionDb>();
+  for (const tanda of enTandas([...ids], TANDA_IN)) {
+    const { data, error } = await db.from("proyeccion_lotes").select("id, tipo, created_at, usuario_nombre").in("id", tanda);
+    if (error) return { data: salida, error };
+    for (const l of data ?? []) salida.set(l.id, l);
+  }
+  return { data: salida, error: null };
+}
+
+/**
+ * La `fuente` (`ia` / `metodo`) de las líneas APLICADAS de los lotes para unas filas: `${lote_id}#${fila_id}#${anio}` → `fuente`. Se pide por `fila_id` (en tandas, paginado):
+ * una fila aparece en pocos lotes.
+ */
+export async function leerFuentesDeLote(db: Db, filaIds: readonly string[]): Promise<Resultado<Map<string, string>>> {
+  const salida = new Map<string, string>();
+  for (const tanda of enTandas([...filaIds], TANDA_IN)) {
+    const r = await leerTodo<{ id: string; lote_id: string; fila_id: string | null; anio: number; fuente: string }>((d, h) =>
+      db.from("proyeccion_lote_filas").select("id, lote_id, fila_id, anio, fuente").in("fila_id", tanda).eq("resultado", "aplicada").order("id").range(d, h)
+    );
+    if (r.error) return { data: salida, error: r.error };
+    for (const x of r.data) if (x.fila_id) salida.set(`${x.lote_id}#${x.fila_id}#${x.anio}`, x.fuente);
+  }
+  return { data: salida, error: null };
 }
 
 // ─── Tiendas de la proyección ───

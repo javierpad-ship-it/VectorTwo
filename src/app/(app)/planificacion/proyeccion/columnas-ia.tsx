@@ -55,6 +55,8 @@ export const nombreProveedor = (id: string): string => PROVEEDORES[id] ?? id;
 
 export const ETIQUETA_META_FILA: Record<EstadoMetaFila, string | null> = {
   libre: null,
+  // 07g: aprobada en bloque con IA: para repartir sigue libre (se muestra la cifra IA de hoy); `aceptable` ya la deshabilita.
+  libre_en_bloque: null,
   fija_decidida: "fija: decidida",
   fija_pct: "fija: % propio",
   fija_cola_larga: "fija: cola larga",

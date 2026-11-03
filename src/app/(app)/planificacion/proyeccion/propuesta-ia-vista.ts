@@ -303,6 +303,7 @@ export function textoGenerada(p: PropuestaResumen | null): string {
 
 export const ETIQUETA_ESTADO_META: Record<EstadoMetaFila, string> = {
   libre: "libre",
+  libre_en_bloque: "libre · aprobada en bloque",
   fija_decidida: "fija: decidida",
   fija_pct: "fija: % propio",
   fija_cola_larga: "fija: cola larga",

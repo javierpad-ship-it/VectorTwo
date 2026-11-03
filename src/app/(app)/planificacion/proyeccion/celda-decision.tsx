@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
 import { formatearNumero } from "@/lib/formato";
+import type { DecisionLoteApi } from "@/lib/aprobacion/tipos-api";
 import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
-import { BadgeDecisionIa, BotonAceptarIa, textoDecisionIa, type AceptarIa } from "./columnas-ia";
+import { BadgeDecisionIa, BotonAceptarIa, fechaCorta, textoDecisionIa, type AceptarIa } from "./columnas-ia";
 import { ayudaCrecimientoFila, marcadorCrecimiento } from "./crecimientos-vista";
 import { filaFijada, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida } from "./vista";
 
@@ -21,6 +23,35 @@ export type DecisionFila = {
 export function textoPropuestaCambio(r: AnioFilaApi | undefined): string | null {
   if (!r || r.decidido === null || r.propuesta_al_decidir === null || r.propuesta_al_decidir === r.propuesto) return null;
   return `Decidiste ${formatearNumero(r.decidido)} con la propuesta en ${formatearNumero(r.propuesta_al_decidir)}; hoy la propuesta es ${r.propuesto === null ? "—" : formatearNumero(r.propuesto)}.`;
+}
+
+/** 07g: el lote en bloque que dejó la cifra decidida de un registro (`null` si se decidió a mano o no está decidido). */
+export function decisionLoteDe(r: AnioFilaApi | undefined): DecisionLoteApi | null {
+  return r?.decision_lote ?? null;
+}
+
+const FUENTE_LOTE: Record<string, string> = { ia: "IA", metodo: "Método" };
+
+/** «Aprobada en bloque (Método) · 03/11/2026»; una reaprobación dice «Reaprobada en bloque». Sin fuente, solo el verbo. */
+export function textoDecisionLote(d: DecisionLoteApi): string {
+  const verbo = d.tipo === "reaprobar" ? "Reaprobada en bloque" : "Aprobada en bloque";
+  const fuente = d.fuente ? FUENTE_LOTE[d.fuente] : null;
+  return `${verbo}${fuente ? ` (${fuente})` : ""} · ${fechaCorta(d.created_at)}`;
+}
+
+/** Quién y cuándo, para el cursor y los lectores de pantalla. */
+export function ayudaDecisionLote(d: DecisionLoteApi): string {
+  return `${textoDecisionLote(d)}${d.usuario_nombre ? ` · ${d.usuario_nombre}` : ""}`;
+}
+
+/** 07g §4.6: «En bloque · IA» / «En bloque · Método» junto a una cifra que decidió un lote de la pestaña Aprobación. El detalle va en el título. */
+export function BadgeDecisionLote({ decision }: { decision: DecisionLoteApi }) {
+  const fuente = decision.fuente ? FUENTE_LOTE[decision.fuente] : null;
+  return (
+    <span title={ayudaDecisionLote(decision)} aria-label={ayudaDecisionLote(decision)}>
+      <Badge tono={decision.fuente === "ia" ? "marca" : "neutro"}>En bloque{fuente ? ` · ${fuente}` : ""}</Badge>
+    </span>
+  );
 }
 
 /**
@@ -65,6 +96,7 @@ export function CeldaDecision({
   const escalada = filaDeTienda === true && registro.origen === "escalada";
   const decidida = filaDeTienda ? filaFijada(registro) : registro.decidido !== null;
   const cambio = textoPropuestaCambio(registro);
+  const lote = decidida ? decisionLoteDe(registro) : null;
   const deshabilitada = bloqueada || ocupado;
   const lectura = leerEntero(texto);
   const nota = notaCambio && texto.trim() !== "" ? notaCambio(lectura.ok ? lectura.valor : null) : null;
@@ -132,7 +164,7 @@ export function CeldaDecision({
             <span className="text-exito" title={`Decidido (${registro.decision_ia ? `cifra aceptada de la IA: ${textoDecisionIa(registro.decision_ia)}` : registro.origen === "manual" ? "cifra escrita" : "propuesta aceptada"})`} aria-label="Decidido">
               ✓
             </span>
-            {registro.decision_ia && <BadgeDecisionIa decision={registro.decision_ia} />}
+            {lote ? <BadgeDecisionLote decision={lote} /> : registro.decision_ia && <BadgeDecisionIa decision={registro.decision_ia} />}
             <Button
               variante="fantasma"
               tamano="sm"

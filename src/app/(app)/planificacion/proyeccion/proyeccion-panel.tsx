@@ -14,6 +14,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Select } from "@/components/ui/form";
 import { Tabs } from "@/components/ui/tabs";
 import { AntesDeProyectar } from "./antes-de-proyectar";
+import { AprobacionTab } from "./aprobacion-tab";
+import { leerParametrosAprobacion } from "./aprobacion-vista";
 import { CabeceraProyeccion } from "./cabecera-proyeccion";
 import { ArchivarModal } from "./archivar-modal";
 import { CerrarModal } from "./cerrar-modal";
@@ -45,11 +47,11 @@ function proyeccionPorDefecto(lista: readonly ProyeccionApi[]): ProyeccionApi | 
 
 /**
  * Pantalla /planificacion/proyeccion (M7). Proyección anual de unidades del año en curso y del siguiente, por GML ×
- * agrupación de marca. Siete pestañas en el orden de trabajo: Factores del Niño · Tiendas nuevas y cierres · Crecimientos
- * (resumen de solo lectura de los crecimientos aprobados, 06d) · Propuesta IA (07e: la propuesta razonada de la IA por género × mundo) · Por línea (Parte 1) · Matriz (Parte 2) · Mensual (Parte 3, solo lectura). Todo el estado de la vista vive en la URL
+ * agrupación de marca. Ocho pestañas en el orden de trabajo: Factores del Niño · Tiendas nuevas y cierres · Crecimientos
+ * (resumen de solo lectura de los crecimientos aprobados, 06d) · Propuesta IA (07e: la propuesta razonada de la IA por género × mundo) · Por línea (Parte 1) · Aprobación (07g: lo que bloquea el cierre, en bloque y con traza) · Matriz (Parte 2) · Mensual (Parte 3, solo lectura). Todo el estado de la vista vive en la URL
  * (`?proyeccion=&pestana=&genero=&mundo=&linea=&temporada=&agrupacion_estacionalidad=&agrupacion_marca=&solo=&fila=&tienda=`):
  * recargar o compartir el enlace reabre la misma vista y cambiar de pestaña conserva el recorte. Admin y planner tienen las
- * mismas acciones; el comprador no entra (menú y página). Nada se aprueba en bloque.
+ * mismas acciones; el comprador no entra (menú y página). En bloque solo se aprueba desde «Aprobación» (07g): por línea se decide una cifra a la vez.
  */
 export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {}) {
   const params = useSearchParams();
@@ -58,6 +60,8 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
   const pestanaUrl = params.get("pestana");
   const pestana: Pestana = esPestana(pestanaUrl) ? pestanaUrl : "linea";
   const filtro = useMemo(() => leerFiltro(params), [params]);
+  // 07g: lo propio de la pestaña «Aprobación» (año, modo, GM y filtros); género, mundo, línea y marca son los filtros compartidos de arriba.
+  const parametrosAprobacion = useMemo(() => leerParametrosAprobacion(params), [params]);
   const filaId = idONulo(params.get("fila"));
   const tiendaId = idONulo(params.get("tienda"));
   // 0.15.0 (07e): el GM abierto en «Propuesta IA» (`<genero_id>.<mundo_id>`).
@@ -131,6 +135,16 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
 
   function limpiarFiltro() {
     cambiarUrl(Object.fromEntries([...CLAVES_FILTRO.map((k) => [k, null] as const), ["fila", null] as const]), "replace");
+  }
+
+  /** Año y modo van al historial del navegador (Atrás los deshace); el resto de los filtros de la pestaña, no. */
+  const cambiarParametrosAprobacion = useCallback(
+    (cambios: Record<string, string | null>) => cambiarUrl(cambios, "anio" in cambios || "modo" in cambios ? "push" : "replace"),
+    [cambiarUrl]
+  );
+
+  function limpiarAprobacion() {
+    cambiarUrl({ genero: null, mundo: null, linea: null, agrupacion_marca: null, gm: null, fuertes: null, revision: null, conf: null, estado_ia: null, brecha: null }, "replace");
   }
 
   function irALinea(ids: NodoMatrizApi["ids"]) {
@@ -210,7 +224,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
         <div className="max-w-3xl">
           <h1 className="text-2xl font-semibold">Proyección de unidades</h1>
           <p className="mt-1 text-sm text-tinta-suave">
-            Las unidades del año en curso y del año siguiente completos, por género · mundo · línea · agrupación de marca. El sistema propone con la curva vigente de M6; tú decides cada cifra, una por una. Las tiendas nuevas van
+            Las unidades del año en curso y del año siguiente completos, por género · mundo · línea · agrupación de marca. El sistema propone con la curva vigente de M6; tú decides cada cifra, una por una en «Por línea» o, para lo que bloquea el cierre, en bloque desde «Aprobación». Las tiendas nuevas van
             antes que las líneas porque alimentan la base del año siguiente.
           </p>
         </div>
@@ -314,6 +328,25 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
           onIrATienda={irATienda}
           onCambio={recargarTodo}
           onRecalcular={() => void recalcular()}
+        />
+      )}
+
+      {proyeccion && pestana === "aprobacion" && (
+        <AprobacionTab
+          proyeccion={proyeccion}
+          filtro={filtro}
+          indice={indice}
+          agrupacionesMarca={optsMarca}
+          parametros={parametrosAprobacion}
+          bloqueada={!editable}
+          onFiltro={cambiarFiltro}
+          onParametros={cambiarParametrosAprobacion}
+          onLimpiar={limpiarAprobacion}
+          onCambio={recargarTodo}
+          onRecalcular={() => void recalcular()}
+          onIrAFactores={() => cambiarPestana("factores")}
+          onIrACrecimientos={() => cambiarPestana("crecimientos")}
+          onIrATiendas={irATiendas}
         />
       )}
 

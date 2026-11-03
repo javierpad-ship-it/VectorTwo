@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { descargarCsv } from "@/components/importador/csv";
 import { Alert } from "@/components/ui/alert";
@@ -14,6 +15,7 @@ import type { IaFilaApi } from "@/lib/ia/tipos-api";
 import type { FilaApi, FilaTiendaLineaApi, IndiceLineaApi, ProyeccionApi, RespuestaDecidirFilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
 import { textoAjusteMeta, textoCifraCambio } from "./columnas-ia";
+import { rutaAprobacion } from "./aprobacion-vista";
 import { AlertaError, BadgeEstadoLinea, BotonEnlace, Cargando } from "./comunes";
 import { DetalleFila } from "./detalle-fila";
 import { SelectoresLinea } from "./filtros-vista";
@@ -47,7 +49,8 @@ import {
  * Parte 1: análisis por línea (ficha 07, pasos 3 y 4). Tres filtros (género, mundo, línea) y un índice lateral con el
  * estado de cada línea para avanzar en orden. La línea elegida muestra el gráfico de unidades por año (cada barra con
  * las mismas tiendas de su año) y la tabla de sus filas GML × agrupación de marca, donde se decide el total de cada
- * año. El detalle de una fila (`&fila=`) trae la explicación completa. Nada se aprueba en bloque.
+ * año. El detalle de una fila (`&fila=`) trae la explicación completa. Aquí se decide fila a fila; para aprobar muchas a la vez (07g) hay
+ * un enlace a la pestaña Aprobación con la línea ya filtrada.
  */
 export function LineaTab({
   proyeccion,
@@ -148,8 +151,9 @@ export function LineaTab({
     if (!r.ok) return false;
     await recargarTodo();
     if (verIa && anio === y + 1) {
-      const estado = iaFilas.porFila.get(fila.id)?.estado_meta;
-      if (estado === "libre" || estado === "fija_decidida") setAviso(textoAjusteMeta(nombreGm));
+      // 07g §3.5: una fila `libre_en_bloque` (IA aprobada en bloque) que se cambia a mano también mueve a las demás libres.
+      const estado: string | undefined = iaFilas.porFila.get(fila.id)?.estado_meta;
+      if (estado === "libre" || estado === "libre_en_bloque" || estado === "fija_decidida") setAviso(textoAjusteMeta(nombreGm));
     }
     // Una fila de apertura mueve el total de su tienda (D + Δ): se dice el total ya actualizado.
     if (fila.tienda_id !== null && r.valor.tienda) setAviso(textoTotalTiendaTras((fila as Partial<FilaTiendaLineaApi>).tienda_codigo ?? "La tienda", r.valor.tienda));
@@ -292,7 +296,7 @@ export function LineaTab({
 
                 <Card
                   titulo="Filas de la línea (GML × agrupación de marca)"
-                  descripcion="Escribe la cifra y pulsa Enter, o ✓ para aceptar la propuesta. Nada se aprueba en bloque."
+                  descripcion="Escribe la cifra y pulsa Enter, o ✓ para aceptar la propuesta. Para aprobar varias a la vez, usa Aprobación."
                   acciones={hayIa ? <Switch checked={verIa} onChange={cambiarVerIa} label="Ver IA" /> : undefined}
                 >
                   <TablaFilas
@@ -322,6 +326,13 @@ export function LineaTab({
                     <p>
                       <BotonEnlace onClick={onIrATiendas}>Ir a Tiendas nuevas y cierres</BotonEnlace>
                     </p>
+                    {!bloqueada && (
+                      <p>
+                        <Link href={rutaAprobacion(proyeccion.id, { anio: y, genero: elegida.genero_id, mundo: elegida.mundo_id, linea: elegida.linea_id })} className="font-medium text-marca-oscura underline underline-offset-2 hover:text-marca">
+                          Aprobar en bloque las de esta línea
+                        </Link>
+                      </p>
+                    )}
                   </div>
                   {datos.prueba_anterior && (
                     <p className="mt-3 rounded-md bg-fondo px-3 py-2 text-xs text-tinta-suave">

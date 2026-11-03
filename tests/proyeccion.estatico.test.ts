@@ -26,7 +26,8 @@ const fuente = (ruta: string) => src.find((f) => f.ruta === ruta)?.texto ?? "";
 const LIB = "src/lib/proyeccion/";
 const CONSULTAS = `${LIB}consultas.ts`;
 const TIPOS_DB = "src/lib/supabase/database.types.ts";
-const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && f.ruta.endsWith("route.ts") && !f.ruta.includes("/ia/"));
+// Las rutas de IA (`/ia/`) y de aprobación en bloque (`/aprobacion/`, 07g) tienen sus propias pruebas estáticas (`ia.estatico`, `aprobacion.estatico`).
+const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && f.ruta.endsWith("route.ts") && !f.ruta.includes("/ia/") && !f.ruta.includes("/aprobacion/"));
 /** Lógica pura: ni base ni HTTP ni pantalla. */
 const PURAS = [
   "apertura-linea", "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "crecimientos", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
@@ -364,9 +365,10 @@ describe("07e R24: M7 no depende de la IA (ni en el código ni en las lecturas d
     expect(put).not.toContain("decision_ia");
     // La firma de la ficha (contrato con Backend A).
     expect(sin(`${LIB}servicio-edicion.ts`)).toMatch(/export async function decidirFila\(\s*id: string,\s*filaId: string,\s*anio: number,\s*cuerpo: DecisionCuerpo,\s*actor: Actor,\s*opciones\?: \{ decision_ia_fila_id\?: string \}\s*\)/);
-    // Quien nombra la columna: persistencia (payload y lectura de trazas) y servicio-edicion (decidir). `copiar_de` (servicio.ts) la copia solo por `trazasIaDe` + `payloadAnioDecision`.
+    // Quien nombra la columna: persistencia (payload y lectura de trazas), servicio-edicion (decidir) y, desde 07g, consultas (la pide en las columnas ligeras para que la IA
+    // distinga `libre_en_bloque`; solo la selecciona). `copiar_de` (servicio.ts) la copia solo por `trazasIaDe` + `payloadAnioDecision`.
     const escriben = delModulo.filter((f) => /decision_ia_fila_id/.test(sinComentarios(f.texto))).map((f) => f.ruta).sort();
-    expect(escriben).toEqual([`${LIB}persistencia.ts`, `${LIB}servicio-edicion.ts`]);
+    expect(escriben).toEqual([CONSULTAS, `${LIB}persistencia.ts`, `${LIB}servicio-edicion.ts`]);
     const servicio = sin(`${LIB}servicio.ts`);
     expect(servicio).toMatch(/trazasIa = trazasIaDe\(f\.data\)/);
     expect(servicio).toMatch(/payloadAnioDecision\(filaId, r, undefined, traza\)/);
@@ -375,5 +377,116 @@ describe("07e R24: M7 no depende de la IA (ni en el código ni en las lecturas d
   it("VERSION_METODO sigue en 5 y la cerrada no menciona la IA (contrato de M8 intacto)", () => {
     expect(fuente(`${LIB}tipos-api.ts`)).toMatch(/export const VERSION_METODO = 5;/);
     for (const ruta of [`${LIB}cierre.ts`, `${LIB}mensual.ts`, "src/app/api/proyeccion/cerrada/route.ts"]) expect(sin(ruta), ruta).not.toMatch(/decision_ia|meta_siguiente/);
+  });
+});
+
+describe("07g R2: filaBloqueaCierre es la única definición de «bloquea el cierre»", () => {
+  const sin = (ruta: string) => sinComentarios(fuente(ruta));
+
+  it("reglas.ts la exporta una sola vez y motivoRechazoCerrar la llama; nadie más compara `propuesto >= umbral` ni `revision_cola_larga` para decidir el bloqueo", () => {
+    const reglas = sin(`${LIB}reglas.ts`);
+    expect(reglas.match(/export function filaBloqueaCierre\(/g)).toHaveLength(1);
+    const cerrar = reglas.slice(reglas.indexOf("export function motivoRechazoCerrar"), reglas.indexOf("export function puedeEliminar"));
+    expect(cerrar).toMatch(/filaBloqueaCierre\(r, umbral\)/);
+    // El bucle que decide qué fila queda sin decidir no repite el predicado.
+    const bucle = cerrar.slice(cerrar.indexOf("const sinDecidir"), cerrar.indexOf("if (sinDecidir.length > 0)"));
+    expect(bucle.length).toBeGreaterThan(50);
+    expect(bucle).not.toMatch(/revision_cola_larga|>=\s*umbral/);
+    // Ni el servicio del cierre ni la aprobación en bloque tienen su propia copia (`cola-larga.ts` pone el aviso con otro propósito: no decide el bloqueo).
+    for (const f of src.filter((x) => x.ruta === `${LIB}servicio.ts` || x.ruta.startsWith("src/lib/aprobacion/"))) {
+      expect(sinComentarios(f.texto), f.ruta).not.toMatch(/propuesto\s*>=\s*(umbral|[a-z.]*umbral[a-z_]*)/i);
+    }
+  });
+});
+
+describe("07g R14: la función SQL escribe las mismas columnas que payloadAnioDecision (sin activo) más decision_lote_id", () => {
+  const dir = path.join(RAIZ, "supabase", "migrations");
+  const archivo = existsSync(dir) ? readdirSync(dir).find((n) => /^\d{4}_lotes_proyeccion\.sql$/.test(n)) : undefined;
+
+  it("la lista de columnas permitidas de aplicar_lote_proyeccion = claves de payloadAnioDecision − activo − fila_id − anio + decision_lote_id", async () => {
+    expect(archivo, "migración de lotes").toBeDefined();
+    const sql = readFileSync(path.join(dir, archivo as string), "utf8");
+    const lista = /v_permitidas text\[\] := array\[([\s\S]*?)\]/.exec(sql)?.[1] ?? "";
+    const enSql = [...lista.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort();
+    expect(enSql.length).toBeGreaterThan(20);
+    const { payloadAnioDecision } = await import("@/lib/proyeccion/persistencia");
+    const registro = {
+      anio: 2027, bloque: "mismas", subbloque: null, vendido: 0, propuesto: 100, metodo: "avance", referencia_alternativa: null, referencia_tres_meses: null, explicacion: "",
+      crecimiento_pct: null, decidido: 100, origen: "manual", propuesta_al_decidir: 100, vigente: 100, nota: null, decidido_por_nombre: "x", decidido_at: "2026-11-03T10:00:00.000Z",
+      meses: null, meses_propuestos: null, origen_meses: null, avance: null, avisos: [], curva_origen_usada: [], curva_origen_propuesta: null,
+    } as unknown as Parameters<typeof payloadAnioDecision>[1];
+    const claves = Object.keys(payloadAnioDecision("fila", registro, "perfil", "traza", "lote"))
+      .filter((k) => !["activo", "fila_id", "anio"].includes(k))
+      .sort();
+    expect(claves).toContain("decision_lote_id");
+    expect(enSql).toEqual(claves);
+    // Nunca id, fila_id, anio ni activo (un lote no reactiva un registro).
+    for (const prohibida of ["id", "fila_id", "anio", "activo"]) expect(enSql).not.toContain(prohibida);
+  });
+
+  it("el registro que solo se recalcula (payloadAnioRecalculo) no lleva ninguna columna de decisión ni activo", async () => {
+    const { payloadAnioRecalculo } = await import("@/lib/proyeccion/persistencia");
+    const registro = {
+      anio: 2027, bloque: "mismas", subbloque: null, vendido: 0, propuesto: 100, metodo: "avance", referencia_alternativa: null, referencia_tres_meses: null, explicacion: "",
+      crecimiento_pct: 5, decidido: 100, origen: "manual", propuesta_al_decidir: 100, vigente: 100, nota: "n", decidido_por_nombre: "x", decidido_at: "2026-11-03T10:00:00.000Z",
+      meses: null, meses_propuestos: null, origen_meses: null, avance: null, avisos: [], curva_origen_usada: [], curva_origen_propuesta: null,
+    } as unknown as Parameters<typeof payloadAnioRecalculo>[1];
+    const claves = Object.keys(payloadAnioRecalculo("fila", registro));
+    for (const decision of ["decidido", "origen", "nota", "propuesta_al_decidir", "decidido_at", "decidido_por_id", "decidido_por_nombre", "decision_ia_fila_id", "decision_lote_id", "crecimiento_pct", "activo", "fila_id", "anio"]) {
+      expect(claves, decision).not.toContain(decision);
+    }
+  });
+});
+
+describe("07g: M7 y la aprobación en bloque", () => {
+  const sin = (ruta: string) => sinComentarios(fuente(ruta));
+  const delModulo = src.filter((f) => f.ruta.startsWith(LIB));
+
+  it("R21: nada de src/lib/proyeccion/ importa de src/lib/aprobacion/", () => {
+    for (const f of delModulo) for (const origen of importsDe(sinComentarios(f.texto))) expect(origen, `${f.ruta} importa ${origen}`).not.toMatch(/(^|\/)lib\/aprobacion(\/|$)|^\.\.?\/.*\baprobacion\//);
+  });
+
+  it("las tablas de lotes solo se LEEN desde consultas.ts (la escritura es la función SQL de la aprobación)", () => {
+    const nombran = delModulo.filter((f) => /proyeccion_lotes|proyeccion_lote_filas/.test(sinComentarios(f.texto))).map((f) => f.ruta);
+    expect(nombran).toEqual([CONSULTAS]);
+    const c = sin(CONSULTAS);
+    expect(c).not.toMatch(/from\(\s*["']proyeccion_lote(s|_filas)["']\)\s*\.(insert|update|upsert|delete)/);
+    expect(c).not.toContain("aplicar_lote_proyeccion");
+  });
+
+  it("decision_lote_id: el cálculo no la escribe, solo servicio-edicion la limpia al decidir y copiar_de no la copia", () => {
+    const calculo = sin(`${LIB}persistencia.ts`).match(/export function payloadAnioCalculo[\s\S]*?\n\}\n/)?.[0] ?? "";
+    expect(calculo.length).toBeGreaterThan(100);
+    expect(calculo).not.toContain("decision_lote_id");
+    const escriben = delModulo.filter((f) => /decision_lote_id/.test(sinComentarios(f.texto))).map((f) => f.ruta).sort();
+    expect(escriben).toEqual([CONSULTAS, `${LIB}persistencia.ts`, `${LIB}servicio-edicion.ts`, `${LIB}servicio-lectura.ts`].sort());
+    // `copiar_de` (servicio.ts) escribe la decisión con `payloadAnioDecision(filaId, r, undefined, traza)`: sin quinto parámetro, la columna no se escribe y queda `null`.
+    expect(sin(`${LIB}servicio.ts`)).toMatch(/payloadAnioDecision\(filaId, r, undefined, traza\)/);
+    // Toda decisión individual la pasa en `null` (salvo el crecimiento propio, que no toca la decisión).
+    expect(sin(`${LIB}servicio-edicion.ts`)).toMatch(/decision_lote_id: soloCrecimiento \? undefined : null/);
+  });
+
+  it("§3.6: la base de Y+1 que B2 recalcula se escribe con update condicional por updated_at y solo por guardarRecalculados", () => {
+    const edicion = sin(`${LIB}servicio-edicion.ts`);
+    expect(edicion).toMatch(/async function guardarRecalculados\(/);
+    expect(edicion.match(/actualizarAnioCondicional\(/g)).toHaveLength(1);
+    // propagarTienda ya no guarda la base de Y+1 con `guardarRegistros` (que escribe la decisión).
+    const propagar = edicion.slice(edicion.indexOf("async function propagarTienda"), edicion.indexOf("// ─── PUT /tiendas/[tiendaId]/anios/[anio]"));
+    expect(propagar).toMatch(/guardarRecalculados\(d, recalculados\)/);
+    expect(propagar).not.toMatch(/guardarRegistros\(d, nuevasBases/);
+    // El update condicional va por id y updated_at, nunca por clave sola.
+    const consultas = sin(CONSULTAS);
+    expect(consultas).toMatch(/\.update\(cambio\)\.eq\("id", id\)\.eq\("updated_at", updatedAtLeido\)/);
+  });
+
+  it("las columnas ligeras traen updated_at, decision_lote_id y decision_ia_fila_id y siguen sin historico; existe el modo `decision` (sin historico)", () => {
+    const c = fuente(CONSULTAS);
+    const anio = /export const COLUMNAS_ANIO_LIGERA =\s*"([^"]*)"/.exec(c)?.[1] ?? "";
+    for (const col of ["updated_at", "decision_lote_id", "decision_ia_fila_id"]) expect(anio.split(",").map((x) => x.trim())).toContain(col);
+    expect(anio).not.toContain("historico");
+    const decision = /decision: `\$\{COLUMNAS_FILA_LIGERA\}, ([^`]*)`/.exec(c)?.[1] ?? "";
+    expect(decision.length).toBeGreaterThan(10);
+    expect(decision).not.toContain("historico");
+    expect(c).toMatch(/export type ColumnasFilas = [^;]*"decision"/);
   });
 });

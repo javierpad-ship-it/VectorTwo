@@ -10,6 +10,7 @@ import { MiniCurva } from "@/components/curvas/mini-curva";
 import { formatearDecimal, formatearNumero, plural } from "@/lib/formato";
 import type { IaFilaApi } from "@/lib/ia/tipos-api";
 import type { FilaDetalleApi, ProyeccionApi } from "@/lib/proyeccion/tipos-api";
+import { rutaAprobacion } from "./aprobacion-vista";
 import { BloqueDecision } from "./bloque-decision";
 import { filaConNino } from "./crecimientos-vista";
 import type { DecisionFila } from "./celda-decision";
@@ -76,7 +77,9 @@ export function DetalleFila({
     const r = await accion.ejecutar(() => api.put(`${ruta}/anios/${anio}`, cuerpo));
     if (!r.ok) return false;
     await Promise.all([fila.recargar(), onCambio()]);
-    if (anio === y + 1 && ia?.estado_meta === "libre") onFilaIaFijada?.();
+    // `libre_en_bloque` (07g §3.5): una fila de IA aprobada en bloque que se cambia a mano también deja a las demás libres absorber la diferencia.
+    const estadoIa: string | undefined = ia?.estado_meta;
+    if (anio === y + 1 && (estadoIa === "libre" || estadoIa === "libre_en_bloque")) onFilaIaFijada?.();
     return true;
   }
 
@@ -241,6 +244,7 @@ export function DetalleFila({
                   factoresMes={d.factores_mes?.[y]}
                   onDecidir={(c) => decidir(y, c)}
                   onAplicarCurva={aplicarCurva}
+                  enlaceLote={rutaAprobacion(proyeccion.id, { anio: y })}
                 />
                 <MesesDeRegistro registro={d.anios.find((a) => a.anio === y)} titulo={`${y} · real en gris, proyectado en cursiva`} />
               </div>
@@ -257,6 +261,7 @@ export function DetalleFila({
                   onDecidir={(c) => decidir(y + 1, c)}
                   onAplicarCurva={aplicarCurva}
                   aceptarIa={ia ? aceptarIaDe(ia, () => aceptarIa(ia)) : undefined}
+                  enlaceLote={rutaAprobacion(proyeccion.id, { anio: y + 1 })}
                 />
                 {factorCorrige && (
                   <p className="text-xs text-tinta-suave">

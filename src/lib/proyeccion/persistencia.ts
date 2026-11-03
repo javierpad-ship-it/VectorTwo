@@ -1,4 +1,4 @@
-import type { Json, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import type { Json, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types";
 import { avanceAcumulado } from "./cierre";
 import type { CrecimientoDeFila } from "./crecimientos";
 import type { FilaPlana } from "./matriz";
@@ -9,6 +9,7 @@ import {
   type AvisoFila,
   type CurvaOrigen,
   type DecisionIaApi,
+  type DecisionLoteApi,
   type DecisionPrevia,
   type DecisionTiendaPrevia,
   type FilaApi,
@@ -182,12 +183,17 @@ export function payloadAnioCalculo(filaId: string, r: RegistroModelo, avisosExtr
  * `decisionIaFilaId` (07e, `decision_ia_fila_id`): `undefined` NO escribe la columna (conserva lo que había; la mayoría de los registros que se
  * reescriben no cambian de decisión); `null` la limpia; un id la escribe. Solo vale con una cifra decidida a mano (`origen = manual`): la base
  * lo exige con un `check`, así que cualquier otro registro la lleva `null` aunque se pida un id (nunca se manda una combinación que la base rechace).
+ *
+ * `decisionLoteId` (07g, `decision_lote_id`): igual que la traza: `undefined` NO escribe la columna (conserva lo que había), `null` la limpia y un id la escribe.
+ * La base exige una cifra decidida (`check decision_lote_id is null or decidido is not null`): sin `decidido` siempre va `null`. Toda decisión individual la
+ * pasa en `null` (una decisión a mano deja de ser «aprobada en bloque»); los lotes la escriben en SQL (`aplicar_lote_proyeccion`).
  */
 export function payloadAnioDecision(
   filaId: string,
   r: RegistroModelo,
   decididoPorId: string | null | undefined,
-  decisionIaFilaId?: string | null
+  decisionIaFilaId?: string | null,
+  decisionLoteId?: string | null
 ): TablesInsert<"proyeccion_fila_anios"> {
   const trazaValida = r.decidido !== null && r.origen === "manual";
   return {
@@ -202,7 +208,54 @@ export function payloadAnioDecision(
     ...(r.decidido === null ? { decidido_por_id: null } : decididoPorId === undefined ? {} : { decidido_por_id: decididoPorId }),
     decidido_por_nombre: r.decidido_por_nombre,
     ...(decisionIaFilaId === undefined ? {} : { decision_ia_fila_id: trazaValida ? decisionIaFilaId : null }),
+    ...(decisionLoteId === undefined ? {} : { decision_lote_id: r.decidido !== null ? decisionLoteId : null }),
   };
+}
+
+/**
+ * 07g (§3.6). Lo que se escribe de un registro que SOLO se recalcula (la base de `Y+1` que B2 reescribe tras decidir `Y` o mover una tienda): las columnas del
+ * cálculo, sin decisión (`decidido`, `origen`, `nota`, `decidido_*`, trazas de IA y de lote: conserva las que tenga) y sin `activo` (nunca reactiva un registro).
+ * Es `payloadAnioCalculo` sin `fila_id`, `anio` ni `activo`: el `update` condicional va por `id`.
+ */
+export function payloadAnioRecalculo(filaId: string, r: RegistroModelo): TablesUpdate<"proyeccion_fila_anios"> {
+  const { fila_id: _f, anio: _a, activo: _act, ...cambio } = payloadAnioCalculo(filaId, r);
+  void _f;
+  void _a;
+  void _act;
+  return cambio;
+}
+
+/** El lote que dejó cada registro decidido en bloque: `proyeccion_fila_anios.id` → su `DecisionLoteApi`. Un lote que no se encontró deja el registro fuera. */
+export type LoteDeDecision = { id: string; tipo: string; created_at: string; usuario_nombre: string | null };
+
+export function decisionesLoteDeFilas(
+  filas: readonly FilaConAnios[],
+  lotes: ReadonlyMap<string, LoteDeDecision>,
+  /** `${lote_id}#${fila_id}#${anio}` → `fuente` de la línea aplicada del lote. */
+  fuentes: ReadonlyMap<string, string>
+): Map<string, DecisionLoteApi> {
+  const m = new Map<string, DecisionLoteApi>();
+  for (const f of filas) {
+    for (const a of f.proyeccion_fila_anios ?? []) {
+      const loteId = a.decision_lote_id;
+      const lote = loteId ? lotes.get(loteId) : undefined;
+      if (!loteId || !lote) continue;
+      const fuente = fuentes.get(`${loteId}#${a.fila_id}#${a.anio}`);
+      m.set(a.id, {
+        lote_id: loteId,
+        tipo: lote.tipo === "reaprobar" || lote.tipo === "revertir" ? lote.tipo : "aprobar",
+        created_at: lote.created_at,
+        usuario_nombre: lote.usuario_nombre,
+        fuente: fuente === "ia" || fuente === "metodo" ? fuente : null,
+      });
+    }
+  }
+  return m;
+}
+
+/** Los ids de lote (`decision_lote_id`) que llevan las filas, sin repetir: lo único que se le pide a las tablas de lotes. */
+export function lotesDeDecisiones(filas: readonly FilaConAnios[]): string[] {
+  return [...new Set(filas.flatMap((f) => (f.proyeccion_fila_anios ?? []).flatMap((a) => (a.decision_lote_id ? [a.decision_lote_id] : []))))];
 }
 
 /**
@@ -399,7 +452,13 @@ export function conCamposBrutos(api: AnioFilaApi, fila: Pick<FilaModelo, "tienda
  * Los registros de una fila a la API. `cola_larga` (la validación de disponibilidad, que vive en `historico`) solo se pone en el
  * registro de `Y` de una fila base; en el resto `null`.
  */
-export function aAniosApi(modelo: FilaModelo, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi, decisionesIa?: ReadonlyMap<string, DecisionIaApi>): AnioFilaApi[] {
+export function aAniosApi(
+  modelo: FilaModelo,
+  anioEnCurso: number,
+  crecimientoDe?: CrecimientoDeApi,
+  decisionesIa?: ReadonlyMap<string, DecisionIaApi>,
+  decisionesLote?: ReadonlyMap<string, DecisionLoteApi>
+): AnioFilaApi[] {
   return modelo.registros.map((r) =>
     conCamposBrutos(
       {
@@ -407,6 +466,8 @@ export function aAniosApi(modelo: FilaModelo, anioEnCurso: number, crecimientoDe
         cola_larga: modelo.tienda_id === null && r.anio === anioEnCurso ? (modelo.historico?.cola_larga ?? null) : null,
         // 07e: con las decisiones de IA leídas (aunque sea un mapa vacío) cada registro dice si salió de «Aceptar IA»; sin ellas el campo no existe.
         ...(decisionesIa ? { decision_ia: (r.id !== undefined ? decisionesIa.get(r.id) : undefined) ?? null } : {}),
+        // 07g: igual con el lote de aprobación en bloque que dejó la cifra decidida.
+        ...(decisionesLote ? { decision_lote: (r.id !== undefined ? decisionesLote.get(r.id) : undefined) ?? null } : {}),
       },
       modelo,
       anioEnCurso,
@@ -474,7 +535,15 @@ export function aFilaPlana(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso:
 }
 
 /** Fila de la API con sus años (`historico_anual` solo si se pide con `historico`). */
-export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: number, crecimientoDe?: CrecimientoDeApi, decisionesIa?: ReadonlyMap<string, DecisionIaApi>): FilaApi | null {
+export function aFilaApi(
+  f: FilaConAnios,
+  c: Catalogo,
+  k: number,
+  anioEnCurso: number,
+  crecimientoDe?: CrecimientoDeApi,
+  decisionesIa?: ReadonlyMap<string, DecisionIaApi>,
+  decisionesLote?: ReadonlyMap<string, DecisionLoteApi>
+): FilaApi | null {
   const n = nombresDe(f, c);
   if (!n) return null;
   const modelo = aFilaModelo(f, k, anioEnCurso);
@@ -498,7 +567,7 @@ export function aFilaApi(f: FilaConAnios, c: Catalogo, k: number, anioEnCurso: n
       completo: a.anio < anioEnCurso || k === 12,
       tiendas: a.tiendas.length,
     })),
-    anios: aAniosApi(modelo, anioEnCurso, crecimientoDe, decisionesIa).filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false),
+    anios: aAniosApi(modelo, anioEnCurso, crecimientoDe, decisionesIa, decisionesLote).filter((r) => f.proyeccion_fila_anios.find((a) => a.anio === r.anio)?.activo !== false),
     avisos: modelo.avisos,
     activo: f.activo,
   };

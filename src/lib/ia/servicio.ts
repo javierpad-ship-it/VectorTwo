@@ -465,6 +465,71 @@ export function lecturaDelGM(l: LecturaProyeccionIa, gm: GMCatalogo, extras: { c
 /** «Aceptar IA» no llama al proveedor: un tope mensual o una clave rechazada no lo impiden; faltar el entorno o la configuración, sí. */
 export const aceptarPermitido = (s: ServicioInterno): boolean => s.api.motivo === null || s.api.motivo === "tope_mensual" || s.api.motivo === "clave_invalida";
 
+// ─── 07g · Aprobación en bloque: las cifras de IA de hoy, de una sola foto ───
+
+/**
+ * La aprobación en bloque (`src/lib/aprobacion/servicio.ts`) lee de la IA SOLO por este archivo (07g §3: «de `ia/servicio.ts` solo para ítems o columnas de IA»; lo vigila
+ * `tests/aprobacion.reglas.test.ts`): estos tres nombres y dos tipos de `contexto-gm.ts` son lo que necesita para cargar la proyección y los GM del árbol.
+ */
+export { cargarProyeccionIa, fuenteMetaDe, gmClaveDe, type GMCatalogo, type ProyeccionIa } from "./contexto-gm";
+
+export type GMValoresIa = { gm: GMCatalogo; lectura: LecturaGM; plan: PlanMetaGM };
+
+export type ValoresIaAprobacion = {
+  /** Por `gm_clave`, solo los GM con filas base: la lectura de la IA de HOY (cifra `A_f` por fila, estado del GM, confianza y avisos). */
+  gms: Map<string, GMValoresIa>;
+  /** `ia_propuestas_filas.id → { fila_id, propuesta_gm_id }` de las propuestas VIGENTES de los GM leídos (para validar los ítems de IA de un lote). */
+  propuestasFila: Map<string, { fila_id: string | null; propuesta_gm_id: string }>;
+  /** Hay una corrida de IA `en_curso` no caducada en la proyección (D16: un lote con ítems de IA se rechaza entero). */
+  corrida_en_curso: boolean;
+};
+
+/**
+ * Una fila base de `Y+1` aprobada en bloque con IA (`decision_lote_id` y `decision_ia_fila_id` no nulos) se lee como LIBRE (`libre_en_bloque`, 07g §3.5):
+ * `decidido` y `origen` en `null` en una COPIA de la fila. La clasificación `libre_en_bloque` de `ia/meta.ts` hace lo mismo; hacerlo aquí deja el resultado
+ * igual con o sin ella y no toca la fila leída.
+ */
+function comoLibreEnBloque(f: FilaConAnios, anioSiguiente: number): FilaConAnios {
+  if (f.tienda_id !== null) return f;
+  const a = f.proyeccion_fila_anios.find((x) => x.anio === anioSiguiente);
+  if (!a || a.decidido === null || !a.decision_lote_id || !a.decision_ia_fila_id) return f;
+  return { ...f, proyeccion_fila_anios: f.proyeccion_fila_anios.map((x) => (x === a ? { ...x, decidido: null, origen: null } : x)) };
+}
+
+/**
+ * 07g (§3.3 punto 4, D7 y D13): la lectura de la IA de HOY de los GM pedidos, calculada de UNA sola foto (una `lecturaDelGM` por GM, así `Σ fijas + Σ A = Meta_GM`).
+ * No escribe nada y no llama al proveedor.
+ *
+ * - `filas`: las filas base activas que el llamador ya leyó (con `decision_lote_id` y `decision_ia_fila_id` en sus registros); sin ellas se usan las
+ *   ligeras de `cargarLecturaProyeccion`.
+ * - `reaprobar`: las filas aprobadas en bloque con IA cuentan como libres al calcular `A` (D13, §3.5), de modo que «la cifra de IA de hoy» es la que la IA daría
+ *   si no estuvieran decididas. Con `false` se lee tal cual (con la clasificación `libre_en_bloque` de `ia/meta.ts`, si existe, el resultado es el mismo).
+ * - `corrida_en_curso`: D16.
+ */
+export async function valoresIaParaAprobacion(
+  d: Db,
+  pi: ProyeccionIa,
+  servicio: ServicioInterno,
+  gms: readonly GMCatalogo[],
+  o: { reaprobar: boolean; filas?: readonly FilaConAnios[] }
+): Promise<Salida<ValoresIaAprobacion>> {
+  const l = await cargarLecturaProyeccion(d, pi, servicio, gms);
+  if (l.respuesta) return falla(l.respuesta);
+  const base = o.filas ?? l.data.filas;
+  const filas = o.reaprobar ? base.map((f) => comoLibreEnBloque(f, pi.Y + 1)) : [...base];
+  const lectura: LecturaProyeccionIa = { ...l.data, filas };
+  const porGM = new Map<string, GMValoresIa>();
+  for (const gm of gms) {
+    if (filasBaseDeGM(filas, gm).length === 0) continue;
+    porGM.set(gm.gm_clave, { gm, ...lecturaDelGM(lectura, gm, { contexto: { aperturas_y1: 0, cierres_y1: 0 } }) });
+  }
+  const propuestasFila = new Map<string, { fila_id: string | null; propuesta_gm_id: string }>();
+  for (const p of l.data.propuestas.values()) for (const f of p.filas) propuestasFila.set(f.id, { fila_id: f.fila_id, propuesta_gm_id: p.id });
+  const c = await leerCorridaEnCurso(d, pi.p.id);
+  if (c.error) return fallaDb(c.error, "IA: leer la corrida en curso");
+  return listo({ gms: porGM, propuestasFila, corrida_en_curso: c.data !== null && !corridaCaducada(c.data) });
+}
+
 // ─── GET …/ia ───
 
 export type MotivoPrerrequisito = MotivoIa;

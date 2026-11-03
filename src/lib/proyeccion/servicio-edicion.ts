@@ -1,8 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { registrarErrorDb } from "@/lib/api/errores-db";
+import type { PostgrestError } from "@supabase/supabase-js";
 import type { TablesInsert } from "@/lib/supabase/database.types";
 import { cargarCatalogo } from "./contexto";
 import {
+  actualizarAnioCondicional,
   actualizarComposicionFila,
   actualizarTiendaProyeccion,
   actualizarTotalTiendaCondicional,
@@ -19,11 +21,11 @@ import { aplicarCurvaNueva, aplicarDecision, aplicarDecisionTienda, crecimientoD
 import { notaMoverTotal, totalTiendaTrasMover } from "./apertura-linea";
 import { conteosResumen } from "./resumen";
 import { ninoDeFilas } from "./servicio";
-import { leerDecisionesIa } from "./servicio-lectura";
+import { leerDecisionesIa, leerDecisionesLote } from "./servicio-lectura";
 import { GENEROS_MATRIZ } from "./tipos-api";
 import { explicar, textoCurva } from "./explicar";
 import { anioMaduroSoles, mesesCompletos, unidadesMadurasEntero, ventaAnioApertura } from "./tiendas-nuevas";
-import { aAnioApi, aFilaModelo, aRegistro, conCamposBrutos, payloadAnioDecision, comoJson, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
+import { aAnioApi, aFilaModelo, aRegistro, conCamposBrutos, payloadAnioCalculo, payloadAnioDecision, payloadAnioRecalculo, comoJson, type AnioDb, type Catalogo, type FilaConAnios, type TiendaPyDb } from "./persistencia";
 import { motivoRechazoAplicarCurva, motivoRechazoDecision, motivoRechazoEdicion, motivoRechazoTotalTienda } from "./reglas";
 import {
   aTiendaApi,
@@ -44,7 +46,7 @@ import {
   type Salida,
 } from "./servicio-base";
 import type { DecisionCuerpo, DecisionTiendaCuerpo } from "./esquemas";
-import { claveBaseDe, type DecisionIaApi, type FilaModelo, type RegistroModelo, type RespuestaDecidirFilaApi, type ResumenProyeccion, type TiendaProyeccionApi } from "./tipos";
+import { claveBaseDe, type DecisionIaApi, type DecisionLoteApi, type FilaModelo, type RegistroModelo, type RespuestaDecidirFilaApi, type ResumenProyeccion, type TiendaProyeccionApi } from "./tipos";
 
 /**
  * Escrituras de las decisiones sobre una proyección en trabajo (Parte 1 y tiendas nuevas) y "aplicar curva nueva". Todas
@@ -55,6 +57,8 @@ import { claveBaseDe, type DecisionIaApi, type FilaModelo, type RegistroModelo, 
 const db = (): Db => supabaseAdmin();
 
 const MENSAJE_TIENDA_CAMBIO = "La tienda cambió mientras editabas; recarga y vuelve a intentar.";
+/** 07g (§3.6): un registro que solo se recalcula cambió entre la lectura y la escritura; no se pisa. */
+const MENSAJE_CONFLICTO_REGISTROS = "La proyección cambió mientras guardabas; recarga y vuelve a intentar.";
 const MENSAJE_GUARDADO_PARCIAL = "No se pudo terminar de guardar el cambio. Recarga la proyección y revisa la tienda antes de volver a intentar.";
 
 const estadoDe = (p: ProyeccionDb) => (p.estado === "cerrada" ? "cerrada" : p.estado === "archivada" ? "archivada" : ("en_trabajo" as const));
@@ -78,10 +82,13 @@ async function sigueEditable(d: Db, id: string): Promise<Salida<null>> {
  * Qué pasa con `decision_ia_fila_id` (07e) del registro cuya decisión se cambia: `string` la escribe («Aceptar IA»), `null` la limpia (cualquier otra
  * decisión) y `undefined` la deja como está (la decisión no cambió). Solo afecta a ese registro; los demás que se reescriben (el año siguiente
  * recalculado por B2, las otras filas de la tienda) conservan su decisión, y con ella su traza.
+ *
+ * 07g: `decision_lote_id` sigue la misma regla, pero nunca se escribe un id desde aquí: `null` = la decisión individual deja de ser «aprobada en bloque»
+ * (R12) y `undefined` = la decisión no cambió (solo el crecimiento propio), así que conserva el lote.
  */
-type TrazaIa = { clave: string; anio: number; decision_ia_fila_id: string | null | undefined };
+type TrazaIa = { clave: string; anio: number; decision_ia_fila_id: string | null | undefined; decision_lote_id: null | undefined };
 
-/** Escribe los registros de varias filas con su decisión (los decididos ahora llevan quién los decidió). */
+/** Escribe los registros de varias filas con su decisión (los decididos ahora llevan quién los decidió). En orden de `(fila_id, anio)`: el mismo que usa `aplicar_lote_proyeccion`, para no interbloquearse. */
 async function guardarRegistros(d: Db, filas: readonly FilaModelo[], ids: ReadonlyMap<string, string>, anios: readonly number[], selloDecision: string, actor: Actor, traza?: TrazaIa) {
   const payloads: TablesInsert<"proyeccion_fila_anios">[] = [];
   for (const f of filas) {
@@ -90,10 +97,61 @@ async function guardarRegistros(d: Db, filas: readonly FilaModelo[], ids: Readon
     for (const r of f.registros) {
       if (!anios.includes(r.anio)) continue;
       const esElDeLaTraza = traza !== undefined && traza.clave === f.clave && traza.anio === r.anio;
-      payloads.push(payloadAnioDecision(filaId, r, r.decidido_at === selloDecision ? actor.id : undefined, esElDeLaTraza ? traza.decision_ia_fila_id : undefined));
+      payloads.push(
+        payloadAnioDecision(
+          filaId,
+          r,
+          r.decidido_at === selloDecision ? actor.id : undefined,
+          esElDeLaTraza ? traza.decision_ia_fila_id : undefined,
+          esElDeLaTraza ? traza.decision_lote_id : undefined
+        )
+      );
     }
   }
-  return upsertAnios(d, payloads);
+  return upsertAnios(d, enOrdenDeBloqueo(payloads));
+}
+
+const enOrdenDeBloqueo = (payloads: TablesInsert<"proyeccion_fila_anios">[]) =>
+  [...payloads].sort((x, y) => (x.fila_id < y.fila_id ? -1 : x.fila_id > y.fila_id ? 1 : x.anio - y.anio));
+
+/** Un registro que solo se recalcula: el modelo de hoy y lo que había (con su `updated_at`) cuando se leyó. */
+type Recalculado = { filaId: string; registro: RegistroModelo; leido: AnioDb | undefined };
+
+/**
+ * 07g (§3.6, R26). Escribe los registros que SOLO se recalculan (la base de `Y+1` que B2 reescribe), sin columnas de decisión y con un `update` condicional por
+ * `updated_at`: si otro proceso (otra decisión, un lote de aprobación, un cálculo) tocó el registro después de leerlo, no se pisa y `conflicto` es `true`.
+ * Un registro que todavía no existe se inserta (nadie pudo decidirlo). En orden de `(fila_id, anio)`. Se detiene en el primer conflicto.
+ */
+async function guardarRecalculados(d: Db, items: readonly Recalculado[]): Promise<{ error: PostgrestError | null; conflicto: boolean }> {
+  const orden = [...items].sort((x, y) => (x.filaId < y.filaId ? -1 : x.filaId > y.filaId ? 1 : x.registro.anio - y.registro.anio));
+  for (const it of orden) {
+    if (it.leido === undefined) {
+      const ins = await upsertAnios(d, [payloadAnioCalculo(it.filaId, it.registro)]);
+      if (ins.error) return { error: ins.error, conflicto: false };
+      continue;
+    }
+    const w = await actualizarAnioCondicional(d, it.leido.id, it.leido.updated_at, payloadAnioRecalculo(it.filaId, it.registro));
+    if (w.error) return { error: w.error, conflicto: false };
+    if (!w.data) return { error: null, conflicto: true };
+  }
+  return { error: null, conflicto: false };
+}
+
+/**
+ * 07g (§3.6). Guarda la decisión de una fila base: PRIMERO el `Y+1` que B2 recalcula (con `update` condicional, solo si se decidió `Y`) y después el registro decidido
+ * (la decisión del planner manda: con su `upsert`). Si el `Y+1` cambió mientras tanto, `conflicto` y no se escribió nada. El `Y` de una decisión sobre `Y+1` no se reescribe:
+ * no cambió.
+ */
+async function guardarDecisionBase(d: Db, nuevo: FilaModelo, leida: FilaConAnios, anio: number, anioEnCurso: number, selloDecision: string, actor: Actor, traza: TrazaIa) {
+  if (anio === anioEnCurso) {
+    const sig = registroDe(nuevo, anioEnCurso + 1);
+    if (sig) {
+      const w = await guardarRecalculados(d, [{ filaId: leida.id, registro: sig, leido: leida.proyeccion_fila_anios.find((a) => a.anio === anioEnCurso + 1) }]);
+      if (w.error || w.conflicto) return w;
+    }
+  }
+  const w = await guardarRegistros(d, [nuevo], new Map([[nuevo.clave, leida.id]]), [anio], selloDecision, actor, traza);
+  return { error: w.error, conflicto: false };
 }
 
 /**
@@ -255,18 +313,21 @@ export async function decidirFila(
       : opciones?.decision_ia_fila_id !== undefined && registroDecidido?.origen === "manual" && registroDecidido.decidido !== null
         ? opciones.decision_ia_fila_id
         : null,
+    // 07g (R12): una decisión individual que cambia el registro lo saca del lote; solo el crecimiento propio lo conserva.
+    decision_lote_id: soloCrecimiento ? undefined : null,
   };
 
   if (modelo.tienda_id === null) {
     // Justo antes de la primera escritura: cuanto menos se lee entre esta comprobación y el guardado, menos crece la ventana con un cierre.
     const editable = await sigueEditable(d, id);
     if (editable.respuesta) return falla(editable.respuesta);
-    const w = await guardarRegistros(d, [nuevo], idsDe(grupo.data), [Y, Y + 1], ahora, actor, traza);
+    const w = await guardarDecisionBase(d, nuevo, objetivo, anio, Y, ahora, actor, traza);
     if (w.error) return fallaDb(w.error, "proyección: guardar la decisión");
+    if (w.conflicto) return fallaMensaje(MENSAJE_CONFLICTO_REGISTROS, 409, "conflicto");
     await refrescarResumen(d, p, cat.data.catalogo);
     const r = registroDe(nuevo, anio) as NonNullable<ReturnType<typeof registroDe>>;
     const api = conCamposBrutos(aAnioApi(r), nuevo, Y, ctx.crecimientoDe);
-    return listo({ ...api, decision_ia: await decisionIaGuardada(d, objetivo, anio, traza.decision_ia_fila_id) });
+    return listo({ ...api, decision_ia: await decisionIaGuardada(d, objetivo, anio, traza.decision_ia_fila_id), decision_lote: await decisionLoteGuardada(d, objetivo, anio, traza.decision_lote_id) });
   }
 
   // Una fila de tienda: se guarda su cifra y, si la tienda ya tiene total decidido, ese total se mueve en lo que cambió la fila.
@@ -349,6 +410,19 @@ async function decisionIaGuardada(d: Db, objetivo: FilaConAnios, anio: number, e
   if (!registro) return null;
   // `leerDecisionesIa` lee por las trazas que traen las filas: se le pasa el registro con la traza que quedó.
   const r = await leerDecisionesIa(d, [{ ...objetivo, proyeccion_fila_anios: [{ ...registro, decision_ia_fila_id: id }] }]);
+  if (r.respuesta) return null;
+  return r.data.get(registro.id) ?? null;
+}
+
+/**
+ * El lote que quedó en el registro tras decidir, para la respuesta: `null` si la decisión lo sacó del lote (R12) o el que ya tenía si solo cambió el crecimiento
+ * propio. Solo para mostrar: si la lectura falla se responde sin lote.
+ */
+async function decisionLoteGuardada(d: Db, objetivo: FilaConAnios, anio: number, escrita: null | undefined): Promise<DecisionLoteApi | null> {
+  if (escrita === null) return null;
+  const registro = objetivo.proyeccion_fila_anios.find((a) => a.anio === anio);
+  if (!registro?.decision_lote_id) return null;
+  const r = await leerDecisionesLote(d, [{ ...objetivo, proyeccion_fila_anios: [registro] }]);
   if (r.respuesta) return null;
   return r.data.get(registro.id) ?? null;
 }
@@ -465,8 +539,17 @@ async function propagarTienda(
     const bases = conCambios.filter((f) => f.tienda_id === null && claves.includes(f.clave));
     const nuevasBases = bases.map((b) => recalcularBaseSiguiente(b, porClave.get(b.clave) ?? [], ctx));
     const idsBase = idsDe(grupo.data);
-    const wb = await guardarRegistros(d, nuevasBases, idsBase, [Y + 1], ahora, actor);
+    // 07g (§3.6): la base de `Y+1` solo se recalcula (nadie la decidió ahora): `update` condicional y sin columnas de decisión, para no pisar una decisión (de una persona o de un lote) tomada mientras tanto.
+    const recalculados: Recalculado[] = [];
+    for (const b of nuevasBases) {
+      const filaId = idsBase.get(b.clave);
+      const registro = registroDe(b, Y + 1);
+      if (!filaId || !registro) continue;
+      recalculados.push({ filaId, registro, leido: grupo.data.find((f) => f.id === filaId)?.proyeccion_fila_anios.find((a) => a.anio === Y + 1) });
+    }
+    const wb = await guardarRecalculados(d, recalculados);
     if (wb.error) return fallaGuardado(wb.error, "proyección: guardar la base del año siguiente");
+    if (wb.conflicto) return fallaMensaje(MENSAJE_CONFLICTO_REGISTROS, 409, "conflicto");
     recalculadas = nuevasBases.length;
   }
 

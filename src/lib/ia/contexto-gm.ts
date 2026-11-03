@@ -131,6 +131,9 @@ export function filaMetaDe(f: FilaConAnios, Y: number): FilaMeta | null {
     decidido,
     vigente: decidido ?? propuesto,
     revision_cola_larga: tieneAviso(sig.avisos, "revision_cola_larga") || tieneAviso(y?.avisos, "revision_cola_larga"),
+    // 07g (§3.5): con lote y traza de IA la fila está «aprobada en bloque con la IA» (`libre_en_bloque`). Las lecturas ligeras ya traen las dos columnas.
+    decision_lote_id: sig.decision_lote_id ?? null,
+    decision_ia_fila_id: sig.decision_ia_fila_id ?? null,
   };
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { Alert } from "@/components/ui/alert";
@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, Input } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { CODIGOS_CIERRE_BLOQUEADO_NINO, type ProyeccionApi } from "@/lib/proyeccion/tipos-api";
+import { rutaAprobacion } from "./aprobacion-vista";
 import { AlertaError } from "./comunes";
 import { rutaProyeccion, useAccion } from "./use-proyeccion";
 import {
@@ -31,7 +32,7 @@ import {
 import { formatearNumero } from "@/lib/formato";
 
 /** Una lista de filas sin decidir (hasta `MAX_SIN_DECIDIR`, con el total y una pista de dónde decidirlas). */
-export function GrupoLista({ titulo, grupo, pista }: { titulo: string; grupo: GrupoSinDecidir; pista: string }) {
+export function GrupoLista({ titulo, grupo, pista }: { titulo: string; grupo: GrupoSinDecidir; pista: ReactNode }) {
   const resto = grupo.total - grupo.lineas.length;
   return (
     <div className="space-y-1">
@@ -49,6 +50,15 @@ export function GrupoLista({ titulo, grupo, pista }: { titulo: string; grupo: Gr
   );
 }
 
+/** 07g: «Aprobar en bloque» lleva a la pestaña Aprobación (las filas que bloquean el cierre se aprueban por lotes, con resumen por género × mundo). Cierra el modal al ir. */
+export function EnlaceAprobacion({ proyeccionId, onCerrar, texto = "Aprobar en bloque" }: { proyeccionId: string; onCerrar: () => void; texto?: string }) {
+  return (
+    <Link href={rutaAprobacion(proyeccionId, {})} onClick={onCerrar} className="font-medium underline underline-offset-2">
+      {texto}
+    </Link>
+  );
+}
+
 /**
  * Cerrar la proyección (ficha 07, paso 7). Resume filas decididas y sin decidir por año, cola larga que se cerrará con la
  * propuesta y avisos, y pide confirmación. El servidor bloquea si queda sin decidir una fila con propuesta mayor o igual
@@ -58,7 +68,8 @@ export function GrupoLista({ titulo, grupo, pista }: { titulo: string; grupo: Gr
  * MUJER por mundo y el Resto: ese motivo bloquea sin excepción (no hay «Cerrar de todos modos») y manda a Curvas → Crecimiento por género × mundo.
  * Desde 0.14.0 (06e) tampoco se cierra, ni forzando, con 2027 marcado como año del Niño, con un factor del Niño de 2026 faltante, desfasado o sin
  * confirmar, con un factor o una agrupación que cambió después de calcular, ni con crecimientos de antes de 0.14.0 por reaprobar: el modal lista cada
- * motivo con su enlace (Factores del Niño, Curvas o la pantalla del GM) o con «Recalcular ahora».
+ * motivo con su enlace (Factores del Niño, Curvas o la pantalla del GM) o con «Recalcular ahora». Desde 07g, las filas sin decidir (ya sea por el
+ * resumen o por un `409 filas_sin_decidir`) llevan un enlace «Aprobar en bloque» a la pestaña Aprobación.
  */
 export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: { proyeccion: ProyeccionApi; onCerrar: () => void; onCerrada: (p: ProyeccionApi) => Promise<void> | void; onRecalcular: () => void }) {
   const [nota, setNota] = useState("");
@@ -69,6 +80,10 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
   // El método viejo y los crecimientos sin aplicar no se saltan con «cerrar de todos modos»: hay que recalcular.
   const exigeRecalcular = cierreExigeRecalcular(proyeccion);
   const sinDecidir = listaSinDecidir(accion.error?.detalle);
+  // 07g: filas sin decidir que se pueden aprobar en bloque. Antes de intentar cerrar se sabe por el resumen de la proyección; tras un `409 filas_sin_decidir`, por el rechazo.
+  const resumen = proyeccion.resumen;
+  const faltanFilas = resumen ? [proyeccion.anio_en_curso, proyeccion.anio_siguiente].some((a) => (resumen.filas_por_anio?.[a] ?? resumen.filas) > (resumen.decididas?.[a] ?? 0)) : false;
+  const hayFilasSinDecidir = faltanFilas || accion.error?.codigo === "filas_sin_decidir";
   const tiendasSinDecidir = listaTiendasSinDecidir(accion.error?.detalle, proyeccion.bloques);
   // Lo que falta aprobar: lo que dijo el servidor al rechazar o, antes de intentarlo, lo que ya trae la proyección.
   const rechazoSinAprobar = accion.error?.codigo === "crecimientos_sin_aprobar" ? leerCrecimientosSinAprobar(accion.error.detalle) : null;
@@ -108,6 +123,11 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
     >
       <div className="space-y-4">
         {accion.error && !rechazoDelNino && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} />}
+        {accion.error?.codigo === "filas_sin_decidir" && (
+          <p className="text-sm">
+            Las filas que faltan se aprueban por lotes en la pestaña Aprobación: <EnlaceAprobacion proyeccionId={proyeccion.id} onCerrar={onCerrar} texto="Ir a Aprobación" />.
+          </p>
+        )}
         {motivosNino.length > 0 && (
           <Alert tono="alerta">
             <span className="block font-medium">No se puede cerrar: el Niño de {proyeccion.anio_en_curso} no está resuelto.</span>
@@ -181,14 +201,24 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
           <GrupoLista
             titulo={`Filas por decidir con propuesta de ${proyeccion.parametros.umbral_cola_larga} unidades o más`}
             grupo={sinDecidir.umbral}
-            pista="Decídelas en Por línea; la matriz con «Solo sin proyectar» ayuda a encontrarlas."
+            pista={
+              <>
+                Decídelas una a una en Por línea (la matriz con «Solo sin proyectar» ayuda a encontrarlas) o varias a la vez en la pestaña Aprobación:{" "}
+                <EnlaceAprobacion proyeccionId={proyeccion.id} onCerrar={onCerrar} />.
+              </>
+            }
           />
         )}
         {sinDecidir && sinDecidir.revision.total > 0 && (
           <GrupoLista
             titulo="Filas para revisión por cola larga con quiebres de stock"
             grupo={sinDecidir.revision}
-            pista="Su propuesta es la demanda corregida por disponibilidad; compárala con el avance normal en el detalle de la fila. En la matriz, el chip «Para revisión» las encuentra."
+            pista={
+              <>
+                Su propuesta es la demanda corregida por disponibilidad; compárala con el avance normal en el detalle de la fila. En la matriz, el chip «Para revisión» las encuentra. También se aprueban en bloque en la pestaña Aprobación:{" "}
+                <EnlaceAprobacion proyeccionId={proyeccion.id} onCerrar={onCerrar} />.
+              </>
+            }
           />
         )}
         {tiendasSinDecidir && (
@@ -206,6 +236,12 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
             <li key={l}>{l}</li>
           ))}
         </ul>
+        {hayFilasSinDecidir && (
+          <p className="text-sm">
+            ¿Quedan muchas filas por decidir? Se aprueban por lotes, con el resumen por género × mundo y la posibilidad de deshacer:{" "}
+            <EnlaceAprobacion proyeccionId={proyeccion.id} onCerrar={onCerrar} texto="Ir a Aprobación" />.
+          </p>
+        )}
         <p className="text-sm text-tinta-suave">
           Se bloquea si queda sin decidir, en cualquiera de los dos años, una fila con propuesta mayor o igual a {proyeccion.parametros.umbral_cola_larga} unidades, una fila para revisión (cola larga con quiebres de stock) o una tienda nueva con venta esperada. Lo demás (la cola larga) se cierra con la propuesta y queda marcado.
           Tampoco se cierra, ni forzando, si {proyeccion.anio_siguiente} está marcado como año del Niño, si el factor del Niño de {proyeccion.anio_en_curso} falta, está desfasado o sin confirmar, o si hay un crecimiento de antes de 0.14.0 por reaprobar.

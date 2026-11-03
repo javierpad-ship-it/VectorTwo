@@ -1,17 +1,17 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { eatM6DeLinea } from "./calculo";
 import { cargarCatalogo } from "./contexto";
-import { leerFilaCompleta, leerFilasConAnios, leerNombresMarcas, leerTiendasProyeccion } from "./consultas";
+import { leerFilaCompleta, leerFilasConAnios, leerFuentesDeLote, leerLotesDeDecision, leerNombresMarcas, leerTiendasProyeccion } from "./consultas";
 import { claveTiendaAnio, filasTiendaDeLinea, marcasDeFilaApi, marcasQueNecesitanNombre, resumenFilasDeTienda } from "./apertura-linea";
 import { baseDeAnio, crecimientoDeGMDeFoto, filtrarFilas, indiceDeLineas, armarMatriz, type FilaPlana } from "./matriz";
 import { armarMensual } from "./mensual";
-import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, decisionesIaDeFilas, ordenMarcaDe, propuestasFilaDeTrazas, type Catalogo, type FilaConAnios } from "./persistencia";
+import { aAniosApi, aFilaApi, aFilaModelo, aFilaPlana, decisionesIaDeFilas, decisionesLoteDeFilas, lotesDeDecisiones, ordenMarcaDe, propuestasFilaDeTrazas, type Catalogo, type FilaConAnios } from "./persistencia";
 import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
 import { aTiendaApi, cargarMatriz, crecimientoParaApi, falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, type Db, type Salida } from "./servicio-base";
 import { fraccionDeTienda } from "./decision";
 import type { CrecimientoDeApi } from "./persistencia";
 import type { ProyeccionDb } from "./consultas";
-import type { DecisionIaApi, FiltroMatrizApi, HistoricoFila, FilaDetalleApi, MarcasDeFilaApi, OrigenComposicion, RespuestaLineasApi, TiendaLineaApi, TiendaLineaBaseApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
+import type { DecisionIaApi, DecisionLoteApi, FiltroMatrizApi, HistoricoFila, FilaDetalleApi, MarcasDeFilaApi, OrigenComposicion, RespuestaLineasApi, TiendaLineaApi, TiendaLineaBaseApi, RespuestaMatrizApi, RespuestaMensualApi, RespuestaFilasTiendaApi, RespuestaTiendasApi, ResumenProyeccion } from "./tipos";
 import { UMBRAL_COLA_LARGA } from "./tipos";
 
 /**
@@ -64,6 +64,21 @@ export async function leerDecisionesIa(d: Db, filas: readonly FilaConAnios[]): P
     }
   }
   return listo(decisionesIaDeFilas(filas, porPropuestaFila));
+}
+
+/**
+ * 07g: qué lote de aprobación en bloque dejó la cifra decidida de cada registro (`decision_lote_id`), SOLO para mostrar («En bloque · IA»). Igual que la traza de IA:
+ * lee únicamente por los ids que las filas ya traen, así que sin ninguna aprobación en bloque no toca ninguna tabla de lotes. Devuelve `registro → DecisionLoteApi`.
+ */
+export async function leerDecisionesLote(d: Db, filas: readonly FilaConAnios[]): Promise<Salida<Map<string, DecisionLoteApi>>> {
+  const ids = lotesDeDecisiones(filas);
+  if (ids.length === 0) return listo(new Map<string, DecisionLoteApi>());
+  const lotes = await leerLotesDeDecision(d, ids);
+  if (lotes.error) return fallaDb(lotes.error, "proyección: leer el lote de aprobación");
+  const conLote = filas.filter((f) => (f.proyeccion_fila_anios ?? []).some((a) => a.decision_lote_id));
+  const fuentes = await leerFuentesDeLote(d, conLote.map((f) => f.id));
+  if (fuentes.error) return fallaDb(fuentes.error, "proyección: leer las líneas del lote de aprobación");
+  return listo(decisionesLoteDeFilas(filas, lotes.data, fuentes.data));
 }
 
 const sinAcentos = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -153,7 +168,9 @@ export async function leerLineas(id: string, f: { genero_id?: string; mundo_id?:
   );
   const decisionesIa = await leerDecisionesIa(d, base_);
   if (decisionesIa.respuesta) return falla(decisionesIa.respuesta);
-  const apis = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y, crec.data, decisionesIa.data));
+  const decisionesLote = await leerDecisionesLote(d, base_);
+  if (decisionesLote.respuesta) return falla(decisionesLote.respuesta);
+  const apis = base_.map((x) => aFilaApi(x, b.catalogo, b.k, Y, crec.data, decisionesIa.data, decisionesLote.data));
   const filasApi = apis.filter((x): x is NonNullable<typeof x> => x !== null);
   const modelos = base_.map((x) => aFilaModelo(x, b.k, Y));
 
@@ -291,7 +308,9 @@ export async function leerFilaDetalle(id: string, filaId: string): Promise<Salid
   if (crec.respuesta) return falla(crec.respuesta);
   const decisionesIa = await leerDecisionesIa(d, [r.data]);
   if (decisionesIa.respuesta) return falla(decisionesIa.respuesta);
-  const api = aFilaApi(r.data, b.catalogo, b.k, b.p.anio_en_curso, crec.data, decisionesIa.data);
+  const decisionesLote = await leerDecisionesLote(d, [r.data]);
+  if (decisionesLote.respuesta) return falla(decisionesLote.respuesta);
+  const api = aFilaApi(r.data, b.catalogo, b.k, b.p.anio_en_curso, crec.data, decisionesIa.data, decisionesLote.data);
   if (!api) return fallaMensaje("Fila no encontrada.", 404);
   const m = aFilaModelo(r.data, b.k, b.p.anio_en_curso);
   return listo({
@@ -301,7 +320,7 @@ export async function leerFilaDetalle(id: string, filaId: string): Promise<Salid
     curva_origen: m.curva_origen,
     factores_mes: m.factores_mes,
     participaciones: m.participaciones,
-    anios: aAniosApi(m, b.p.anio_en_curso, crec.data, decisionesIa.data),
+    anios: aAniosApi(m, b.p.anio_en_curso, crec.data, decisionesIa.data, decisionesLote.data),
   });
 }
 

@@ -100,6 +100,7 @@ export function motivoNoAceptable(a: { capacidad_encendida: boolean; servicio_di
   if (a.estado === "desactualizada") return "La propuesta está desactualizada: regenera este género y mundo.";
   if (a.estado === "fallida" || a.estado === "bloqueado_privacidad") return "La última propuesta de este género y mundo no se pudo generar.";
   if (a.estado === "sin_propuesta" || a.estado === "sin_filas_libres") return "Este género y mundo no tiene propuesta de IA.";
+  if (a.estado_meta === "libre_en_bloque") return "La fila ya está aprobada en bloque con la IA: cámbiala a mano en Por línea o reapruébala en la pestaña Aprobación.";
   if (a.estado_meta !== "libre") return "La fila es fija: ya está decidida, tiene su propio porcentaje o es de cola larga.";
   if (a.meta_y1 === null) return "La IA no dio una cifra para esta fila.";
   return null;
@@ -176,8 +177,10 @@ export function lecturaDeGM(a: ArgsLecturaGM): LecturaGM {
     for (const g of propuesta.filas) {
       const hoy = a.filas.find((f) => f.clave === g.fila_clave);
       if (!hoy) continue;
-      const estadoMeta: EstadoMetaFila = plan.estados.get(hoy.fila_id) ?? "sin_base";
-      const A = estadoMeta === "libre" && aHoy ? (aHoy.get(hoy.fila_id) ?? null) : null;
+      // 07g (§3.5): la aprobada en bloque con IA cuenta como libre para repartir (`A` es lo que la IA le daría hoy si no estuviera decidida), pero se muestra como
+      // `libre_en_bloque` y no es aceptable fila por fila.
+      const estadoMeta: EstadoMetaFila = plan.en_bloque.has(hoy.fila_id) ? "libre_en_bloque" : (plan.estados.get(hoy.fila_id) ?? "sin_base");
+      const A = (estadoMeta === "libre" || estadoMeta === "libre_en_bloque") && aHoy ? (aHoy.get(hoy.fila_id) ?? null) : null;
       const ind = A === null ? null : indicadoresFila({ a: A, natural_y1: g.natural_y1, p_metodo: hoy.meta.propuesto, base: hoy.meta.base, base_corregida: hoy.meta.base_corregida });
       const abs = absorcion?.filas.get(hoy.fila_id) ?? null;
       const avisos = unicos<AvisoIa>([...(g.avisos as AvisoIa[]), ...(abs?.avisos ?? []), ...(asignacion?.avisos_fila.get(hoy.fila_id) ?? [])]);
