@@ -1287,8 +1287,34 @@ Orden cronológico. Cada entrada dice qué se decidió, por qué, y qué se desc
 
 ## 2026-11-02 · M7 (07g): las filas que bloquean el cierre se pueden aprobar en bloque, con la sugerencia de la IA o la propuesta del método (decisión 82, relaja «nada se aprueba en bloque»)
 
-**Decisión.** Javier (2026-11-02) pidió poder aprobar más de una fila a la vez con la sugerencia de la IA para cerrar las proyecciones. Se relaja la regla «nada se aprueba en bloque» (07 §2 punto 7, entradas del 2026-10-15) y el «una fila a la vez» de «Aceptar IA» (decisión 70): **las filas base que hoy bloquean el cierre (regla 37: sin decidir, con propuesta ≥ umbral de cola larga o «para revisión») se pueden aprobar en bloque desde una pestaña nueva «Aprobación»**, siempre con una persona que filtra, selecciona y confirma viendo los totales y el desvío frente a la meta de cada género × mundo. Lo aprobado en bloque es, en datos, lo mismo que los botones de una fila: «IA» = «Aceptar IA» (`origen = manual` con `decision_ia_fila_id`, solo 2027 y solo con la cifra vigente que el planner vio) y «Método» = «Aceptar» (`origen = propuesta`); además lleva `decision_lote_id`. Salvaguardas: nunca pisa una decisión existente; un año por lote; la IA de un GM se aprueba entera o no se aprueba; escritura transaccional y condicional en SQL con resultado por fila; idempotencia por `lote_id`; auditoría inmutable por lote; deshacer revirtiendo el lote (solo lo que nadie cambió después); los mismos bloqueos de fondo que cerrar (sin «forzar»); con la IA apagada funciona para el método. El cuadre de la meta sigue sin exigirse al cerrar (07e D19). Especificada en `docs/modulos/07g-aprobacion-en-bloque.md`; **sin construir**, con preguntas abiertas para Javier (qué entra por defecto, tope y bloqueos) y una pasada del `arquitecto-revisor` antes de construir.
+**Decisión.** Javier (2026-11-02) pidió poder aprobar más de una fila a la vez con la sugerencia de la IA para cerrar las proyecciones. Se relajan la regla «nada se aprueba en bloque» (07 §2 punto 7, entradas del 2026-10-15) y el «una fila a la vez» de «Aceptar IA» (decisión 70). **Las filas base que hoy bloquean el cierre** (regla 37: sin decidir, con propuesta ≥ umbral de cola larga o «para revisión») **se pueden aprobar en bloque desde una pestaña nueva «Aprobación»**, siempre con una persona que filtra, selecciona y confirma viendo el resumen por género × mundo.
 
-**Por qué.** Son ≈ 690 filas por año que decidir para cerrar, y la IA ya hizo el análisis de cada una: decidir fila por fila convierte el cierre en horas de clics sin más criterio. El motivo de la regla original («el planner revisa y decide») se conserva: el bloque no es automático, se elige con filtros por GM, línea, fuente, avisos y confianza, se ve el efecto antes de confirmar, queda la traza de quién aprobó qué y con qué propuesta, y se puede deshacer. No pisar decisiones y validar la cifra vista evita que el bloque cambie algo que el planner no vio.
+Qué se aprueba con cada fuente (respuestas de Javier, 2026-11-03):
+- **2026, con la propuesta del método** (avance real por línea más la estacionalidad de los meses que faltan), rotulada «Método» (`origen = propuesta`, lo mismo que «Aceptar»).
+- **2027, con la IA**, que distribuye la meta de crecimiento anual del GM entre las líneas (`origen = manual` con `decision_ia_fila_id`, lo mismo que «Aceptar IA», con la cifra vigente que el planner vio). El método se usa en 2027 solo en los GM sin IA, con su propio badge; las libres sin cifra IA de un GM con IA quedan fuera del bloque.
+- Las dos fuentes escriben además `decision_lote_id`.
 
-**Descartado.** Aprobar sin selección («cerrar con las propuestas»); un modo que sobrescriba decisiones existentes; mezclar 2026 y 2027 en un mismo lote; aprobar en bloque con `decidirFila` en bucle (minutos y sin condición contra decisiones simultáneas); exigir el cuadre al cerrar.
+Reglas:
+- **Las filas con poca confianza de la IA (o sin dato de confianza) no se aprueban en bloque por ninguna vía**, ni siquiera por el método (`confianza_baja`).
+- **Se bloquea sin excepción todo lote de aprobación o reaprobación, de cualquier año**, si la proyección está desactualizada por cualquier motivo o si los crecimientos de 2027 no están aprobados.
+- **Modo «Reaprobar»** para la revisión mensual: tras recalcular, actualiza solo las filas aprobadas en bloque que nadie tocó después y cuya propuesta cambió. **Lo decidido a mano no lo toca ningún lote.**
+
+Salvaguardas:
+- un año por lote; la IA de un GM se aprueba entera o no se aprueba, con todas las filas del GM bloqueadas y comprobadas;
+- escritura transaccional y condicional en SQL, con resultado por fila y conteos calculados con lo escrito de verdad;
+- idempotencia por `lote_id` y huella de la simulación revisada;
+- casilla «Revisé el resumen por GM» en los lotes grandes;
+- auditoría inmutable por lote;
+- deshacer revirtiendo un lote o una confirmación (cualquier planner, en trabajo, solo lo que nadie cambió después).
+
+Con la IA apagada funciona para el método. El cuadre de la meta sigue sin exigirse al cerrar (07e D19). Especificada en `docs/modulos/07g-aprobacion-en-bloque.md` (ajustada el 2026-11-03 con las respuestas de Javier y la revisión independiente); **sin construir**.
+
+**Por qué.** Son ≈ 680 filas por año que decidir para cerrar, y cada cierre de mes obliga a revisar el cierre del año y el año siguiente. Decidir fila por fila convierte eso en horas de clics sin más criterio. El motivo de la regla original («el planner revisa y decide») se conserva: el bloque no es automático, se elige con filtros, se ve el efecto por GM antes de confirmar, queda la traza de quién aprobó qué y con qué propuesta, y se puede deshacer. Excluir la baja confianza deja en manos del planner justo las cifras que la IA no respalda. Bloquear con datos viejos evita fijar cifras que el recálculo ya no propondría.
+
+**Descartado.**
+- aprobar sin selección («cerrar con las propuestas»);
+- sobrescribir en bloque decisiones tomadas a mano;
+- un modo «Solo método» en 2027 cuando la IA está encendida;
+- mezclar 2026 y 2027 en un mismo lote;
+- aprobar en bloque con `decidirFila` en bucle (minutos y sin condición contra decisiones simultáneas);
+- exigir el cuadre al cerrar.
