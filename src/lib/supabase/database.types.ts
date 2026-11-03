@@ -1,6 +1,12 @@
 /**
  * Tipos de la base de datos.
  *
+ * Verificados el 2026-11-03 contra `generate_typescript_types` de `Vector2` (0031 M7 07g, aprobacion en bloque, aplicada): 2 tablas nuevas
+ * (`proyeccion_lotes` y `proyeccion_lote_filas`, de solo insercion), `proyeccion_fila_anios.decision_lote_id` (uuid null, FK diferible a
+ * `proyeccion_lotes`) y las funciones `aplicar_lote_proyeccion(p) -> Json` y `respuesta_lote_proyeccion(p_lote_id, p_repetido) -> Json`.
+ * El generador ademas lista `prueba_conexion`, ordena las columnas alfabeticamente y escribe `Args: never`: aqui solo cambia lo que toca
+ * la 0031.
+ *
  * Verificados el 2026-10-31 contra `generate_typescript_types` de `Vector2` (0030 M7 07e, propuesta de la IA, aplicada): 8 tablas
  * nuevas (`ia_evaluaciones`, `ia_configuraciones`, `ia_corridas`, `ia_corrida_gms`, `ia_entradas`, `ia_llamadas`, `ia_propuestas_gm`,
  * `ia_propuestas_filas`), `proyeccion_fila_anios.decision_ia_fila_id` (uuid null, FK a `ia_propuestas_filas`) y las funciones
@@ -2598,6 +2604,7 @@ export type Database = {
           decidido_por_id: string | null;
           decidido_por_nombre: string | null;
           decision_ia_fila_id: string | null;
+          decision_lote_id: string | null;
           explicacion: string;
           fila_id: string;
           id: string;
@@ -2631,6 +2638,7 @@ export type Database = {
           decidido_por_id?: string | null;
           decidido_por_nombre?: string | null;
           decision_ia_fila_id?: string | null;
+          decision_lote_id?: string | null;
           explicacion?: string;
           fila_id: string;
           id?: string;
@@ -2664,6 +2672,7 @@ export type Database = {
           decidido_por_id?: string | null;
           decidido_por_nombre?: string | null;
           decision_ia_fila_id?: string | null;
+          decision_lote_id?: string | null;
           explicacion?: string;
           fila_id?: string;
           id?: string;
@@ -2694,6 +2703,13 @@ export type Database = {
             columns: ["decision_ia_fila_id"];
             isOneToOne: false;
             referencedRelation: "ia_propuestas_filas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_fila_anios_decision_lote_id_fkey";
+            columns: ["decision_lote_id"];
+            isOneToOne: false;
+            referencedRelation: "proyeccion_lotes";
             referencedColumns: ["id"];
           },
           {
@@ -2813,6 +2829,161 @@ export type Database = {
             columns: ["tienda_id"];
             isOneToOne: false;
             referencedRelation: "tiendas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      proyeccion_lote_filas: {
+        Row: {
+          anio: number;
+          created_at: string;
+          decidido_anterior: number | null;
+          fila_clave: string;
+          fila_id: string | null;
+          fuente: string;
+          gm_clave: string;
+          id: string;
+          lote_id: string;
+          propuesta_fila_id: string | null;
+          resultado: string;
+          valor: number | null;
+          valor_actual: number | null;
+          valor_esperado: number | null;
+        };
+        Insert: {
+          anio: number;
+          created_at?: string;
+          decidido_anterior?: number | null;
+          fila_clave: string;
+          fila_id?: string | null;
+          fuente: string;
+          gm_clave: string;
+          id?: string;
+          lote_id: string;
+          propuesta_fila_id?: string | null;
+          resultado: string;
+          valor?: number | null;
+          valor_actual?: number | null;
+          valor_esperado?: number | null;
+        };
+        Update: {
+          anio?: number;
+          created_at?: string;
+          decidido_anterior?: number | null;
+          fila_clave?: string;
+          fila_id?: string | null;
+          fuente?: string;
+          gm_clave?: string;
+          id?: string;
+          lote_id?: string;
+          propuesta_fila_id?: string | null;
+          resultado?: string;
+          valor?: number | null;
+          valor_actual?: number | null;
+          valor_esperado?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proyeccion_lote_filas_fila_id_fkey";
+            columns: ["fila_id"];
+            isOneToOne: false;
+            referencedRelation: "proyeccion_filas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_lote_filas_lote_id_fkey";
+            columns: ["lote_id"];
+            isOneToOne: false;
+            referencedRelation: "proyeccion_lotes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_lote_filas_propuesta_fila_id_fkey";
+            columns: ["propuesta_fila_id"];
+            isOneToOne: false;
+            referencedRelation: "ia_propuestas_filas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      proyeccion_lotes: {
+        Row: {
+          anio: number;
+          calculado_at_proyeccion: string;
+          confirmacion_id: string;
+          created_at: string;
+          efecto_gm_previsto: Json;
+          filtro: Json;
+          huella_cuerpo: string;
+          id: string;
+          nota: string | null;
+          perfil_id: string | null;
+          propuestas_gm: string[];
+          proyeccion_id: string | null;
+          resumen: Json;
+          revierte_lote_id: string | null;
+          revision_confirmada: boolean;
+          tipo: string;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          anio: number;
+          calculado_at_proyeccion: string;
+          confirmacion_id: string;
+          created_at?: string;
+          efecto_gm_previsto?: Json;
+          filtro?: Json;
+          huella_cuerpo: string;
+          id: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          propuestas_gm?: string[];
+          proyeccion_id?: string | null;
+          resumen: Json;
+          revierte_lote_id?: string | null;
+          revision_confirmada?: boolean;
+          tipo: string;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          anio?: number;
+          calculado_at_proyeccion?: string;
+          confirmacion_id?: string;
+          created_at?: string;
+          efecto_gm_previsto?: Json;
+          filtro?: Json;
+          huella_cuerpo?: string;
+          id?: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          propuestas_gm?: string[];
+          proyeccion_id?: string | null;
+          resumen?: Json;
+          revierte_lote_id?: string | null;
+          revision_confirmada?: boolean;
+          tipo?: string;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proyeccion_lotes_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_lotes_proyeccion_id_fkey";
+            columns: ["proyeccion_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proyeccion_lotes_revierte_lote_id_fkey";
+            columns: ["revierte_lote_id"];
+            isOneToOne: false;
+            referencedRelation: "proyeccion_lotes";
             referencedColumns: ["id"];
           },
         ];
@@ -3829,6 +4000,19 @@ export type Database = {
           p_gml_ids: string[];
           p_grupos: Json;
           p_hasta: string;
+        };
+        Returns: Json;
+      };
+      aplicar_lote_proyeccion: {
+        Args: {
+          p: Json;
+        };
+        Returns: Json;
+      };
+      respuesta_lote_proyeccion: {
+        Args: {
+          p_lote_id: string;
+          p_repetido: boolean;
         };
         Returns: Json;
       };
