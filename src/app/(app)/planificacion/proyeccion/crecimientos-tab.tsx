@@ -29,6 +29,8 @@ import {
   type OpcionesFilasResumen,
 } from "./crecimientos-vista";
 import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
+import { VentaPorTienda } from "./venta-por-tienda";
+import { opcionesPorTienda } from "./venta-por-tienda-vista";
 import { enlaceCrecimientoGeneroMundo, formatearPct, leerPorcentaje, textoFaltanCrecimientos, textoReaprobarCierre, unidades } from "./vista";
 
 /**
@@ -38,16 +40,22 @@ import { enlaceCrecimientoGeneroMundo, formatearPct, leerPorcentaje, textoFaltan
  * base real y la corregida, la corrección del Niño y el % del año siguiente sobre las dos, con avisos si cambió, si falta aprobar o si hay que
  * reaprobar (versiones de antes de 0.14.0 en un GM con Niño) para cerrar, y un enlace «Analizar y aprobar» a cada GM. Lo único editable es el
  * objetivo global (`PATCH` de la proyección, que no la desactualiza; es una meta sobre el año real). En una proyección cerrada o archivada todo se
- * ve igual y el objetivo queda en solo lectura.
+ * ve igual y el objetivo queda en solo lectura. 07f: cada GM y el Resto traen «Ver por tienda», que abre debajo de la tabla la venta por tienda y año de
+ * esa fila (lectura pura; la elección vive en `?por_tienda=`).
  */
 export function CrecimientosTab({
   proyeccion,
   bloqueada,
+  porTienda = null,
+  onPorTienda,
   onCambio,
   onRecalcular,
 }: {
   proyeccion: ProyeccionApi;
   bloqueada: boolean;
+  /** `?por_tienda=`: el conjunto abierto en «Ver por tienda» (`<genero_id>.<mundo_id>` o `resto`). */
+  porTienda?: string | null;
+  onPorTienda?: (clave: string | null) => void;
   onCambio: () => Promise<void>;
   onRecalcular: () => Promise<void> | void;
 }) {
@@ -80,6 +88,8 @@ export function CrecimientosTab({
           datos={datos}
           proyeccion={proyeccion}
           bloqueada={bloqueada}
+          porTienda={porTienda}
+          onPorTienda={onPorTienda}
           onRecalcular={() => void recalcular()}
           onRecargar={() => void lectura.recargar()}
           onObjetivoGuardado={async () => {
@@ -96,6 +106,8 @@ export function ResumenCrecimientos({
   datos,
   proyeccion,
   bloqueada,
+  porTienda = null,
+  onPorTienda,
   onRecalcular,
   onRecargar,
   onObjetivoGuardado,
@@ -103,6 +115,8 @@ export function ResumenCrecimientos({
   datos: ResumenCrecimientosProyeccionApi;
   proyeccion: ProyeccionApi;
   bloqueada: boolean;
+  porTienda?: string | null;
+  onPorTienda?: (clave: string | null) => void;
   onRecalcular: () => void;
   onRecargar: () => void;
   onObjetivoGuardado: () => Promise<void>;
@@ -176,10 +190,59 @@ export function ResumenCrecimientos({
         </Alert>
       )}
 
-      <TablaResumenCrecimientos datos={datos} anioEnCurso={y} gmFueraBase={opciones.gmFueraBase} sobreResto={opciones.sobreResto} />
+      <TablaResumenCrecimientos
+        datos={datos}
+        anioEnCurso={y}
+        gmFueraBase={opciones.gmFueraBase}
+        sobreResto={opciones.sobreResto}
+        porTiendaActiva={porTienda}
+        onVerPorTienda={onPorTienda ? (clave) => onPorTienda(clave) : undefined}
+      />
+
+      {porTienda && onPorTienda && (
+        <PorTienda clave={porTienda} datos={datos} proyeccion={proyeccion} puedeRecalcular={enTrabajo && !bloqueada && !proyeccion.calculando} onPorTienda={onPorTienda} onRecalcular={onRecalcular} />
+      )}
 
       {datos.total && <PieCrecimientos datos={datos} proyeccion={proyeccion} editable={enTrabajo && !bloqueada && !proyeccion.calculando} onGuardado={onObjetivoGuardado} onRecargar={onRecargar} />}
     </div>
+  );
+}
+
+/** 07f: la tarjeta «Venta por tienda» del conjunto elegido. Una clave que no es de esta proyección (un enlace viejo) se dice y se puede cerrar. Se vuelve a leer al recalcular. */
+function PorTienda({
+  clave,
+  datos,
+  proyeccion,
+  puedeRecalcular,
+  onPorTienda,
+  onRecalcular,
+}: {
+  clave: string;
+  datos: ResumenCrecimientosProyeccionApi;
+  proyeccion: ProyeccionApi;
+  puedeRecalcular: boolean;
+  onPorTienda: (clave: string | null) => void;
+  onRecalcular: () => void;
+}) {
+  const opciones = opcionesPorTienda(datos);
+  if (!opciones.some((o) => o.clave === clave)) {
+    return (
+      <Alert tono="alerta" onCerrar={() => onPorTienda(null)}>
+        Ese género · mundo no tiene filas en esta proyección: elige otro con «Ver por tienda».
+      </Alert>
+    );
+  }
+  return (
+    <VentaPorTienda
+      key={`${clave}-${proyeccion.calculado_at ?? ""}`}
+      proyeccion={proyeccion}
+      clave={clave}
+      opciones={opciones}
+      puedeRecalcular={puedeRecalcular}
+      onClave={(c) => onPorTienda(c)}
+      onCerrar={() => onPorTienda(null)}
+      onRecalcular={onRecalcular}
+    />
   );
 }
 
@@ -217,7 +280,15 @@ export function TablaResumenCrecimientos({
   anioEnCurso,
   gmFueraBase,
   sobreResto,
-}: { datos: ResumenCrecimientosProyeccionApi } & Pick<OpcionesFilasResumen, "anioEnCurso" | "gmFueraBase" | "sobreResto">) {
+  porTiendaActiva = null,
+  onVerPorTienda,
+}: {
+  datos: ResumenCrecimientosProyeccionApi;
+  /** El conjunto abierto en «Ver por tienda» (para marcar su botón). */
+  porTiendaActiva?: string | null;
+  /** Sin él, la tabla no trae botones (solo lectura pura). El Total nunca lo tiene. */
+  onVerPorTienda?: (clave: string) => void;
+} & Pick<OpcionesFilasResumen, "anioEnCurso" | "gmFueraBase" | "sobreResto">) {
   const s = datos.anio_siguiente;
   const y = anioEnCurso ?? s - 1;
   const filas = filasDeResumen(datos, { anioEnCurso: y, gmFueraBase, sobreResto });
@@ -303,12 +374,20 @@ export function TablaResumenCrecimientos({
       clave: "enlace",
       titulo: "",
       className: "whitespace-nowrap",
-      render: (f) =>
-        f.enlace ? (
-          <Link href={f.enlace} className="font-medium text-marca-oscura underline underline-offset-2 hover:text-marca" aria-label={`Analizar y aprobar ${f.nombre}`}>
-            Analizar y aprobar
-          </Link>
-        ) : null,
+      render: (f) => (
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {f.enlace ? (
+            <Link href={f.enlace} className="font-medium text-marca-oscura underline underline-offset-2 hover:text-marca" aria-label={`Analizar y aprobar ${f.nombre}`}>
+              Analizar y aprobar
+            </Link>
+          ) : null}
+          {onVerPorTienda && f.tipo !== "total" ? (
+            <Button variante="secundario" tamano="sm" aria-label={`Ver por tienda ${f.nombre}`} aria-pressed={porTiendaActiva === f.clave} onClick={() => onVerPorTienda(f.clave)}>
+              Ver por tienda
+            </Button>
+          ) : null}
+        </span>
+      ),
     },
   ];
   return (

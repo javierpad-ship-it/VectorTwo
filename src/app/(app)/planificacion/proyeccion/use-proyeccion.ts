@@ -14,7 +14,7 @@ import { mensajeError } from "@/lib/formato";
 export function useLectura<T>(url: string | null, conservarAnterior = false) {
   const [guardado, setGuardado] = useState<{ url: string; datos: T } | null>(null);
   const [leidoDe, setLeidoDe] = useState<string | null>(null);
-  const [fallo, setFallo] = useState<{ url: string; mensaje: string } | null>(null);
+  const [fallo, setFallo] = useState<{ url: string; mensaje: string; codigo: string | null } | null>(null);
   const secuencia = useRef(0);
 
   const pedir = useCallback(() => {
@@ -29,7 +29,7 @@ export function useLectura<T>(url: string | null, conservarAnterior = false) {
       })
       .catch((e: unknown) => {
         if (numero !== secuencia.current) return;
-        setFallo({ url, mensaje: mensajeError(e) });
+        setFallo({ url, mensaje: mensajeError(e), codigo: codigoDeError(e) });
       })
       .finally(() => {
         if (numero !== secuencia.current) return;
@@ -47,8 +47,10 @@ export function useLectura<T>(url: string | null, conservarAnterior = false) {
   // Cargando: hay url y todavía no terminó la primera lectura de ESA url (o está releyendo sin datos).
   const cargando = url !== null && leidoDe !== url;
   const error = url !== null && fallo?.url === url ? fallo.mensaje : null;
-  const setError = useCallback((m: string | null) => setFallo(m === null ? null : { url: url ?? "", mensaje: m }), [url]);
-  return { datos, cargando, error, setError, recargar };
+  // `codigo`: el código de negocio del error de la API (los `409` y `404` de M7), para ofrecer la acción que corresponde.
+  const codigo = url !== null && fallo?.url === url ? fallo.codigo : null;
+  const setError = useCallback((m: string | null) => setFallo(m === null ? null : { url: url ?? "", mensaje: m, codigo: null }), [url]);
+  return { datos, cargando, error, codigo, setError, recargar };
 }
 
 /** `detalle` = el cuerpo de la respuesta de error (las listas de algunos `409`). */

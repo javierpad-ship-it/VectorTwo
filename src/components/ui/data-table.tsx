@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 export type Columna<T> = {
   clave: string;
   titulo: string;
+  /** Contenido del encabezado cuando necesita algo más que texto (p. ej. un `Badge`); `titulo` sigue siendo el nombre accesible. Si falta, se muestra `titulo`. */
+  encabezado?: ReactNode;
   render: (fila: T) => ReactNode;
   className?: string;
   /** Con `ordenActual` y `onOrdenar`, el encabezado se vuelve un botón que ordena por esta columna. */
@@ -60,7 +62,7 @@ export function DataTable<T>({
                       </span>
                     </button>
                   ) : (
-                    c.titulo
+                    (c.encabezado ?? c.titulo)
                   )}
                 </th>
               );

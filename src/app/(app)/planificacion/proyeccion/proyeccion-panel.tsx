@@ -31,6 +31,7 @@ import { claveGmValida } from "./propuesta-ia-vista";
 import type { DestinoLinea } from "./gm-ia-detalle";
 import { TiendasTab } from "./tiendas-tab";
 import { rutaProyeccion, useAccion, useLectura, useSondeo } from "./use-proyeccion";
+import { clavePorTiendaValida } from "./venta-por-tienda-vista";
 import { aplicarCambiosUrl, CLAVES_FILTRO, esPestana, leerFiltro, PESTANAS, puedeEditar, type FiltroVista, type Pestana } from "./vista";
 
 const SIN_INDICE: IndiceLineaApi[] = [];
@@ -67,6 +68,9 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
   // 0.15.0 (07e): el GM abierto en «Propuesta IA» (`<genero_id>.<mundo_id>`).
   const gmIaUrl = params.get("gm_ia");
   const gmIa = claveGmValida(gmIaUrl) ? gmIaUrl : null;
+  // 07f: el conjunto abierto en «Ver por tienda» de Crecimientos (`<genero_id>.<mundo_id>` o `resto`); se borra al cambiar de pestaña o de proyección.
+  const porTiendaUrl = params.get("por_tienda");
+  const porTienda = clavePorTiendaValida(porTiendaUrl) ? porTiendaUrl : null;
 
   const estado = useLectura<RespuestaProyeccionApi>("/api/proyeccion");
   const lista = useMemo(() => estado.datos?.proyecciones ?? [], [estado.datos]);
@@ -115,11 +119,11 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
   );
 
   function elegirProyeccion(id: string) {
-    cambiarUrl({ proyeccion: id, fila: null, tienda: null, gm_ia: null });
+    cambiarUrl({ proyeccion: id, fila: null, tienda: null, gm_ia: null, por_tienda: null });
   }
 
   function cambiarPestana(p: Pestana) {
-    cambiarUrl({ pestana: p, fila: null, tienda: null });
+    cambiarUrl({ pestana: p, fila: null, tienda: null, por_tienda: null });
   }
 
   const cambiarFiltro = useCallback(
@@ -194,7 +198,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
     const r = await accion.ejecutar(() => api.delete(rutaProyeccion(proyeccion.id)));
     if (r.ok) {
       setAviso(`«${proyeccion.nombre}» se eliminó.`);
-      cambiarUrl({ proyeccion: null, fila: null, tienda: null });
+      cambiarUrl({ proyeccion: null, fila: null, tienda: null, por_tienda: null });
     }
     await recargarTodo();
   }
@@ -202,7 +206,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
   async function guardada(p: ProyeccionApi, mensaje: string) {
     setAviso(mensaje);
     await estado.recargar();
-    cambiarUrl({ proyeccion: p.id, fila: null, tienda: null });
+    cambiarUrl({ proyeccion: p.id, fila: null, tienda: null, por_tienda: null });
     await Promise.all([actual.recargar(), lineas.recargar()]);
   }
 
@@ -298,7 +302,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
       {proyeccion && pestana === "tiendas" && <TiendasTab proyeccion={proyeccion} tiendaId={tiendaId} bloqueada={!editable} onCambio={recargarTodo} onRecalcular={() => void recalcular()} />}
 
       {proyeccion && pestana === "crecimientos" && (
-        <CrecimientosTab proyeccion={proyeccion} bloqueada={!editable} onCambio={recargarTodo} onRecalcular={recalcular} />
+        <CrecimientosTab proyeccion={proyeccion} bloqueada={!editable} porTienda={porTienda} onPorTienda={(clave) => cambiarUrl({ por_tienda: clave })} onCambio={recargarTodo} onRecalcular={recalcular} />
       )}
 
       {proyeccion && pestana === "ia" && (

@@ -1635,7 +1635,7 @@ export function esBloqueMensual(v: unknown): v is BloqueMensual {
 }
 
 /** Nombre del archivo de Excel: `proyeccion-2026-2027-matriz.xlsx`. */
-export function nombreArchivoProyeccion(anioEnCurso: number, vista: "matriz" | "mensual"): string {
+export function nombreArchivoProyeccion(anioEnCurso: number, vista: "matriz" | "mensual" | "por-tienda"): string {
   return `proyeccion-${anioEnCurso}-${anioEnCurso + 1}-${vista}.xlsx`;
 }
 
