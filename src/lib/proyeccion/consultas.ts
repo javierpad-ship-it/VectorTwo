@@ -5,6 +5,7 @@ import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
 import { periodoADb } from "@/lib/ventas/periodo";
 import type { FilaConAnios, TiendaPyDb } from "./persistencia";
 import { TANDA_UPSERT, type ColaLargaApi, type VentaProyeccion } from "./tipos";
+import type { VentaTiendaNodos } from "./venta-por-tienda";
 
 /**
  * Acceso a datos de M7 (solo servidor). ÚNICO archivo de `src/` que nombra la función `venta_proyeccion` y que lee o
@@ -500,6 +501,32 @@ export async function leerVentaTanda(
       // Una lectura anterior a la migración 0021 no trae `disponibilidad`: llega vacía (toda cola larga queda `sin_dato`).
       disponibilidad: v.disponibilidad ?? [],
       cargas: v.cargas ?? {},
+    },
+    error: null,
+  };
+}
+
+/** Plazo de la lectura de `venta_tienda_nodos` (07f): PostgREST corta a los 8 s; aquí se corta antes de que se cuelgue la pantalla. */
+export const TIMEOUT_VENTA_TIENDA_MS = 8000;
+
+/**
+ * 07f: la venta publicada de unos nodos por tienda × mes, con soles y SIN el CD (una sola función `jsonb`, un solo estado de los datos). `desde` y `hasta` son
+ * `aaaa-mm` (rango inclusivo). `data` es `null` si la respuesta no tiene la forma `{ series, cargas }`. Solo lectura. ÚNICO archivo de `src/` que la nombra.
+ */
+export async function leerVentaTiendaNodos(
+  db: Db,
+  args: { gmlIds: readonly string[]; desde: string; hasta: string }
+): Promise<Resultado<VentaTiendaNodos | null>> {
+  const { data, error } = await db
+    .rpc("venta_tienda_nodos", { p_gml_ids: [...args.gmlIds], p_desde: periodoADb(args.desde), p_hasta: periodoADb(args.hasta) })
+    .abortSignal(AbortSignal.timeout(TIMEOUT_VENTA_TIENDA_MS));
+  if (error) return { data: null, error };
+  const v = data as unknown as { series?: unknown; cargas?: unknown } | null;
+  if (!v || !Array.isArray(v.series) || v.cargas === null || typeof v.cargas !== "object" || Array.isArray(v.cargas)) return { data: null, error: null };
+  return {
+    data: {
+      series: (v.series as { t: string; p: string; u: number | string; s: number | string }[]).map((x) => ({ t: x.t, p: x.p, u: Number(x.u), s: Number(x.s) })),
+      cargas: v.cargas as Record<string, string>,
     },
     error: null,
   };

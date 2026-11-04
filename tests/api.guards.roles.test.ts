@@ -194,3 +194,38 @@ describe("08b: agrupadores de compras (decisiones 92 y 95): el comprador escribe
     expect(agr.filter((c) => c.exigeRol).map(nombreDe).sort()).toEqual(["POST compras/paquetes/[id]/estado", "POST compras/viajes/[id]/estado"].sort());
   });
 });
+
+/**
+ * 07f: «Ver por tienda» (`GET …/crecimientos/por-tienda`) es una LECTURA con `requireUser`: los tres roles la ven (el comprador ve venta y stock, decisión 99) y sin sesión
+ * recibe 401. Aquí van los guards REALES: pasar el guard no toca ninguna tabla de datos; sin `gm` el handler responde 400 antes de leer nada.
+ */
+describe("07f: GET …/crecimientos/por-tienda (guard requireUser real)", () => {
+  const RUTA = "proyeccion/proyecciones/[id]/crecimientos/por-tienda/route.ts";
+  const consultar = async (consulta = "") => {
+    const modulo = (await import(/* @vite-ignore */ path.join(API, RUTA))) as { GET: (r: NextRequest, c: unknown) => Promise<Response> };
+    const url = `http://localhost/api/${RUTA.replace(/\/route\.ts$/, "").replace(/\[\w+\]/g, UUID)}${consulta}`;
+    return modulo.GET(new NextRequest(url), { params: Promise.resolve({ id: UUID }) });
+  };
+
+  it("abre con requireUser como primera sentencia", () => {
+    const cuerpo = cuerpoDeFuncion(limpiar(readFileSync(path.join(API, RUTA), "utf8")), "GET");
+    expect(cuerpo).not.toBeNull();
+    expect(primeraSentencia(cuerpo ?? "")).toMatchObject({ tipo: "guard", guard: "requireUser" });
+  });
+
+  it("sin sesión responde 401 y no toca ninguna tabla de datos", async () => {
+    estado.user = null;
+    expect((await consultar(`?gm=resto`)).status).toBe(401);
+    expect(estado.tablasTocadas).toEqual([]);
+  });
+
+  it("admin, planner y comprador pasan el guard (nunca 401 ni 403): sin gm, 400 antes de leer datos", async () => {
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    for (const rol of ["admin", "planner", "comprador"]) {
+      estado.rol = rol;
+      const respuesta = await consultar();
+      expect(respuesta.status, rol).toBe(400);
+      expect(estado.tablasTocadas, rol).toEqual([]);
+    }
+  });
+});

@@ -57,13 +57,28 @@ export type EstadoFalso = {
   llamadasVenta: number;
   /** Hace fallar el próximo `rpc` con ese error. */
   errorVenta: { code: string; message: string } | null;
+  /** 07f: respuesta de `venta_tienda_nodos` por llamada (la arma el test con su fixture), los argumentos de cada llamada y un error que se devuelve en toda llamada. */
+  ventaTienda: (args: { p_gml_ids: string[]; p_desde: string; p_hasta: string }, llamada: number) => unknown;
+  llamadasVentaTienda: { p_gml_ids: string[]; p_desde: string; p_hasta: string }[];
+  errorVentaTienda: { code: string; message: string } | null;
   /** Gancho de escritura: si devuelve un error, esa operación falla sin tocar nada (para probar reversiones). */
   falloDeEscritura: ((tabla: string, modo: "insert" | "update" | "delete" | "upsert", carga: Fila | Fila[]) => ErrorFalso | null) | null;
   /** Observador: se avisa de cada operación que se arma (`select`, `insert`, `update`, `upsert`, `delete`) para comprobar el orden de lecturas y escrituras. */
   alOperar: ((tabla: string, operacion: "select" | "insert" | "update" | "upsert" | "delete") => void) | null;
 };
 
-export const estado: EstadoFalso = { tablas: {}, siguienteId: 1, venta: () => ({}), llamadasVenta: 0, errorVenta: null, falloDeEscritura: null, alOperar: null };
+export const estado: EstadoFalso = {
+  tablas: {},
+  siguienteId: 1,
+  venta: () => ({}),
+  llamadasVenta: 0,
+  errorVenta: null,
+  ventaTienda: () => ({ series: [], cargas: {} }),
+  llamadasVentaTienda: [],
+  errorVentaTienda: null,
+  falloDeEscritura: null,
+  alOperar: null,
+};
 
 export function reiniciar() {
   reloj = 0;
@@ -71,6 +86,9 @@ export function reiniciar() {
   estado.siguienteId = 1;
   estado.llamadasVenta = 0;
   estado.errorVenta = null;
+  estado.ventaTienda = () => ({ series: [], cargas: {} });
+  estado.llamadasVentaTienda = [];
+  estado.errorVentaTienda = null;
   estado.falloDeEscritura = null;
   estado.alOperar = null;
 }
@@ -463,6 +481,16 @@ export function clienteFalso() {
   return {
     from: (t: string) => new Consulta(t),
     rpc: (nombre: string, args: Record<string, unknown>) => {
+      if (nombre === "venta_tienda_nodos") {
+        // 07f: el constructor real de PostgREST encadena `.abortSignal(...)`; la base falsa lo acepta y devuelve lo mismo.
+        const pedido = args as { p_gml_ids: string[]; p_desde: string; p_hasta: string };
+        estado.llamadasVentaTienda.push(pedido);
+        const resultado = estado.errorVentaTienda
+          ? { data: null, error: { ...estado.errorVentaTienda, details: null, hint: null } }
+          : { data: estado.ventaTienda(pedido, estado.llamadasVentaTienda.length), error: null };
+        const promesa = Promise.resolve(resultado);
+        return Object.assign(promesa, { abortSignal: () => promesa });
+      }
       if (nombre !== "venta_proyeccion") throw new Error(`rpc inesperado: ${nombre}`);
       estado.llamadasVenta += 1;
       if (estado.errorVenta) return Promise.resolve({ data: null, error: { ...estado.errorVenta, details: null, hint: null } });

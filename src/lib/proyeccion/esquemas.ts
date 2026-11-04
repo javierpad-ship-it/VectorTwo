@@ -218,6 +218,17 @@ export const cerradaQuerySchema = z.object({
   anio: z.coerce.number("El año debe ser un número de cuatro cifras, por ejemplo 2026 (?anio=2026).").int("El año debe ser un número entero.").min(2024, "El año no es válido.").max(2101, "El año no es válido."),
 });
 
+/**
+ * `GET …/crecimientos/por-tienda?gm=<genero_id>.<mundo_id>|resto` (07f): un género × mundo o el Resto. Los ids son uuid (la clave de la fila de
+ * `GET …/crecimientos`); cualquier otro parámetro se rechaza.
+ */
+const UUID_GM = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+export const porTiendaQuerySchema = z.strictObject({
+  gm: z
+    .string("gm es obligatorio: «genero_id.mundo_id» o «resto».")
+    .refine((v) => v === "resto" || new RegExp(`^${UUID_GM}\\.${UUID_GM}$`, "i").test(v), "gm debe ser «genero_id.mundo_id» o «resto»."),
+});
+
 export type CrearProyeccionCuerpo = z.infer<typeof crearSchema>;
 export type EditarProyeccionCuerpo = z.infer<typeof editarSchema>;
 export type DecisionCuerpo = z.infer<typeof decisionSchema>;

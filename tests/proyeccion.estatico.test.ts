@@ -26,12 +26,15 @@ const fuente = (ruta: string) => src.find((f) => f.ruta === ruta)?.texto ?? "";
 const LIB = "src/lib/proyeccion/";
 const CONSULTAS = `${LIB}consultas.ts`;
 const TIPOS_DB = "src/lib/supabase/database.types.ts";
+const RUTA_POR_TIENDA = "src/app/api/proyeccion/proyecciones/[id]/crecimientos/por-tienda/route.ts";
 // Las rutas de IA (`/ia/`) y de aprobación en bloque (`/aprobacion/`, 07g) tienen sus propias pruebas estáticas (`ia.estatico`, `aprobacion.estatico`).
 const RUTAS = src.filter((f) => f.ruta.startsWith("src/app/api/proyeccion/") && f.ruta.endsWith("route.ts") && !f.ruta.includes("/ia/") && !f.ruta.includes("/aprobacion/"));
 /** Lógica pura: ni base ni HTTP ni pantalla. */
 const PURAS = [
   "apertura-linea", "bloques", "calculo", "calendario", "cierre", "cierres-tienda", "composicion", "crecimientos", "curva-fila", "decision", "desactualizado", "esquemas", "excel",
   "explicar", "cola-larga", "resumen", "matriz", "mensual", "meta-gm", "modelo", "nino", "participaciones", "persistencia", "reglas", "reparto", "siguiente", "tendencia", "tiendas-nuevas", "tipos", "tipos-api", "universo",
+  // 07f: la lógica de «Ver por tienda» (la importa también la pantalla).
+  "venta-por-tienda",
 ];
 
 describe("0.14.0 F1: los meses del periodo que se comparan en un factor salen de UNA sola función", () => {
@@ -211,6 +214,8 @@ describe("M7: rutas", () => {
       [`${B}proyecciones/[id]/tiendas/[tiendaId]/filas/route.ts`]: ["GET"],
       [`${B}proyecciones/[id]/matriz/route.ts`]: ["GET"],
       [`${B}proyecciones/[id]/crecimientos/route.ts`]: ["GET", "PUT"],
+      // 07f: «Ver por tienda» de Crecimientos (solo lectura).
+      [`${B}proyecciones/[id]/crecimientos/por-tienda/route.ts`]: ["GET"],
       [`${B}proyecciones/[id]/mensual/route.ts`]: ["GET"],
       [`${B}proyecciones/[id]/cerrar/route.ts`]: ["POST"],
       [`${B}proyecciones/[id]/archivar/route.ts`]: ["POST"],
@@ -222,8 +227,14 @@ describe("M7: rutas", () => {
     for (const r of RUTAS) expect(metodos(r.texto), r.ruta).toEqual(esperado[r.ruta]);
   });
 
-  it("toda ruta usa requirePlanner y ningún otro guard", () => {
+  it("toda ruta usa requirePlanner y ningún otro guard, salvo la lectura de «Ver por tienda» (07f), que usa requireUser (el comprador ve venta y stock, decisión 99)", () => {
     for (const r of RUTAS) {
+      if (r.ruta === RUTA_POR_TIENDA) {
+        const t = sinComentarios(r.texto);
+        expect(t, r.ruta).toMatch(/const \{ response \} = await requireUser\(\);\s*if \(response\) return response;/);
+        expect(t, r.ruta).not.toMatch(/requirePlanner|requireAdmin/);
+        continue;
+      }
       expect(r.texto, r.ruta).toContain("requirePlanner");
       expect(r.texto, r.ruta).not.toMatch(/requireUser|requireAdmin/);
     }
@@ -347,7 +358,7 @@ describe("07e R24: M7 no depende de la IA (ni en el código ni en las lecturas d
   });
 
   it("calcular, cerrar, matriz, mensual y cerrada: ni sus servicios ni sus rutas nombran tablas ia_* ni importan de la IA", () => {
-    const servicios = ["servicio", "servicio-base", "servicio-crecimientos", "consultas", "calculo", "modelo", "cierre", "mensual", "matriz", "desactualizado", "reglas", "contexto"].map((n) => `${LIB}${n}.ts`);
+    const servicios = ["servicio", "servicio-base", "servicio-crecimientos", "servicio-venta-por-tienda", "venta-por-tienda", "consultas", "calculo", "modelo", "cierre", "mensual", "matriz", "desactualizado", "reglas", "contexto"].map((n) => `${LIB}${n}.ts`);
     for (const ruta of servicios) {
       expect(fuente(ruta).length, ruta).toBeGreaterThan(0);
       expect(NOMBRA_TABLA_IA.test(sin(ruta)), ruta).toBe(false);
@@ -492,5 +503,61 @@ describe("07g: M7 y la aprobación en bloque", () => {
     expect(decision.length).toBeGreaterThan(10);
     expect(decision).not.toContain("historico");
     expect(c).toMatch(/export type ColumnasFilas = [^;]*"decision" \| "decision_historico"/);
+  });
+});
+
+describe("07f: «Ver por tienda» es de solo lectura, no mezcla fuentes y la función SQL no deja entrar al CD", () => {
+  const sin = (ruta: string) => sinComentarios(fuente(ruta));
+  const SERVICIO = `${LIB}servicio-venta-por-tienda.ts`;
+  const dirMigraciones = path.join(RAIZ, "supabase", "migrations");
+  const archivoMigracion = existsSync(dirMigraciones) ? readdirSync(dirMigraciones).find((n) => /^\d{4}_venta_tienda_nodos\.sql$/.test(n)) : undefined;
+  const sqlSinComentarios = () => readFileSync(path.join(dirMigraciones, archivoMigracion as string), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
+
+  it("R9: solo consultas.ts nombra venta_tienda_nodos (y los tipos generados), con timeout de 8 s", () => {
+    const usan = src.filter((f) => sinComentarios(f.texto).includes("venta_tienda_nodos") && f.ruta !== TIPOS_DB && f.ruta !== CONSULTAS).map((f) => f.ruta);
+    expect(usan).toEqual([]);
+    const consultas = sinComentarios(fuente(CONSULTAS));
+    expect(consultas).toMatch(/\.rpc\("venta_tienda_nodos"/);
+    expect(consultas).toMatch(/TIMEOUT_VENTA_TIENDA_MS = 8000/);
+    expect(consultas).toMatch(/\.abortSignal\(AbortSignal\.timeout\(TIMEOUT_VENTA_TIENDA_MS\)\)/);
+  });
+
+  it("R9: el servicio no escribe (insert, update, upsert, delete), no llama a ningún rpc ni nombra tablas ia_*, venta_lineas_ia, historico ni las otras lecturas de venta", () => {
+    const t = sin(SERVICIO);
+    expect(t.length).toBeGreaterThan(500);
+    expect(t).not.toMatch(/\.(insert|update|upsert|delete)\(/);
+    expect(t).not.toMatch(/\.rpc\(/);
+    expect(t).not.toMatch(/\bia_[a-z_]+|venta_lineas_ia|historico|venta_proyeccion|venta_genero_mundo|venta_mensual_tienda|from\(\s*["']venta_stock/);
+    expect(t).not.toMatch(/from\(\s*["']proyeccion/);
+    // Lee solo con las funciones de consultas.ts y de tiendas: ni siquiera `.from(` propio.
+    expect(t).not.toMatch(/\.from\(/);
+    expect(importsDe(fuente(SERVICIO)).filter((o) => /lib\/ia(\/|$)|aprobacion|database\.types/.test(o))).toEqual([]);
+  });
+
+  it("la ruta abre con requireUser, valida la consulta con porTiendaQuerySchema y no toca la base", () => {
+    const t = sinComentarios(fuente(RUTA_POR_TIENDA));
+    expect(t).toMatch(/leerConsulta\(request, porTiendaQuerySchema\)/);
+    expect(t).not.toMatch(/supabaseAdmin|supabaseServer|\.from\(|\.rpc\(/);
+    expect(sin(`${LIB}esquemas.ts`)).toMatch(/export const porTiendaQuerySchema = z\.strictObject\(/);
+  });
+
+  it("R5: la migración filtra tipo = 'Tienda' (el CD nunca entra) y de venta_stock_vigente solo nombra unidades y venta_soles", () => {
+    expect(archivoMigracion, "migración de venta_tienda_nodos").toBeDefined();
+    const sql = sqlSinComentarios();
+    expect(sql).toMatch(/join public\.tiendas t on t\.id = v\.tienda_id and t\.tipo = 'Tienda'/);
+    expect(sql).not.toMatch(/costo_vendido|stock_unidades|stock_valorizado|centro de distribuci/i);
+    const columnas = [...new Set([...sql.matchAll(/\bv\.(\w+)/g)].map((m) => m[1]))].sort();
+    expect(columnas).toEqual(["equivalencia_id", "periodo", "tienda_id", "unidades", "venta_soles"]);
+    expect([...sql.matchAll(/\b(unidades|venta_soles)\b/g)].length).toBeGreaterThan(0);
+  });
+
+  it("la migración es solo lectura y solo la ejecuta el backend: sin DDL de datos, revoke a public, anon y authenticated, grant a service_role", () => {
+    const sql = sqlSinComentarios();
+    expect(sql.replace(/on delete (restrict|cascade|no action|set null)/gi, "")).not.toMatch(/\b(drop|delete|truncate|update|insert|alter|create table)\b/i);
+    expect(sql).toMatch(/language sql\s+stable\s+security invoker\s+set search_path = ''/);
+    expect(sql).toMatch(/revoke execute on function public\.venta_tienda_nodos\(uuid\[\], date, date\) from public, anon, authenticated;/);
+    expect(sql).toMatch(/grant execute on function public\.venta_tienda_nodos\(uuid\[\], date, date\) to service_role;/);
+    const destinos = [...sql.matchAll(/grant execute on function [^;]*? to ([^;]+);/gi)].map((m) => m[1].trim());
+    expect(destinos).toEqual(["service_role"]);
   });
 });

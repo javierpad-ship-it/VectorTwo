@@ -1174,3 +1174,59 @@ export type RespuestaCerradaApi = {
 };
 
 export const TEMPORADAS_FACTOR: readonly TemporadaFactor[] = ["invierno", "verano"];
+
+// ─── 07f · Venta por tienda y año de un género × mundo (GET …/crecimientos/por-tienda) ───
+
+/** Unidades netas y soles netos de IGV (2 decimales) de una tienda o de un subtotal en un periodo. */
+export type CifraVentaApi = { u: number; s: number };
+/** Por qué una variación no es un %: `nueva` (el anterior es 0), `sin_dato`, `parcial` (la tienda no estuvo abierta todo un periodo) o `incompleto` (falta un mes publicado). */
+export type MotivoVariacion = "nueva" | "sin_dato" | "parcial" | "incompleto";
+/** Una columna de periodo: `clave` es `"2023"` … `"2025"` (año completo), `"2025-ac"` (ene–k del año anterior) o `"2026-ac"` (ene–k del año en curso). `meses_faltantes` son `aaaa-mm` sin carga publicada. */
+export type PeriodoVentaApi = { clave: string; anio: number; hasta_mes: number; meses_faltantes: string[] };
+export type EstadoTiendaVenta = "misma" | "entra" | "sale" | "abrio_en_curso" | "cerro" | "otra" | "sin_bloque";
+export type TiendaVentaApi = {
+  tienda_id: string;
+  codigo: string;
+  nombre: string;
+  grupo: "base" | "fuera";
+  estado: EstadoTiendaVenta;
+  estado_texto: string;
+  /** Las de `parametros.bloques` (las de M4 solo en `sin_bloque`). */
+  fecha_apertura: string | null;
+  fecha_cierre: string | null;
+  /** Una cifra por cada `periodos[].clave` (con ceros si no vendió). `completo = false`: la tienda no estuvo abierta todo el periodo según sus fechas (se ve «parcial»). */
+  periodos: Record<string, CifraVentaApi & { completo: boolean }>;
+  /** Cierre vigente de `Y` en unidades (real ene–k + proyectado); `null` = «—». `exacto`: sale de sus filas de tienda y no de un reparto. */
+  vigente: { u: number; real: number; proyectado: number; exacto: boolean } | null;
+};
+export type TotalVentaApi = {
+  periodos: Record<string, CifraVentaApi>;
+  /** En `base`: `base.total` (incluye «sin atribuir»). En `fuera` y `conjunto`: `null`. */
+  vigente: number | null;
+  /** Clave de periodo (y `"vigente"`) → códigos de las tiendas incluidas cuyo periodo NO es completo. */
+  no_comparables: Record<string, string[]>;
+};
+export type VentaPorTiendaApi = {
+  conjunto: { clave: string; nombre: string; es_resto: boolean };
+  anio_en_curso: number;
+  anio_siguiente: number;
+  hasta_periodo: string;
+  k: number;
+  periodos: PeriodoVentaApi[];
+  base: {
+    /** `Σ B` = `agregado.base` de la misma celda en `GET …/crecimientos`. */
+    total: number | null;
+    /** `Σ B'` (base corregida del Niño). */
+    corregida: number | null;
+    tiendas: number;
+    /** Códigos de las tiendas de la base que entran con su vigente exacto. */
+    entran: string[];
+    /** Lo que no se pudo repartir entre tiendas (puede ser negativo). `Σ vigente(base) + sin_atribuir = total`. */
+    sin_atribuir: number;
+    motivo_nulo: null | "metodo_anterior" | "sin_filas";
+  };
+  /** La base primero; en cada grupo, por unidades de `«Y»-ac` descendente y código. */
+  tiendas: TiendaVentaApi[];
+  totales: { base: TotalVentaApi; fuera: TotalVentaApi; conjunto: TotalVentaApi };
+  avisos: { codigo: "filas_sin_base" | "meses_faltantes" | "sin_atribuir" | "sin_bloque"; mensaje: string }[];
+};
