@@ -81,13 +81,13 @@ insert into r (caso, ok) values
          or (column_name = 'nota' and data_type = 'text' and is_nullable = 'YES')))
     and exists (select 1 from pg_constraint where conrelid = 'public.migraciones_aplicadas'::regclass and contype = 'p'
                   and pg_get_constraintdef(oid) = 'PRIMARY KEY (nombre)')),
-  ('backfill: 34 filas en total (33 migraciones aplicadas antes del registro y la propia 0035)',
-    (select count(*) from public.migraciones_aplicadas) = 34),
+  ('backfill: 34 filas hasta la 0035 (33 migraciones aplicadas antes del registro y la propia 0035; las posteriores, como la 0036, se registran aparte)',
+    (select count(*) from public.migraciones_aplicadas where left(nombre, 4)::int <= 35) = 34),
   ('backfill: los numeros registrados son exactamente 0..25, 27 y 29..35 (ni 0026 ni 0028)',
-    (select array_agg(left(nombre, 4)::int order by left(nombre, 4)::int) from public.migraciones_aplicadas)
+    (select array_agg(left(nombre, 4)::int order by left(nombre, 4)::int) from public.migraciones_aplicadas where left(nombre, 4)::int <= 35)
       = (select array_agg(g order by g) from generate_series(0, 35) g where g not in (26, 28))),
   ('backfill: sin duplicados de numero (un solo nombre por numero) y todos con el formato NNNN_nombre',
-    (select count(distinct left(nombre, 4)) from public.migraciones_aplicadas) = 34
+    (select count(distinct left(nombre, 4)) from public.migraciones_aplicadas where left(nombre, 4)::int <= 35) = 34
     and (select count(*) from public.migraciones_aplicadas where nombre !~ '^[0-9]{4}_[a-z0-9_]+$') = 0),
   ('backfill: 33 filas llevan la nota del backfill y la 0035 se registra a si misma con su propia nota',
     (select count(*) from public.migraciones_aplicadas where nota = 'backfill de la 0035: aplicada antes de existir el registro') = 33
@@ -102,13 +102,14 @@ insert into public.migraciones_aplicadas (nombre, nota) values ('0000_base', 'ot
   on conflict (nombre) do nothing;
 insert into r (caso, ok) values
   ('backfill repetible: insertar de nuevo con on conflict do nothing no duplica, no cambia notas ni fechas',
-    (select count(*) from public.migraciones_aplicadas) = 34
+    (select count(*) from public.migraciones_aplicadas where left(nombre, 4)::int <= 35) = 34
+    and (select count(*) from public.migraciones_aplicadas) = (select count(*) from antes_reg)
     and not exists (select 1 from antes_reg a join public.migraciones_aplicadas m using (nombre)
                       where a.aplicada_at is distinct from m.aplicada_at or a.nota is distinct from m.nota));
 
 -- Como service_role (el rol de la API) y con los otros dos.
 insert into r (caso, ok) values
-  ('service_role lee la tabla de registro (34 filas)', pg_temp.estado('select count(*) from public.migraciones_aplicadas', 'service_role') = 'ok'),
+  ('service_role lee la tabla de registro', pg_temp.estado('select count(*) from public.migraciones_aplicadas', 'service_role') = 'ok'),
   ('service_role inserta una migracion nueva (convencion: nombre y nota)',
     pg_temp.estado($q$insert into public.migraciones_aplicadas (nombre, nota) values ('9999_humo_servicio', 'humo') on conflict do nothing$q$, 'service_role') = 'ok'),
   ('service_role NO actualiza el registro (42501)',

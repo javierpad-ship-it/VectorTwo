@@ -18,6 +18,8 @@ import {
   pidDe,
   plan,
   revisionCompra,
+  revisionEmbarque,
+  rpc,
   rpcEnTransaccion,
   sembrarBase,
   sembrarCompra,
@@ -277,74 +279,392 @@ describe.skipIf(!HAY_BASE)("concurrencia (Postgres real, dos conexiones)", () =>
   });
 
   /**
-   * HALLAZGO (ver informe): aplicar_movimiento_agrupador bloquea embarque -> compras y AL FINAL inserta eventos con `viaje_id` del
-   * embarque (FK: FOR KEY SHARE sobre el viaje). asignar_viaje_compras bloquea viaje (FOR UPDATE) -> compras. Con un embarque DENTRO de
-   * un viaje y una compra compartida, los dos pueden esperarse en cruz: Postgres detecta el interbloqueo (40P01) y aborta a UNO, que
-   * no deja nada escrito; ni compras.revision ni los eventos quedan a medias. Lo que garantiza la prueba es esa seguridad (un perdedor
-   * con 40P01 limpio y datos coherentes); NO que el interbloqueo no exista. El backend de agrupadores no traduce 40P01 (la API
-   * respondera 500 generico); la aprobacion de lotes si lo traduce a `conflicto_reintentar`.
+   * CANDADOS DE VIAJES Y EMBARQUES (migracion 0036). Contexto del hallazgo: `aplicar_movimiento_agrupador` y `cambiar_estado_agrupador`
+   * sostienen un embarque (y una compra) y al final insertan eventos con `viaje_id` (FK: FOR KEY SHARE sobre el viaje); `importar_agrupadores`
+   * inserta embarques y paquetes que apuntan a viajes y embarques por codigo (tampoco los bloquea). Si `guardar_embarque`,
+   * `asignar_viaje_compras` o `importar_agrupadores` tomaban el viaje con FOR UPDATE, ese KEY SHARE chocaba con el y Postgres abortaba a
+   * uno con 40P01. Desde la 0036 los viajes y los embarques se bloquean con FOR NO KEY UPDATE (solo cambian columnas no clave; el
+   * KEY SHARE de las FK ya no choca, el exclusion entre escritores se mantiene) y las compras siguen con FOR UPDATE.
    *
-   * Se fuerza la ventana: un tercer cliente (P) retiene una fila de asignacion que A necesita despues de tomar sus candados.
+   * Las pruebas usan una COMPUERTA: un cliente extra (P) retiene un candado de TABLA (SHARE) que bloquea solo los inserts en esa tabla, de modo
+   * que la sesion A queda parada despues de tomar sus candados y antes de su insert con FK. Asi el cruce es determinista, no una carrera.
    */
-  it("embarque dentro de un viaje: aplicar_movimiento_agrupador y asignar_viaje_compras sobre la misma compra pueden cruzarse; si pasa, Postgres aborta a UNO (40P01) sin dejar datos a medias", async () => {
+  const T_GUARDAR = ["jsonb", "integer", "jsonb"];
+  const T_CAMBIAR = ["text", "uuid", "text", "integer", "text", "jsonb"];
+  const T_VIAJE_COMPRAS = ["uuid", "jsonb", "jsonb"];
+
+  /** Un viaje V, un embarque E dentro de V, una compra confirmada asignada entera a E y un paquete en E. */
+  async function escenarioViajeEmbarque(ns: number) {
+    return sembrar(async () => {
+      const b = await sembrarBase(S, ns);
+      const viaje = await sembrarViaje(S, b, `Viaje ns${ns}`);
+      const embarque = await sembrarEmbarque(S, b, `Embarque ns${ns}`, "2026-11-15", { viaje_id: viaje });
+      const compra = await sembrarCompra(S, b, { n: 1, referencia: `LK-${ns}`, estado: "confirmada", perfil: b.comprador1 });
+      const asignacion = await asignarEntrega(S, compra.entrega, embarque, 100);
+      const p = await rpc(S, "guardar_paquete", [{ embarque_id: embarque, nombre: `Paquete ns${ns}` }, await revisionEmbarque(S, embarque), actor(b.admin, "IT Admin")], ["jsonb", "integer", "jsonb"]);
+      if (!p.data?.ok) throw new Error(`guardar_paquete fallo: ${JSON.stringify(p)}`);
+      return { b, viaje, embarque, compra, asignacion, paquete: p.data.paquete_id as string };
+    });
+  }
+  type EscenarioLk = Awaited<ReturnType<typeof escenarioViajeEmbarque>>;
+
+  async function revisionViaje(viaje: string): Promise<number> {
+    return Number(await escalar<number>(S, "select revision from public.compra_viajes where id = $1", [viaje]));
+  }
+
+  function planQuitarEntrega(esc: EscenarioLk, embarques: unknown[], compras: unknown[]): Json {
+    return plan(
+      "quitar",
+      embarques,
+      compras,
+      [{ asignacion_id: esc.asignacion, entrega_id: esc.compra.entrega, linea_id: esc.compra.linea, compra_id: esc.compra.compra, unidades: 100, destino: null }],
+      [{ linea_id: esc.compra.linea, periodo: "2026-11", unidades: 100 }]
+    );
+  }
+
+  /** Compuerta: P retiene `lock table <tabla> in share mode`; quien inserte en esa tabla espera hasta que P haga rollback. */
+  async function abrirCompuerta(tabla: string): Promise<Client> {
     const P = await abrir();
-    abiertas.push(P);
+    await P.query("begin");
+    await P.query(`lock table public.${tabla} in share mode`);
+    return P;
+  }
+  async function cerrarCompuerta(P: Client): Promise<void> {
     try {
-      const { b, viaje, embarque, compra } = await sembrar(async () => {
-        const base = await sembrarBase(S, 78);
-        const v = await sembrarViaje(S, base, "Viaje del embarque");
-        const e = await sembrarEmbarque(S, base, "Embarque en viaje", "2026-11-15", { viaje_id: v });
-        const s = await sembrarCompra(S, base, { n: 1, referencia: "DL-1", estado: "confirmada", perfil: base.comprador1 });
-        await asignarEntrega(S, s.entrega, e, 100);
-        return { b: base, viaje: v, embarque: e, compra: s };
-      });
-      const asignacion = await escalar<string>(S, "select id from public.compra_entrega_asignaciones where embarque_id = $1", [embarque]);
-      const planQuitar = plan(
-        "quitar",
-        await embarquesConRevision(S, [embarque]),
-        await comprasDelPlan(S, [embarque]),
-        [{ asignacion_id: asignacion, entrega_id: compra.entrega, linea_id: compra.linea, compra_id: compra.compra, unidades: 100, destino: null }],
-        [{ linea_id: compra.linea, periodo: "2026-11", unidades: 100 }]
-      );
+      await P.query("rollback");
+    } catch {
+      // ya cerrada
+    }
+    await P.end().catch(() => undefined);
+  }
+
+  it("hallazgo original: embarque DENTRO de un viaje, aplicar_movimiento_agrupador (sostiene embarque y compra, luego KEY SHARE del viaje) y asignar_viaje_compras (viaje y luego compra) sobre la misma compra: SIN interbloqueo; gana el movimiento y el segundo recibe compra_cambio", async () => {
+    const P = await abrir();
+    try {
+      const esc = await escenarioViajeEmbarque(78);
+      const { b, viaje, embarque, compra } = esc;
+      const planQuitar = planQuitarEntrega(esc, await embarquesConRevision(S, [embarque]), await comprasDelPlan(S, [embarque]));
       const revCompra = await revisionCompra(S, compra.compra);
       const pidA = await pidDe(A);
       const pidB = await pidDe(B);
 
       // P retiene la fila de asignacion: A tomara embarque y compra y se parara al intentar quitarla.
       await P.query("begin");
-      await P.query("select 1 from public.compra_entrega_asignaciones where id = $1 for update", [asignacion]);
+      await P.query("select 1 from public.compra_entrega_asignaciones where id = $1 for update", [esc.asignacion]);
       const pA = rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planQuitar, actor(b.comprador1, "C1")], TIPOS_C);
       await esperarBloqueo(M, pidA);
-      // B toma el viaje (FOR UPDATE) y se queda esperando la compra que A ya tiene.
-      const pB = rpcEnTransaccion(B, "asignar_viaje_compras", [viaje, [{ id: compra.compra, revision: revCompra }], actor(b.comprador2, "C2")], ["uuid", "jsonb", "jsonb"]);
+      // B toma el viaje (FOR NO KEY UPDATE) y se queda esperando la compra que A ya tiene.
+      const pB = rpcEnTransaccion(B, "asignar_viaje_compras", [viaje, [{ id: compra.compra, revision: revCompra }], actor(b.comprador2, "C2")], T_VIAJE_COMPRAS);
       await esperarBloqueo(M, pidB);
-      await P.query("rollback"); // A sigue: ahora necesita el viaje (FOR KEY SHARE) que B tiene (FOR UPDATE)
+      await P.query("rollback"); // A sigue: necesita el viaje (FOR KEY SHARE) que B tiene (NO KEY UPDATE): ya no chocan
 
       const [rA, rB]: ResultadoRpc[] = await Promise.all([pA, pB]);
-      const errores = [rA, rB].filter((r) => r.error !== null);
-      const gano = (r: ResultadoRpc) => r.data?.ok === true;
-      if (errores.length > 0) {
-        // Interbloqueo: exactamente uno aborta con 40P01 y el otro termina bien.
-        expect(errores).toHaveLength(1);
-        expect(errores[0].error?.codigo).toBe("40P01");
-        expect([rA, rB].filter(gano)).toHaveLength(1);
-      }
-      // Sea cual sea el resultado, el estado final es coherente: la revision de la compra sube solo por quien gano, sin desalineaciones.
-      const ganadores = [rA, rB].filter(gano).length;
-      const rev = await revisionCompra(S, compra.compra);
-      expect(rev).toBeGreaterThanOrEqual(revCompra);
-      expect(rev - revCompra).toBeLessThanOrEqual(2);
-      expect(rev - revCompra).toBeGreaterThanOrEqual(ganadores > 0 ? 1 : 0);
+      expect(rA.error, `A: ${JSON.stringify(rA)}`).toBeNull();
+      expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+      expect(rA.data?.ok).toBe(true);
+      expect(rB.data).toEqual({ ok: false, motivo: "compra_cambio" });
+      // Solo escribio A: la revision de la compra sube una vez, hay un evento de A y ninguno de B; el viaje de la compra sigue sin asignar.
+      expect(await revisionCompra(S, compra.compra)).toBe(revCompra + 1);
+      expect(await contar(S, "compra_eventos", "compra_id = $1 and accion = 'asignar_agrupador'", [compra.compra])).toBe(1);
+      expect(await contar(S, "compra_eventos", "compra_id = $1 and accion = 'asignar_viaje'", [compra.compra])).toBe(0);
+      expect(await escalar<string | null>(S, "select viaje_id from public.compras where id = $1", [compra.compra])).toBeNull();
       expect(await escalar<string>(S, "select count(*) from public.agrupadores_desalineados()")).toBe("0");
-      // Nada a medias: cada evento de compra corresponde a una operacion que se confirmo.
-      const eventos = await filas<{ accion: string }>(S, "select accion from public.compra_eventos where compra_id = $1 and accion in ('asignar_agrupador', 'asignar_viaje')", [compra.compra]);
-      expect(eventos.length).toBe(rev - revCompra);
     } finally {
+      await cerrarCompuerta(P);
+    }
+  });
+
+  it("cambiar_estado_agrupador(embarque) sostiene el embarque y necesita el KEY SHARE del viaje para su evento; guardar_embarque sostiene el viaje y espera el embarque: SIN interbloqueo, el segundo recibe agrupador_cambio", async () => {
+    const esc = await escenarioViajeEmbarque(83);
+    const { b, viaje, embarque } = esc;
+    const rev = await revisionEmbarque(S, embarque);
+    const P = await abrirCompuerta("compra_agrupador_eventos");
+    try {
+      const pidA = await pidDe(A);
+      const pidB = await pidDe(B);
+      // A: toma el embarque y se para en el insert del evento (la compuerta), ANTES de pedir el KEY SHARE del viaje.
+      const pA = rpcEnTransaccion(A, "cambiar_estado_agrupador", ["embarque", embarque, "en_transito", rev, null, actor(b.comprador1, "C1")], T_CAMBIAR);
+      await esperarBloqueo(M, pidA);
+      // B: toma el viaje y espera el embarque de A.
+      const pB = rpcEnTransaccion(
+        B,
+        "guardar_embarque",
+        [{ id: embarque, nombre: "Embarque renombrado", tipo: "importacion", viaje_id: viaje }, rev, actor(b.comprador2, "C2")],
+        T_GUARDAR
+      );
+      await esperarBloqueo(M, pidB);
+      await cerrarCompuerta(P);
+      const [rA, rB] = await Promise.all([pA, pB]);
+      expect(rA.error, `A: ${JSON.stringify(rA)}`).toBeNull();
+      expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+      expect(rA.data).toMatchObject({ ok: true, estado: "en_transito", revision: rev + 1 });
+      expect(rB.data).toEqual({ ok: false, motivo: "agrupador_cambio" });
+      expect(await revisionEmbarque(S, embarque)).toBe(rev + 1);
+      expect(await escalar<string>(S, "select nombre from public.compra_embarques where id = $1", [embarque])).toBe(`Embarque ns83`);
+    } finally {
+      await cerrarCompuerta(P);
+    }
+  });
+
+  it("importar_agrupadores (embarque por viaje_codigo: sostiene el candado del codigo y pide el KEY SHARE del viaje) contra guardar_embarque (sostiene el viaje y pide el candado del codigo): SIN interbloqueo, los dos terminan bien", async () => {
+    const esc = await escenarioViajeEmbarque(84);
+    const { b, viaje } = esc;
+    const codigoViaje = await escalar<string>(S, "select codigo from public.compra_viajes where id = $1", [viaje]);
+    const lote = {
+      archivo_nombre: "it-84.csv",
+      viajes: [],
+      embarques: [
+        {
+          fila: 1, codigo: null, nombre: "Embarque importado ns84", tipo: "importacion", viaje_id: null, viaje_codigo: codigoViaje, responsable_id: b.comprador1,
+          referencia_logistica: null, puerto_embarque: null, fecha_salida_estimada: null, fecha_llegada_estimada: "2026-12-15", nota: null,
+        },
+      ],
+      paquetes: [],
+    };
+    const P = await abrirCompuerta("compra_embarques");
+    try {
+      const pidA = await pidDe(A);
+      const pidB = await pidDe(B);
+      // A: toma el candado consultivo del codigo de embarques y se para en el insert del embarque (la compuerta).
+      const pA = rpcEnTransaccion(A, "importar_agrupadores", [lote, actor(b.admin, "Admin")], TIPOS_C);
+      await esperarBloqueo(M, pidA);
+      // B: toma el viaje y espera el candado del codigo, que tiene A.
+      const pB = rpcEnTransaccion(
+        B,
+        "guardar_embarque",
+        [{ nombre: "Embarque nuevo ns84", tipo: "importacion", viaje_id: viaje, fecha_llegada_estimada: "2026-12-20" }, null, actor(b.comprador2, "C2")],
+        T_GUARDAR
+      );
+      await esperarBloqueo(M, pidB);
+      await cerrarCompuerta(P);
+      const [rA, rB] = await Promise.all([pA, pB]);
+      expect(rA.error, `A: ${JSON.stringify(rA)}`).toBeNull();
+      expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+      expect(rA.data?.ok).toBe(true);
+      expect(rB.data).toMatchObject({ ok: true, creado: true });
+      const codigos = await filas<{ codigo: string }>(S, "select codigo from public.compra_embarques where viaje_id = $1 and nombre like '%ns84' and nombre <> 'Embarque ns84' order by codigo", [viaje]);
+      expect(codigos).toHaveLength(2);
+      expect(new Set(codigos.map((x) => x.codigo)).size).toBe(2);
+    } finally {
+      await cerrarCompuerta(P);
+    }
+  });
+
+  it("importar_agrupadores (paquete por embarque_codigo) contra guardar_paquete sobre ese embarque: SIN interbloqueo, los dos terminan bien", async () => {
+    const esc = await escenarioViajeEmbarque(85);
+    const { b, embarque } = esc;
+    const codigoEmbarque = await escalar<string>(S, "select codigo from public.compra_embarques where id = $1", [embarque]);
+    const lote = {
+      archivo_nombre: "it-85.csv",
+      viajes: [],
+      embarques: [],
+      paquetes: [{ fila: 1, codigo: null, nombre: "Paquete importado ns85", embarque_id: null, embarque_codigo: codigoEmbarque, responsable_id: null, nota: null }],
+    };
+    const rev = await revisionEmbarque(S, embarque);
+    const P = await abrirCompuerta("compra_paquetes");
+    try {
+      const pidA = await pidDe(A);
+      const pidB = await pidDe(B);
+      const pA = rpcEnTransaccion(A, "importar_agrupadores", [lote, actor(b.admin, "Admin")], TIPOS_C);
+      await esperarBloqueo(M, pidA);
+      const pB = rpcEnTransaccion(B, "guardar_paquete", [{ embarque_id: embarque, nombre: "Paquete nuevo ns85" }, rev, actor(b.comprador2, "C2")], ["jsonb", "integer", "jsonb"]);
+      await esperarBloqueo(M, pidB);
+      await cerrarCompuerta(P);
+      const [rA, rB] = await Promise.all([pA, pB]);
+      expect(rA.error, `A: ${JSON.stringify(rA)}`).toBeNull();
+      expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+      expect(rA.data?.ok).toBe(true);
+      expect(rB.data).toMatchObject({ ok: true, creado: true });
+      expect(await contar(S, "compra_paquetes", "embarque_id = $1 and nombre like '%ns85'", [embarque])).toBe(3);
+    } finally {
+      await cerrarCompuerta(P);
+    }
+  });
+
+  it("tres conexiones: aplicar_movimiento_agrupador (embarque y compra), asignar_viaje_compras (viaje, espera la compra) y guardar_embarque (espera el viaje) en cadena: SIN interbloqueo; gana el movimiento, la asignacion recibe compra_cambio y la edicion agrupador_cambio", async () => {
+    const esc = await escenarioViajeEmbarque(86);
+    const { b, viaje, embarque, compra } = esc;
+    const planQuitar = planQuitarEntrega(esc, await embarquesConRevision(S, [embarque]), await comprasDelPlan(S, [embarque]));
+    const revCompra = await revisionCompra(S, compra.compra);
+    const revEmb = await revisionEmbarque(S, embarque);
+    const C = await abrir();
+    const P = await abrirCompuerta("compra_agrupador_eventos");
+    try {
+      const pidA = await pidDe(A);
+      const pidB = await pidDe(B);
+      const pidC = await pidDe(C);
+      // A (movimiento): embarque y compra tomados; se para en el insert del evento del embarque (el que pide el KEY SHARE del viaje).
+      const pA = rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planQuitar, actor(b.comprador1, "C1")], TIPOS_C);
+      await esperarBloqueo(M, pidA);
+      // B (asignar viaje): toma el viaje y espera la compra de A.
+      const pB = rpcEnTransaccion(B, "asignar_viaje_compras", [viaje, [{ id: compra.compra, revision: revCompra }], actor(b.comprador2, "C2")], T_VIAJE_COMPRAS);
+      await esperarBloqueo(M, pidB);
+      // C (editar embarque): espera el viaje que tiene B.
+      const pC = rpcEnTransaccion(
+        C,
+        "guardar_embarque",
+        [{ id: embarque, nombre: "Otro nombre", tipo: "importacion", viaje_id: viaje }, revEmb, actor(b.admin, "Admin")],
+        T_GUARDAR
+      );
+      await esperarBloqueo(M, pidC);
+      await cerrarCompuerta(P);
+      const [rA, rB, rC] = await Promise.all([pA, pB, pC]);
+      for (const [n, r] of [["A", rA], ["B", rB], ["C", rC]] as const) expect(r.error, `${n}: ${JSON.stringify(r)}`).toBeNull();
+      expect(rA.data?.ok).toBe(true);
+      expect(rB.data).toEqual({ ok: false, motivo: "compra_cambio" });
+      expect(rC.data).toEqual({ ok: false, motivo: "agrupador_cambio" });
+      expect(await revisionCompra(S, compra.compra)).toBe(revCompra + 1);
+      expect(await escalar<string>(S, "select nombre from public.compra_embarques where id = $1", [embarque])).toBe("Embarque ns86");
+      expect(await escalar<string>(S, "select count(*) from public.agrupadores_desalineados()")).toBe("0");
+    } finally {
+      await cerrarCompuerta(P);
+      await C.end().catch(() => undefined);
+    }
+  });
+
+  /**
+   * Modo de cada candado, comprobado desde fuera con `nowait`: mientras la funcion tiene su transaccion abierta, otra sesion SI puede
+   * tomar `for key share` (es lo que pide una FK) sobre el viaje o el embarque, y NO puede tomar `for no key update` (otro escritor).
+   * Las compras se conservan con `for update` (revision y estado: nadie debe ni insertar lineas mientras se mueven).
+   */
+  type Probe = { tabla: "compra_viajes" | "compra_embarques" | "compras"; id: string; esperado: "no_key_update" | "for_update" };
+  async function bloqueo(c: Client, tabla: string, id: string, modo: "for key share" | "for no key update"): Promise<"libre" | "bloqueado"> {
+    try {
+      await c.query(`select 1 from public.${tabla} where id = $1 ${modo} nowait`, [id]);
+      return "libre";
+    } catch (e) {
+      if ((e as { code?: string }).code === "55P03") return "bloqueado";
+      throw e;
+    }
+  }
+
+  it("modo de los candados: viajes y embarques con FOR NO KEY UPDATE (key share libre, otro escritor bloqueado), compras con FOR UPDATE", async () => {
+    const esc = await escenarioViajeEmbarque(87);
+    const { b, viaje, embarque, compra, paquete } = esc;
+    const act = actor(b.admin, "Admin");
+    const V = { tabla: "compra_viajes", id: viaje, esperado: "no_key_update" } as const;
+    const E = { tabla: "compra_embarques", id: embarque, esperado: "no_key_update" } as const;
+    const C = { tabla: "compras", id: compra.compra, esperado: "for_update" } as const;
+    const casos: { nombre: string; args: () => Promise<unknown[]>; tipos: string[]; fn: string; probes: Probe[] }[] = [
+      {
+        nombre: "guardar_viaje (editar)", fn: "guardar_viaje", tipos: T_GUARDAR, probes: [V],
+        args: async () => [{ id: viaje, nombre: "Viaje editado", fecha_inicio: "2026-10-05", responsable_id: b.comprador1 }, await revisionViaje(viaje), act],
+      },
+      {
+        nombre: "cambiar_estado_agrupador (viaje)", fn: "cambiar_estado_agrupador", tipos: T_CAMBIAR, probes: [V],
+        args: async () => ["viaje", viaje, "cerrar", await revisionViaje(viaje), null, act],
+      },
+      {
+        nombre: "asignar_viaje_compras", fn: "asignar_viaje_compras", tipos: T_VIAJE_COMPRAS, probes: [V, C],
+        args: async () => [viaje, [{ id: compra.compra, revision: await revisionCompra(S, compra.compra) }], act],
+      },
+      {
+        nombre: "guardar_embarque (editar)", fn: "guardar_embarque", tipos: T_GUARDAR, probes: [V, E],
+        args: async () => [{ id: embarque, nombre: "Embarque editado", tipo: "importacion", viaje_id: viaje }, await revisionEmbarque(S, embarque), act],
+      },
+      {
+        nombre: "guardar_paquete (crear)", fn: "guardar_paquete", tipos: T_GUARDAR, probes: [E],
+        args: async () => [{ embarque_id: embarque, nombre: "Paquete extra" }, await revisionEmbarque(S, embarque), act],
+      },
+      {
+        nombre: "cambiar_estado_agrupador (embarque)", fn: "cambiar_estado_agrupador", tipos: T_CAMBIAR, probes: [E],
+        args: async () => ["embarque", embarque, "en_transito", await revisionEmbarque(S, embarque), null, act],
+      },
+      {
+        nombre: "cambiar_estado_agrupador (paquete)", fn: "cambiar_estado_agrupador", tipos: T_CAMBIAR, probes: [E],
+        args: async () => ["paquete", paquete, "cancelar", await revisionEmbarque(S, embarque), "prueba de candados", act],
+      },
+      {
+        nombre: "aplicar_movimiento_agrupador", fn: "aplicar_movimiento_agrupador", tipos: TIPOS_C, probes: [E, C],
+        args: async () => [planQuitarEntrega(esc, await embarquesConRevision(S, [embarque]), await comprasDelPlan(S, [embarque])), act],
+      },
+      {
+        nombre: "importar_agrupadores (viaje_id y embarque_id existentes)", fn: "importar_agrupadores", tipos: TIPOS_C, probes: [V, E],
+        args: async () => [
+          {
+            archivo_nombre: "it-87.csv",
+            viajes: [],
+            embarques: [
+              {
+                fila: 1, codigo: null, nombre: "Emb imp ns87", tipo: "importacion", viaje_id: viaje, viaje_codigo: null, responsable_id: b.comprador1,
+                referencia_logistica: null, puerto_embarque: null, fecha_salida_estimada: null, fecha_llegada_estimada: "2027-01-15", nota: null,
+              },
+            ],
+            paquetes: [{ fila: 1, codigo: null, nombre: "Paq imp ns87", embarque_id: embarque, embarque_codigo: null, responsable_id: null, nota: null }],
+          },
+          act,
+        ],
+      },
+    ];
+    for (const caso of casos) {
+      const r = await rpcEnTransaccion(A, caso.fn, await caso.args(), caso.tipos, false);
       try {
-        await P.query("rollback");
-      } catch {
-        // ya cerrada
+        expect(r.error, `${caso.nombre}: ${JSON.stringify(r)}`).toBeNull();
+        expect(r.data?.ok, `${caso.nombre}: ${JSON.stringify(r)}`).toBe(true);
+        for (const p of caso.probes) {
+          expect(await bloqueo(S, p.tabla, p.id, "for no key update"), `${caso.nombre}: otro escritor sobre ${p.tabla} debe esperar`).toBe("bloqueado");
+          const keyShare = await bloqueo(S, p.tabla, p.id, "for key share");
+          expect(keyShare, `${caso.nombre}: el KEY SHARE de una FK sobre ${p.tabla} ${p.esperado === "no_key_update" ? "debe pasar" : "debe esperar"}`).toBe(
+            p.esperado === "no_key_update" ? "libre" : "bloqueado"
+          );
+        }
+      } finally {
+        await A.query("rollback");
       }
+    }
+  });
+
+  it("carrera general sobre un mismo viaje, embarque y compra (5 operaciones a la vez, 6 rondas): ninguna sesion recibe error de Postgres (ni 40P01); cada una gana o recibe un motivo", async () => {
+    const esc = await escenarioViajeEmbarque(88);
+    const { b, viaje, embarque, compra } = esc;
+    const extras = [await abrir(), await abrir(), await abrir()];
+    const [C, D, F] = extras;
+    const motivosValidos = ["agrupador_cambio", "compra_cambio", "transicion_invalida"];
+    try {
+      for (let ronda = 0; ronda < 6; ronda++) {
+        const asignada = (await contar(S, "compra_entrega_asignaciones", "entrega_id = $1", [compra.entrega])) > 0;
+        const planMovimiento = asignada
+          ? planQuitarEntrega(
+              { ...esc, asignacion: await escalar<string>(S, "select id from public.compra_entrega_asignaciones where entrega_id = $1", [compra.entrega]) },
+              await embarquesConRevision(S, [embarque]),
+              await comprasDelPlan(S, [embarque])
+            )
+          : plan(
+              "asignar",
+              await embarquesConRevision(S, [embarque]),
+              await comprasDelPlan(S, [embarque], [compra.compra]),
+              [movimientoAsignar(compra, embarque, 100)],
+              [{ linea_id: compra.linea, periodo: "2026-11", unidades: 100 }]
+            );
+        const revE = await revisionEmbarque(S, embarque);
+        const estadoE = await escalar<string>(S, "select estado from public.compra_embarques where id = $1", [embarque]);
+        const viajeDeCompra = await escalar<string | null>(S, "select viaje_id from public.compras where id = $1", [compra.compra]);
+        const resultados = await Promise.all([
+          rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planMovimiento, actor(b.comprador1, "C1")], TIPOS_C),
+          rpcEnTransaccion(
+            B,
+            "asignar_viaje_compras",
+            [viajeDeCompra ? null : viaje, [{ id: compra.compra, revision: await revisionCompra(S, compra.compra) }], actor(b.comprador2, "C2")],
+            T_VIAJE_COMPRAS
+          ),
+          rpcEnTransaccion(C, "cambiar_estado_agrupador", ["embarque", embarque, estadoE === "planificado" ? "en_transito" : "volver_a_planificado", revE, null, actor(b.admin, "Admin")], T_CAMBIAR),
+          rpcEnTransaccion(D, "guardar_embarque", [{ id: embarque, nombre: `Embarque ns88 r${ronda}`, tipo: "importacion", viaje_id: viaje }, revE, actor(b.admin, "Admin")], T_GUARDAR),
+          rpcEnTransaccion(
+            F,
+            "guardar_viaje",
+            [{ id: viaje, nombre: `Viaje ns88 r${ronda}`, fecha_inicio: "2026-10-05", responsable_id: b.comprador1 }, await revisionViaje(viaje), actor(b.admin, "Admin")],
+            T_GUARDAR
+          ),
+        ]);
+        resultados.forEach((r, i) => {
+          expect(r.error, `ronda ${ronda}, operacion ${i}: ${JSON.stringify(r)}`).toBeNull();
+          if (r.data?.ok !== true) expect(motivosValidos, `ronda ${ronda}, operacion ${i}: ${JSON.stringify(r)}`).toContain(r.data?.motivo);
+        });
+        expect(resultados.some((r) => r.data?.ok === true), `ronda ${ronda}: alguien debe ganar`).toBe(true);
+      }
+      expect(await escalar<string>(S, "select count(*) from public.agrupadores_desalineados()")).toBe("0");
+    } finally {
+      for (const x of extras) await x.end().catch(() => undefined);
     }
   });
 
