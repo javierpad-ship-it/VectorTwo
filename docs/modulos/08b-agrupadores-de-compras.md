@@ -19,9 +19,9 @@
 > - **g)** El puerto real se guarda **por embarque** (`compra_embarques.puerto_embarque`), con el puerto habitual del proveedor (08c) como sugerencia (decisión 96).
 > - **h)** Habrá **más de 15 viajes y embarques abiertos** al arrancar: el **importador de agrupadores** se adelanta a 08b-1 (§3.11, decisión 97).
 >
-> **Numeración.** Aplicadas: `0000`–`0025`, `0027`, `0029` y `0030`. Reservadas: `0026` (`0.13.1 · M8`), `0028` (M9a) y `0031` (07f).
-> - **Migraciones de esta ficha**: se citan con marcador, como hace la 08c: **`00B1_agrupadores_compras.sql`** (08b-1) y **`00B2_recibir_embarque.sql`** (08b-2), con `scripts/humo-00B1.sql` y `scripts/humo-00B2.sql`. `datos` les pone el número libre al construir (decisión 48). La 08c usa `00E1` y `00E2`, y la primera que se construya toma la `0032`.
-> - **Versión**: la siguiente libre al cerrar cada entrega (hoy `APP_VERSION = "0.15.0 · M7"`; reservadas `0.13.1 · M8`, `0.15.0 · M7 b` y `0.15.1 · M7`).
+> **Numeración** (registro único en `docs/PLAN.md` §5, actualizado el 2026-11-04). Aplicadas: `0000`–`0025`, `0027` y `0029`–`0031` (`0031` = 07g). Reservadas: `0026` (`0.13.1 · M8`) y `0028` (M9a).
+> - **Migraciones de esta ficha**: se citan con marcador, como hace la 08c: **`00B1_agrupadores_compras.sql`** (08b-1) y **`00B2_recibir_embarque.sql`** (08b-2), con `scripts/humo-00B1.sql` y `scripts/humo-00B2.sql`. `datos` les pone el número libre al construir (decisión 48). **08b-1 tomó la `0032`** (`0032_agrupadores_compras.sql`); `00B2` toma la siguiente libre al construir, por orden de cierre (la 08c usa `00E1` y `00E2`, y 07f `00F1`).
+> - **Versión**: la siguiente libre al cerrar cada entrega (hoy `APP_VERSION = "0.15.0 · M7 c"`; reservadas `0.13.1 · M8`, `0.15.0 · M7 b` y `0.15.1 · M7`).
 > - Commits `M8:`.
 >
 > **Base real.** El arquitecto no pudo leer `vector-two`: en su sesión no había MCP ni credenciales. Según el coordinador, hoy hay **0 planners activos, 1 admin (Javier) y 2 compradores activos**. En T1 de 08b-1, `datos` corre en solo lectura las consultas de §2.10 y anota el resultado aquí. **Nunca contra `lukers-compras`.**
@@ -50,7 +50,7 @@
 | **08b-1** | Viajes, embarques y paquetes (alta, edición, estados y códigos `aamm##`), **asignación** de compras a viajes y de entregas a embarques y paquetes, **alinear y mover fechas** de salida y de llegada, puerto real del embarque, **comprador responsable**, **viaje activo**, pestaña Sin agrupador, **importador de agrupadores** con su plantilla (§3.11), columnas `VIAJE`, `EMBARQUE` y `PAQUETE` del importador de compras, Excel. **El flujo no cambia de método** (sigue leyendo las mismas entregas) | `00B1` (todas las tablas y columnas, también `compra_linea_recepciones.asignacion_id`, que usará 08b-2; funciones de 08b-1, incluida `importar_agrupadores`) | `0.13.0` validada; **en serie con la E1 de 08c** (comparten `nav.ts`, `src/lib/compras/tipos-api.ts` y `src/components/compras/**`) |
 | **08b-2** | **«Recibir embarque»**, «Registrar otra llegada», volver de recibido a en tránsito, **recepciones vinculadas** al embarque, pendiente por asignación, `pendientesPorEntrega` que respeta el vínculo y **`VERSION_METODO_FLUJO` de 3 a 4** | `00B2` (solo funciones: `recibir_embarque` y `revertir_recepcion_embarque`) | 08b-1 |
 
-Javier no fija fecha (respuesta d). Dentro del camino de compras, el orden que recomiendan las dos fichas es `0.13.0` validada, después E1 (08c), después 08b-1, 08b-2, E2 y E3 (08c), `0.13.1` y M9a. Nunca dos de ellas en paralelo. El contrato de §3.10 vale para cualquier orden respecto de `0.13.1`.
+Javier no fija fecha (respuesta d). Dentro del camino de compras, el orden (fijado el 2026-11-04, con 08b-1 ya en construcción) es 08b-1, E1 (08c), 08b-2, E2 y E3 (08c), `0.13.1` y M9a. Nunca dos de ellas en paralelo. El contrato de §3.10 vale para cualquier orden respecto de `0.13.1`.
 
 ### 0.3 Permisos: el comprador escribe agrupadores (decisiones 92 y 95, nuevas)
 

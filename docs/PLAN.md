@@ -1,7 +1,7 @@
 # Vector2 · Plan maestro
 
 > Sistema de planificación de producto de Lukers. Segunda versión, construida desde cero tomando Vector-One solo como referencia.
-> Dueño del producto: Javier Pérez. Última actualización: 3 de noviembre de 2026. Versión en el código: **`0.15.0 · M7 c`** (07g: aprobación en bloque de las filas que bloquean el cierre, con el método en 2026 y la IA en 2027; migración `0031`), construida y validada por QA y seguridad, pendiente del hito con Javier. Antes quedó la `0.15.0 · M7` (07e: propuesta con IA por género × mundo, primer proveedor OpenAI; migración `0030`), desplegable **con la IA apagada**, también pendiente del hito. Antes quedaron construidas la `0.14.0 · M6` (06e: cierre del año por curva, base corregida del Niño y método 5; migración `0029`) y la `0.13.0 · M8` (flujo, IMI, conciliación, confirmar ingresos, cancelar e importador de carga inicial), también pendientes de validación. Migraciones aplicadas en Vector2: `0000` a `0025`, `0027`, `0029`, `0030` y `0031` (la `0026` es de `0.13.1 · M8`, la `0028` de M9a y la `0032` de 07f). Siguen: `0.13.1 · M8` (captura manual, edición completa, aplicar reparto e impacto), `0.15.1 · M7` (sublíneas y cierre del año por IA), M9a (toma la siguiente versión libre al cerrar) y la PWA.
+> Dueño del producto: Javier Pérez. Última actualización: 3 de noviembre de 2026. Versión en el código: **`0.15.0 · M7 c`** (07g: aprobación en bloque de las filas que bloquean el cierre, con el método en 2026 y la IA en 2027; migración `0031`), construida y validada por QA y seguridad, pendiente del hito con Javier. Antes quedó la `0.15.0 · M7` (07e: propuesta con IA por género × mundo, primer proveedor OpenAI; migración `0030`), desplegable **con la IA apagada**, también pendiente del hito. Antes quedaron construidas la `0.14.0 · M6` (06e: cierre del año por curva, base corregida del Niño y método 5; migración `0029`) y la `0.13.0 · M8` (flujo, IMI, conciliación, confirmar ingresos, cancelar e importador de carga inicial), también pendientes de validación. Migraciones aplicadas en Vector2: `0000` a `0025`, `0027`, `0029`, `0030` y `0031` (la `0026` es de `0.13.1 · M8` y la `0028` de M9a; la `0032` es de 08b-1, en construcción; el resto de reservas está en el registro único de §5). Siguen: `0.13.1 · M8` (captura manual, edición completa, aplicar reparto e impacto), `0.15.1 · M7` (sublíneas y cierre del año por IA), M9a (toma la siguiente versión libre al cerrar) y la PWA.
 
 ## 1. Por qué una V2
 
@@ -122,6 +122,22 @@ Cada módulo pasa por especificación, migración, API y pantalla, QA, documenta
 | PWA | ⏳ | especificada (`10-pwa.md`), pendiente de aprobación; entra después de M9a |
 
 **Orden de construcción que se siguió y el que sigue.** Fase 1 (M0, M1, M2, M3, M4, M1b), luego M5 y sus mejoras (05b, 05c, regla `0.8.3`), la mejora 02b de M2 y el paso 1 de M6, la carga masiva de M3, el endurecimiento de seguridad (`0.9.2`), M11 (`0.9.4` y `0.9.5`) y el paso 2 de M6 (`0.9.6`). Después se construyó M6 por agrupación (`0.9.7`), la composición y la curva del usuario (`0.10.4`), M7 (`0.10.0` a `0.10.8`), M12 (`0.11.0`), M13 (`0.12.0`), el crecimiento por género × mundo de M6 (`0.12.1`), M8 en su primera entrega (`0.13.0`, con su cambio de menú `0.13.0 · M8 b`) el cierre del año por curva con método 5 (06e, `0.14.0 · M6`) y la propuesta con IA (07e, `0.15.0 · M7`, migración `0030`, con la IA apagada). **Sigue: `0.13.1 · M8` (migración `0026`), `0.15.1 · M7` (sublíneas y cierre del año por IA), M9a (migración `0028`, versión libre al cerrar) y la PWA**, cada una tras la validación de Javier de lo anterior. Numeración vigente: `0.13.1` es de M8, `0.14.0` es de M6 (hecha), `0.15.0` es de la IA (hecha) y `0.15.1` es su segunda entrega; `0.13.1` conserva su etiqueta aunque se construya después de `0.14.0`. Las versiones se asignan en el orden en que cierran las entregas, no en el que se planearon (ver DECISIONES: "La etiqueta `0.9.1` pasa a M3").
+
+### Reservas de migraciones y versiones (registro único)
+
+Es la única fuente para saber qué número toma cada entrega (actualizada el 2026-11-04). Las fichas citan sus migraciones con un marcador (`00B2`, `00E1`, `00F1`…) y no fijan número: `datos` pone **la siguiente libre** al construir, **por orden de cierre** (decisión 48), y actualiza esta tabla en el mismo commit.
+
+| Migración | Dueño | Estado |
+|---|---|---|
+| `0000`–`0025`, `0027`, `0029`, `0030`, `0031` | ver §4 (`0031` = 07g) | aplicadas |
+| `0026` | `0.13.1 · M8` | reservada |
+| `0028` | M9a | reservada |
+| `0032` | 08b-1 (`0032_agrupadores_compras.sql`) | en construcción (`datos`) |
+| la siguiente libre, por orden de cierre | 08c E1 (`00E1_proveedores_y_fotos`), 08b-2 (`00B2_recibir_embarque`), 08c E2 (`00E2_parametros_precio`) y 07f (`00F1_venta_tienda_nodos`) | sin número |
+
+**Orden del camino de compras: 08b-1 → E1 (08c) → 08b-2 → E2 (08c) → E3 (08c, sin migración)**, después `0.13.1` y M9a; nunca dos en paralelo. 07f va por el camino de la proyección y toma la siguiente libre cuando cierre.
+
+**Versiones.** Vigente: `0.15.0 · M7 c`. Reservadas por etiqueta: `0.13.1 · M8`, `0.15.0 · M7 b` (07f) y `0.15.1 · M7`. 08b-1, 08b-2 y las entregas E1, E2 y E3 de 08c toman la siguiente libre al cerrar.
 
 ### Fase 1 — Cimientos y maestros
 
