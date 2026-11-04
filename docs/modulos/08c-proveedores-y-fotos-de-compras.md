@@ -1,6 +1,6 @@
 # 08c · Proveedores, fotos de las líneas, galería, proformas y reporte Directorio (secciones de Compras traídas de COTV)
 
-> **Estado: especificada el 2026-11-02 y ajustada el 2026-11-04 con la revisión independiente del `arquitecto-revisor` (opus).** Los puntos importantes I1, I3–I6 e I9 y los menores M1–M15 están incorporados (trazabilidad en §10). **Quedan seis preguntas «Pendiente de Javier» (§11)**, cada una con un *default* provisional, que es lo que se construye si no responde; cambiar una respuesta solo reescribe su apartado de §11. Las preguntas de la primera versión (§9.2) quedan como *defaults* aplicados que no bloquean. Es una mejora de la parte de compras de M8 ([08](08-flujo-y-compras.md)), anterior a M9a, igual que la ficha vecina [08b · Agrupadores de compras](08b-agrupadores-de-compras.md). Adelanta a M9a dos piezas que la ficha 08 le había dejado: la pantalla de proveedores y los contactos.
+> **Estado: especificada el 2026-11-02, ajustada el 2026-11-04 con la revisión independiente del `arquitecto-revisor` (opus) y cerrada el mismo 2026-11-04 con las respuestas de Javier a las seis preguntas de §11.** Los puntos importantes I1, I3–I6 e I9 y los menores M1–M15 están incorporados (trazabilidad en §10). **Las seis preguntas de §11 ya no están pendientes**: cada apartado dice la respuesta literal de Javier, lo que se construye y lo que se quitó; quedan como **decisiones propuestas 100 a 106** (§11 y §12), que el `documentador` pasa a `DECISIONES.md`. La respuesta a P6 abre una sección nueva, **§12 · Carga desde COTV** (proveedores, compras y fotos reales traídos de la base de COTV), que tiene **cuatro preguntas propias para Javier** (§12.8) y que solo bloquean la carga de compras y fotos (C2), no la construcción de E1 ni la carga de proveedores (C1). Las preguntas de la primera versión (§9.2) quedan como *defaults* aplicados que no bloquean. Es una mejora de la parte de compras de M8 ([08](08-flujo-y-compras.md)), anterior a M9a, igual que la ficha vecina [08b · Agrupadores de compras](08b-agrupadores-de-compras.md). Adelanta a M9a dos piezas que la ficha 08 le había dejado: la pantalla de proveedores y los contactos.
 >
 > **Pedidos textuales de Javier (2026-11-02).** (1) «en las compras que carguemos items también deberíamos poder cargar la foto. en 800x800 tú la reduces.» (2) «mira en el app de COTV todas las últimas cosas que le añadimos. Pero deberían ser todas secciones del módulo de compras. dentro del menú principal. Ordenaría el menú: Inicio, Compras, Planificación, Maestros, Administración» (el orden ya está en `nav.ts`, commit `a3b3def`). (3) «también es importante el módulo de proveedores. no recuerdo si está puerto de embarque en el caso de los proveedores».
 >
@@ -8,7 +8,7 @@
 >
 > **Base real.** Comprobada en solo lectura sobre `vector-two` (ref `tzjsxzmsvvhxyiooihyq`, **nunca** `lukers-compras`) por el `arquitecto-revisor` el 2026-11-04; el detalle está en §2.0. `datos` la reconfirma en T1 antes de escribir la migración y anota lo que falta: el plan del proyecto y su cuota de Storage y de tráfico (§8, riesgo 1).
 >
-> **Sin datos reales.** Proveedores «Proveedor Norte», «Feria Sur», «Textiles Delta Ltd.» (China) y «Hilados Andinos SAC» (Perú); marcas ALFA y BETA; cifras inventadas. Las fotos de prueba son JPEG sintéticos que se arman en el propio test, byte a byte. En el repo no entra ninguna foto real de producto, ni en `tests/`, ni en `public/`, ni en `datos/`. En producción no se crean datos inventados: ver §11.P6.
+> **Sin datos reales en el repo; sin datos inventados en `vector-two`.** En esta ficha y en las pruebas: proveedores «Proveedor Norte», «Feria Sur», «Textiles Delta Ltd.» (China) y «Hilados Andinos SAC» (Perú); marcas ALFA y BETA; cifras inventadas. Las fotos de prueba son JPEG sintéticos que se arman en el propio test, byte a byte. En el repo no entra ninguna foto real de producto, ni en `tests/`, ni en `public/`, ni en `datos/`, ni ningún nombre o cifra real de COTV: §12 trae solo estructura, conteos y patrones. Al revés, **en `vector-two` no entra ningún dato inventado** (decisión 105): lo que se ve allí viene de COTV (§12) o lo escribe Javier.
 
 ## 0. Contexto
 
@@ -16,9 +16,9 @@
 
 | Pieza de COTV (archivo) | Qué hace allí | En Vector2 |
 |---|---|---|
-| Proveedores (`SupplierForm`, `CountryStateFields`, `SupplierContactsFields`, `app/actions.ts` `createSupplier`/`updateSupplier`) | Nombre único, país (lista), estado solo si es EE. UU., dirección, RUC, cuenta y banco, contactos múltiples (nombre, cargo, teléfono, correo). Las *server actions* escriben con el cliente del usuario y **borran y reinsertan** los contactos en dos pasos | **Se trae** (§2.1–2.2) como maestro compartido por todos los viajes, sobre la tabla `proveedores` que ya existe (M8). Se añaden la dirección, el estado o provincia para cualquier país, y los campos de importación de §9 A. **Banco y cuenta quedan fuera** salvo que Javier diga otra cosa (regla 19 de M8, §9 A3). Contactos y ficha se guardan en **una sola transacción**. Cómo se traen los proveedores que ya están en COTV: §11.P2 |
+| Proveedores (`SupplierForm`, `CountryStateFields`, `SupplierContactsFields`, `app/actions.ts` `createSupplier`/`updateSupplier`) | Nombre único, país (lista), estado solo si es EE. UU., dirección, RUC, cuenta y banco, contactos múltiples (nombre, cargo, teléfono, correo). Las *server actions* escriben con el cliente del usuario y **borran y reinsertan** los contactos en dos pasos | **Se trae** (§2.1–2.2) como maestro compartido por todos los viajes, sobre la tabla `proveedores` que ya existe (M8). Se añaden la dirección, el estado o provincia para cualquier país, y los campos de importación de §9 A. **Banco y cuenta quedan fuera** salvo que Javier diga otra cosa (regla 19 de M8, §9 A3). Contactos y ficha se guardan en **una sola transacción**. Los proveedores que ya están en COTV los **carga Claude una sola vez** desde su base, sin importador con pantalla (decisión 101, §12, carga C1) |
 | Alta al vuelo (`ensureSupplier` en `app/actions.ts`) | Si el nombre no existe, lo crea en silencio | **Se trae** con dos frenos. Si el nombre está repetido, ofrece «usar el existente». Si se parece a otro, pregunta «¿es alguno de estos?» (§3.2) |
-| Fotos por ítem (`PhotoPicker`, `lib/image.ts`, `lib/photos.ts`, `purchase_photos`) | Hasta 3 por ítem. En el navegador: lado largo de 1000 px y JPEG 0,8. El navegador **sube directo** al bucket privado `purchase-photos` gracias a **políticas abiertas a `authenticated`** (lectura, alta y borrado de cualquier objeto del bucket). La tabla tiene la política `authenticated full access`. Se lee con URL firmada de 1 h | **Se trae con otro modelo de seguridad** (§2.4, §3.3). Lado largo de 800 px. La subida **pasa por un route handler** con guard, que sube con `service_role` a un bucket privado **sin políticas**. Las URLs firmadas se generan solo en el servidor. Se añade una miniatura de 320 px. Hasta 3 fotos por línea |
+| Fotos por ítem (`PhotoPicker`, `lib/image.ts`, `lib/photos.ts`, `purchase_photos`) | Hasta 3 por ítem. En el navegador: lado largo de 1000 px y JPEG 0,8. El navegador **sube directo** al bucket privado `purchase-photos` gracias a **políticas abiertas a `authenticated`** (lectura, alta y borrado de cualquier objeto del bucket). La tabla tiene la política `authenticated full access`. Se lee con URL firmada de 1 h | **Se trae con otro modelo de seguridad** (§2.4, §3.3). Lado largo de 800 px. La subida **pasa por un route handler** con guard, que sube con `service_role` a un bucket privado **sin políticas**. Las URLs firmadas se generan solo en el servidor. Se añade una miniatura de 320 px. Hasta 3 fotos por línea. Las fotos que ya están en COTV se copian a sus líneas de Vector2 en la carga C2 (§12) |
 | Fotos para celular (`FotosModule`) | Filtro por proveedor con «N ítems · M sin foto», casilla «Solo sin foto», contador con foto / total, cámara o galería | **Se trae** como **Compras → Fotos** (§4.3) |
 | Galería (`GaleriaGrid`) | Matriz de miniaturas del viaje, filtro por proveedor, vista ampliada | **Se trae** como **Compras → Galería** (§4.4), paginada y firmando solo la página visible |
 | Proforma (`ProformaTable`, `lib/pricing.ts`, `lib/proforma-pdf.ts`) | Interna: PVP sugerido = FOB × 13,4 redondeado a X9,90 y CV esperado = FOB × 1,3 × 3,4 × 1,18 ÷ PVP. Externa: oculta PVP y CV. Filtro por proveedor; PDF con fotos (jsPDF + autotable) y Excel. **Los parámetros viven en `localStorage`** | **Se trae** como **Compras → Proformas** (§4.5). Los parámetros pasan a una **configuración versionada en base** (§2.6). La **externa exige un proveedor** y el servidor **no manda** PVP, CV ni parámetros (§5, R14–R15) |
@@ -50,11 +50,12 @@ Lo que se corrige: las políticas abiertas a `authenticated` en `storage.objects
 
 | Entrega | Qué trae | Migración | Depende de |
 |---|---|---|---|
-| **E1** (versión libre al cerrar) | **Proveedores** (ficha completa, contactos, alta al vuelo, desactivar y eliminar); **fotos por línea** (subir, quitar, ver en el detalle de la compra, miniatura servida por la API, limpieza de huérfanas); **Compras → Fotos** para el celular; **descripción y modelo** de la línea; los **ganchos de 08b-1** (puertos habituales y aviso de puerto); menú. Además, lo que §11 deje en E1 con su *default*: importador de proveedores (P2), historial del proveedor (P4) y traer fotos de la línea cancelada (P5) | `00E1_proveedores_y_fotos.sql` (siguiente libre) | **08b-1 cerrada** (su migración ya tiene número, ver PLAN §5, y su API sigue en curso) y `0.13.0` validada. Para recorrer el hito hace falta además una **carga inicial** de compras (§6) |
+| **E1** (versión libre al cerrar) | **Proveedores** (ficha completa, contactos, alta al vuelo, desactivar y eliminar); **fotos por línea** (subir, quitar, ver en el detalle de la compra, miniatura servida por la API, limpieza de huérfanas); **Compras → Fotos** para el celular; **descripción y modelo** de la línea; los **ganchos de 08b-1** (puertos habituales y aviso de puerto); menú. Además, por las respuestas de §11: historial del proveedor (P4), traer fotos de la línea cancelada (P5) y las columnas `clave_origen` para la carga desde COTV (§12). **Sin importador de proveedores** (P2, decisión 101). Cierra con la **carga C1** (proveedores y contactos de COTV, §12.5) | `00E1_proveedores_y_fotos.sql` (siguiente libre) | **08b-1 cerrada** (su migración ya tiene número, ver PLAN §5, y su API sigue en curso) y `0.13.0` validada. El hito de Javier se recorre con datos reales de COTV (§12.7) |
+| **C2 · Compras y fotos de COTV** (sin versión: es una carga, no código de producción) | Las compras de COTV que Javier decida (§12.8, G1), su descripción y modelo, y la copia de sus fotos al bucket `compras-fotos` | ninguna (usa `00E1`) | E1 cerrada y en `vector-two`; respuestas G1 a G3 de §12.8; los dos viajes de COTV creados en 08b-1 |
 | **E2** | **Galería**; **Proformas** interna y externa con PDF y Excel; **parámetros de precio versionados**; columnas `DESCRIPCION` y `MODELO` en el importador si `0.13.1` aún no rehízo `importar_compra` | `00E2_parametros_precio.sql` (siguiente libre) | E1 y **08b-2 cerrada** (va después en la serie) |
 | **E3** | **Reporte Directorio** (árbol y Excel) | ninguna | E2 (usa los precios) y 08b-1 (responsable del viaje) |
 
-**Orden (fijado el 2026-11-04): 08b-1 → E1 → 08b-2 → E2 → E3**, y después `0.13.1` y M9a. 08b-1 ya está a medias en la rama (commit `79c7edc`: contratos, lógica y pantallas; su migración de agrupadores la termina `datos`; la API sigue pendiente), así que E1 entra justo detrás, y no antes como proponía la primera versión de esta ficha. A cambio, E1 ya puede usar la barra de viaje activo y llenar los puertos habituales que 08b-1 deja preparados. **Nunca en paralelo** con 08b ni con `0.13.1`: los tres tocan `detalle-compra.tsx`, `compras/tipos-api.ts`, `compras/consultas.ts` y `nav.ts`.
+**Orden (fijado el 2026-11-04): 08b-1 → E1 (cierra con la carga C1) → C2 → 08b-2 → E2 → E3**, y después `0.13.1` y M9a. C2 no escribe código de la aplicación ni migraciones; va antes de 08b-2 para que el hito de E1 y los de 08b-2, E2 y E3 se recorran con compras y fotos reales. Si Javier aún no respondió §12.8, C2 espera y 08b-2 puede empezar: C2 no toca archivos del repo. 08b-1 ya está a medias en la rama (commit `79c7edc`: contratos, lógica y pantallas; su migración de agrupadores la termina `datos`; la API sigue pendiente), así que E1 entra justo detrás, y no antes como proponía la primera versión de esta ficha. A cambio, E1 ya puede usar la barra de viaje activo y llenar los puertos habituales que 08b-1 deja preparados. **Nunca en paralelo** con 08b ni con `0.13.1`: los tres tocan `detalle-compra.tsx`, `compras/tipos-api.ts`, `compras/consultas.ts` y `nav.ts`.
 
 **Tandas de E1** (dueño único por archivo; mismas reglas que ficha 08 §0.8):
 
@@ -66,9 +67,10 @@ Lo que se corrige: las políticas abiertas a `authenticated` en `storage.objects
 | T3a · Pantallas con fixtures | `frontend` | T0 | `src/app/(app)/compras/fotos/**`, `src/app/(app)/compras/proveedores/**`, `src/components/fotos/**` (`comprimir.ts`, `selector-fotos.tsx`, `tarjeta-linea-fotos.tsx`, `visor-foto.tsx`), `src/components/proveedores/**` (`formulario-proveedor.tsx`, `selector-proveedor.tsx` con «Crear», `campos-pais-region.tsx`, `contactos.tsx`), `src/lib/fotos/use-fotos.ts`, `src/lib/nav.ts` (la barra de viaje activo se **importa** de `src/components/compras/agrupadores/`, no se copia), **aditivo** en `src/lib/api-client.ts` (`api.subir(url, FormData)`, sin `Content-Type`), `tests/fotos.pantalla.estatico.test.ts` | build y `tsc` limpios; 390 px sin controles fuera |
 | T3b · Servicio y API | `backend` | T1, T2 | `src/lib/fotos/{almacen,consultas,servicio}.ts`, `src/lib/proveedores/{consultas,servicio}.ts`, `src/app/api/compras/proveedores/**`, `src/app/api/compras/[id]/lineas/**`, `src/app/api/compras/fotos/**`, `tests/fotos.handlers.test.ts`, `tests/proveedores.handlers.test.ts`, `tests/fotos.estatico.test.ts`. **Aditivos**: `src/lib/compras/{tipos-api,consultas,servicio}.ts` (`descripcion`, `modelo`, `fotos_activas` en `LineaCompraApi`); `src/lib/compras/agrupadores/{consultas,servicio,importar}.ts` (llenar `puertos_habituales` y emitir `puerto_distinto_del_habitual`, I5; `consultas` y `servicio` los crea la API de 08b-1, que cierra antes) con `tests/agrupadores.puertos.handlers.test.ts`; `tests/flujo.estatico.test.ts` (tablas y funciones nuevas en la lista); altas en `tests/api.guards.roles.test.ts` | R4–R11, R7b, R15–R17, R26, R27 y R29 verdes; guards y roles verdes |
 | T4 · Integración | `frontend` | T3a, T3b | Los de T3a más **un cambio aislado** en `src/components/compras/detalle-compra.tsx` (un `<FotosLinea>` y «Descripción / modelo» por línea) y, **solo si** la prueba de `capture` lo pide (M15), `next.config.ts` (`camera=(self)`) | Contra la API real en local, en Chrome Android y Safari iOS (cámara trasera, galería, HEIC) |
-| T5 · Cierre | `qa`, `seguridad` (sonnet), `documentador` | T4 | `qa` y `seguridad` solo leen. `documentador`: `docs/**`, `src/lib/version.ts` | Hito de §6 E1 |
+| T5 · Cierre | `qa`, `seguridad` (sonnet), `documentador` | T4 | `qa` y `seguridad` solo leen. `documentador`: `docs/**`, `src/lib/version.ts` | Hito de §6 E1 en local |
+| T6 · Carga C1 | `datos` (escritura en `vector-two`) con el agente principal; `seguridad` lee el procedimiento antes | T5 verde y `00E1` aplicada en `vector-two` | **Ningún archivo del repo.** Consultas a COTV y lotes en el *scratchpad* de la sesión, borrados al terminar | §12.5, C1: conteos de origen y destino cuadran y la segunda pasada crea 0 |
 
-Las piezas de §11 que queden en E1 con su *default* suman sus archivos a estas tandas; cada apartado de §11 dice cuáles.
+Las piezas que §11 deja en E1 (P4, P5) suman sus archivos a estas tandas; cada apartado de §11 dice cuáles. La carga desde COTV no suma archivos al repo (§12.5).
 
 **E2** sigue el mismo esquema: T0 con `src/lib/proformas/{tipos-api,esquemas}.ts`; T1 con `00E2_parametros_precio.sql`; T2 con `src/lib/proformas/{precios,armar}.ts` y pruebas; T3a con `src/app/(app)/compras/{galeria,proformas}/**`, `src/components/proformas/**` (`pdf.ts` con import dinámico de `jspdf` y `jspdf-autotable`, `excel.ts`, `simulador.tsx`) y `nav.ts`; T3b con `src/lib/proformas/{consultas,servicio}.ts`, `src/app/api/compras/{galeria,proformas,parametros-precio}/**`. Las rutas de `src/app/api/compras/fotos/**` son todas de E1. **Dependencias nuevas**: `jspdf` y `jspdf-autotable`, autorizadas por la decisión 35; si la red las bloquea, ver §8, riesgo 6. **E3**: `src/lib/directorio/{armar,tipos-api}.ts`, `src/app/api/compras/directorio/route.ts`, `src/app/(app)/compras/directorio/**`, `src/components/directorio/**`.
 
@@ -97,6 +99,7 @@ Hechas en solo lectura por el `arquitecto-revisor` el 2026-11-04. `datos` las re
 - Perfiles activos: 1 admin, 2 compradores, 0 planners.
 - 5 `agrupaciones_marca` con `orden`.
 - **Falta** (lo anota `datos`): el plan del proyecto y su cuota de Storage y de tráfico de salida (§8, riesgo 1).
+- Para la carga desde COTV, `datos` anota además en T1 cuántas filas tienen hoy `generos`, `mundos`, `lineas`, `genero_mundo_linea`, `marcas`, `perfiles` y `compra_viajes` (§12.1, Q9).
 
 ### 2.1 `proveedores` (existe desde `0025`; E1 añade columnas, sin backfill)
 
@@ -105,17 +108,18 @@ Hechas en solo lectura por el `arquitecto-revisor` el 2026-11-04. `datos` las re
 | `direccion` | `text null` | ≤ 300 |
 | `region` | `text null` | ≤ 80. Es el «Estado / provincia». Con `pais = 'Estados Unidos'` la API exige un valor de la lista de estados (como COTV). Con otro país es texto libre, porque en China la provincia (Guangdong, Zhejiang) también importa |
 | `puerto_embarque` | `text null` | ≤ 80. **Puerto habitual** de embarque (Ningbo, Shenzhen, Miami). El que vale para un envío concreto es dato del embarque de 08b, que muestra el del proveedor como referencia. Texto con sugerencias de los valores ya usados, sin catálogo (§9 A1) |
-| `incoterm` | `text null` | Catálogo zod de los Incoterms 2020 (`EXW`, `FCA`, `FAS`, `FOB`, `CFR`, `CIF`, `CPT`, `CIP`, `DAP`, `DPU`, `DDP`); sin `check`, como todo catálogo (PLAN §4). Es el **habitual**; la compra no lo guarda en esta ficha (§7). Qué pasa con el PVP y el CV si no es FOB: §11.P3 |
+| `incoterm` | `text null` | Catálogo zod de los Incoterms 2020 (`EXW`, `FCA`, `FAS`, `FOB`, `CFR`, `CIF`, `CPT`, `CIP`, `DAP`, `DPU`, `DDP`); sin `check`, como todo catálogo (PLAN §4). Es el **habitual**; la compra no lo guarda en esta ficha (§7). **Solo informativo**: el costo de una compra se toma siempre como FOB y el incoterm no cambia ningún cálculo ni marca ninguna fila (decisión 102, §11.P3) |
 | `moneda` | `text null` | La **habitual** (`USD` o `PEN`, el catálogo de `compras.moneda`). Prellena la moneda de una compra nueva en `0.13.1` |
 | `plazo_produccion_dias` | `integer null` | `check (plazo_produccion_dias between 0 and 365)`. Días entre la orden y el embarque |
 | `plazo_transito_dias` | `integer null` | `check (plazo_transito_dias between 0 and 180)`. Días entre el embarque y la llegada al CD. Con el anterior, `0.13.1` sugiere el mes de la primera entrega (fecha de compra + producción + tránsito) |
 | `condiciones_pago` | `text null` | ≤ 200, libre («30 % adelanto, 70 % contra BL») |
 | `revision` | `integer not null default 0` | `check (revision >= 0)`. Controla la concurrencia en la edición: la ficha y los contactos se guardan juntos; si otro guardó antes, `409 proveedor_cambio` |
 | `updated_by_id` → `perfiles` `on delete set null`, `updated_by_nombre` | | Último cambio. `perfil_id` y `usuario_nombre` siguen siendo quién lo creó. Índice por `updated_by_id` |
+| `clave_origen` | `text null` | ≤ 80. Índice **único parcial** `where clave_origen is not null`. Identifica el registro de origen de una carga: `cotv:supplier:{uuid de COTV}`. Solo lo escribe la carga C1 (§12.5) a través de `guardar_proveedor`; la API no lo recibe (`proveedorFichaSchema` es estricto: una clave `clave_origen` da `400`) ni lo devuelve. Sirve para que la carga sea idempotente aunque después alguien renombre el proveedor, y para que C2 encuentre el proveedor de cada compra de COTV sin depender del nombre (decisión 106) |
 
 Lo que **no cambia**:
 
-- `pais` sigue siendo texto ≤ 80. La API valida **toda** escritura contra `PAISES` (`src/lib/proveedores/paises.ts`, nombres en español como `countries.ts` de COTV más los que falten de Asia). No hay valores antiguos que conservar: hoy hay 0 proveedores y `importar_compra` crea los suyos con `pais` nulo, que la ficha marca como «falta país» (M13).
+- `pais` sigue siendo texto ≤ 80. La API valida **toda** escritura contra `PAISES` (`src/lib/proveedores/paises.ts`, nombres en español como `countries.ts` de COTV más los que falten de Asia). No hay valores antiguos que conservar: hoy hay 0 proveedores y `importar_compra` crea los suyos con `pais` nulo, que la ficha marca como «falta país» (M13). La carga C1 pasa por el mismo `PAISES`: un país de COTV que no esté en la lista entra nulo y el proveedor queda con «Ficha incompleta» (§12.2 a).
 - `identificacion` pasa a rotularse «RUC / Tax ID».
 - `codigo` y `nombre` mantienen sus únicos sobre `upper(codigo)` y `upper(nombre)` (`0025`, sin `btrim`). La API los guarda ya recortados (`trim` en zod), así que los espacios al borde no crean duplicados.
 
@@ -150,6 +154,8 @@ Ambas son opcionales y solo las escriben funciones (§2.7). Sirven para identifi
 | `subida_por_id` → `perfiles` `on delete set null`, `subida_por_nombre` | | |
 | `quitada_at`, `quitada_por_id` → `perfiles` `on delete set null`, `quitada_por_nombre` | | Se llenan al quitar la foto |
 | `activo` | `boolean not null default true` | `false` = quitada. `check (activo or quitada_at is not null)` |
+| `origen_foto_id` | `uuid null → compra_linea_fotos on delete restrict` | Solo para «Traer fotos de la versión cancelada» (§11.P5) |
+| `clave_origen` | `text null` | ≤ 80. Índice **único parcial** `where clave_origen is not null` (sin filtrar por `activo`: una foto de COTV que alguien quitó no se vuelve a cargar). `cotv:photo:{uuid de COTV}`. Solo lo escribe la carga C2 (§12.5) a través de `agregar_foto_linea`; la API nunca lo recibe ni lo devuelve (decisión 106) |
 | `created_at`, `updated_at` | | Con el trigger `set_updated_at` de siempre |
 
 Índices: `(linea_id, created_at) where activo`, `(compra_id) where activo` y `(created_at desc) where activo` (este último para la galería).
@@ -182,10 +188,10 @@ Cierran la tabla `nota` (≤ 200), `perfil_id` → `perfiles` `on delete set nul
 
 | Función | Qué hace | `motivo` posibles |
 |---|---|---|
-| `guardar_proveedor(p_id uuid, p_revision int, p_proveedor jsonb, p_contactos jsonb, p_actor jsonb)` | Con `p_id` nulo, **crea**. Con id, bloquea la fila (`for update`), compara `revision`, actualiza la ficha y **reemplaza los contactos en la misma transacción**, sube `revision` y pone `updated_by_*`. Atrapa el `unique_violation` del nombre o del código | `proveedor_cambio`, `nombre_repetido`, `codigo_repetido`, `no_encontrado` |
+| `guardar_proveedor(p_id uuid, p_revision int, p_proveedor jsonb, p_contactos jsonb, p_actor jsonb)` | Con `p_id` nulo, **crea**. Con id, bloquea la fila (`for update`), compara `revision`, actualiza la ficha y **reemplaza los contactos en la misma transacción**, sube `revision` y pone `updated_by_*`. Atrapa el `unique_violation` del nombre o del código. Al crear acepta `p_proveedor.clave_origen` (solo la carga lo manda) y, si ya existe un proveedor con esa clave, no escribe y responde `ya_cargado` con su `id`. Con `p_actor.origen = 'carga_cotv'` el evento es `importar` en lugar de `crear` (§11.P4) | `proveedor_cambio`, `nombre_repetido`, `codigo_repetido`, `no_encontrado`, `ya_cargado` |
 | `cambiar_activo_proveedor(p_id uuid, p_activo boolean, p_actor jsonb)` | Desactiva o reactiva | `no_encontrado` |
 | `eliminar_proveedor(p_id uuid, p_actor jsonb)` | Lo borra (con sus contactos, en cascada) si **no tiene ninguna compra**, de ningún estado. Si tiene, lo desactiva. Es la regla `accionEliminarProveedor` que ya existe | `no_encontrado` (devuelve `accion: 'borrado' \| 'desactivado'`) |
-| `agregar_foto_linea(p_compra uuid, p_linea uuid, p_foto jsonb, p_actor jsonb)` | Bloquea **la línea** (`for update`; no la compra ni su `revision`). Comprueba que la línea es de la compra y está activa, que la compra no está `cancelada` y que hay menos de **3** fotos activas. Luego inserta | `no_pertenece`, `no_editable`, `max_fotos` |
+| `agregar_foto_linea(p_compra uuid, p_linea uuid, p_foto jsonb, p_actor jsonb)` | Bloquea **la línea** (`for update`; no la compra ni su `revision`). Comprueba que la línea es de la compra y está activa, que la compra no está `cancelada` y que hay menos de **3** fotos activas. Luego inserta. Acepta `p_foto.clave_origen` (solo la carga C2): si ya hay una fila con esa clave, no escribe y responde `ya_cargada` | `no_pertenece`, `no_editable`, `max_fotos`, `ya_cargada` |
 | `quitar_foto_linea(p_compra uuid, p_linea uuid, p_foto uuid, p_actor jsonb)` | Bloquea la línea y comprueba pertenencia. En una compra cancelada solo quita si `p_actor.rol = 'admin'` (así el admin puede retirar una foto equivocada de una compra ya cancelada, I7); si no, `no_editable`. Pone `activo = false` y `quitada_*`. Devuelve `ruta` y `ruta_miniatura` para que la API borre los objetos | `no_pertenece`, `no_editable`, `ya_quitada` |
 | `editar_ficha_linea(p_compra uuid, p_linea uuid, p_antes jsonb, p_descripcion text, p_modelo text, p_actor jsonb)` | Bloquea **la línea** (`for update`), **no la compra**: no lee ni sube `compras.revision` (I6). Comprueba pertenencia, línea activa y compra no cancelada. Compara `descripcion` y `modelo` guardados con `p_antes` (`{ descripcion, modelo }`, con `is distinct from`): si alguno cambió, rechaza sin escribir. Si coinciden, escribe e inserta el evento `editar_linea` con `antes`, `despues` y el `resumen` («descripción: — → Jean slim azul medio»). El evento mueve la huella del flujo una vez (cuenta eventos), sin cambiar cifras. **Por qué no usa la `revision` de la compra**: Fotos tiene una tarjeta por línea; con la revisión de la compra, editar una descripción, asignar la compra a un viaje (08b) o confirmar un ingreso dejaría viejas las copias de las otras tarjetas de esa compra y daría `409` falsos. Matiza la decisión 60 para estos dos campos (§9.1, 88) | `linea_cambio`, `no_pertenece`, `no_editable` |
 | `guardar_parametros_precio(p_base_version int, p_parametros jsonb, p_actor jsonb)` (E2) | `pg_advisory_xact_lock` propio. Si la vigente no es `p_base_version`, rechaza. Si coincide, inserta `version + 1` | `parametros_cambiaron` |
@@ -344,7 +350,7 @@ Las hojas son `{ compra_numero, proveedor, descripcion, modelo, unidades, moneda
 
 ### 3.6 Códigos de error nuevos
 
-`proveedor_cambio`, `nombre_repetido`, `codigo_repetido`, `nombre_parecido`, `solo_planner_intercompany`, `linea_cambio`, `longitud_requerida`, `origen_invalido`, `foto_grande`, `foto_requerida`, `formato_invalido`, `dimensiones_invalidas`, `max_fotos`, `ya_quitada`, `almacen_no_disponible`, `proveedor_requerido`, `parametros_cambiaron` (más los propios de cada apartado de §11). Se reutilizan `no_pertenece`, `no_editable` y `compra_cambio` de M8. Todos con mensaje en `MENSAJE_ERROR_*` y estado en `ESTADO_HTTP_ERROR_*`, como en `compras/tipos-api.ts`.
+`proveedor_cambio`, `nombre_repetido`, `codigo_repetido`, `nombre_parecido`, `solo_planner_intercompany`, `linea_cambio`, `longitud_requerida`, `origen_invalido`, `foto_grande`, `foto_requerida`, `formato_invalido`, `dimensiones_invalidas`, `max_fotos`, `ya_quitada`, `almacen_no_disponible`, `proveedor_requerido`, `parametros_cambiaron` (más los propios de cada apartado de §11). `ya_cargado` y `ya_cargada` son motivos de función que solo ve la carga desde COTV: no tienen ruta ni código HTTP. Se reutilizan `no_pertenece`, `no_editable` y `compra_cambio` de M8. Todos con mensaje en `MENSAJE_ERROR_*` y estado en `ESTADO_HTTP_ERROR_*`, como en `compras/tipos-api.ts`.
 
 ## 4. Pantallas
 
@@ -376,7 +382,7 @@ Se usa el kit de Vector2 (`Tabs`, `DataTable`, `Modal`, `Form`, `Chips`, `Badge`
   - **Contactos**: filas con nombre*, cargo, teléfono, correo y la radio «Principal»; «+ Agregar contacto», hasta 20.
 - **Validaciones visibles**: nombre repetido («Ya existe «Feria Sur»: [Abrir]», o «… pero está inactivo: pide a un admin o planner que lo reactive»); nombre parecido (aviso, no bloquea); correo inválido; estado de EE. UU. requerido; «Otro usuario guardó cambios: recarga» (`proveedor_cambio`).
 - **Acciones del planner**: Desactivar o Reactivar, y Eliminar. Esta última pide confirmación y la respuesta dice «eliminado» o «tenía compras: quedó desactivado».
-- **Detalle**: la ficha, el resumen de compras (cuántas, la última, unidades y costo por moneda) y «Ver sus compras», que abre `/compras/registro?proveedor_id=`. Su historial de cambios: §11.P4.
+- **Detalle**: la ficha, el resumen de compras (cuántas, la última, unidades y costo por moneda) y «Ver sus compras», que abre `/compras/registro?proveedor_id=`. Su historial de cambios: §11.P4. Un proveedor traído de COTV muestra en el historial el evento «Carga desde COTV».
 - **Alta al vuelo** (`selector-proveedor.tsx`; lo usan la captura de `0.13.1` y los filtros): autocompletado de activos y la opción «Crear «X»». Con `409 nombre_parecido`, un `Modal` pregunta «¿Es alguno de estos? Proveedor Norte Ltd. (mismo nombre sin la razón social) · Textiles Delta Ltd. (0,83)» con las opciones [Usar este] y [No, crear «X»]. Lo creado al vuelo sale con «Ficha incompleta».
 
 ### 4.3 Fotos (`/compras/fotos`, pensada para el celular)
@@ -397,7 +403,7 @@ Se usa el kit de Vector2 (`Tabs`, `DataTable`, `Modal`, `Form`, `Chips`, `Badge`
   - Se rechazan en el cliente los originales de más de 30 MB.
 - **Ver**: tocar una miniatura abre el visor con la foto de 800 (`GET /fotos/[id]`).
 - **Compra cancelada**: la tarjeta sale en solo lectura; el admin ve la ✕ para quitar una foto equivocada. Las miniaturas no caducan; si la foto grande del visor caducó (más de 1 h abierta), el visor la vuelve a pedir una vez.
-- **Sin compras**: «Todavía no hay compras: se cargan con el importador de carga inicial» (§6, requisito previo).
+- **Sin compras**: «Todavía no hay compras: se cargan con el importador de carga inicial» (§6, requisito previo). En `vector-two` las primeras llegan con la carga C2 de COTV o con la carga inicial de Javier (§12).
 - **Limpieza (solo admin)**: en el menú «…» de la cabecera, «Limpiar fotos huérfanas» dice cuántas hay («3 sin registro y 1 de fotos quitadas, de hace más de 24 h») y las borra al confirmar (§3.3).
 - **Lo que ve cada rol**: los tres ven y escriben lo mismo (§9 B3).
 
@@ -487,11 +493,11 @@ En cada nodo: líneas, unidades, costo por moneda, costo en soles, venta potenci
 
 ## 6. Criterios de aceptación / hito de prueba
 
-Estas listas las recorre QA **en local, con datos sintéticos**. Lo que recorre Javier en producción, y con qué datos, lo dice §11.P6.
+Estas listas las recorre QA **en local, con datos sintéticos**. Lo que recorre Javier en `vector-two`, siempre con datos reales de COTV, lo dicen §11.P6 y §12.7.
 
 **E1** (en Chromium, en un Android real y en un iPhone real):
 
-**Requisito previo (I2).** E1 no trae ninguna forma de crear compras: hoy hay 0 compras, el único camino es `POST /api/compras/importar` (`requirePlanner`, solo con `carga_inicial`) y la captura manual es de `0.13.1`. En local, QA carga antes una carga inicial sintética; en producción hace falta la carga inicial de Javier (§11.P6).
+**Requisito previo (I2).** E1 no trae ninguna forma de crear compras: hoy hay 0 compras, el único camino es `POST /api/compras/importar` (`requirePlanner`, solo con `carga_inicial`) y la captura manual es de `0.13.1`. En local, QA carga antes una carga inicial sintética. En `vector-two` nunca se cargan compras inventadas: las primeras llegan con la carga C2 desde COTV o con la carga inicial real de Javier (§12).
 
 - [ ] Las consultas de §2.0 reconfirmadas; `00E1` aplica dos veces en local y en `vector-two`; el humo pasa (R4, R5, R6, R7, R7b, R10, R11, R13, R15 y Storage sin ninguna política); los tipos se regeneran.
 - [ ] lint, `tsc`, vitest y build limpios; las pruebas de M8 y de 08b siguen verdes **sin modificarlas**, salvo las altas aditivas en `tests/flujo.estatico.test.ts` y `tests/api.guards.roles.test.ts` (M11).
@@ -517,13 +523,13 @@ Estas listas las recorre QA **en local, con datos sintéticos**. Lo que recorre 
 - [ ] Dos pestañas editando el mismo proveedor: la segunda recibe `409 proveedor_cambio`.
 - [ ] En Viajes y embarques (08b-1), un embarque con compras de «Textiles Delta Ltd.» sugiere «Ningbo» como puerto; importar ese embarque con puerto «Shanghái» da el aviso «Puerto distinto del habitual del proveedor» (R29).
 - [ ] Menú: los tres roles ven la sección Compras con Fotos y Proveedores activos, y Galería, Proformas y Directorio deshabilitados («E2» y «E3»). Nada aparece fuera de Compras.
-- [ ] Lo que §11 deje en E1 con su *default* (P2, P4, P5) tiene su propio punto de hito en su apartado.
+- [ ] Lo que §11 deja en E1 (P4, P5) tiene su propio punto de hito en su apartado. La carga C1 se valida con §12.5 antes del hito de Javier.
 - [ ] `seguridad` (sonnet) revisa las rutas `requireUser` que escriben (fotos, ficha de línea, proveedores), la subida *multipart* con su tope, la ruta de miniaturas y la limpieza.
 
 **E2**:
 
 - [ ] Galería: 3 columnas a 390 px; [Cargar más] por cursor (subir una foto entre dos páginas no repite ni salta ninguna); vista ampliada con leyenda; filtro por viaje (por defecto, el activo) y por proveedor.
-- [ ] Proforma interna de «Textiles Delta Ltd.» con dos líneas sintéticas (3,15 y 3,25 USD): PVP 39,90 y 49,90; CV 41,2 % y 34,0 %. Los totales cuadran con R19.
+- [ ] Proforma interna de «Textiles Delta Ltd.» con dos líneas sintéticas (3,15 y 3,25 USD): PVP 39,90 y 49,90; CV 41,2 % y 34,0 %. Los totales cuadran con R19. Cambiar el incoterm habitual del proveedor a `CIF` no cambia ni marca nada (decisión 102).
 - [ ] Simular un TC de 3,8: cambian los CV, aparece la banda de simulación, y el PDF y el Excel salen rotulados «Simulación». El comprador no ve [Guardar].
 - [ ] El planner guarda la v1; otra pestaña con base 0 recibe `409`. El PDF dice «Parámetros v1».
 - [ ] Externa sin proveedor bloqueada. Con proveedor, la respuesta de red no contiene PVP ni CV (DevTools). PDF con fotos, compartido desde el celular a WhatsApp o al correo. Excel sin columnas internas.
@@ -544,7 +550,10 @@ Estas listas las recorre QA **en local, con datos sintéticos**. Lo que recorre 
 - Proformas **numeradas y guardadas**, enviarlas por correo desde el sistema y que el proveedor las firme. Hoy la proforma se genera, no se guarda.
 - PVP decidido por línea (precio final de venta); tipo de cambio automático (SUNAT o SBS); monedas distintas de USD y PEN (la columna admite ampliar el catálogo sin migración).
 - Incoterm, puerto y plazos **por compra** (aquí solo son los habituales del proveedor; el puerto real lo muestra el embarque de 08b); costo puesto en almacén (*landed cost*: flete, aduana).
-- Fusionar proveedores duplicados (lo mitiga el aviso de parecido). Portal del proveedor. Datos bancarios (salvo §9 A3).
+- Fusionar proveedores duplicados (lo mitiga el aviso de parecido; los repetidos que traiga COTV se resuelven antes de cargar, §12.2 a). Portal del proveedor. Datos bancarios (salvo §9 A3): la carga desde COTV **ni siquiera los lee** (§12.2 a).
+- **Importador de proveedores con pantalla** (decisión 101). Los de COTV se cargan una vez (§12); los nuevos se crean en la ficha o al vuelo. Si un día aparece otra fuente masiva, se especifica entonces, sobre `guardar_proveedor`.
+- **Aviso «costo no FOB / CV aproximado»** (decisión 102): el costo es FOB siempre y el incoterm solo informa.
+- De COTV **no se cargan**: necesidades OTB (`otb_needs`, `otb_need_months`: el OTB por viaje está descartado, decisión 2; solo se **leen** para saber el género, el mundo y la línea de cada compra), asignaciones de comprador (`gender_mundo_assignments`: manda M1b), perfiles (`profiles`: los usuarios de Vector2 ya existen) ni los datos bancarios (§12.1).
 
 ## 8. Riesgos
 
@@ -556,17 +565,22 @@ Estas listas las recorre QA **en local, con datos sintéticos**. Lo que recorre 
 6. **Dependencias del PDF.** `jspdf` y `jspdf-autotable` son nuevas. Si la política de red las bloquea, como pasó con SheetJS, la alternativa es una vista de impresión con `window.print()`: «Guardar como PDF» del navegador, sin compartir el archivo.
 7. **Choque de archivos con 08b y `0.13.1`** (`detalle-compra.tsx`, `compras/tipos-api.ts`, `consultas.ts`, `nav.ts` y, desde I5, `src/lib/compras/agrupadores/**`). Se construye en serie, nunca en paralelo (§0.3).
 8. **Tráfico de miniaturas por Railway** (M4). Con caché de un día por equipo, unas 300 miniaturas de 20 KB son ~6 MB por apertura en frío. Si molesta, se vuelve a URLs firmadas solo para la Galería.
-9. **Hito sin compras** (I2). E1 no crea compras (§6, requisito previo). Si la carga inicial de Javier se retrasa, el hito de E1 se recorre solo en local.
+9. **Hito sin compras** (I2). E1 no crea compras (§6, requisito previo). Si C2 (§12) y la carga inicial de Javier se retrasan, el hito de E1 se recorre con los proveedores de C1 y las fotos se prueban en local.
+10. **Copiar las fotos de COTV pide llaves que solo Javier tiene** (§12.2 c). El MCP de Supabase lee tablas, no descarga objetos de Storage. Sin una llave de COTV y otra de Vector2, C2 puede cargar compras, descripción y modelo, pero no las fotos.
+11. **Contar dos veces la misma compra** (§12.3). Si las compras de COTV ya vienen en la carga inicial de Javier (las órdenes reales) y además se cargan desde COTV, el flujo las sumaría dos veces y los huecos saldrían más chicos de lo que son. Lo resuelve la pregunta G1 de §12.8 antes de C2.
+12. **La carga no se deshace** (§12.5). En `vector-two` las compras solo se cancelan y un proveedor con compras solo se desactiva. Por eso cada carga se ensaya completa en local contra un volcado de COTV y se corre una sola vez en `vector-two`.
 
 ## 9. Decisiones cerradas en esta ficha y preguntas abiertas para Javier
 
 ### 9.1 Decisiones del arquitecto (propuestas para `docs/DECISIONES.md`, números 87 a 91, reservados en `DECISIONES.md`; 08b usa 81, 83 a 86 y 92 a 98)
 
-- **87 · Proveedores es un maestro de Compras, compartido por todos los viajes.** Su ficha y sus contactos se guardan en una sola función transaccional con `revision`. `proveedor_contactos` pasa de la `0028` de M9a a esta ficha; la `0028` queda solo con `compra_linea_mezcla`. Crea y edita cualquier usuario; `es_intercompany`, desactivar y eliminar, solo el planner. El aviso de parecido compara nombres sin la razón social. (Historial e importador: §11.P4 y §11.P2.)
+- **87 · Proveedores es un maestro de Compras, compartido por todos los viajes.** Su ficha y sus contactos se guardan en una sola función transaccional con `revision`. `proveedor_contactos` pasa de la `0028` de M9a a esta ficha; la `0028` queda solo con `compra_linea_mezcla`. Crea y edita cualquier usuario; `es_intercompany`, desactivar y eliminar, solo el planner. El aviso de parecido compara nombres sin la razón social. (Historial: §11.P4, decisión 103. Los de COTV se cargan sin importador: §11.P2 y §12, decisiones 101 y 106.)
 - **88 · Las fotos de una línea se reducen en el navegador** a lo que cabe en 800×800 conservando la proporción (JPEG; miniatura de 320 px), y el servidor les quita los metadatos. Suben **por un route handler con guard** y tope de tamaño, que las guarda con `service_role` en un bucket privado **sin políticas**. La miniatura se sirve por la API con caché privada; la foto grande, por URL firmada de 1 h generada en el servidor. Máximo 3 activas. Quitar las borra del bucket y conserva quién y cuándo; una limpieza de solo admin recoge los objetos huérfanos. **No tocan `revision`, eventos ni la huella del flujo.** La descripción y el modelo de la línea se protegen con el candado de la línea y los valores previos, no con la `revision` de la compra: **matiza la decisión 60** para esos dos campos, para no dar `409` falsos en Fotos. Se descarta lo de COTV: políticas abiertas a `authenticated` y subida directa del navegador.
 - **89 · Los parámetros de precio (markup, factor, TC, IGV) son una configuración versionada e inmutable en base.** Simular nunca guarda. Cada exporte dice con qué versión, o que es una simulación. Se descarta `localStorage`.
 - **90 · La proforma externa es de un solo proveedor** y el servidor nunca le manda PVP, CV ni parámetros: es un tipo de respuesta distinto, no un campo oculto en pantalla.
 - **91 · De COTV no se traen** el espacio intercompany (ya está en M13 y M8), Pendientes (`0.13.1`), el dashboard por comprador (OTB por viaje, descartado), la asignación de comprador (M1b) ni «Nueva línea» (la necesidad se calcula). El viaje activo lo trae 08b.
+
+Las **decisiones 100 a 106** son las respuestas de Javier del 2026-11-04 y lo que el arquitecto decidió a partir de ellas: 100 a 105 están en §11 (P1 a P6) y la 106 en §12. Se registran con esos números (en `DECISIONES.md` la siguiente libre era la 100).
 
 ### 9.2 *Defaults* aplicados de la primera versión (no bloquean)
 
@@ -614,9 +628,9 @@ Eran las preguntas abiertas de la primera versión. Desde la revisión del 2026-
 | I6 · 409 falsos en Fotos | Opción (a): `editar_ficha_linea` con candado de línea y `p_antes`, sin `compras.revision`; `linea_cambio` | §2.7, §3.1, §3.3, R7, R7b, §9.1 (88) |
 | I7 · Fotos atrapadas al reimportar | Mínimo aplicado (documentado; el admin quita en canceladas); «Traer fotos» como *default* | §2.7, R6, §7, **§11.P5** |
 | I8 · Maestro sin historial | `proveedor_eventos` como *default* | **§11.P4** |
-| I9 · Costo no FOB | Aviso «CV aproximado» como *default* | §2.1, **§11.P3** |
-| I10 · Traer proveedores de COTV | Importador como *default* | §0.1, **§11.P2** |
-| I11 · Sintéticos en producción | Hito en local con sintéticos; Javier con su carga real como *default* | §6, **§11.P6** |
+| I9 · Costo no FOB | Javier: FOB siempre, sin marca (decisión 102). Se quitó el aviso «CV aproximado»; el incoterm solo informa | §2.1, **§11.P3** |
+| I10 · Traer proveedores de COTV | Javier: «tú los importas». Carga única desde la base de COTV, sin importador con pantalla (decisión 101) | §0.1, **§11.P2**, **§12** |
+| I11 · Sintéticos en producción | Javier: datos de COTV, nada inventado en `vector-two` (decisión 105). Sintéticos solo en local | §6, **§11.P6**, **§12.7** |
 | M1 | 411 sin `content-length`, lectura con tope, sin `request.formData()` directo; `Origin` | §3.1, §3.3, R3 |
 | M2 | `quitarMetadatos` en el servidor; `imageOrientation: "from-image"` | §3.3, §4.3, R2 |
 | M3 | Humo exige 0 políticas en `storage` | §2.0, §2.5, R9 |
@@ -633,109 +647,269 @@ Eran las preguntas abiertas de la primera versión. Desde la revisión del 2026-
 | M14 | Celdas de texto en Excel, `generarCsv`, nombre del PDF saneado | §4.2, §4.5, R26 |
 | M15 | `next.config.ts` asignado a `frontend` en T4 si hace falta | §0.3 T4, §6 |
 
-## 11. Pendiente de Javier (seis preguntas)
+## 11. Respuestas de Javier (2026-11-04; decisiones propuestas 100 a 105)
 
-Cada apartado trae la pregunta en lenguaje de negocio, las opciones, el ***default* provisional** (lo que se construye si Javier no responde antes de esa entrega) y **todo** lo que ese *default* añade a la ficha: modelo, API, pantalla, regla, hito y archivos de las tandas. Fuera de su apartado, las demás secciones solo lo **nombran**. Si una respuesta cambia, se reescribe **ese apartado**; la única excepción está dicha en P4 (c).
+Las seis preguntas de la revisión ya tienen respuesta. Cada apartado dice la respuesta literal, la decisión que queda para `DECISIONES.md` y **todo** lo que añade o quita a la ficha: modelo, API, pantalla, regla, hito y archivos de las tandas. Fuera de su apartado, las demás secciones solo lo **nombran**.
 
-### 11.P1 · ¿Fotos en el mismo momento de registrar la compra? (I2)
+### 11.P1 · Fotos al registrar la compra y después (decisión 100)
 
-**Pregunta.** Hasta la entrega `0.13.1`, las compras solo entran al sistema con tu archivo de carga inicial. Cuando llegue el registro de compras a mano, ¿quieres que el comprador pueda sacar las fotos de cada producto **en el mismo formulario** donde anota la compra, o basta con que las suba después desde Compras → Fotos?
+**Respuesta de Javier.** «El comprador podría subir la foto al momento de ingresar la compra o en un proceso.»
 
-- **(a) En el mismo formulario**, en cuanto la línea esté guardada (aunque la compra siga en borrador). ***Default provisional.***
-- (b) Solo después, desde Compras → Fotos.
+**Decisión 100 · Las fotos de una línea se suben por las dos vías.** En el mismo formulario donde se registra la compra, en cuanto la línea esté guardada, y después desde Compras → Fotos o desde el detalle de la compra. Las dos usan el mismo componente y la misma API.
 
-**Qué añade el *default*.** Nada en E1: es un contrato para la ficha de `0.13.1`. Su formulario de línea monta el mismo `<FotosLinea>` de E1 (`src/components/fotos/`) cuando la línea ya tiene `id`; antes de guardarla, el botón sale deshabilitado con «Guarda la línea para agregar fotos». No hay fotos sin línea ni cola local (10-pwa).
+**Qué añade.**
 
-**Si cambia a (b):** se borra este contrato. Nada más de la ficha cambia.
+- **En E1**: nada nuevo. Compras → Fotos (§4.3) y el `<FotosLinea>` del detalle de la compra (T4) ya son la vía «después».
+- **Contrato para la ficha de `0.13.1`**: su formulario de línea monta el mismo `<FotosLinea>` de E1 (`src/components/fotos/`) en cuanto la línea tiene `id`, aunque la compra siga en borrador. Antes de guardarla, el botón sale deshabilitado con «Guarda la línea para agregar fotos». No hay fotos sin línea ni cola local (10-pwa). `0.13.1` no crea rutas de fotos: usa las de §3.3.
 
-### 11.P2 · ¿Cómo pasamos los proveedores de COTV? (I10)
+### 11.P2 · Los proveedores de COTV los carga Claude (decisión 101)
 
-**Pregunta.** En COTV ya tienes los proveedores cargados, con sus contactos. ¿Cómo los pasamos a Vector2?
+**Respuesta de Javier.** «Tú los importas.»
 
-- **(a) Con un importador**: descargas una planilla (Excel o CSV), pegas lo de COTV y el sistema los crea todos de una vez; si la subes dos veces, no duplica. Los datos bancarios no se pasan. ***Default provisional, en E1.***
-- (b) A mano, uno por uno, en la pantalla de Proveedores.
-- (c) Con importador, pero más adelante (junto con la galería y las proformas, E2).
+**Decisión 101 · Los proveedores de COTV se cargan una sola vez, desde la base de COTV, sin importador con pantalla.** Los carga el agente principal con `datos`, no Javier. Pasan por la misma función que la ficha (`guardar_proveedor`) y por el mismo esquema zod que la API, con una clave de origen que hace la carga idempotente (decisión 106, §12). Los datos bancarios de COTV no se leen.
 
-**Qué añade el *default*.**
+**Por qué no el importador con pantalla.** Son 34 proveedores y 26 contactos, una sola vez. El importador costaba una función SQL (`importar_proveedores`), una ruta, una pestaña, el parser de la planilla, su plantilla y sus pruebas: aproximadamente una tanda completa de `backend` y `frontend` (1 a 1,5 días de agentes) más su mantenimiento, para usarlo una vez. La carga única cuesta **una columna** (`proveedores.clave_origen`, §2.1) y **medio día** de trabajo de agentes (§12.5, C1), y no deja código nuevo en la aplicación. Si mañana aparece otra fuente masiva de proveedores, se especifica entonces sobre `guardar_proveedor`.
 
-- **API**: `POST /api/compras/proveedores/importar` (`requirePlanner`; hoy lo usa Javier como admin), modos `previsualizar` y `aplicar`, hasta 1 000 filas, con el importador compartido `src/components/importador/**` y su plantilla.
-- **Columnas**: `NOMBRE`*, `CODIGO`, `PAIS`, `REGION`, `CIUDAD`, `DIRECCION`, `IDENTIFICACION`, `PUERTO_EMBARQUE`, `INCOTERM`, `MONEDA`, `PLAZO_PRODUCCION_DIAS`, `PLAZO_TRANSITO_DIAS`, `CONDICIONES_PAGO`, `NOTA` y hasta 3 contactos (`CONTACTO1_NOMBRE`, `CONTACTO1_CARGO`, `CONTACTO1_TELEFONO`, `CONTACTO1_CORREO` … `CONTACTO3_*`); el contacto 1 es el principal. Se aceptan como alias los encabezados de COTV (`name`, `country`, `state`, `address`, `ruc`). Las columnas de banco (`bank_name`, `bank_account`) se ignoran con el aviso `columna_ignorada` (§9 A3). `es_intercompany` no se importa.
-- **Solo crea.** Un nombre que ya existe (en mayúsculas y sin espacios al borde) sale omitido como `ya_existe`, sin tocarlo: reimportar el mismo archivo no hace nada. Motivos de omisión: `nombre_vacio`, `nombre_repetido_en_archivo`, `ya_existe`, `pais_desconocido`, `region_invalida`, `incoterm_invalido`, `moneda_invalida`, `plazo_invalido`, `correo_invalido`, `texto_largo`. El parecido (§3.2) es un aviso por fila y no omite.
-- **Modelo**: función `importar_proveedores(p_lote jsonb, p_actor jsonb)` en `00E1`, una transacción por lote, con la misma lógica de ficha y contactos que `guardar_proveedor` (y su evento, si P4 queda en sí).
-- **Pantalla**: pestaña «Importar» en `/compras/proveedores`, visible para admin y planner.
-- **Regla RP2**: importar dos veces el mismo archivo crea N y después 0; un nombre que solo difiere en mayúsculas o espacios sale `ya_existe`; un correo inválido en el contacto 2 omite la fila entera.
-- **Tandas**: T0 `src/lib/proveedores/importar-esquemas.ts`; T1 la función en `00E1`; T2 `src/lib/proveedores/importar.ts` y `tests/proveedores.importar.test.ts`; T3a la pestaña; T3b `src/app/api/compras/proveedores/importar/route.ts`.
-- **Hito**: en local, una planilla sintética de 5 proveedores (uno repetido y uno con el país mal escrito) da 3 creados, 1 `ya_existe` y 1 `pais_desconocido`; reimportarla da 0 creados. En producción, Javier importa los de COTV **antes** de su carga inicial de compras, para que el importador de compras los encuentre por nombre (§11.P6).
+**Qué se quitó de la ficha** (estaba en el *default* anterior): `POST /api/compras/proveedores/importar`, la función `importar_proveedores`, la pestaña «Importar» de Proveedores, la regla RP2 y los archivos `src/lib/proveedores/{importar-esquemas,importar}.ts`, `tests/proveedores.importar.test.ts` y `src/app/api/compras/proveedores/importar/route.ts`.
 
-**Si cambia:** con (b) se borra este apartado; con (c) se mueve tal cual a E2.
+**Qué añade.** La columna `proveedores.clave_origen` (§2.1), el motivo `ya_cargado` de `guardar_proveedor` (§2.7) y la carga C1 como tanda T6 de E1 (§0.3, §12.5).
 
-### 11.P3 · ¿El costo que se anota es siempre FOB? (I9)
+### 11.P3 · El costo es siempre FOB, sin marca (decisión 102)
 
-**Pregunta.** El PVP sugerido y el CV esperado de la proforma suponen que el costo unitario de cada compra es **FOB**: la mercadería puesta en el barco en origen, sin flete ni seguro. ¿Es siempre así?
+**Respuesta de Javier.** «Sí, sin marcar nada.»
 
-- **(a) Sí, siempre FOB por regla de la casa.** Si un proveedor trabaja habitualmente con una condición que ya incluye flete o seguro (CIF, CFR, DDP y similares), la proforma interna y el Directorio marcan sus filas «costo no FOB: CV aproximado». El cálculo no cambia. ***Default provisional, en E2 y E3.***
-- (b) Sí, siempre FOB, sin ninguna marca.
-- (c) No: a veces el costo es CIF u otra condición y quiero que el cálculo lo corrija. Eso es otra ficha (condición por compra y un factor por condición).
+**Decisión 102 · El costo unitario de una compra se toma siempre como FOB.** La proforma interna y el Directorio calculan el PVP sugerido y el CV esperado igual para todos los proveedores. El incoterm habitual del proveedor es **solo informativo**: no cambia ningún cálculo ni marca ninguna fila.
 
-**Qué añade el *default*.** `FilaProformaInternaApi` y las hojas del Directorio suman `aviso_costo: "no_fob" | null`: `no_fob` si el `incoterm` habitual del proveedor es `CFR`, `CIF`, `CPT`, `CIP`, `DAP`, `DPU` o `DDP`; nulo con `EXW`, `FCA`, `FAS`, `FOB` o sin incoterm. En pantalla, un `Badge` «CV aprox.» con la explicación. La proforma externa nunca lo lleva. **Regla RP3**: un proveedor `CIF` marca sus filas; uno `FCA` o sin incoterm, no; el PVP y el CV salen iguales con y sin marca. **Hito E2**: un proveedor sintético `CIF` muestra el aviso en la interna y no en la externa. **Tandas**: el campo en `src/lib/proformas/{tipos-api,armar}.ts` y `src/lib/directorio/armar.ts`; el `Badge` en `src/components/proformas/**`.
+**Qué se quitó de la ficha** (estaba en el *default* anterior): el campo `aviso_costo` de `FilaProformaInternaApi` y de las hojas del Directorio, el `Badge` «CV aprox.», la regla RP3, el punto de hito con un proveedor `CIF` y sus archivos de tanda. En su lugar, el hito de E2 comprueba que cambiar el incoterm a `CIF` no cambia ni marca nada (§6).
 
-**Si cambia:** con (b) se borra este apartado; con (c) se borra y se abre una ficha nueva.
+Si un día hay costos CIF u otra condición que deban corregirse, es una ficha nueva (condición por compra y un factor por condición).
 
-### 11.P4 · ¿Quién puede cambiar un proveedor, y queda registro? (I8)
+### 11.P4 · Cualquiera edita y queda un historial que no se borra (decisión 103)
 
-**Pregunta.** Los proveedores son compartidos: si un comprador cambia el nombre de un proveedor o el teléfono de un contacto, lo ven todos. ¿Cómo lo quieres?
+**Respuesta de Javier.** Opción (a), la que proponía el revisor.
 
-- **(a) Cualquiera puede editar, y queda un historial que no se puede borrar**: quién cambió qué, cuándo y cuál era el valor anterior, visible en la ficha del proveedor. ***Default provisional, en E1.***
-- (b) Cualquiera puede editar, sin historial (solo «modificado por» y la fecha del último cambio).
-- (c) El comprador solo crea proveedores; cambiar el nombre o los contactos de uno existente lo hacen el admin o el planner.
+**Decisión 103 · Cualquier usuario crea y edita proveedores, y cada cambio queda en `proveedor_eventos`, inmutable.** Desactivar, eliminar y marcar intercompany siguen siendo del planner (R16).
 
-**Qué añade el *default*.**
+**Qué añade.**
 
 - **Tabla `proveedor_eventos`** (en `00E1`): `id`, `proveedor_id uuid null` → `proveedores` `on delete set null` (con índice `(proveedor_id, created_at desc)`), `proveedor_nombre text not null` (copia, para que el historial de un proveedor borrado siga legible), `accion text not null` (catálogo zod: `crear`, `editar`, `desactivar`, `reactivar`, `eliminar`, `importar`), `antes jsonb null` y `despues jsonb null` (ficha y contactos; nunca banco), `resumen` (≤ 300), `perfil_id` → `perfiles` `on delete set null`, `usuario_nombre`, `created_at`. **Sin `activo` ni `updated_at`**: la misma excepción documentada que `compra_eventos`.
 - **Inmutable** por trigger, también para `service_role`, y con trigger de sentencia contra `TRUNCATE` (patrón de `compra_eventos` y del trigger `compra_eventos_sin_vaciado` de la migración de 08b-1). Única excepción: el `UPDATE` que solo pone en nulo `proveedor_id` o `perfil_id` (borrado de un proveedor sin compras o de un usuario), con todo lo demás igual.
-- **Quién escribe**: `guardar_proveedor` (un evento por guardado con cambios; un guardado sin cambios no escribe evento ni sube `revision`), `cambiar_activo_proveedor`, `eliminar_proveedor` (el evento `eliminar` va antes del borrado) e `importar_proveedores` si P2 queda en sí.
+- **Quién escribe**: `guardar_proveedor` (un evento por guardado con cambios; un guardado sin cambios no escribe evento ni sube `revision`; con `p_actor.origen = 'carga_cotv'`, la acción es `importar` y el resumen «Carga desde COTV»), `cambiar_activo_proveedor` y `eliminar_proveedor` (el evento `eliminar` va antes del borrado).
 - **API**: `GET /api/compras/proveedores/[id]/historial` (`requireUser`) → `[{ accion, resumen, cambios: [{ campo, antes, despues }], por: PersonaFechaApi }]`; el detalle campo a campo se calcula en TS.
 - **Pantalla**: pestaña «Historial» en el detalle del proveedor.
-- **Regla RP4**: renombrar deja un evento con `antes` y `despues` del nombre; cambiar el teléfono de un contacto deja uno con el contacto anterior; `UPDATE`, `DELETE` y `TRUNCATE` sobre la tabla fallan también con `service_role` (humo); borrar un proveedor sin compras conserva sus eventos con `proveedor_id` nulo.
+- **Regla RP4**: renombrar deja un evento con `antes` y `despues` del nombre; cambiar el teléfono de un contacto deja uno con el contacto anterior; `UPDATE`, `DELETE` y `TRUNCATE` sobre la tabla fallan también con `service_role` (humo); borrar un proveedor sin compras conserva sus eventos con `proveedor_id` nulo; un proveedor cargado desde COTV tiene exactamente un evento `importar`.
 - **Tandas**: T1 tabla y triggers en `00E1`; T2 `src/lib/proveedores/historial.ts`; T3a la pestaña; T3b `src/app/api/compras/proveedores/[id]/historial/route.ts`.
 - **Hito**: como comprador, renombrar un proveedor; como planner, verlo en Historial con el nombre anterior.
 
-**Si cambia:** con (b) se borra este apartado. Con (c) se borra **y además** cambian R16 y las acciones de §4.2: `PATCH /api/compras/proveedores/[id]` pasa a `requirePlanner` y el comprador conserva el alta (completa y al vuelo).
+### 11.P5 · Botón «Traer fotos de la versión cancelada» (decisión 104)
 
-### 11.P5 · Al corregir una compra cancelando y reimportando, ¿se conservan las fotos? (I7)
+**Respuesta de Javier.** Opción (a): el botón.
 
-**Pregunta.** Para corregir una compra que vino en el archivo de carga, hoy se cancela y se vuelve a importar (así quedó decidido en M8). Las fotos quedan pegadas a la compra cancelada. ¿Qué hacemos con ellas?
+**Decisión 104 · Al corregir una compra importada (cancelar y reimportar, decisión 57), la línea nueva puede traer en un toque las fotos de la misma línea de la versión cancelada.** Se copian; las de la compra cancelada no cambian.
 
-- **(a) Un botón «Traer fotos de la versión cancelada»** en la línea nueva, que las copia en un toque. ***Default provisional, en E1.***
-- (b) Se vuelven a tomar. Las de la compra cancelada siguen visibles en esa compra y el admin puede quitarlas (eso ya está en E1, R6).
+**Qué añade.**
 
-**Qué añade el *default*.**
-
-- **Origen**: la línea más reciente de una compra **cancelada** con la misma `clave_importacion` (proveedor | referencia | línea, la que pone el importador) y el mismo proveedor. Solo para líneas importadas: las manuales no tienen clave.
-- **Modelo**: columna `origen_foto_id uuid null` → `compra_linea_fotos` `on delete restrict` en `compra_linea_fotos` (en `00E1`), con único parcial `(linea_id, origen_foto_id) where activo and origen_foto_id is not null`. Función `traer_fotos_linea(p_compra uuid, p_linea uuid, p_origen uuid, p_fotos jsonb, p_actor jsonb)`: bloquea la línea destino; comprueba pertenencia, destino no cancelado, origen en una compra cancelada con la misma clave, y no pasar de 3 activas (trae las más antiguas que quepan y salta las ya traídas). Motivos: `sin_origen`, `no_editable`, `max_fotos`.
+- **Origen**: la línea más reciente de una compra **cancelada** con la misma `clave_importacion` (proveedor | referencia | línea, la que pone el importador) y el mismo proveedor. Solo para líneas importadas: las manuales no tienen clave. Vale también para las compras que entren desde COTV por el importador (C2, §12), que llevan clave.
+- **Modelo**: columna `origen_foto_id` en `compra_linea_fotos` (§2.4), con único parcial `(linea_id, origen_foto_id) where activo and origen_foto_id is not null`. Función `traer_fotos_linea(p_compra uuid, p_linea uuid, p_origen uuid, p_fotos jsonb, p_actor jsonb)`: bloquea la línea destino; comprueba pertenencia, destino no cancelado, origen en una compra cancelada con la misma clave, y no pasar de 3 activas (trae las más antiguas que quepan y salta las ya traídas). Motivos: `sin_origen`, `no_editable`, `max_fotos`. Una foto traída no hereda la `clave_origen` de COTV (el único es global): conserva el vínculo por `origen_foto_id`.
 - **API**: `POST /api/compras/[id]/lineas/[lineaId]/fotos/traer` (`requireUser`), sin cuerpo. Copia en Storage (`.copy`, dentro de `almacen.ts`) cada foto activa del origen a rutas nuevas de la línea destino y llama a la función; si rechaza, borra las copias. Las fotos del origen no cambian. Errores: `404 sin_origen`, `409 max_fotos`, `409 no_editable`, `502 almacen_no_disponible`. `LineaConFotosApi` suma `fotos_en_cancelada: number`.
 - **Pantalla**: en la tarjeta de Fotos y en el detalle de la compra, «Hay 2 fotos en la versión cancelada [Traer]».
 - **Regla RP5**: traer copia las fotos activas del origen hasta completar 3; traer dos veces no duplica (la segunda trae 0); una línea sin clave o sin origen cancelado da `404 sin_origen`; el origen queda intacto.
 - **Tandas**: T1 columna, índice y función en `00E1`; T2 `src/lib/fotos/traer.ts`; T3a el aviso y el botón; T3b `src/app/api/compras/[id]/lineas/[lineaId]/fotos/traer/route.ts`.
 - **Hito** (local): importar una compra, poner 2 fotos en una línea, cancelarla, reimportarla corregida, [Traer] → 2 fotos; [Traer] otra vez → 0 nuevas.
 
-**Si cambia a (b):** se borra este apartado.
+### 11.P6 · En el sistema real, solo datos reales traídos de COTV (decisión 105)
 
-### 11.P6 · ¿Con qué datos se prueba la entrega en el sistema real? (I11)
+**Respuesta de Javier.** «Jalas la data de la base en Supabase que usa cotvb, no quiero datos inventados aquí.»
 
-**Pregunta.** Para probar E1 hacen falta compras, proveedores y fotos. En el sistema real, lo que se crea no se puede borrar del todo: las compras solo se cancelan y los proveedores con compras solo se desactivan. ¿Cómo hacemos la prueba final?
+**Decisión 105 · En `vector-two` no entra ningún dato inventado.** Los proveedores, compras y fotos con que Javier recorre los hitos de E1, E2 y E3 son los reales de COTV, traídos desde su base de Supabase (`control-otb-viaje`) en **solo lectura** por el agente principal y `datos` (§12). Los datos sintéticos siguen existiendo, pero **solo en local**: en las pruebas de vitest, en el humo y en el recorrido de QA de §6. Ningún dato de COTV entra al repo: las consultas y los lotes viven en el *scratchpad* de la sesión y se borran al terminar.
 
-- **(a) Los datos inventados se usan solo en una copia local**, donde QA recorre §6 completo. Tú recorres el sistema real **con tu carga inicial real**: completas la ficha de proveedores reales y subes fotos reales a compras reales. ***Default provisional.***
-- (b) Se prueba en el sistema real con datos inventados, que después se cancelan y desactivan y quedan a la vista como inactivos o cancelados.
+**Qué añade.** La sección §12 entera: inventario, mapeo, estrategia de carga, validación y el hito de Javier con datos reales (§12.7), que reemplaza la lista que estaba aquí. La opción descartada era probar en `vector-two` con datos inventados y dejarlos cancelados y desactivados a la vista.
 
-**Qué añade el *default*: el recorrido de Javier en producción.**
+## 12. Carga desde COTV (decisión 106)
 
-- [ ] (Si P2 queda en sí) importar los proveedores de COTV.
-- [ ] Hacer la carga inicial de compras (`0.13.0`): sin ella no hay nada que fotografiar.
-- [ ] Completar la ficha de dos proveedores reales, con puerto e incoterm habituales y un contacto.
-- [ ] Desde el celular, en Compras → Fotos, subir tres fotos a una línea real y verlas en el detalle de la compra; quitar una.
-- [ ] Escribir la descripción y el modelo de esa línea.
-- [ ] En Viajes y embarques, ver el puerto habitual sugerido en un embarque de ese proveedor.
+**Decisión 106 · Lo que ya existe en COTV entra a `vector-two` por cargas idempotentes con clave de origen, ensayadas completas en local y corridas una sola vez.** Primero los proveedores con sus contactos (C1, al cerrar E1). Después, y solo con las respuestas de §12.8, las compras de COTV con su descripción y modelo, y la copia de sus fotos (C2). La clave de origen es el `id` de COTV (`proveedores.clave_origen`, `compra_linea_fotos.clave_origen` y, para las compras, la `REFERENCIA` del importador). Nada se carga escribiendo tablas a mano: proveedores por `guardar_proveedor`, compras por el importador de carga inicial (`importar_compra`), descripción y modelo por `editar_ficha_linea` y fotos por `agregar_foto_linea`, todas con sus validaciones.
+
+### 12.0 Fuente y reglas de la carga
+
+- **Origen**: proyecto Supabase `control-otb-viaje` (ref `hcqwabksrheneitpyhtm`), la base que usa COTV. Código de referencia: `/home/user/cotbv2`. **Solo `SELECT`** con `mcp__Supabase__execute_sql` y ese `project_id`. Nunca se escribe en COTV. Nunca se toca `lukers-compras`.
+- **Destino**: `vector-two` (ref `tzjsxzmsvvhxyiooihyq`). Escriben solo `datos` o el agente principal, nunca el arquitecto, y solo por las funciones de §2.7 y de M8.
+- **Nada al repo.** Los resultados de las consultas a COTV, los lotes, el volcado para el ensayo, las fotos descargadas y las listas de diferencias viven en el *scratchpad* de la sesión, fuera de `/home/user/VectorTwo`, y se borran al terminar. En esta ficha y en los commits solo quedan estructura, conteos y patrones.
+- **Ensayo antes**: cada carga se corre completa en el PostgreSQL local (`scripts/validar-migraciones-local.sh` más `00E1`) contra un volcado de COTV y una copia de solo lectura de los maestros de `vector-two` (árbol, marcas, perfiles, viajes) antes de tocar `vector-two` (§12.5).
+
+### 12.1 Inventario de COTV
+
+**Conteos** (medidos por el agente principal el 2026-11-04): `suppliers` 34 · `supplier_contacts` 26 · `purchases` 436 · `purchase_items` 391 · `purchase_photos` 163 · `profiles` 3 · `campaigns` 2 · `gender_mundo_assignments` 13 · `otb_needs` 261 · `otb_need_months` 323.
+
+**Estructura.** `supabase/schema.sql` de COTV está desactualizado: no trae `supplier_contacts`, `gender_mundo_assignments` ni las columnas `country`, `state`, `ruc`, `bank_account` y `bank_name` de `suppliers`, que la aplicación sí usa (`app/actions.ts`, `lib/data.ts`). La estructura que vale es la de la base (Q1). Leída del código:
+
+| Tabla de COTV | Columnas que importan | Qué es |
+|---|---|---|
+| `suppliers` | `id`, `name` (único, **sensible a mayúsculas**), `country`, `state`, `address`, `ruc`, `bank_account`, `bank_name`, `created_at` | Proveedor, compartido por los viajes |
+| `supplier_contacts` | `id`, `supplier_id`, `name`, `cargo`, `phone`, `email` | Contactos; al editar se borran y se reinsertan (sin transacción) |
+| `campaigns` | `id`, `name`, `period_start`, `period_end` | El viaje (2) |
+| `purchases` | `id`, `campaign_id`, `buyer_id` → `profiles`, `supplier_id`, `purchase_date` (`default current_date`), `notes` | Cabecera de compra |
+| `purchase_items` | `id`, `purchase_id`, `need_id` → `otb_needs`, `product_name`, `brand` (texto libre), `brand_group`, `model`, `units numeric`, `fob_unit_cost numeric`, `target_sale_price` | La línea comprada |
+| `otb_needs` | `gender` (código de COTV), `linea_sap` (texto), `mundo`, `agrupacion`, `origen` (`NECESIDAD CD`, `ING. PROV`, `INTERCOMPANY`), cifras de OTB | La necesidad a la que apunta cada ítem: es lo **único** que dice el género, el mundo y la línea de una compra |
+| `otb_need_months` | `need_id`, `month`, `units` | Reparto mensual del OTB de la necesidad (no es la llegada de la compra) |
+| `purchase_photos` | `id`, `purchase_item_id`, `path` | Hasta 3 por ítem; el objeto está en el bucket privado `purchase-photos` |
+| `profiles` · `gender_mundo_assignments` | rol; comprador por viaje × género × mundo (por nombre) | No se cargan (§7) |
+
+**Patrones que se leen en el código de COTV** (los confirma o corrige C0 con las consultas de abajo):
+
+1. **Una compra por ítem.** `savePurchase` y `createNeed` crean siempre una cabecera y un solo ítem, y `deletePurchase` borra el ítem pero **no** la cabecera. Con 436 cabeceras y 391 ítems hay **al menos 45 compras vacías** (sin ítems), que no se cargan.
+2. **Proveedores creados al vuelo con el nombre tal como se tecleó** (`resolveSupplierId`, búsqueda exacta). Es de esperar: repetidos que solo difieren en mayúsculas, espacios o razón social, y proveedores sin país, sin dirección y sin contactos.
+3. **La fecha de compra es el día del registro** (`purchase_date` no está en el formulario: toma `current_date` del servidor, en UTC; un registro de la noche de Lima cae al día siguiente).
+4. **No hay** estado de compra, moneda, mes de llegada, tallas ni color. El costo es `fob_unit_cost` y la proforma de COTV lo trata como dólares (TC 3,4). `units` es `numeric`: puede haber decimales.
+5. **La marca es texto libre** y `brand_group` está casi vacío (lo dice el commit `e11c4da` de COTV). Las agrupaciones de COTV son 4 (`ULTRA LOW`, `FAST FASHION`, `MARCA CONOCIDA`, `PREMIUM`) y dos no existen en Vector2.
+6. **Géneros con otros códigos**: COTV usa `H`, `M`, `JH`, `JM`, `NH`, `NM` y `BB`; Vector2, `H`, `M`, `JOVENCITOS`, `JOVENCITAS`, `NINOS`, `NINAS`, `BEBE` y `OTROS`. Los mundos son los mismos cinco.
+7. **Fotos**: ruta plana `{uuid}.jpg` en la raíz del bucket, JPEG de calidad 0,8 y lado largo ≤ 1 000 px, reducidas en el navegador. Como `PhotoPicker` sube antes de guardar el formulario, puede haber **objetos sin fila** (formularios abandonados).
+
+**Consultas del inventario** (solo `SELECT` sobre COTV, todas agregadas; las corre `datos` en C0 y anota aquí **solo las cifras**, nunca filas ni nombres):
+
+| # | Qué mide | Consulta (resumen) | Resultado |
+|---|---|---|---|
+| Q1 | Estructura real | `information_schema.columns` de las diez tablas, con tipo y nulabilidad | por anotar en C0 |
+| Q2 | Proveedores | total; distintos por `upper(btrim(name))`; con espacios al borde; sin país, estado, dirección, RUC; con algún dato bancario (solo el conteo); países distintos y cuántos no están en `PAISES`; sin ninguna compra | por anotar |
+| Q3 | Repetidos y parecidos | grupos con el mismo nombre limpio (sin signos y sin las palabras de razón social de §3.2) y cuántos proveedores caen en ellos; el detalle se mira en la sesión con `parecidos.ts` | por anotar |
+| Q4 | Contactos | total; proveedores con 0, 1 o más contactos; máximo por proveedor; sin correo; correo que no pasa `^[^@\s]+@[^@\s]+\.[^@\s]+$`; sin teléfono; sin cargo | por anotar |
+| Q5 | Compras | total; sin ítems; con más de un ítem; sin proveedor; sin comprador; con nota; mínimo y máximo de `purchase_date`; cuántas por viaje (por `campaign_id`, sin nombre) | por anotar |
+| Q6 | Ítems | total; `units` no enteras; mínimo y máximo de `units` y de `fob_unit_cost`; costo 0; sin modelo; sin `brand_group`; marcas distintas; con PVP objetivo; ítems cuyo viaje no es el de su necesidad | por anotar |
+| Q7 | A qué apuntan | ítems por `origen` × `gender` × `mundo` de su necesidad (son códigos de catálogo, no nombres); ternas género × mundo × línea distintas; necesidades usadas sin ningún mes con unidades | por anotar |
+| Q8 | Fotos | filas; ítems con 1, 2 y 3 fotos; `storage.objects` del bucket `purchase-photos`: objetos, bytes totales, promedio y máximo (`metadata->>'size'`), los que no son `image/jpeg`, **objetos sin fila** y **filas sin objeto** | por anotar |
+| Q9 | Destino (`vector-two`, solo lectura) | filas de `generos`, `mundos`, `lineas`, `genero_mundo_linea`, `marcas`, `perfiles`, `compra_viajes`, `proveedores` y `compras` antes de cargar | por anotar |
+
+Además, en el ensayo (C0) se mide **cuántos ítems resuelven** su género × mundo × línea en el árbol de Vector2 y su marca en `marcas`, y cuántos no, con el motivo del importador (`linea_requerida`, `marca_desconocida`, `equivalencia_desconocida`…). Esa tasa decide cuánto trabajo le queda a Javier en G2.
+
+### 12.2 Mapeo de COTV a Vector2
+
+**(a) Proveedores y contactos → `proveedores` y `proveedor_contactos` (carga C1).**
+
+| COTV | Vector2 | Regla |
+|---|---|---|
+| `suppliers.id` | `clave_origen` | `cotv:supplier:{id}` |
+| `name` | `nombre` | `btrim`, 1–120. Dos de COTV con el mismo `upper(btrim(name))` chocan con el único de Vector2: entra **el que tiene más compras** (a igualdad, el más antiguo) y el otro se une a él: sus contactos se suman sin repetir (mismo correo o mismo nombre) y sus compras apuntarán a ese proveedor en C2. Los **parecidos** que no son iguales (otra razón social, una errata) entran los dos y se listan a Javier, que puede desactivar uno (fusionar está fuera de alcance, §7) |
+| — | `codigo` | nulo (COTV no tiene) |
+| `country` | `pais` | Normalizado contra `PAISES` (sin tildes, mayúsculas; las equivalencias como «USA» → «Estados Unidos» se arman en el ensayo y se listan). Fuera de la lista → nulo y «Ficha incompleta» |
+| `state` | `region` | Con Estados Unidos, debe estar en `ESTADOS_EEUU` (si no, nulo y aviso); con otro país, texto ≤ 80 |
+| `address` | `direccion` | ≤ 300 |
+| `ruc` | `identificacion` | ≤ 40 |
+| `bank_account`, `bank_name` | — | **No se seleccionan** en la consulta (§9 A3, R17) |
+| `created_at` | — | Se pierde: `created_at` es el momento de la carga; quién y cuándo, en el evento `importar` |
+| — | `ciudad`, `puerto_embarque`, `incoterm`, `moneda`, plazos, `condiciones_pago`, `nota` | Nulos: COTV no los tiene y **no se suponen** (la pantalla sugiere FOB al editar; la carga no escribe nada que COTV no diga). Los completan el comprador o el planner |
+| — | `es_intercompany` | `false`. Si todas las compras de un proveedor son de origen `INTERCOMPANY`, sale en la lista para el planner |
+| `supplier_contacts.name`, `cargo`, `phone`, `email` | `nombre` (1–120), `cargo` (≤ 80), `telefono` (≤ 40), `correo` (≤ 120) | Correo inválido → nulo y aviso (no se pierde el contacto). El **primero** por `created_at` es el principal (R13); `orden` por `created_at` |
+
+Quién y cuándo: `p_actor = { id: null, nombre: "Carga desde COTV", rol: "admin", origen: "carga_cotv" }`; el evento es `importar` (§11.P4).
+
+**(b) Compras e ítems → `compras` y `compra_lineas` (carga C2). ¿Es viable?** Sí, **por el importador de carga inicial**, pero no solo con lo que hay en COTV: **falta el mes de llegada**, que es obligatorio (`compra_lineas.llegada_periodo not null`, `llegada_invalida` en el importador) y que el flujo necesita para saber en qué mes entra la mercadería. COTV nunca lo guardó: `otb_need_months` es el reparto del OTB de la necesidad, no la llegada de lo comprado. Por eso C2 arma una **planilla de carga inicial ya llena** con todo lo que dice COTV y deja vacías las columnas que solo Javier sabe (G2). Javier la completa y **la importa él** por la pantalla de siempre (`POST /api/compras/importar`, `carga_inicial`): así cada fila pasa por todas las validaciones de M8 y de 08b-1, y la compra queda a su nombre.
+
+| Columna del importador | Sale de COTV | Regla |
+|---|---|---|
+| `PROVEEDOR` | `purchases.supplier_id` | Nombre del proveedor de C1, buscado por `clave_origen` (o por el proveedor al que se unió) |
+| `REFERENCIA` | `purchases.id` | `COTV-{id}` (41 caracteres, ≤ 80). Es la clave de origen de la compra |
+| `LINEA_ORDINAL` | orden del ítem en su compra | Por `created_at`, `id`; casi siempre 1 (patrón 1) |
+| `FECHA_COMPRA` | `purchase_date` | Tal cual (patrón 3: es la fecha de registro) |
+| `VIAJE` | `campaign_id` | Código del `compra_viajes` que Javier crea en 08b-1 para cada uno de los 2 viajes (G3) |
+| `GENERO` | `otb_needs.gender` | Tabla fija: `H`→`H`, `M`→`M`, `JH`→`JOVENCITOS`, `JM`→`JOVENCITAS`, `NH`→`NINOS`, `NM`→`NINAS`, `BB`→`BEBE`. Otro código → fila a revisar |
+| `MUNDO` | `otb_needs.mundo` | Tal cual (los mismos cinco) |
+| `LINEA` | `otb_needs.linea_sap` | Tal cual; la resuelve el importador contra el árbol. La que no case sale con su motivo y Javier la corrige en la planilla |
+| `EQUIVALENCIA` | — | Vacía: en un nodo GMLE el importador la manda a la genérica `SIN EQUIVALENCIA` del nodo, como a cualquier fila sin equivalencia |
+| `MARCA` | `purchase_items.brand` | `btrim`. La que no exista sale `marca_desconocida`: Javier la crea en Maestros → Marcas (con su agrupación) o corrige el nombre |
+| `TALLAS` | — | Vacía = `ambas`, el valor del importador para «sin distinguir». COTV nunca separó tallas |
+| `UNIDADES` | `units` | Entero > 0. Con decimales, la fila sale `unidades_invalida` y Javier decide |
+| `COSTO_UNITARIO` · `MONEDA` | `fob_unit_cost` · `USD` | FOB en dólares (decisión 102) |
+| `LLEGADA` · `RECIBIDAS` | — | **Vacías: las llena Javier** (G2). Lo que ya llegó al CD va en `RECIBIDAS`, para no contarlo dos veces contra el stock de M5 |
+| `NOTA` (de la compra) | `buyer_id` → `profiles.full_name`, `notes` | «Registrada en COTV por {nombre}» y la nota de COTV, ≤ 500 |
+| (después) `descripcion` · `modelo` | `product_name` · `model` | No son columnas del importador hasta E2: C2 los escribe con `editar_ficha_linea` en cada línea creada (≤ 200 y ≤ 60; lo que exceda se corta con aviso) |
+
+**Qué se pierde**: el PVP objetivo (`target_sale_price`), la agrupación de COTV (manda la de la marca en Vector2), el vínculo con la necesidad OTB, la hora del registro y quién lo hizo como usuario (queda en la nota). **Tallas y color** no se pierden: COTV nunca los tuvo y Vector2 no maneja color. Las compras vacías (patrón 1) no se cargan.
+
+**Origen y estado.** `origen = carga_inicial` y `estado = confirmada`, como toda carga inicial: COTV no tiene estados y lo que se registraba allí era lo comprado. Las compras de necesidades `INTERCOMPANY` dependen de G4.
+
+**(c) Fotos → `compra_linea_fotos` y bucket `compras-fotos` (carga C2).**
+
+- **Dónde están**: bucket privado `purchase-photos` de COTV, ruta plana `{uuid}.jpg`, JPEG de lado largo ≤ 1 000 px (patrón 7). Tamaño y formato exactos: Q8.
+- **Qué hay que hacerles**: reducirlas a ≤ 800 px de lado largo (≤ 400 KB) y sacar la miniatura de 320 px (≤ 60 KB), con las calidades de `comprimir.ts` (0,82 → 0,72 → 0,62; miniatura 0,75), pasarlas por `quitarMetadatos` y `validarJpeg` (la misma lógica pura de `src/lib/fotos/`), subir los dos objetos a `compras/{compra_id}/{linea_id}/{foto_id}.jpg` y llamar a `agregar_foto_linea` con `clave_origen = cotv:photo:{id}`. Si la línea ya tiene 3 fotos, sale `max_fotos` y se lista.
+- **A qué línea van**: la línea creada en C2 a partir del ítem de COTV (por su `REFERENCIA` y su ordinal), o la línea de la carga inicial de Javier con la que se enlazó el ítem (G1, camino «enlazar»). Sin línea, la foto no se copia y se lista.
+- **¿Se puede con las herramientas disponibles? No del todo, y hay que decirlo claro.** El MCP de Supabase solo ejecuta SQL: lee las filas y los metadatos de `storage.objects` (Q8), pero **no descarga el contenido** de un objeto, y desde SQL tampoco se puede firmar una URL de Storage. Para bajar las 163 fotos hace falta **una llave de COTV** (una llave secreta nueva, creada solo para esto en el panel de COTV y revocada al terminar, o la `service_role`); para subirlas a `vector-two`, **su llave `service_role`** (la de `.env.local` de Javier; en este entorno no hay ninguna). Las dos las tiene que dar Javier, por variable de entorno de la sesión, nunca en un archivo del repo (G3). Sin ellas, C2 carga compras, descripción y modelo, y las fotos esperan.
+- **Cómo pasan sin tocar el repo**: un *script* de un solo uso **fuera del repo** (en el *scratchpad*) baja cada objeto a una carpeta propia del *scratchpad*, lo reduce con Pillow (`uv run --with pillow`; no añade dependencias al proyecto), lo valida importando la lógica pura de `src/lib/fotos/`, lo sube con `service_role` y llama a la función. `seguridad` lee el *script* antes de correrlo en `vector-two`. Al terminar se borran las fotos descargadas y el *script*.
+- **Cuota**: 163 fotos de ≤ 460 KB entre foto y miniatura son, en el peor caso, unos 75 MB, y en la práctica unos 25 MB: caben de sobra en el plan gratuito (§8, riesgo 1).
+
+### 12.3 Qué pasaría en el flujo si se cargan las compras
+
+- **Proveedores (C1): ningún efecto.** El flujo no lee proveedores; solo cambian las sugerencias de puerto de 08b-1 (R29).
+- **Compras (C2): sí lo cambian, y es lo que se quiere si son compras reales que aún no están en Vector2.** Una compra confirmada suma sus unidades «en camino» en el mes de llegada, en su GML (o equivalencia) × agrupación de marca. El hueco de esos meses baja, el IMI sube, Pendientes y Huecos cambian, y el importador puede dar el aviso `exceso` si una línea pasa del tope. La huella del flujo (`flujo_huella_base()`) cambia una vez por compra importada y la caché se recalcula; ninguna cifra de M7 cambia (la proyección es de venta).
+- **Llegadas ya pasadas.** Una compra con `LLEGADA` anterior al primer mes abierto y sin `RECIBIDAS` queda como ingreso por confirmar (no hay recepción presunta, decisión 54). Si esa mercadería ya está en el stock de M5, se contaría dos veces hasta que alguien confirme el ingreso: por eso la planilla pide `RECIBIDAS`.
+- **El riesgo grande es el doble conteo** con la carga inicial de Javier (§8, riesgo 11). Si sus órdenes ya incluyen lo comprado en los viajes de COTV, cargar además las compras de COTV duplicaría esas unidades en el flujo. Esto es la pregunta G1.
+- **Por qué no cargarlas como borrador**, para tener las fotos sin tocar el flujo: el borrador también exige `llegada_periodo` (habría que inventarla), la carga inicial de `0.13.0` solo crea confirmadas, y dejaría compras duplicadas a la vista el día que llegue la carga inicial. Se descarta.
+
+**Recomendación**: cargar **ya los proveedores** (C1, sin efecto en el flujo) y **las compras y fotos solo después de G1 y G2**. Si las compras de COTV ya están en la carga inicial de Javier, no se cargan compras desde COTV: después de su carga inicial, C2 **enlaza** cada ítem de COTV con su línea (mismo proveedor, marca, GML y unidades; las dudas se las muestra a Javier en una planilla) y les copia descripción, modelo y fotos. Si no están, se cargan por la planilla de §12.2 b.
+
+### 12.4 Orden
+
+1. **C0 · Inventario y ensayo** (sin Javier): Q1–Q9; volcado de COTV y copia de los maestros de `vector-two` al *scratchpad*; PostgreSQL local con todas las migraciones y `00E1`; C1 y C2 completos en local.
+2. **C1 · Proveedores y contactos** en `vector-two`: tanda T6 de E1, cuando `00E1` está aplicada y QA dio por bueno el hito local.
+3. **Javier crea los 2 viajes** en Viajes y embarques (08b-1) y responde §12.8.
+4. **C2a · Compras**: planilla llena → Javier completa `LLEGADA`, `RECIBIDAS` y lo que no casó → la importa él → C2 escribe descripción y modelo. O, si G1 dice que ya están en su carga inicial, C2 enlaza los ítems con sus líneas.
+5. **C2b · Fotos**: con las llaves de G3.
+
+### 12.5 Cómo se carga, se valida y (no) se revierte
+
+**Idempotencia.** Proveedores por `clave_origen` (`ya_cargado`), compras por la clave natural del importador (`PROVEEDOR | REFERENCIA | LINEA`: una fila ya importada sale `igual`), fotos por `clave_origen` (`ya_cargada`). Correr cualquier paso dos veces crea 0 la segunda vez. Si un paso se corta a la mitad, se vuelve a correr entero.
+
+**C1 paso a paso.**
+
+1. Un `SELECT` en COTV arma, por proveedor, el objeto de la ficha y sus contactos, **sin** columnas bancarias.
+2. En la sesión: `btrim`, unión de repetidos, países y regiones contra `PAISES` y `ESTADOS_EEUU`, correos, principal. Cada lote pasa por `proveedorFichaSchema` (el zod de producción, sin `clave_origen`, que se añade después): si uno solo falla, no se carga nada y se corrige la regla.
+3. Ensayo en local: correr, comprobar los conteos de abajo, correr otra vez (0 nuevos).
+4. En `vector-two`: una llamada a `guardar_proveedor(null, null, ficha, contactos, actor_carga)` por proveedor.
+5. Validar y borrar el *scratchpad*.
+
+**Validación (C1 y C2).** Se comparan conteos de origen y de destino; en la ficha se anotan solo las cifras.
+
+| Qué | En COTV | En `vector-two` | Debe dar |
+|---|---|---|---|
+| Proveedores | 34 menos los unidos | `proveedores` con `clave_origen like 'cotv:supplier:%'` | igual |
+| Contactos | 26 menos los repetidos al unir | sus `proveedor_contactos` | igual; y por proveedor, el mismo número |
+| Eventos | — | `proveedor_eventos` con `accion = 'importar'` | uno por proveedor cargado |
+| Compras | cabeceras con ítems, menos las que G1 o G4 dejan fuera | `compras` con `referencia like 'COTV-%'` | igual |
+| Líneas, unidades y costo | ítems; `sum(units)`; `sum(units × fob_unit_cost)` | sus `compra_lineas`; `sum(unidades)`; `sum(unidades × costo_unitario)` | igual |
+| Descripción y modelo | ítems con `product_name` / `model` | líneas con `descripcion` / `modelo` | igual |
+| Fotos | filas de las líneas cargadas | `compra_linea_fotos` con `clave_origen like 'cotv:photo:%'`, cada una con sus 2 objetos en `storage.objects` | igual; 0 huérfanas (`fotos_huerfanas`) |
+
+Además, **muestras**: 5 proveedores y 5 compras al azar comparados campo a campo en la sesión, y 5 fotos que Javier abre en el celular.
+
+**Revertir.** Antes de C2, un proveedor de C1 no tiene compras: `eliminar_proveedor` lo **borra** (queda su evento con `proveedor_id` nulo), así que C1 sí se puede deshacer. Después de C2 ya no: las compras solo se cancelan (con motivo «carga COTV errónea») y quedan a la vista, los proveedores con compras solo se desactivan y las fotos se quitan (quedan registradas). Por eso C2 se ensaya completo en local y se corre **una sola vez**.
+
+### 12.6 Qué se hace sin Javier y qué no
+
+| Sin Javier (agente principal y `datos`) | Necesita a Javier |
+|---|---|
+| Inventario Q1–Q9 y su anotación aquí (solo cifras) | Responder G1 a G4 (§12.8) |
+| Ensayo completo en local (C0) | Crear los 2 viajes en 08b-1 (o autorizar que se creen con el nombre y las fechas de COTV) |
+| C1: proveedores y contactos en `vector-two`, con su validación | Completar `LLEGADA` y `RECIBIDAS` en la planilla, corregir las líneas y marcas que no casen e importarla |
+| Armar la planilla de C2 y la lista de lo que no casa; proponer el enlace ítem ↔ línea si G1 = «ya están» | Confirmar los enlaces dudosos |
+| Descripción y modelo de las líneas cargadas | Dar las dos llaves para las fotos (G3) y revocar la de COTV al terminar |
+| Validación y muestras | Mirar 5 fotos en el celular |
+
+**Costo**: C0 y C1, medio día de agentes. C2 compras, medio día más el tiempo de Javier con la planilla. C2 fotos, un día (el *script*, el ensayo y la corrida). Ninguna suma código ni pruebas a la aplicación.
+
+### 12.7 El hito de E1 con datos reales
+
+Reemplaza la lista que estaba en §11.P6. QA sigue recorriendo §6 en local con datos sintéticos; Javier recorre esto en `vector-two`:
+
+- [ ] Ver en Proveedores los de COTV (C1): el número cuadra con §12.5; los que no tenían país salen con «Ficha incompleta»; ninguno muestra datos bancarios; en Historial, «Carga desde COTV».
+- [ ] Completar la ficha de dos proveedores reales: puerto de embarque e incoterm habituales y un contacto principal; ver el cambio en Historial.
+- [ ] (Cuando C2 esté hecho) Compras → Fotos con el viaje activo: las fotos de COTV en sus líneas, con descripción y modelo; el contador «N de M líneas con foto» cuadra con lo que había en COTV.
+- [ ] Desde el celular, subir una foto nueva a una línea real y quitar otra; verlas en el detalle de la compra.
+- [ ] En Viajes y embarques, el puerto habitual sugerido en un embarque de ese proveedor (R29).
 - [ ] Revisar el menú como admin y, si puede, con un comprador.
 
-**Si cambia a (b):** se borra esta lista y §6 se recorre en producción con los datos inventados.
+Si C2 todavía no está hecho cuando E1 cierra, Javier recorre los tres primeros puntos de proveedores y los de fotos quedan para cuando C2 termine; E1 no espera a C2.
+
+### 12.8 Preguntas para Javier (solo bloquean C2)
+
+1. **G1 · ¿Las compras de los dos viajes de COTV ya están en tu archivo de carga inicial de compras?** Si tus órdenes (las de SAP o las que cargas a mano) ya traen lo comprado en esos viajes, cargarlas además desde COTV las contaría dos veces en el flujo. *Recomendación: si ya están, no se cargan compras desde COTV; yo enlazo cada ítem de COTV con tu línea y le paso descripción, modelo y fotos. Si no están, se cargan desde COTV con la planilla de G2.*
+2. **G2 · ¿Me completas el mes de llegada?** COTV nunca guardó cuándo llega la mercadería, y sin ese mes una compra no puede entrar al flujo. *Recomendación: te paso la planilla de carga inicial ya llena con todo lo de COTV; tú completas `LLEGADA` (y `RECIBIDAS` si algo ya llegó al CD), corriges las líneas o marcas que no se encontraron y la importas tú. No uso el mes del OTB de la necesidad: no es lo mismo que la llegada y sería inventar.*
+3. **G3 · ¿Me das dos llaves para copiar las fotos?** La herramienta que tengo lee la base de COTV pero no puede descargar las fotos. Necesito una llave de COTV (mejor una nueva, creada solo para esto, que revocas al terminar) y la `service_role` de Vector2, puestas como variables de la sesión, nunca en un archivo. *Recomendación: sí, con la llave temporal de COTV. La alternativa es que tú corras el script en tu equipo.*
+4. **G4 · ¿Qué hago con las compras del espacio intercompany de COTV?** En COTV, lo comprado contra necesidades de origen `INTERCOMPANY` no era OTB. En Vector2 eso ya se modela con las reglas de M13 y el origen `intercompany_cd`. *Recomendación: dejarlas fuera de esta carga; después del inventario te digo cuántas son y, si valen la pena, las cargas como intercompany con la misma planilla.*
