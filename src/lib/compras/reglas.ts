@@ -72,6 +72,7 @@ export const MOTIVOS_FUNCION_EXTRA = [
   "proveedor_requerido",
   "proveedor_inexistente",
   "saldo_cerrado",
+  "compra_no_borrador",
 ] as const;
 export type MotivoFuncionExtra = (typeof MOTIVOS_FUNCION_EXTRA)[number];
 export type MotivoRpcCompra = MotivoFuncionCompra | MotivoFuncionExtra;
@@ -114,6 +115,11 @@ const ERRORES_EXTRA: Record<MotivoFuncionExtra, ErrorDeMotivo> = {
   proveedor_requerido: { status: 400, codigo: "proveedor_requerido", mensaje: "Indica el proveedor de la compra." },
   proveedor_inexistente: { status: 404, codigo: "proveedor", mensaje: "No encontramos ese proveedor." },
   saldo_cerrado: { status: 409, codigo: "saldo_cerrado", mensaje: "Esa compra ya cerró su saldo: no admite líneas nuevas." },
+  compra_no_borrador: {
+    status: 409,
+    codigo: "compra_no_borrador",
+    mensaje: "Esa compra ya está confirmada o es de otra persona; usa otra referencia o agrégale líneas desde la compra.",
+  },
 };
 
 /**

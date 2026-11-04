@@ -341,6 +341,28 @@ function asignarViaje(viajeId: string | null, compras: { id: string; revision: n
   return ok({ viaje_id: viajeId, compras: salida, avisos });
 }
 
+/**
+ * Espejo de `compra_foto_entregas(compra)` (0034, M1): entregas con id, mes, unidades y origen; repartos resumidos por entrega (sin ids) y
+ * asignaciones con id, entrega, embarque, paquete y unidades. Una compra está TOCADA si esta foto cambia entre antes y después del movimiento.
+ */
+function fotoEntregas(compraId: string): string {
+  const lineas = new Set(tabla("compra_lineas").filter((l) => l.compra_id === compraId).map((l) => l.id as string));
+  const entregas = tabla("compra_linea_entregas")
+    .filter((e) => lineas.has(e.linea_id as string))
+    .map((e) => ({ id: e.id as string, linea_id: e.linea_id as string, periodo: String(e.periodo).slice(0, 7), unidades: e.unidades as number, origen: e.origen as string }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const ids = new Set(entregas.map((e) => e.id));
+  const repartos = tabla("compra_linea_repartos")
+    .filter((r) => ids.has(r.entrega_id as string))
+    .map((r) => [r.entrega_id, r.marca_id, r.genero_mundo_linea_id, r.equivalencia_id ?? null, r.unidades].join("|"))
+    .sort();
+  const asignaciones = tabla("compra_entrega_asignaciones")
+    .filter((a) => ids.has(a.entrega_id as string))
+    .map((a) => [a.id, a.entrega_id, a.embarque_id, a.paquete_id ?? null, a.unidades].join("|"))
+    .sort();
+  return JSON.stringify({ entregas, repartos, asignaciones });
+}
+
 /** Aplica un `PlanAplicable` sobre las tablas con los espejos puros (la función SQL hace lo mismo con `agrupador_mover_entregas`). */
 function aplicarMovimiento(plan: PlanAplicable, actor: { perfil_id: string | null; nombre: string }): Respuesta {
   const embarques = plan.embarques.map((e) => get("compra_embarques", e.id));
@@ -348,6 +370,7 @@ function aplicarMovimiento(plan: PlanAplicable, actor: { perfil_id: string | nul
   if (embarques.some((e, i) => e!.revision !== plan.embarques[i].revision)) return no("agrupador_cambio");
   if (plan.compras.some((c) => get("compras", c.id)?.revision !== c.revision)) return no("compra_cambio");
 
+  const fotosAntes = new Map(plan.compras.map((c) => [c.id, fotoEntregas(c.id)]));
   const lineas = new Set(plan.movimientos.map((m) => m.linea_id));
   const entregas = tabla("compra_linea_entregas").filter((e) => lineas.has(e.linea_id as string));
   const base = {
@@ -400,11 +423,14 @@ function aplicarMovimiento(plan: PlanAplicable, actor: { perfil_id: string | nul
     fila.fecha_llegada_estimada = emb.fecha_llegada_estimada;
     fila.periodo_llegada = `${String(emb.fecha_llegada_estimada).slice(0, 7)}-01`;
   }
-  const comprasNuevas = plan.compras.map((c) => {
-    const fila = get("compras", c.id)!;
-    fila.revision = (fila.revision as number) + 1;
-    return { id: c.id, revision: fila.revision as number };
-  });
+  // Como la SQL (0034, M1): solo las compras TOCADAS (su `compra_foto_entregas` cambió) suben revisión y salen en `compras`.
+  const comprasNuevas = plan.compras
+    .filter((c) => fotoEntregas(c.id) !== fotosAntes.get(c.id))
+    .map((c) => {
+      const fila = get("compras", c.id)!;
+      fila.revision = (fila.revision as number) + 1;
+      return { id: c.id, revision: fila.revision as number };
+    });
   const embarquesNuevos = plan.embarques.map((e) => {
     const fila = get("compra_embarques", e.id)!;
     fila.revision = (fila.revision as number) + 1;

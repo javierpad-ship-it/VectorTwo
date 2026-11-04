@@ -299,6 +299,7 @@ export type MotivoOmisionCompra =
   | "linea_repetida"
   | "cabecera_inconsistente"
   | "cambiada_requiere_edicion"
+  | "compra_no_borrador"
   | "sin_reparto"
   | "mezcla_sin_filas"
   | "mezcla_no_suma_100"
@@ -352,7 +353,7 @@ export type CompraImportacionApi = {
 };
 
 export type AplicadaImportacionApi = { clave: string; compra_id: string; numero: string; lineas: number };
-export type NoAplicadaImportacionApi = { clave: string; proveedor: string; referencia: string; motivo: MotivoFuncionCompra | "error"; mensaje: string };
+export type NoAplicadaImportacionApi = { clave: string; proveedor: string; referencia: string; motivo: MotivoFuncionCompra | "saldo_cerrado" | "compra_no_borrador" | "error"; mensaje: string };
 
 export type ReporteImportacionComprasApi = {
   modo: ModoImportacionCompras;

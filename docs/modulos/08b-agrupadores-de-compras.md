@@ -334,7 +334,7 @@ importarAgrupadoresSchema = z.object({ modo: z.enum(["previsualizar", "aplicar"]
 | `/api/compras/embarques/[id]/recibir` (08b-2) | POST | `requireUser` | `recibirEmbarqueSchema` | ídem | 409 `no_confirmada`, `excede_pendiente`, `recepcion_antes_de_compra`, `sin_unidades`, `llegada_futura`, `recepcion_cambio`, `embarque_no_editable` |
 | `/api/compras/embarques/[id]/revertir-recepcion` (08b-2) | POST | `requirePlanner` | `{ revision, huella_plan }` | ídem | 409 `tiene_recepciones` |
 | `/api/compras/agrupadores/sin-asignar` · `/opciones` · `/historial` | GET | `requireUser` | filtros · — · `?viaje_id\|embarque_id\|paquete_id` | `SinAgrupadorApi` · selectores · `{ eventos }` | 404 |
-| `/api/compras/agrupadores/importar` | POST | `requireUser` | `importarAgrupadoresSchema` | `ReporteImportacionAgrupadoresApi` | 400 validación (más de 1 000 filas, cuerpo > 6 MB); 409 `vuelve_a_previsualizar` |
+| `/api/compras/agrupadores/importar` | POST | `requireUser` | `importarAgrupadoresSchema` | `ReporteImportacionAgrupadoresApi` | 400 validación (más de 1 000 filas); 413 cuerpo > 6 MB (`leerCuerpo`); 409 `vuelve_a_previsualizar` |
 | `/api/compras/viaje-activo` | PUT | `requireUser` | `viajeActivoSchema` | `{ viaje_activo }` (cookie) | 404 `no_encontrado` |
 
 **Cambios aditivos en M8** (dueño `backend`): `GET /api/compras` acepta `?viaje_id=…|sin_viaje&embarque_id=…`. `CompraApi` suma `viaje` y, en cada entrega, `asignaciones[]` y `sin_embarque`. El importador suma las columnas de §3.9.

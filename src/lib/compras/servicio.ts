@@ -83,6 +83,7 @@ import {
   TALLAS_COMPRA,
   TIPOS_LINEA,
   type ActorCompra,
+  type ActorImportarCompra,
   type Mes,
   type MotivoFuncionCompra,
   type TipoLinea,
@@ -126,6 +127,9 @@ async function resolverFlujo(f: ProveedorDeFlujo): Promise<ContextoFlujo | undef
 export type UsuarioCompras = { id: string; nombre: string; rol: Rol };
 
 export const actorDe = (u: UsuarioCompras): ActorCompra => ({ perfil_id: u.id, nombre: u.nombre });
+
+/** `p_actor` de `importar_compra`: el comprador va `restringido` (solo agrega líneas a su propio borrador); admin y planner no. */
+export const actorImportarDe = (u: UsuarioCompras): ActorImportarCompra => (u.rol === "comprador" ? { ...actorDe(u), restringido: true } : actorDe(u));
 
 // ─── Respuestas de error ───
 
@@ -860,6 +864,7 @@ async function estadoImportacion(d: Db): Promise<Salida<EstadoImportacionCompras
     referencia: c.referencia,
     estado: elegir(ESTADOS_COMPRA, c.estado, "confirmada"),
     cancelada_at: c.cancelada_at,
+    perfil_id: c.perfil_id,
     fecha_compra: c.fecha_compra,
     moneda: elegir(MONEDAS, c.moneda, "PEN"),
   }));
@@ -943,7 +948,10 @@ export async function importarCompras(
   if (estado.respuesta) return falla(estado.respuesta);
   if (k.respuesta) return falla(k.respuesta);
 
-  let resultado = previsualizarImportacionCompras(cuerpo.filas, cuerpo.mezcla, estado.data, { carga_inicial: cuerpo.carga_inicial, k_prima: k.data });
+  // El comprador solo agrega líneas a su propio borrador (A1/A2): la previsualización omite las filas hacia otra compra existente y
+  // `importar_compra` lo vuelve a comprobar bajo candado (`restringido` en `p_actor`).
+  const comprador = usuario.rol === "comprador" ? { perfil_id: usuario.id } : null;
+  let resultado = previsualizarImportacionCompras(cuerpo.filas, cuerpo.mezcla, estado.data, { carga_inicial: cuerpo.carga_inicial, k_prima: k.data, comprador });
   // Columnas VIAJE, EMBARQUE y PAQUETE: la fila se clasifica primero como en M8 (con la huella de lo que dice el archivo) y después se
   // evalúan; las que se omiten salen del plan antes de calcular el exceso y de aplicar nada.
   let evaluacion: EvaluacionAgrupadoresCompras | null = null;
@@ -965,7 +973,7 @@ export async function importarCompras(
   const respuestas: ResultadoAplicacionCompra[] = [];
   const importadas = new Map<string, string>();
   for (const compra of resultado.compras) {
-    const r = await rpcImportarCompra(d, argsImportarCompra(compra, actorDe(usuario)));
+    const r = await rpcImportarCompra(d, argsImportarCompra(compra, actorImportarDe(usuario)));
     if (r.error) {
       // Un fallo de la base (no un motivo de negocio) corta: las que siguen quedan sin aplicar y se avisa; reimportar las completa.
       const { status, mensaje } = describirErrorDb(r.error.code, r.error.message, r.error.details);
@@ -977,7 +985,11 @@ export async function importarCompras(
     if (i.ok) {
       importadas.set(compra.clave, i.compra_id);
       respuestas.push({ clave: compra.clave, ok: true, compra_id: i.compra_id, numero: typeof i.datos.numero === "string" ? i.datos.numero : "" });
-    } else respuestas.push({ clave: compra.clave, ok: false, motivo: esMotivoDeFuncion(i.motivo) ? i.motivo : "error", mensaje: errorDeMotivo(i.motivo).mensaje });
+    } else {
+      // `compra_no_borrador` (la compra cambió entre la lectura y el candado) y `saldo_cerrado` se informan con su motivo; nada se escribió.
+      const motivo = esMotivoDeFuncion(i.motivo) || i.motivo === "compra_no_borrador" || i.motivo === "saldo_cerrado" ? i.motivo : "error";
+      respuestas.push({ clave: compra.clave, ok: false, motivo, mensaje: errorDeMotivo(i.motivo).mensaje });
+    }
   }
   // Las otras dos transacciones de §3.9: un corte deja la compra sin agrupador y el reporte lo dice; reimportar lo completa.
   const filasAgrupador = agrupadores && evaluacion ? await agrupadores.aplicar(evaluacion, importadas) : [];

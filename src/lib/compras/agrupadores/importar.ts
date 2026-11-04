@@ -268,7 +268,7 @@ function leerFilaAgrupador(f: FilaAgrupador, perfiles: readonly PerfilConCorreo[
   } else {
     const perfil = perfiles.find((p) => p.email.trim().toLowerCase() === correo);
     if (!perfil) return falla(tipo, "responsable_desconocido", `No hay un usuario con el correo «${texto(f.responsable)}».`);
-    if (!esAsignable(perfil)) return falla(tipo, "responsable_no_asignable", `${perfil.nombre} no puede ser responsable: elige un comprador o un administrador activos.`);
+    if (!esAsignable(perfil)) return falla(tipo, "responsable_no_asignable", `El usuario «${texto(f.responsable)}» no puede ser responsable: elige un comprador o un administrador activos.`);
     datos.responsable = perfil;
   }
   return { ok: true, datos };

@@ -9,7 +9,7 @@ import { leerTiendas } from "@/lib/tiendas/consultas";
 import type { ArgsCancelarCompra } from "./cancelar";
 import type { PayloadImportarCompra } from "./importar";
 import type { ArgsQuitarRecepcion, ArgsRegistrarRecepciones } from "./recepciones";
-import type { ActorCompra } from "./tipos";
+import type { ActorImportarCompra } from "./tipos";
 
 /**
  * Acceso a datos de las compras de M8 (solo servidor). ÚNICO archivo de `src/lib/compras/` que habla con Supabase (ficha 08, regla 21).
@@ -198,6 +198,6 @@ export function rpcCancelarCompra(db: Db, a: ArgsCancelarCompra): Promise<Respue
 }
 
 /** `importar_compra`: UNA compra de la carga inicial (proveedor si falta, compra, líneas, entregas, repartos, recepciones y evento). */
-export function rpcImportarCompra(db: Db, a: { p_compra: PayloadImportarCompra; p_actor: ActorCompra }): Promise<RespuestaRpc> {
+export function rpcImportarCompra(db: Db, a: { p_compra: PayloadImportarCompra; p_actor: ActorImportarCompra }): Promise<RespuestaRpc> {
   return Promise.resolve(db.rpc("importar_compra", { p_compra: a.p_compra as unknown as Json, p_actor: a.p_actor }));
 }

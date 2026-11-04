@@ -255,6 +255,10 @@ describe("R25: omisiones del importador de agrupadores", () => {
     expect(motivoDe(viajeOk(1, { responsable: CORREO_PERFIL_AGR.pl }))).toBe("responsable_no_asignable");
     expect(motivoDe(viajeOk(1, { responsable: CORREO_PERFIL_AGR.c3 }))).toBe("responsable_no_asignable");
     expect(motivoDe(embarqueOk(1, { responsable: CORREO_PERFIL_AGR.pl }))).toBe("responsable_no_asignable");
+    // G: el mensaje no revela el nombre del perfil (solo repite lo que la persona escribió en el archivo)
+    const detalle = una(viajeOk(1, { responsable: CORREO_PERFIL_AGR.pl })).detalle ?? "";
+    expect(detalle).toContain(CORREO_PERFIL_AGR.pl);
+    expect(detalle).not.toContain("Planner PL");
     expect(una(viajeOk(1, { responsable: CORREO_PERFIL_AGR.a })).clasificacion).toBe("nueva");
     expect(una(viajeOk(1, { responsable: " C1@Ejemplo.TEST " })).clasificacion).toBe("nueva");
     expect(una(embarqueOk(1, { responsable: "" })).clasificacion).toBe("nueva");

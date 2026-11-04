@@ -533,7 +533,7 @@ function modeloDeTablas(compraId: string): { compra: Fila; modelo: ModeloCompra 
   };
 }
 
-type Actor = { perfil_id: string | null; nombre: string };
+type Actor = { perfil_id: string | null; nombre: string; restringido?: boolean };
 
 /** Lo que dejan las funciones de escritura en las tablas tras una operación válida: estado, revisión, líneas, recepciones y evento. */
 function aplicarEnTablas(compra: Fila, modelo: ModeloCompra, evento: Fila, actor: Actor, recepcionesNuevas: Fila[] = [], extra: Fila = {}): void {
@@ -637,16 +637,22 @@ function rpcImportar(a: Record<string, unknown>): { data: unknown; error: ErrorR
   const claves = new Set(tabla("compra_lineas").filter((l) => tabla("compras").find((c) => c.id === l.compra_id)?.estado !== "cancelada").map((l) => l.clave_importacion));
   if (p.lineas.some((l) => claves.has(l.clave_importacion))) return { data: { ok: false, motivo: "clave_existente" }, error: null };
 
+  // Como la función SQL (0034): el actor restringido (`restringido: true` o perfil comprador) solo agrega a su propio borrador, y el
+  // rechazo ocurre antes de crear el proveedor, la compra o las líneas.
+  const restringido = actor.restringido === true || Object.values(PERFILES).some((x) => x.id === actor.perfil_id && x.rol === "comprador");
   let proveedorId = p.proveedor_id ?? null;
   if (!proveedorId) {
     const existente = tabla("proveedores").find((x) => String(x.nombre).toUpperCase() === String(p.proveedor_nombre).toUpperCase());
     if (existente) proveedorId = existente.id as string;
-    else {
-      proveedorId = nuevoId();
-      tabla("proveedores").push({ id: proveedorId, codigo: null, nombre: p.proveedor_nombre, pais: null, ciudad: null, identificacion: null, es_intercompany: false, nota: null, activo: true, perfil_id: actor.perfil_id, usuario_nombre: actor.nombre, created_at: sello(), updated_at: sello() });
-    }
   }
-  let compra = tabla("compras").find((c) => c.proveedor_id === proveedorId && String(c.referencia).toUpperCase() === p.referencia.toUpperCase() && c.estado !== "cancelada");
+  let compra = proveedorId === null ? undefined : tabla("compras").find((c) => c.proveedor_id === proveedorId && String(c.referencia).toUpperCase() === p.referencia.toUpperCase() && c.estado !== "cancelada");
+  if (compra && restringido && (compra.estado !== "borrador" || actor.perfil_id === null || compra.perfil_id !== actor.perfil_id)) {
+    return { data: { ok: false, motivo: "compra_no_borrador" }, error: null };
+  }
+  if (!proveedorId) {
+    proveedorId = nuevoId();
+    tabla("proveedores").push({ id: proveedorId, codigo: null, nombre: p.proveedor_nombre, pais: null, ciudad: null, identificacion: null, es_intercompany: false, nota: null, activo: true, perfil_id: actor.perfil_id, usuario_nombre: actor.nombre, created_at: sello(), updated_at: sello() });
+  }
   const creada = !compra;
   const ahora = sello();
   if (!compra) {

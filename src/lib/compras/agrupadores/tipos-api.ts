@@ -136,7 +136,7 @@ export const MENSAJE_ERROR_AGRUPADOR: Record<CodigoErrorAgrupador, string> = {
   tiene_recepciones: "Ya tiene ingresos confirmados: quítalos primero.",
   motivo_requerido: "Escribe el motivo.",
   compra_cambio: "Otra persona cambió una de las compras mientras la mirabas: revisa la vista previa.",
-  no_pertenece: "Esa asignación, paquete, entrega o compra no pertenece a este embarque.",
+  no_pertenece: "El embarque cambió mientras lo mirabas: esa asignación, paquete o entrega ya no corresponde. Se vuelve a leer; revisa y repite la acción.",
   embarque_con_recepciones: "Este embarque ya tiene ingresos confirmados: lo que falta se pasa a otro embarque.",
   asignacion_con_recepciones: "Esa mercadería ya tiene ingresos confirmados y no se puede mover.",
   excede_entrega: "Las unidades superan lo que queda sin asignar en la entrega.",
@@ -380,7 +380,11 @@ export type PlanMovimientoApi = {
   avisos: AvisoDetalleApi[];
 };
 
-/** Lo que devuelve escribir un movimiento. `compras` son las revisiones nuevas de las compras tocadas. */
+/**
+ * Lo que devuelve escribir un movimiento. `compras` son las revisiones nuevas de las compras TOCADAS (las que cambiaron sus entregas,
+ * repartos o asignaciones; 0034): puede ser una lista vacía y NO trae una entrada por cada compra del plan. Las que no salen conservan su
+ * revisión: quien necesite una revisión vigente de otra compra debe releerla, no suponerla.
+ */
 export type RespuestaMovimientoApi = {
   embarque: EmbarqueDetalleApi;
   /** Otros embarques que el movimiento tocó (origen y destino, p. ej. al mover un paquete o pasar pendientes). */

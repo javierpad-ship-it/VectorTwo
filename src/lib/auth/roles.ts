@@ -3,7 +3,7 @@
  *
  *   admin      → todo, incluida la administración de usuarios.
  *   planner    → maestros y planificación.
- *   comprador  → solo lectura; en Fase 3 registra sus compras.
+ *   comprador  → consulta venta y stock; registra y edita compras, viajes, embarques y paquetes; importa compras en borrador.
  */
 export const ROLES = ["admin", "planner", "comprador"] as const;
 
@@ -18,7 +18,7 @@ export const ETIQUETA_ROL: Record<Rol, string> = {
 export const DESCRIPCION_ROL: Record<Rol, string> = {
   admin: "Acceso completo y administración de usuarios.",
   planner: "Edita maestros y trabaja la planificación.",
-  comprador: "Consulta en solo lectura lo que se le comparte.",
+  comprador: "Consulta venta y stock; registra y edita compras, viajes, embarques y paquetes; importa compras en borrador.",
 };
 
 export function esRol(valor: unknown): valor is Rol {

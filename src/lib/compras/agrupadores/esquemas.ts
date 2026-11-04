@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { celdaTexto, MAX_CELDA_NOTA } from "@/lib/api/celdas";
 import { fechaSchema as fechaIso, importarComprasSchema, filaImportacionCompraSchema } from "@/lib/compras/esquemas";
-import { MAX_FILAS_IMPORTACION } from "@/lib/compras/tipos";
+import { MAX_FILAS_IMPORTACION, MAX_UNIDADES_LINEA } from "@/lib/compras/tipos";
 import { mesSchema as mesIso } from "@/lib/intercompany/esquemas";
 import {
   ACCIONES_ESTADO,
@@ -42,9 +42,20 @@ const estricto = { error: (iss: { code: string; keys?: string[] }) => (iss.code 
 
 const uuid = (campo: string) => z.uuid(`${campo} debe ser un identificador válido.`);
 
+/** Tope de `revision` (y de todo entero que viaje a un `integer` de Postgres): más allá, la base daría un error 500 en vez de un 400. */
+export const MAX_ENTERO_BASE = 2_147_483_647;
+
 /** Versión vigente del agrupador (o de su embarque): `409 agrupador_cambio` si ya no lo es. */
 const revision = (campo = "La revisión") =>
-  z.number(`${campo} debe ser un número.`).int(`${campo} debe ser un entero.`).min(0, `${campo} no puede ser negativa.`);
+  z
+    .number(`${campo} debe ser un número.`)
+    .int(`${campo} debe ser un entero.`)
+    .min(0, `${campo} no puede ser negativa.`)
+    .max(MAX_ENTERO_BASE, `${campo} no es válida.`);
+
+/** Unidades de un movimiento o de una recepción: nunca más que el tope de una línea de compra (también cabe en un `integer`). */
+const unidadesTope = (mensajeMax = `Las unidades no pueden superar ${MAX_UNIDADES_LINEA.toLocaleString("es-PE")}.`) =>
+  z.number("Las unidades deben ser un número.").int("Las unidades deben ser un número entero.").max(MAX_UNIDADES_LINEA, mensajeMax);
 
 const MENSAJE_CODIGO = "El código solo admite letras, números y guiones (hasta 30 caracteres).";
 
@@ -205,6 +216,24 @@ export const asignarViajeSchema = z.strictObject(
 );
 export type AsignarViaje = z.infer<typeof asignarViajeSchema>;
 
+/**
+ * B2: una compra repetida en `compras` se procesa una sola vez. Mismo `id` con la misma revisión: se colapsa (el orden de la primera
+ * aparición se conserva). Mismo `id` con revisiones distintas: una de las dos vistas está vencida, así que `{ ok: false }` y la ruta
+ * responde `409 compra_cambio` sin tocar la base.
+ */
+export function deduplicarComprasViaje(compras: AsignarViaje["compras"]): { ok: true; compras: AsignarViaje["compras"] } | { ok: false } {
+  const vistas = new Map<string, number>();
+  const unicas: AsignarViaje["compras"] = [];
+  for (const c of compras) {
+    const previa = vistas.get(c.id);
+    if (previa === undefined) {
+      vistas.set(c.id, c.revision);
+      unicas.push(c);
+    } else if (previa !== c.revision) return { ok: false };
+  }
+  return { ok: true, compras: unicas };
+}
+
 // ─── Movimientos de entregas (§3.3 a §3.5; todos admiten `?previsualizar=1`) ───
 
 const itemsMax = (campo: string) => `Se admiten hasta ${MAX_ITEMS_MOVIMIENTO} ${campo} por vez.`;
@@ -220,7 +249,7 @@ export const asignarEntregasSchema = z.strictObject(
         z.strictObject(
           {
             entrega_id: uuid("La entrega"),
-            unidades: z.number("Las unidades deben ser un número.").int("Las unidades deben ser un número entero.").positive("Las unidades deben ser mayores que cero."),
+            unidades: unidadesTope().positive("Las unidades deben ser mayores que cero."),
             compra_revision: revision("La revisión de la compra"),
           },
           estricto,
@@ -320,7 +349,7 @@ export const recibirEmbarqueSchema = z
           z.strictObject(
             {
               asignacion_id: uuid("La asignación"),
-              unidades: z.number("Las unidades deben ser un número.").int("Las unidades deben ser un número entero.").min(0, "Las unidades no pueden ser negativas."),
+              unidades: unidadesTope().min(0, "Las unidades no pueden ser negativas."),
             },
             estricto,
           ),
@@ -328,7 +357,12 @@ export const recibirEmbarqueSchema = z
         .max(MAX_ASIGNACIONES_RECIBIR, `Se admiten hasta ${MAX_ASIGNACIONES_RECIBIR} asignaciones por llegada.`)
         .optional(),
       /** Obligatorio si no hay `items`. */
-      total_confirmado: z.number("El total debe ser un número.").int("El total debe ser un número entero.").positive("El total debe ser mayor que cero.").optional(),
+      total_confirmado: z
+        .number("El total debe ser un número.")
+        .int("El total debe ser un número entero.")
+        .positive("El total debe ser mayor que cero.")
+        .max(MAX_ENTERO_BASE, "El total no es válido.")
+        .optional(),
       nota: textoOpcional("La nota", MAX_NOTA_RECEPCION_EMBARQUE),
     },
     estricto,

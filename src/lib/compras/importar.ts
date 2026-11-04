@@ -37,7 +37,7 @@ import {
   MAX_UNIDADES_LINEA,
   TALLAS_COMPRA,
   TIPOS_LINEA_DISPONIBLES,
-  type ActorCompra,
+  type ActorImportarCompra,
   type DestinoCompra,
   type EstadoCompra,
   type Mes,
@@ -117,6 +117,8 @@ export type CompraExistente = {
   referencia: string | null;
   estado: EstadoCompra;
   cancelada_at: string | null;
+  /** Quién creó la compra (`compras.perfil_id`; nulo si el perfil se borró). Solo lo mira la restricción del comprador. */
+  perfil_id?: string | null;
   /**
    * Fecha y moneda de la cabecera. Si vienen, una línea nueva con otra fecha u otra moneda se omite (`cabecera_inconsistente`): la
    * función de la base agrega la línea a la compra sin compararlas. Opcionales para quien no las conozca (no se compara).
@@ -154,6 +156,11 @@ export type OpcionesImportacion = {
   k_prima: Mes | null;
   /** Por defecto `TIPOS_LINEA_DISPONIBLES` (`especifica` y `barrer_marca`). */
   tipos_disponibles?: readonly TipoLinea[];
+  /**
+   * Quien importa es COMPRADOR (A1/A2, 0034): solo puede agregar líneas a una compra existente si está en `borrador` y es suya
+   * (`perfil_id` = este). Con otra compra existente la fila nueva se omite con `compra_no_borrador`. Admin y planner no lo pasan.
+   */
+  comprador?: { perfil_id: string } | null;
 };
 
 /** Una línea de `p_compra.lineas` de `importar_compra`. */
@@ -399,6 +406,14 @@ type DatosFila = {
   nota: string | null;
 };
 
+/** `true` si la compra es un borrador cuyo dueño es `perfilId`: lo único a lo que el comprador puede agregar líneas. */
+export const esBorradorPropio = (compra: Pick<CompraExistente, "estado" | "perfil_id">, perfilId: string): boolean =>
+  compra.estado === "borrador" && compra.perfil_id != null && compra.perfil_id === perfilId;
+
+/** Texto de la omisión `compra_no_borrador` (también lo usa el servicio cuando la base la rechaza bajo candado). */
+export const detalleCompraNoBorrador = (numero: string): string =>
+  `La compra ${numero} ya está confirmada o es de otra persona; usa otra referencia o agrégale líneas desde la compra (0.13.1).`;
+
 type Omision = { motivo: MotivoOmisionCompra; detalle?: string };
 type Resultado = { ok: true; datos: DatosFila } | { ok: false; omision: Omision };
 
@@ -575,6 +590,13 @@ export function previsualizarImportacionCompras(
     if (clasificacion === "nueva" && compraExistente && compraExistente.cancelada_at !== null) {
       vistos.delete(d.clave);
       return omitir({ motivo: "cabecera_inconsistente", detalle: `La compra ${compraExistente.numero} ya cerró su saldo: no admite líneas nuevas.` });
+    }
+
+    // El comprador solo agrega líneas a su propio borrador (misma regla que `importar_compra`, que vuelve a comprobarla bajo candado).
+    if (clasificacion === "nueva" && compraExistente && opciones.comprador && !esBorradorPropio(compraExistente, opciones.comprador.perfil_id)) {
+      vistos.delete(d.clave);
+      if (!cab) cabeceras.delete(d.compra_clave);
+      return omitir({ motivo: "compra_no_borrador", detalle: detalleCompraNoBorrador(compraExistente.numero) });
     }
 
     // Una línea nueva que se agrega a una compra existente hereda su cabecera: otra fecha u otra moneda es otra compra.
@@ -1066,7 +1088,7 @@ export function payloadImportarCompra(plan: PlanCompraImportar): PayloadImportar
 }
 
 /** `rpc("importar_compra", args)`. */
-export function argsImportarCompra(plan: PlanCompraImportar, actor: ActorCompra): { p_compra: PayloadImportarCompra; p_actor: ActorCompra } {
+export function argsImportarCompra(plan: PlanCompraImportar, actor: ActorImportarCompra): { p_compra: PayloadImportarCompra; p_actor: ActorImportarCompra } {
   return { p_compra: payloadImportarCompra(plan), p_actor: actor };
 }
 
@@ -1165,7 +1187,7 @@ export function omitirFilasDelPlan(resultado: ResultadoPrevisualizacion, omision
 
 export type ResultadoAplicacionCompra =
   | { clave: string; ok: true; compra_id: string; numero: string }
-  | { clave: string; ok: false; motivo: MotivoFuncionCompra | "error"; mensaje: string };
+  | { clave: string; ok: false; motivo: MotivoFuncionCompra | "saldo_cerrado" | "compra_no_borrador" | "error"; mensaje: string };
 
 /**
  * Pasa el reporte a `modo = "aplicar"` con lo que respondió cada `importar_compra`: `aplicadas` (con el número de compra y las

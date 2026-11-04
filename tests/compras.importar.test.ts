@@ -239,6 +239,79 @@ describe("idempotencia por clave natural (regla 18, caso 28)", () => {
   });
 });
 
+describe("el comprador solo agrega líneas a su propio borrador (0034, A1/A2)", () => {
+  const YO = "10000000-0000-4000-8000-0000000000c1";
+  const OTRO = "10000000-0000-4000-8000-0000000000c2";
+  const OPC_COMPRADOR = (perfil: string | null): OpcionesImportacion => ({ carga_inicial: false, k_prima: "2026-09", comprador: perfil === null ? null : { perfil_id: perfil } });
+  const existente = (p: Partial<EstadoImportacionCompras["compras"][number]>) => ({
+    id: COMPRA.c12,
+    numero: "C-000012",
+    proveedor_id: PROVEEDOR.norte,
+    referencia: "PO-2211",
+    estado: "borrador" as const,
+    cancelada_at: null,
+    perfil_id: YO,
+    fecha_compra: "2026-10-14",
+    moneda: "PEN" as const,
+    ...p,
+  });
+  const con = (compra: ReturnType<typeof existente>, opciones: OpcionesImportacion) =>
+    previsualizar([fila({ linea_ordinal: "9", llegada: "2026-12", unidades: "50" })], { ...estadoImportacionBase(), compras: [compra] }, opciones);
+
+  it("compra existente confirmada de carga inicial → la fila se omite con compra_no_borrador y no queda nada en el plan", () => {
+    const r = con(existente({ estado: "confirmada", perfil_id: OTRO }), OPC_COMPRADOR(YO));
+    expect(motivos(r)).toEqual(["compra_no_borrador"]);
+    expect(un(r).detalle).toBe("La compra C-000012 ya está confirmada o es de otra persona; usa otra referencia o agrégale líneas desde la compra (0.13.1).");
+    expect(r.compras).toEqual([]);
+    expect(r.reporte.totales).toMatchObject({ nuevas: 0, procesadas: 0, omitidas: 1 });
+  });
+
+  it("una confirmada que es suya también se omite: solo cuenta el borrador", () => {
+    expect(motivos(con(existente({ estado: "confirmada" }), OPC_COMPRADOR(YO)))).toEqual(["compra_no_borrador"]);
+  });
+
+  it("borrador de otra persona, o sin dueño → se omite", () => {
+    expect(motivos(con(existente({ perfil_id: OTRO }), OPC_COMPRADOR(YO)))).toEqual(["compra_no_borrador"]);
+    expect(motivos(con(existente({ perfil_id: null }), OPC_COMPRADOR(YO)))).toEqual(["compra_no_borrador"]);
+  });
+
+  it("su propio borrador → agrega las líneas nuevas", () => {
+    const r = con(existente({}), OPC_COMPRADOR(YO));
+    expect(motivos(r)).toEqual([]);
+    expect(r.reporte.compras_a_crear[0]).toMatchObject({ referencia: "PO-2211", lineas_nuevas: 1, existente: { numero: "C-000012" } });
+  });
+
+  it("una referencia sin compra existente, o de una compra cancelada, sigue creando la suya", () => {
+    expect(previsualizar([fila()], estadoImportacionBase(), OPC_COMPRADOR(YO)).compras).toHaveLength(1);
+    expect(motivos(con(existente({ estado: "cancelada", perfil_id: OTRO }), OPC_COMPRADOR(YO)))).toEqual([]);
+  });
+
+  it("admin y planner (sin `comprador`) conservan su comportamiento: agregan a cualquier compra viva", () => {
+    for (const compra of [existente({ estado: "confirmada", perfil_id: OTRO }), existente({ perfil_id: OTRO }), existente({ perfil_id: null })]) {
+      const r = con(compra, OPC_COMPRADOR(null));
+      expect(motivos(r)).toEqual([]);
+      expect(r.reporte.compras_a_crear[0]).toMatchObject({ lineas_nuevas: 1, existente: { numero: "C-000012" } });
+    }
+  });
+
+  it("solo omite las filas NUEVAS: una fila igual a la ya importada sigue siendo igual, y el resto del archivo entra", () => {
+    const base = previsualizar([fila()], estadoImportacionBase(), OPC_COMPRADOR(YO));
+    const estado: EstadoImportacionCompras = {
+      ...estadoImportacionBase(),
+      compras: [existente({ estado: "confirmada", perfil_id: OTRO })],
+      lineas_existentes: comoExistentes(base),
+    };
+    const r = previsualizar([fila(), fila({ proveedor: "Proveedor Norte", referencia: "PO-NUEVA", llegada: "2026-12" })], estado, OPC_COMPRADOR(YO));
+    expect(r.reporte.totales).toMatchObject({ iguales: 1, nuevas: 1, omitidas: 0 });
+    expect(r.compras.map((c) => c.referencia)).toEqual(["PO-NUEVA"]);
+  });
+
+  it("argsImportarCompra deja pasar `restringido` en p_actor", () => {
+    const plan = previsualizar([fila()], estadoImportacionBase(), OPC_COMPRADOR(YO)).compras[0];
+    expect(argsImportarCompra(plan, { perfil_id: YO, nombre: "Comprador", restringido: true }).p_actor).toEqual({ perfil_id: YO, nombre: "Comprador", restringido: true });
+  });
+});
+
 describe("clave natural y huella", () => {
   it("claveImportacion normaliza con upper(trim(…))", () => {
     expect(claveImportacion({ proveedor: "  proveedor norte ", referencia: "po-2211 ", linea_ordinal: "1" })).toBe("PROVEEDOR NORTE|PO-2211|1");

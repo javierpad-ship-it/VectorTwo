@@ -1,7 +1,7 @@
 import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { IDS, PERFILES, escenario, eventosDe, llamadasA, publicarMes, reiniciarEscenario, tablaDe } from "./compras.fake-db";
+import { IDS, PERFILES, clienteFalso, escenario, eventosDe, llamadasA, publicarMes, reiniciarEscenario, tablaDe } from "./compras.fake-db";
 
 // Los módulos de la base y de las fuentes se cargan dentro de la fábrica para que sean los mismos que importa este archivo.
 vi.mock("server-only", () => ({}));
@@ -76,6 +76,7 @@ import { GET as proveedores } from "@/app/api/compras/proveedores/route";
 import { POST as importar } from "@/app/api/compras/importar/route";
 import { contadores, reiniciarCaches } from "@/lib/flujo/cache";
 import { reiniciarCacheCatalogo } from "@/lib/compras/servicio";
+import { payloadImportarCompra, previsualizarImportacionCompras } from "@/lib/compras/importar";
 import { cargarContextoBarrer } from "@/lib/marcas-barrer/servicio";
 import { aTotalesApi, armarConciliacionApi, calcularFlujo, type NombresFlujo } from "@/lib/flujo/modelo";
 import { obtenerFlujo, totalesDeFilas } from "@/lib/flujo/servicio";
@@ -84,6 +85,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { ConciliacionApi, FilaFlujoDetalleApi, FlujoApi, HuecosApi, ParametrosFlujoApi, RespuestaAceptarApi } from "@/lib/flujo/tipos-api";
 import type { CompraApi, EventoCompraApi, ProveedorApi, ReporteImportacionComprasApi } from "@/lib/compras/tipos-api";
 import { AGR_M8, COMPRA, EQ, GEN, LIN, LINEA, MARCA_M8, MUN, NODO_M8, PROVEEDOR, filasImportacionEjemplo } from "./compras.fixture";
+import { estadoImportacionBase } from "./compras.estado.fixture";
 import { REGLA_JH, cerradaDeFila, entrada, mapaDeStock, participaciones, stockMes } from "./flujo.soporte";
 import { resolverTarjeta } from "./flujo.fixture";
 
@@ -1157,6 +1159,99 @@ describe("POST /api/compras/importar", () => {
     expect(cuerpo.data.no_aplicadas).toEqual([expect.objectContaining({ referencia: "PO-2211", motivo: "clave_existente" })]);
     expect(cuerpo.data.no_aplicadas[0].mensaje).toContain("vuelve a previsualizar");
     expect(cuerpo.data.aplicadas.map((a) => a.clave)).toEqual(["FERIA SUR|FS-001"]);
+  });
+
+  describe("el comprador solo agrega líneas a su propio borrador (0034, A1/A2)", () => {
+    const una = () => filasImportacionEjemplo().filter((f) => f.proveedor === "Proveedor Norte" && f.linea_ordinal === "1");
+    const masUna = () => [{ ...una()[0], linea_ordinal: "9", unidades: "100", entregas: "2026-11:100", llegada: "" }];
+    const lineasDe = (numero: string) => tablaDe("compra_lineas").filter((l) => l.compra_id === idCompra(numero));
+    const actoresEnviados = () => llamadasA("importar_compra").map((l) => l.args.p_actor as Record<string, unknown>);
+
+    it("comprador + compra existente confirmada de carga inicial: la fila se omite con compra_no_borrador y no se escribe nada", async () => {
+      sinFeria();
+      escenario.usuario = { rol: "planner", perfil: PERFILES.planner };
+      await importarCon("aplicar", una());
+      expect(compraDe(idCompra("C-000100"))?.estado).toBe("confirmada");
+      const antes = { llamadas: llamadasA("importar_compra").length, lineas: tablaDe("compra_lineas").length, eventos: tablaDe("compra_eventos").length, revision: revisionDe(idCompra("C-000100")) };
+
+      comoComprador("comprador1");
+      for (const modo of ["previsualizar", "aplicar"] as const) {
+        const { r, cuerpo } = await importarCon(modo, masUna(), { carga_inicial: false });
+        expect(r.status, JSON.stringify(cuerpo)).toBe(200);
+        expect(cuerpo.data.omitidas).toEqual([expect.objectContaining({ motivo: "compra_no_borrador", referencia: "PO-2211", detalle: expect.stringContaining("C-000100 ya está confirmada o es de otra persona") })]);
+        expect(cuerpo.data.compras_a_crear).toEqual([]);
+        expect(cuerpo.data.aplicadas).toEqual([]);
+      }
+      expect(llamadasA("importar_compra")).toHaveLength(antes.llamadas);
+      expect(tablaDe("compra_lineas")).toHaveLength(antes.lineas);
+      expect(tablaDe("compra_eventos")).toHaveLength(antes.eventos);
+      expect(revisionDe(idCompra("C-000100"))).toBe(antes.revision);
+    });
+
+    it("comprador + borrador de otra persona: se omite; con su propio borrador, agrega las líneas y manda `restringido` en p_actor", async () => {
+      sinFeria();
+      comoComprador("comprador1");
+      await importarCon("aplicar", una(), { carga_inicial: false });
+      expect(compraDe(idCompra("C-000100"))).toMatchObject({ estado: "borrador", perfil_id: PERFILES.comprador1.id });
+      expect(actoresEnviados()).toEqual([{ perfil_id: PERFILES.comprador1.id, nombre: PERFILES.comprador1.nombre, restringido: true }]);
+
+      comoComprador("comprador2");
+      const ajena = await importarCon("aplicar", masUna(), { carga_inicial: false });
+      expect(ajena.cuerpo.data.omitidas.map((o) => o.motivo)).toEqual(["compra_no_borrador"]);
+      expect(llamadasA("importar_compra")).toHaveLength(1);
+      expect(lineasDe("C-000100")).toHaveLength(1);
+
+      comoComprador("comprador1");
+      const propia = await importarCon("aplicar", masUna(), { carga_inicial: false });
+      expect(propia.cuerpo.data.omitidas).toEqual([]);
+      expect(propia.cuerpo.data.aplicadas.map((a) => [a.numero, a.lineas])).toEqual([["C-000100", 1]]);
+      expect(lineasDe("C-000100")).toHaveLength(2);
+      expect(tablaDe("compras")).toHaveLength(1);
+    });
+
+    it("admin y planner agregan a cualquier compra viva (confirmada o borrador ajeno) y no mandan `restringido`", async () => {
+      sinFeria();
+      comoComprador("comprador1");
+      await importarCon("aplicar", una(), { carga_inicial: false });
+      escenario.usuario = { rol: "planner", perfil: PERFILES.planner };
+      const r = await importarCon("aplicar", masUna(), { carga_inicial: false });
+      expect(r.cuerpo.data.omitidas).toEqual([]);
+      expect(r.cuerpo.data.aplicadas.map((a) => a.numero)).toEqual(["C-000100"]);
+      expect(lineasDe("C-000100")).toHaveLength(2);
+      expect(actoresEnviados()[1]).toEqual({ perfil_id: PERFILES.planner.id, nombre: PERFILES.planner.nombre });
+
+      escenario.usuario = { rol: "admin", perfil: PERFILES.planner };
+      const otra = [{ ...una()[0], linea_ordinal: "10", unidades: "10", entregas: "2026-11:10", llegada: "" }];
+      expect((await importarCon("aplicar", otra, { carga_inicial: true })).cuerpo.data.aplicadas.map((a) => a.numero)).toEqual(["C-000100"]);
+      expect(lineasDe("C-000100")).toHaveLength(3);
+      expect(actoresEnviados()[2]).not.toHaveProperty("restringido");
+    });
+
+    it("si la compra deja de ser su borrador entre previsualizar y aplicar, la base la rechaza (compra_no_borrador): queda sin aplicar y no se escribe nada", async () => {
+      sinFeria();
+      comoComprador("comprador1");
+      await importarCon("aplicar", una(), { carga_inicial: false });
+      escenario.claveExistente = () => {
+        const c = compraDe(idCompra("C-000100"));
+        if (c) c.estado = "confirmada";
+        return false;
+      };
+      const { r, cuerpo } = await importarCon("aplicar", masUna(), { carga_inicial: false });
+      expect(r.status).toBe(200);
+      expect(cuerpo.data.no_aplicadas).toEqual([expect.objectContaining({ referencia: "PO-2211", motivo: "compra_no_borrador", mensaje: expect.stringContaining("confirmada o es de otra persona") })]);
+      expect(cuerpo.data.aplicadas).toEqual([]);
+      expect(lineasDe("C-000100")).toHaveLength(1);
+    });
+
+    it("la base se restringe sola: un perfil comprador sin la clave `restringido` también recibe compra_no_borrador", async () => {
+      sinFeria();
+      escenario.usuario = { rol: "planner", perfil: PERFILES.planner };
+      await importarCon("aplicar", una());
+      const plan = previsualizarImportacionCompras(masUna(), [], estadoImportacionBase(), { carga_inicial: false, k_prima: "2026-09" }).compras[0];
+      const db = clienteFalso();
+      const r = await db.rpc("importar_compra", { p_compra: payloadImportarCompra({ ...plan, proveedor_id: PROVEEDOR.norte }), p_actor: { perfil_id: PERFILES.comprador1.id, nombre: "C1" } });
+      expect(r.data).toEqual({ ok: false, motivo: "compra_no_borrador" });
+    });
   });
 
   it("corregir un error: cancelar la compra (sin recepciones) libera sus claves y la fila corregida se reimporta como nueva", async () => {

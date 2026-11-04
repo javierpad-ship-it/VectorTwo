@@ -64,6 +64,7 @@ import type {
   ViajeActivoCuerpo,
   ViajesQuery,
 } from "./esquemas";
+import { deduplicarComprasViaje } from "./esquemas";
 import { accionAdmitidaPorTipo, validarGuardarEmbarque } from "./estados";
 import {
   argsImportarAgrupadores,
@@ -888,13 +889,19 @@ const avisoDeFuncion = (a: unknown): AvisoDetalleApi | null => {
  * (asignar_viaje_compras). Quitar solo vale para compras que hoy son de ese viaje: si no, `404 no_pertenece` (R23). Un viaje cerrado se
  * acepta con el aviso `viaje_cerrado`; uno cancelado, no.
  */
-export async function asignarComprasAViaje(d: Db, usuario: UsuarioAgrupadores, id: string, cuerpo: AsignarViaje): Promise<Salida<RespuestaAsignarViajeApi>> {
-  if (cuerpo.viaje_id !== null && cuerpo.viaje_id !== id) return fallaMensaje("El viaje del cuerpo no es el de la ruta.", 400);
+export async function asignarComprasAViaje(d: Db, usuario: UsuarioAgrupadores, id: string, pedido: AsignarViaje): Promise<Salida<RespuestaAsignarViajeApi>> {
+  if (pedido.viaje_id !== null && pedido.viaje_id !== id) return fallaMensaje("El viaje del cuerpo no es el de la ruta.", 400);
+  // B2: una compra repetida se procesa una vez; el mismo id con dos revisiones distintas es una vista vencida (409).
+  const sinRepetidas = deduplicarComprasViaje(pedido.compras);
+  if (!sinRepetidas.ok) return fallaMotivo("compra_cambio");
+  const cuerpo: AsignarViaje = { ...pedido, compras: sinRepetidas.compras };
   if (cuerpo.viaje_id === null) {
     const compras = await leerComprasPorId(d, cuerpo.compras.map((c) => c.id));
     if (compras.error) return fallaDb(compras.error, "agrupadores: leer las compras");
     const delViaje = new Map(compras.data.map((c) => [c.id, c.viaje_id]));
-    if (cuerpo.compras.some((c) => delViaje.get(c.id) !== id)) return fallaMotivo("no_pertenece");
+    if (cuerpo.compras.some((c) => delViaje.get(c.id) !== id)) {
+      return fallaMensaje("El viaje cambió mientras lo mirabas: alguna de esas compras ya no es de él. Se vuelve a leer; revisa y repite la acción.", 404, "no_pertenece");
+    }
   }
   const r = leerRpc(await rpcAsignarViajeCompras(d, { viaje_id: cuerpo.viaje_id, compras: cuerpo.compras, actor: actorDe(usuario) }), "agrupadores: asignar compras al viaje");
   if (r.respuesta) return falla(r.respuesta);
@@ -1142,6 +1149,7 @@ export async function moverEntregas(
   const tocados = plan.aplicable.embarques
     .filter((e) => e.id !== embarqueRespuesta)
     .map((e) => ({ id: e.id, codigo: ctx.ix.embarque.get(e.id)?.codigo ?? "—", revision: revisiones.get(e.id) ?? e.revision + 1 }));
+  // Solo las compras TOCADAS (0034): puede ser `[]`. Las demás del plan conservan su revisión, así que no se inventa ninguna.
   const compras = Array.isArray(resultado.compras) ? resultado.compras.filter(esRegistro).map((c) => ({ id: String(c.id), revision: Number(c.revision) })) : [];
   return listo({ embarque: detalle.data, embarques_tocados: tocados, compras, avisos: plan.vista.avisos });
 }

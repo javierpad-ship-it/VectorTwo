@@ -5,6 +5,7 @@ import {
   cambiarEstadoSchema,
   cambiarFechaSchema,
   codigoSchema,
+  deduplicarComprasViaje,
   comprasAgrupadorQueryShape,
   editarEmbarqueSchema,
   editarViajeSchema,
@@ -27,6 +28,7 @@ import {
   viajeActivoSchema,
   viajesQuerySchema,
 } from "@/lib/compras/agrupadores/esquemas";
+import { MAX_UNIDADES_LINEA } from "@/lib/compras/tipos";
 import {
   ACCIONES_AGRUPADOR_EVENTO,
   ACCIONES_ESTADO,
@@ -233,6 +235,44 @@ describe("asignarViajeSchema (§3.3)", () => {
   it("cada compra lleva su revisión y nada más", () => {
     expect(asignarViajeSchema.safeParse({ viaje_id: U2, compras: [{ id: U1 }] }).success).toBe(false);
     expect(asignarViajeSchema.safeParse({ viaje_id: U2, compras: [{ ...compra, extra: 1 }] }).success).toBe(false);
+  });
+});
+
+describe("topes de `revision` y de unidades (H): un valor fuera de rango es 400, no un error de la base", () => {
+  const MAX = 2_147_483_647;
+  const compra = { id: U1, revision: 1 };
+  it("revision: acepta hasta 2 147 483 647 y rechaza el siguiente (viaje, compra, embarque, destino)", () => {
+    expect(asignarViajeSchema.safeParse({ viaje_id: U2, compras: [{ id: U1, revision: MAX }] }).success).toBe(true);
+    expect(asignarViajeSchema.safeParse({ viaje_id: U2, compras: [{ id: U1, revision: MAX + 1 }] }).success).toBe(false);
+    expect(asignarViajeSchema.safeParse({ viaje_id: U2, compras: [{ id: U1, revision: 1e300 }] }).success).toBe(false);
+    expect(cambiarEstadoSchema.safeParse({ revision: MAX + 1, accion: "cancelar", motivo: "x" }).success).toBe(false);
+    expect(revertirRecepcionSchema.safeParse({ revision: MAX }).success).toBe(true);
+    expect(revertirRecepcionSchema.safeParse({ revision: MAX + 1 }).success).toBe(false);
+    expect(quitarAsignacionesSchema.safeParse({ revision: 1, asignaciones: [{ id: U1, compra_revision: MAX + 1 }] }).success).toBe(false);
+    expect(asignarViajeSchema.safeParse({ viaje_id: U2, compras: [compra] }).success).toBe(true);
+  });
+  it("unidades de asignar y de recibir: tope de una línea (10 000 000) y total confirmado dentro de un integer", () => {
+    const asignar = (unidades: number) => asignarEntregasSchema.safeParse({ revision: 1, paquete_id: null, items: [{ entrega_id: U1, unidades, compra_revision: 1 }] });
+    expect(asignar(MAX_UNIDADES_LINEA).success).toBe(true);
+    expect(asignar(MAX_UNIDADES_LINEA + 1).success).toBe(false);
+    expect(asignar(MAX).success).toBe(false);
+    const recibir = (extra: Record<string, unknown>) => recibirEmbarqueSchema.safeParse({ revision: 1, modo: "llegada", fecha_llegada_real: "2026-11-05", ...extra });
+    expect(recibir({ items: [{ asignacion_id: U1, unidades: MAX_UNIDADES_LINEA }] }).success).toBe(true);
+    expect(recibir({ items: [{ asignacion_id: U1, unidades: MAX_UNIDADES_LINEA + 1 }] }).success).toBe(false);
+    expect(recibir({ total_confirmado: MAX }).success).toBe(true);
+    expect(recibir({ total_confirmado: MAX + 1 }).success).toBe(false);
+  });
+});
+
+describe("deduplicarComprasViaje (B2)", () => {
+  const A = { id: U1, revision: 1 };
+  const B = { id: U2, revision: 4 };
+  it("colapsa el mismo id con la misma revisión y conserva el orden de la primera aparición", () => {
+    expect(deduplicarComprasViaje([A, B, { ...A }])).toEqual({ ok: true, compras: [A, B] });
+    expect(deduplicarComprasViaje([B])).toEqual({ ok: true, compras: [B] });
+  });
+  it("el mismo id con revisiones distintas no se puede resolver: vista vencida", () => {
+    expect(deduplicarComprasViaje([A, { ...A, revision: 2 }])).toEqual({ ok: false });
   });
 });
 

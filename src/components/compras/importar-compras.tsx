@@ -106,12 +106,16 @@ function resumen(r: ReporteImportacionComprasApi): string {
   return `${verbo} ${plural(r.compras_a_crear.length, "compra", "compras")} con ${plural(lineasNuevas, "línea nueva", "líneas nuevas")} y ${plural(r.proveedores_a_crear.length, "proveedor", "proveedores")}.`;
 }
 
-function mensajeConfirmarAplicar(nombre: string, r: ReporteImportacionComprasApi, cargaInicial: boolean): string {
+function mensajeConfirmarAplicar(nombre: string, r: ReporteImportacionComprasApi, cargaInicial: boolean, esComprador: boolean): string {
   const partes = [`¿Aplicar ${cargaInicial ? "la carga inicial de" : "la importación de"} ${nombre}? ${resumen({ ...r, modo: "previsualizar" })}`];
   if (cargaInicial) {
     partes.push("Las compras entran como ya hechas (confirmadas, origen carga inicial) y, desde ahora, cuentan en el flujo. Se aplican una por una: si algo se corta, reimporta el archivo y se completará lo que falte.");
   } else {
-    partes.push("Las compras entran en borrador, a tu nombre: no cuentan en el flujo hasta que se confirmen. Se aplican una por una: si algo se corta, reimporta el archivo y se completará lo que falte.");
+    partes.push(
+      esComprador
+        ? "Las compras nuevas entran en borrador, a tu nombre: no cuentan en el flujo hasta que se confirmen. Si la referencia ya existe y es un borrador tuyo, se le agregan las líneas nuevas; si ya está confirmada o es de otra persona, esas filas se omiten. Se aplican una por una: si algo se corta, reimporta el archivo y se completará lo que falte."
+        : "Las compras nuevas entran en borrador, a tu nombre: no cuentan en el flujo hasta que se confirmen. Si la referencia ya existe, las líneas nuevas se agregan a esa compra tal como esté (si está confirmada, esas líneas sí cuentan en el flujo). Se aplican una por una: si algo se corta, reimporta el archivo y se completará lo que falte.",
+    );
   }
   const ag = totalesAgrupadores(r.agrupadores ?? []);
   if (ag.asignado > 0) partes.push(`Se asignará viaje o embarque a ${plural(ag.asignado, "fila", "filas")} del archivo (dos pasos más por compra: si uno falla, la compra queda sin ese agrupador y reimportar lo completa).`);
@@ -134,7 +138,7 @@ export function ImportarCompras({ onAplicado, onImportado, puedeCargaInicial = t
   // La casilla arranca marcada para quien puede (así era el único modo); quien no puede nunca manda `carga_inicial`.
   const [marcada, setMarcada] = useState(true);
   const cargaInicial = puedeCargaInicial && marcada;
-  const imp = useImportarCompras({ campos: CAMPOS, cargaInicial, confirmarAplicar: (nombre, r) => mensajeConfirmarAplicar(nombre, r, cargaInicial), alAplicar: onImportado });
+  const imp = useImportarCompras({ campos: CAMPOS, cargaInicial, confirmarAplicar: (nombre, r) => mensajeConfirmarAplicar(nombre, r, cargaInicial, !puedeCargaInicial), alAplicar: onImportado });
   const { archivo, previa, previaVigente, final } = imp;
   const plantilla = plantillaCompras(cargaInicial);
 
@@ -157,13 +161,15 @@ export function ImportarCompras({ onAplicado, onImportado, puedeCargaInicial = t
               <Checkbox checked={marcada} onChange={setMarcada} label="Carga inicial de compras ya hechas" className="mt-0.5" />
               <span>
                 <strong>Carga inicial de compras ya hechas.</strong> Entran confirmadas y a nombre de quien importa; con las unidades que ya recibieron (RECIBIDAS), cuentan en el flujo desde ahora. Sin marcar, es el
-                importador normal: las compras entran en borrador.
+                importador normal: las compras nuevas entran en borrador.
               </span>
             </label>
           ) : null}
           {!cargaInicial && (
             <Alert tono="info">
-              Las compras entran en borrador, a tu nombre y con origen comprador: no cuentan en el flujo hasta que se confirmen. La columna RECIBIDAS no aplica (solo es de la carga inicial, que hacen administración y planeamiento).
+              {puedeCargaInicial
+                ? "Las compras nuevas entran en borrador, a tu nombre y con origen comprador: no cuentan en el flujo hasta que se confirmen. Si la referencia ya existe, las líneas nuevas se agregan a esa compra tal como esté (si está confirmada, esas líneas sí cuentan en el flujo). La columna RECIBIDAS no aplica: solo es de la carga inicial."
+                : "Las compras nuevas entran en borrador, a tu nombre y con origen comprador: no cuentan en el flujo hasta que se confirmen. Si la referencia ya existe y es un borrador tuyo, se le agregan las líneas nuevas; si ya está confirmada o es de otra persona, esas filas se omiten (usa otra referencia o agrégale líneas desde la compra). La columna RECIBIDAS no aplica (solo es de la carga inicial, que hacen administración y planeamiento)."}
             </Alert>
           )}
         </div>

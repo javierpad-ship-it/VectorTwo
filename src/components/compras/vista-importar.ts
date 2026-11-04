@@ -50,6 +50,7 @@ export const ETIQUETA_MOTIVO_OMISION_COMPRA: Record<MotivoOmisionCompra, string>
   destino_desconocido: "Destino desconocido",
   proveedor_inactivo: "Proveedor desactivado",
   cambiada_requiere_edicion: "Línea cambiada: hay que cancelar y reimportar",
+  compra_no_borrador: "La compra ya está confirmada o es de otra persona",
   sin_reparto: "Lote sin reparto vigente",
   mezcla_sin_filas: "Lote de varias marcas sin filas",
   mezcla_no_suma_100: "La mezcla no suma 100 %",

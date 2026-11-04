@@ -454,11 +454,28 @@ describe("viajes: crear, editar y asignar compras (casos 6, 9 y 19a)", () => {
     const c102 = compraPorNumero("C-000102");
     const ajena = await comprasDeViaje(enviar("POST", "/x", { viaje_id: null, compras: [{ id: c102.id, revision: c102.revision }] }), ctx(VIAJE_AGR.v261001));
     expect(ajena.status).toBe(404);
-    expect((await leer(ajena)).codigo).toBe("no_pertenece");
+    const cuerpoAjena = await leer(ajena);
+    expect(cuerpoAjena.codigo).toBe("no_pertenece");
+    expect(cuerpoAjena.error).toMatch(/viaje cambió.*vuelve a leer/);
     const vieja = await comprasDeViaje(enviar("POST", "/x", { viaje_id: VIAJE_AGR.v261001, compras: [{ id: c102.id, revision: 0 }] }), ctx(VIAJE_AGR.v261001));
     expect((await leer(vieja)).codigo).toBe("compra_cambio");
     const otro = await comprasDeViaje(enviar("POST", "/x", { viaje_id: INEXISTENTE, compras: [{ id: c102.id, revision: 1 }] }), ctx(VIAJE_AGR.v261001));
     expect(otro.status).toBe(400);
+    expect(llamadasRpc("asignar_viaje_compras")).toHaveLength(1);
+  });
+
+  it("B2: una compra repetida en `compras` se procesa una vez (una sola entrada y una sola revisión nueva); el mismo id con dos revisiones es 409 `compra_cambio` sin tocar la base", async () => {
+    const c102 = compraPorNumero("C-000102");
+    const revision = Number(c102.revision);
+    const doble = await comprasDeViaje(enviar("POST", "/x", { viaje_id: VIAJE_AGR.v261001, compras: [{ id: c102.id, revision }, { id: c102.id, revision }] }), ctx(VIAJE_AGR.v261001));
+    expect(doble.status, JSON.stringify(await doble.clone().json())).toBe(200);
+    expect((await leer<RespuestaAsignarViajeApi>(doble)).data.compras).toEqual([{ id: c102.id, revision: revision + 1 }]);
+    expect(llamadasRpc("asignar_viaje_compras")).toHaveLength(1);
+    expect((llamadasRpc("asignar_viaje_compras")[0].args.p_compras as unknown[]).length).toBe(1);
+
+    const distintas = await comprasDeViaje(enviar("POST", "/x", { viaje_id: null, compras: [{ id: c102.id, revision: revision + 1 }, { id: c102.id, revision }] }), ctx(VIAJE_AGR.v261001));
+    expect(distintas.status).toBe(409);
+    expect((await leer(distintas)).codigo).toBe("compra_cambio");
     expect(llamadasRpc("asignar_viaje_compras")).toHaveLength(1);
   });
 
@@ -631,7 +648,10 @@ describe("movimientos de entregas: vista previa, escritura y reintento con la hu
     // la asignación del 261101 no es del 261201
     const ajena = await quitarDe(E.e261201, { revision: 1, asignaciones: [{ id: ASIGNACION_AGR.l1NovP261101, compra_revision: 3 }] });
     expect(ajena.status).toBe(404);
-    expect((await leer(ajena)).codigo).toBe("no_pertenece");
+    const cuerpoAjena = await leer(ajena);
+    expect(cuerpoAjena.codigo).toBe("no_pertenece");
+    // B1: el texto dice que el embarque cambió y que se vuelve a leer (no «no pertenece a este embarque»)
+    expect(cuerpoAjena.error).toMatch(/embarque cambió.*vuelve a leer/);
     const paquete = await aPaquete(enviar("POST", "/x", { revision: 1, paquete_id: null, asignaciones: [ASIGNACION_AGR.l1NovP261101] }), ctx(E.e261201));
     expect(paquete.status).toBe(404);
     expect((await leer(paquete)).codigo).toBe("no_pertenece");
@@ -764,6 +784,25 @@ describe("movimientos de entregas: vista previa, escritura y reintento con la hu
     expect((await leer<RespuestaMovimientoApi>(r)).data.embarque.asignaciones[0]).toMatchObject({ paquete_id: PAQUETE_AGR.p261102, periodo: "2026-11" });
     const otro = await aPaquete(enviar("POST", "/x", { revision: 1, paquete_id: PAQUETE_AGR.p261101, asignaciones: [ASIGNACION_AGR.l1Dic261201] }), ctx(E.e261201));
     expect((await leer(otro)).codigo).toBe("paquete_de_otro_embarque");
+  });
+
+  it("M1: el plan trae TODAS las compras del embarque, pero solo las TOCADAS suben de revisión, salen en `compras` y quedan en el evento del embarque", async () => {
+    conCaso1();
+    // C-000102 también viaja en el 261101 (sin paquete): mover el paquete 261101 al 261201 no cambia nada de ella.
+    tablaDe("compra_entrega_asignaciones").push({ id: "a9000000-0000-4000-8000-000000000099", entrega_id: ENTREGA_AGR.c102Nov, embarque_id: E.e261101, paquete_id: null, unidades: 400, activo: true });
+    const revisionC102 = revisionCompra(COMPRA_AGR.c102);
+    const cuerpo = { revision: 1, embarque_destino_id: E.e261201, revision_destino: 1, motivo: "Pasa al embarque de diciembre" };
+    const r = await moverPaquete(enviar("POST", "/x", cuerpo), ctx(PAQUETE_AGR.p261101));
+    expect(r.status, JSON.stringify(await r.clone().json())).toBe(200);
+    const { data } = await leer<RespuestaMovimientoApi>(r);
+    const enviado = escenario.llamadas.find((l) => l.nombre === "aplicar_movimiento_agrupador")?.args.p_plan as { compras: { id: string }[] };
+    expect(enviado.compras.map((c) => c.id).sort()).toEqual([COMPRA_AGR.c101, COMPRA_AGR.c102].sort());
+    expect(data.compras).toEqual([{ id: COMPRA_AGR.c101, revision: 4 }]);
+    expect(revisionCompra(COMPRA_AGR.c101)).toBe(4);
+    expect(revisionCompra(COMPRA_AGR.c102)).toBe(revisionC102);
+    const eventos = tablaDe("compra_agrupador_eventos").filter((e) => e.accion === "mover_paquete");
+    expect(eventos.length).toBeGreaterThan(0);
+    for (const e of eventos) expect(e.compras).toEqual([{ compra_id: COMPRA_AGR.c101, revision_nueva: 4 }]);
   });
 
   it("pasar pendientes: lo pendiente va a otro embarque en curso con su motivo; sin pendientes, 409 `sin_pendientes`", async () => {

@@ -88,6 +88,13 @@ export const MAX_RESUMEN_EVENTO = 300;
 /** `p_actor` de las funciones de escritura. `perfil_id` es nulo solo en procesos sin sesión (nunca en la API). */
 export type ActorCompra = { perfil_id: string | null; nombre: string };
 
+/**
+ * `p_actor` de `importar_compra`. `restringido: true` lo manda el backend cuando quien importa es COMPRADOR: la función solo le deja
+ * agregar líneas a una compra existente si es un borrador suyo (`compra_no_borrador` si no). Admin y planner no lo mandan; la función
+ * además se restringe sola si el perfil es comprador (la clave solo puede añadir restricción, nunca quitarla).
+ */
+export type ActorImportarCompra = ActorCompra & { restringido?: true };
+
 // ─── Registros de lectura (lo mínimo que usan las funciones puras; los arma `consultas.ts`) ───
 
 export type CompraRegistro = {
