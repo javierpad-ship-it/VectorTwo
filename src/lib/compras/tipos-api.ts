@@ -389,4 +389,8 @@ export const ETIQUETA_ACCION_EVENTO: Record<AccionEvento, string> = {
   cancelar: "Canceló la compra",
   aplicar_reparto: "Aplicó el reparto vigente",
   importar: "Importó la línea",
+  asignar_viaje: "Asignó el viaje de la compra",
+  asignar_agrupador: "Asignó entregas a un embarque",
+  mover_entregas: "Movió entregas de embarque o de fecha",
+  recibir_embarque: "Confirmó el ingreso con un embarque",
 };

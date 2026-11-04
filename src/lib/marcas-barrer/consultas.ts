@@ -155,6 +155,23 @@ export async function leerVersionesVigentes(db: Db, marcaIds: readonly string[] 
   return { data: repartos.map((r) => aVersion(r, filas.data.get(r.id) ?? [])), error: null };
 }
 
+/**
+ * Las versiones con esos ids (con sus filas), vigentes o no y activas o no: aditivo de la ficha 08b (R6, revisión I6). Un lote movido
+ * se reparte de nuevo con la MISMA versión con que se repartió, aunque ya no sea la vigente. Los ids que no existen no aparecen.
+ */
+export async function leerVersionesPorId(db: Db, repartoIds: readonly string[]): Promise<Resultado<VersionLeida[]>> {
+  const ids = [...new Set(repartoIds)];
+  const repartos: RepartoDb[] = [];
+  for (const tanda of enTandas(ids, TANDA_IN)) {
+    const r = await leerTodo<RepartoDb>((d, h) => db.from("repartos_marca_barrido").select("*").in("id", tanda).order("id").range(d, h));
+    if (r.error) return { data: [], error: r.error };
+    repartos.push(...r.data);
+  }
+  const filas = await leerFilasDeVersiones(db, repartos.map((r) => r.id));
+  if (filas.error) return { data: [], error: filas.error };
+  return { data: repartos.map((r) => aVersion(r, filas.data.get(r.id) ?? [])), error: null };
+}
+
 /** Todas las versiones de una marca (la más reciente primero), con sus filas. */
 export async function leerVersionesDeMarca(db: Db, marcaId: string): Promise<Resultado<VersionLeida[]>> {
   const r = await leerTodo<RepartoDb>((d, h) =>

@@ -26,6 +26,7 @@ import {
   leerResumenVenta,
   leerVentaMarcaGml,
   leerVersionesDeMarca,
+  leerVersionesPorId,
   leerVersionesVigentes,
   primerDia,
   siguienteVersion,
@@ -623,6 +624,18 @@ export async function leerRepartosVigentes(d: Db, marcaIds: readonly string[] | 
     todas = [...new Set(unidadesFlujoEspecial((gml as EstadoGmlCargado).estado).unidades.filter((u) => u.modalidad === "barrido").map((u) => u.marca_id))];
   }
   return listo(armarRepartosVigentes(versiones.data, marcaIds, todas));
+}
+
+/**
+ * Repartos por id, SIN filtrar por vigente ni por activo (aditivo de la ficha 08b, R6): los agrupadores de compras reparten de nuevo
+ * un lote movido con la misma versión con que se repartió, aunque M12 ya haya aprobado otra. Misma forma que los vigentes
+ * (`RepartoVigenteApi`; las filas con participación 0 no vienen). Los ids que no existen simplemente no aparecen en la respuesta.
+ */
+export async function leerRepartosPorId(d: Db, repartoIds: readonly string[]): Promise<Salida<RepartoVigenteApi[]>> {
+  if (repartoIds.length === 0) return listo([]);
+  const versiones = await leerVersionesPorId(d, repartoIds);
+  if (versiones.error) return fallaDb(versiones.error, "marcas al barrer: leer los repartos por id");
+  return listo(armarRepartosVigentes(versiones.data, null, []).repartos);
 }
 
 // ─── Lista ───

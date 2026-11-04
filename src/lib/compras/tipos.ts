@@ -1,3 +1,5 @@
+import { ACCIONES_EVENTO_COMPRA_AGRUPADORES, ORIGEN_ENTREGA_EMBARQUE } from "./agrupadores/tipos";
+
 /**
  * Constantes y registros de lectura de las compras (M8, ficha 08, secciones 0, 6 y 7). Lógica pura y sin I/O: lo importan
  * `src/lib/compras/**` y, por la regla de independencia (ficha 08, §0.8), `src/lib/flujo/**` (que solo puede importar de compras
@@ -35,7 +37,8 @@ export type TipoLinea = (typeof TIPOS_LINEA)[number];
 /** En `0.13.0` existen `especifica` y `barrer_marca`; `barrer_mezcla` entra con M9a. */
 export const TIPOS_LINEA_DISPONIBLES: readonly TipoLinea[] = ["especifica", "barrer_marca"];
 
-export const ORIGENES_ENTREGA = ["manual", "estacionalidad", "importada"] as const;
+/** `embarque` es el origen de las entregas que crea un movimiento de agrupadores (ficha 08b, §2.7); el valor vive en `agrupadores/tipos.ts`. */
+export const ORIGENES_ENTREGA = ["manual", "estacionalidad", "importada", ORIGEN_ENTREGA_EMBARQUE] as const;
 export type OrigenEntrega = (typeof ORIGENES_ENTREGA)[number];
 
 export const ORIGENES_RECEPCION = ["manual", "sugerencia", "importada"] as const;
@@ -53,6 +56,8 @@ export const ACCIONES_EVENTO = [
   "cancelar",
   "aplicar_reparto",
   "importar",
+  // Ficha 08b (§2.7): asignar viaje, asignar o mover entregas de un embarque y (08b-2) recibir un embarque.
+  ...ACCIONES_EVENTO_COMPRA_AGRUPADORES,
 ] as const;
 export type AccionEvento = (typeof ACCIONES_EVENTO)[number];
 
