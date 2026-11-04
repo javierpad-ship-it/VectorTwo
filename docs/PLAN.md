@@ -134,6 +134,7 @@ Es la única fuente para saber qué número toma cada entrega (actualizada el 20
 | `0028` | M9a | reservada |
 | `0032` | 08b-1 (`0032_agrupadores_compras.sql`) | en construcción (`datos`) |
 | `0033` | 07f (`0033_venta_tienda_nodos.sql`, solo la función de lectura `venta_tienda_nodos`) | aplicada en Vector2 (`datos`); falta el código de 07f |
+| `0034` | 08b-1, correcciones tras QA y seguridad (`0034_importar_borrador_propio.sql`: `importar_compra`, `aplicar_movimiento_agrupador` y `asignar_viaje_compras`, solo funciones) | aplicada en Vector2 (`datos`) |
 | la siguiente libre, por orden de cierre | 08c E1 (`00E1_proveedores_y_fotos`), 08b-2 (`00B2_recibir_embarque`) y 08c E2 (`00E2_parametros_precio`) | sin número |
 
 **Orden del camino de compras: 08b-1 → E1 (08c) → 08b-2 → E2 (08c) → E3 (08c, sin migración)**, después `0.13.1` y M9a; nunca dos en paralelo. 07f va por el camino de la proyección y toma la siguiente libre cuando cierre.
