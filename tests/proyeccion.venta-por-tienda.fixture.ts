@@ -88,7 +88,7 @@ function segmento(t: string, s: Segmento): SerieVentaTienda[] {
 }
 const seg = (t: string, anio: number, desde: number, hasta: number, u: number, precio = 50): SerieVentaTienda[] => segmento(t, { anio, desde, hasta, u, precio });
 
-/** La venta de MUJER · URBANO de la ficha §8 (toda en el nodo `mu1`; `mu2` solo trae filas base). T01: S/ 380 000 en ene–sep 2025 y S/ 480 000 en ene–sep 2026. */
+/** La venta de MUJER · URBANO de la ficha §8 (toda en el nodo `mu1`; `mu2` solo trae filas base). T01: S/ 380 000 en ene–set 2025 y S/ 480 000 en ene–set 2026. */
 export function seriesMujerUrbano(): SerieVentaTienda[] {
   return [
     ...seg(T.T01, 2023, 1, 12, 6000, 70),

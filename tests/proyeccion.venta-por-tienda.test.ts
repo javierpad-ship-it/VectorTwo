@@ -174,7 +174,7 @@ describe("caso sintético de la ficha §8 (MUJER · URBANO)", () => {
     expect(r.totales.conjunto.vigente).toBeNull();
   });
 
-  it("T01: ene–sep 2025 S/ 380 000 y ene–sep 2026 S/ 480 000, +26,3 % en S/ frente a +20,0 % en u", () => {
+  it("T01: ene–set 2025 S/ 380 000 y ene–set 2026 S/ 480 000, +26,3 % en S/ frente a +20,0 % en u", () => {
     const t = tienda(r, "T01");
     expect(t.periodos["2025-ac"]).toMatchObject({ u: 5000, s: 380000 });
     expect(t.periodos["2026-ac"]).toMatchObject({ u: 6000, s: 480000 });
@@ -192,7 +192,7 @@ describe("caso sintético de la ficha §8 (MUJER · URBANO)", () => {
     expect(redondear(par(r, tienda(r, "T01"), "vigente").u.pct)).toBe(20);
   });
 
-  it("T10 (entra): ene–sep 2025 es 0, así que su variación es «nueva»; su 2025 es parcial y su vigente frente a 2025, «parcial»", () => {
+  it("T10 (entra): ene–set 2025 es 0, así que su variación es «nueva»; su 2025 es parcial y su vigente frente a 2025, «parcial»", () => {
     const t = tienda(r, "T10");
     expect(t.estado).toBe("entra");
     expect(t.periodos["2025"]?.completo).toBe(false);
@@ -223,7 +223,7 @@ describe("caso sintético de la ficha §8 (MUJER · URBANO)", () => {
       delGrupo.filter((t) => !(base.no_comparables[clave] ?? []).includes(t.codigo) && !(base.no_comparables[contra] ?? []).includes(t.codigo));
     const comparable = (clave: string, contra: string, valor: (t: TiendaVentaApi) => number, anterior: (t: TiendaVentaApi) => number) =>
       (suma(sinParciales(clave, contra).map(valor)) / suma(sinParciales(clave, contra).map(anterior)) - 1) * 100;
-    // ene–sep 2026 frente a ene–sep 2025: +31,8 % total (11 200 ÷ 8 500) y +17,6 % sin T10.
+    // ene–set 2026 frente a ene–set 2025: +31,8 % total (11 200 ÷ 8 500) y +17,6 % sin T10.
     expect(redondear((11200 / 8500 - 1) * 100)).toBe(31.8);
     expect(redondear(comparable("2026-ac", "2025-ac", (t) => t.periodos["2026-ac"]?.u ?? 0, (t) => t.periodos["2025-ac"]?.u ?? 0))).toBe(17.6);
     // Cierre vigente frente a 2025: +27,9 % total (15 600 ÷ 12 200) y +17,6 % sin T10 (que no estuvo abierta todo 2025).
@@ -240,7 +240,7 @@ describe("caso sintético de la ficha §8 (MUJER · URBANO)", () => {
     expect(r.totales.conjunto.periodos["2026-ac"]?.s).toBe(480000 + 3000 * 50 + 1000 * 50 + 1200 * 50 + 800 * 50 + 400 * 50);
   });
 
-  it("los periodos: 2023, 2024, 2025 completos y los cortes ene–sep de 2025 y 2026", () => {
+  it("los periodos: 2023, 2024, 2025 completos y los cortes ene–set de 2025 y 2026", () => {
     expect(r.periodos.map((p) => [p.clave, p.anio, p.hasta_mes, p.meses_faltantes.length])).toEqual([
       ["2023", 2023, 12, 0],
       ["2024", 2024, 12, 0],
@@ -305,11 +305,11 @@ describe("regla 4 · grupos de tiendas desde los bloques guardados", () => {
 });
 
 describe("regla 6 · el corte es el último mes cerrado de la proyección", () => {
-  it("con venta de octubre y hasta_periodo = 2026-09, «2026 ene–sep» no incluye octubre y «2025 ene–sep» usa los mismos 9 meses", () => {
+  it("con venta de octubre y hasta_periodo = 2026-09, «2026 ene–set» no incluye octubre y «2025 ene–set» usa los mismos 9 meses", () => {
     const base = entradaMujerUrbano();
     const r = armar({ series: [...base.series, { t: T.T01, p: "2026-10", u: 5000, s: 400000 }, { t: T.T01, p: "2026-11", u: 100, s: 1 }] });
     expect(tienda(r, "T01").periodos["2026-ac"]).toMatchObject({ u: 6000, s: 480000 });
-    // Octubre de 2025 (2 000 u / 3 meses de oct–dic) cuenta en 2025 completo y no en «2025 ene–sep».
+    // Octubre de 2025 (2 000 u / 3 meses de oct–dic) cuenta en 2025 completo y no en «2025 ene–set».
     expect(tienda(r, "T01").periodos["2025-ac"]?.u).toBe(5000);
     expect(tienda(r, "T01").periodos["2025"]?.u).toBe(7000);
     expect(r.periodos.find((p) => p.clave === "2026-ac")).toMatchObject({ anio: 2026, hasta_mes: 9 });
@@ -357,7 +357,7 @@ describe("regla 7 · variaciones", () => {
     expect(periodoCompleto("2019-03-01", "2024-02-28", 2024, 2)).toBe(false);
   });
 
-  it("las comparaciones existentes: 2024÷2023, 2025÷2024, ene–sep y el vigente solo en unidades", () => {
+  it("las comparaciones existentes: 2024÷2023, 2025÷2024, ene–set y el vigente solo en unidades", () => {
     const r = armar();
     expect(paresVariacion(2026, r.periodos)).toEqual([
       { clave: "2024", contra: "2023" },
@@ -423,7 +423,7 @@ describe("avisos", () => {
     expect(r.avisos.some((a) => a.codigo === "sin_atribuir")).toBe(false);
     const sin = armar({ series: entradaMujerUrbano().series.filter((s) => s.p < "2026-01"), fueraBase: null });
     expect(sin.base.sin_atribuir).toBe(14000);
-    expect(sin.avisos.find((a) => a.codigo === "sin_atribuir")?.mensaje).toContain("14 000 u");
+    expect(sin.avisos.find((a) => a.codigo === "sin_atribuir")?.mensaje).toContain("14,000 u");
     expect(suma(sin.tiendas.filter((t) => t.grupo === "base").map((t) => t.vigente?.u ?? 0)) + sin.base.sin_atribuir).toBe(15600);
   });
 

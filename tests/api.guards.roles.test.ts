@@ -196,10 +196,10 @@ describe("08b: agrupadores de compras (decisiones 92 y 95): el comprador escribe
 });
 
 /**
- * 07f: «Ver por tienda» (`GET …/crecimientos/por-tienda`) es una LECTURA con `requireUser`: los tres roles la ven (el comprador ve venta y stock, decisión 99) y sin sesión
- * recibe 401. Aquí van los guards REALES: pasar el guard no toca ninguna tabla de datos; sin `gm` el handler responde 400 antes de leer nada.
+ * 07f: «Ver por tienda» (`GET …/crecimientos/por-tienda`) es una lectura con `requirePlanner`, como el resto de la API de proyección: el comprador recibe 403 y sin sesión
+ * recibe 401. Aquí van los guards REALES: ni el 401 ni el 403 tocan ninguna tabla de datos.
  */
-describe("07f: GET …/crecimientos/por-tienda (guard requireUser real)", () => {
+describe("07f: GET …/crecimientos/por-tienda (guard requirePlanner real)", () => {
   const RUTA = "proyeccion/proyecciones/[id]/crecimientos/por-tienda/route.ts";
   const consultar = async (consulta = "") => {
     const modulo = (await import(/* @vite-ignore */ path.join(API, RUTA))) as { GET: (r: NextRequest, c: unknown) => Promise<Response> };
@@ -207,10 +207,10 @@ describe("07f: GET …/crecimientos/por-tienda (guard requireUser real)", () => 
     return modulo.GET(new NextRequest(url), { params: Promise.resolve({ id: UUID }) });
   };
 
-  it("abre con requireUser como primera sentencia", () => {
+  it("abre con requirePlanner como primera sentencia", () => {
     const cuerpo = cuerpoDeFuncion(limpiar(readFileSync(path.join(API, RUTA), "utf8")), "GET");
     expect(cuerpo).not.toBeNull();
-    expect(primeraSentencia(cuerpo ?? "")).toMatchObject({ tipo: "guard", guard: "requireUser" });
+    expect(primeraSentencia(cuerpo ?? "")).toMatchObject({ tipo: "guard", guard: "requirePlanner" });
   });
 
   it("sin sesión responde 401 y no toca ninguna tabla de datos", async () => {
@@ -219,9 +219,16 @@ describe("07f: GET …/crecimientos/por-tienda (guard requireUser real)", () => 
     expect(estado.tablasTocadas).toEqual([]);
   });
 
-  it("admin, planner y comprador pasan el guard (nunca 401 ni 403): sin gm, 400 antes de leer datos", async () => {
+  it("el comprador recibe 403 y no toca ninguna tabla de datos", async () => {
     estado.user = { id: "u1", email: "c@ejemplo.pe" };
-    for (const rol of ["admin", "planner", "comprador"]) {
+    estado.rol = "comprador";
+    expect((await consultar(`?gm=resto`)).status).toBe(403);
+    expect(estado.tablasTocadas).toEqual([]);
+  });
+
+  it("admin y planner pasan el guard (nunca 401 ni 403): sin gm, 400 antes de leer datos", async () => {
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    for (const rol of ["admin", "planner"]) {
       estado.rol = rol;
       const respuesta = await consultar();
       expect(respuesta.status, rol).toBe(400);

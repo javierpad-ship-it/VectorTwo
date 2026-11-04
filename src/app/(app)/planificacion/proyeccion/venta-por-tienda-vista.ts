@@ -34,10 +34,10 @@ export function opcionesPorTienda(r: Pick<ResumenCrecimientosProyeccionApi, "fil
 
 // ─── Textos ───
 
-const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"];
 export const mesCorto = (mes: number): string => MESES[mes - 1] ?? String(mes);
 
-/** `2026-09` (o `2026-09-01`) → `sep 2026`. */
+/** `2026-09` (o `2026-09-01`) → `set 2026`. */
 export function mesAnioCorto(periodo: string): string {
   return `${mesCorto(Number(periodo.slice(5, 7)))} ${periodo.slice(0, 4)}`;
 }
@@ -48,7 +48,7 @@ const nUnidades = (n: number): string => `${unidades(n)} u`;
 /** «Venta por tienda · MUJER · URBANO». */
 export const tituloPorTienda = (nombre: string): string => `Venta por tienda · ${nombre}`;
 
-/** «2023», «2025 ene–sep», «2026 ene–sep (real)». */
+/** «2023», «2025 ene–set», «2026 ene–set (real)». */
 export function etiquetaPeriodo(p: Pick<PeriodoVentaApi, "clave" | "anio" | "hasta_mes">, anioEnCurso: number): string {
   if (!p.clave.endsWith("-ac")) return String(p.anio);
   return `${p.anio} ene–${mesCorto(p.hasta_mes)}${p.anio === anioEnCurso ? " (real)" : ""}`;
@@ -67,7 +67,7 @@ export function textoFaltan(meses: readonly string[]): string | null {
   return `faltan: ${lista}${meses.length > 3 ? ` +${meses.length - 3} más` : ""}`;
 }
 
-/** La leyenda bajo la cabecera: «Soles netos de IGV. Sin CD. Datos hasta sep 2026». */
+/** La leyenda bajo la cabecera: «Soles netos de IGV. Sin CD. Datos hasta set 2026». */
 export const textoLeyendaPorTienda = (hastaPeriodo: string): string => `Soles netos de IGV. Sin CD. Datos hasta ${mesAnioCorto(hastaPeriodo)}.`;
 
 export type Segmento = { texto: string; negrita?: boolean };
@@ -123,6 +123,32 @@ export const AYUDA_MOTIVO: Record<MotivoVariacion, string> = {
   parcial: "Parcial: la tienda no estuvo abierta todo uno de los dos periodos, así que la comparación no es válida.",
   incompleto: "Incompleto: falta un mes publicado en uno de los dos periodos.",
 };
+
+/** La explicación corta de cada motivo para la leyenda visible bajo la tabla (sin depender del `title`, que no existe en el móvil). */
+const LEYENDA_MOTIVO: Record<MotivoVariacion, string> = {
+  nueva: "no vendió en el periodo anterior, no hay % que calcular",
+  sin_dato: "sin venta en los dos periodos, o el anterior es negativo",
+  parcial: "la tienda no estuvo abierta todo uno de los dos periodos",
+  incompleto: "falta un mes publicado en uno de los dos periodos",
+};
+const ORDEN_MOTIVOS: MotivoVariacion[] = ["nueva", "parcial", "incompleto", "sin_dato"];
+
+/** Los motivos que de verdad aparecen en la tabla (también en las comparables), en orden fijo; vacío si ninguna celda trae motivo. */
+export function motivosPresentes(filas: readonly Pick<FilaPorTienda, "variaciones">[]): MotivoVariacion[] {
+  const hay = new Set<MotivoVariacion>();
+  for (const f of filas) {
+    for (const c of Object.values(f.variaciones)) {
+      for (const m of [c.u.motivo, c.s?.motivo ?? null, c.comparable?.u.motivo ?? null, c.comparable?.s?.motivo ?? null]) if (m) hay.add(m);
+    }
+  }
+  return ORDEN_MOTIVOS.filter((m) => hay.has(m));
+}
+
+/** «Variación sin %: «nueva» no vendió…; «parcial» …» con solo los motivos presentes; `null` si no hay ninguno. */
+export function textoLeyendaMotivos(motivos: readonly MotivoVariacion[]): string | null {
+  if (motivos.length === 0) return null;
+  return `Variación sin %: ${motivos.map((m) => `«${TEXTO_MOTIVO[m]}» ${LEYENDA_MOTIVO[m]}`).join("; ")}.`;
+}
 
 // ─── Modelo de la tabla ───
 
@@ -455,8 +481,10 @@ export function claseFilaPorTienda(f: Pick<FilaPorTienda, "tipo">): string | und
 
 const redondear1 = (x: number | null): number | null => (x === null ? null : Math.round(x * 10) / 10);
 
+/** El motivo con la etiqueta de la pantalla («—», «nueva», «parcial», «incompleto»), no el código crudo; si u y S/ coinciden se dice una sola vez, como en la celda. */
 function textoMotivos(c: CeldaVariacion): string {
-  const una = (x: VariacionVenta | null, medida: string) => (x?.motivo ? `${medida}: ${x.motivo}` : null);
+  if (c.u.motivo && c.u.motivo === (c.s?.motivo ?? null)) return TEXTO_MOTIVO[c.u.motivo];
+  const una = (x: VariacionVenta | null, medida: string) => (x?.motivo ? `${medida}: ${TEXTO_MOTIVO[x.motivo]}` : null);
   return [una(c.u, "u"), una(c.s, "S/")].filter(Boolean).join("; ");
 }
 

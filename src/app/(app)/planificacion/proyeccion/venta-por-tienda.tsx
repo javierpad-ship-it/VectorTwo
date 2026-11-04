@@ -15,9 +15,11 @@ import {
   claseFilaPorTienda,
   hojasPorTienda,
   mesCorto,
+  motivosPresentes,
   tablaPorTienda,
   textoAlertaDatosCambiados,
   textoFaltan,
+  textoLeyendaMotivos,
   textoLeyendaPorTienda,
   tituloPorTienda,
   type CeldaPeriodo,
@@ -32,7 +34,7 @@ import { formatearMomento, nombreArchivoProyeccion } from "./vista";
 
 /**
  * «Ver por tienda» (ficha 07f): la venta por tienda y año de un género × mundo (o del Resto) debajo de la tabla de Crecimientos. SOLO LECTURA: lee
- * `GET …/crecimientos/por-tienda?gm=` (`requireUser`, la ven los tres roles) y no escribe nada. Muestra qué tiendas y qué años hay detrás de la «Base 2026 (u)»
+ * `GET …/crecimientos/por-tienda?gm=` (`requirePlanner`) y no escribe nada. Muestra qué tiendas y qué años hay detrás de la «Base 2026 (u)»
  * de esa fila: las tiendas de la base marcadas aparte de las que quedan fuera, y un subtotal de la base que cuadra exacto con Σ B. La elección vive en la URL
  * (`?por_tienda=`), la lleva `proyeccion-panel.tsx`.
  */
@@ -276,6 +278,7 @@ function columnaDe(c: ColumnaPorTienda): Columna<FilaPorTienda> {
 export function TablaVentaPorTienda({ datos }: { datos: VentaPorTiendaApi }) {
   const t = tablaPorTienda(datos);
   const hayComparable = t.filas.some((f) => Object.values(f.variaciones).some((v) => v.comparable));
+  const leyendaMotivos = textoLeyendaMotivos(motivosPresentes(t.filas));
   return (
     <div className="min-w-0 space-y-2">
       <section aria-label={`Venta por tienda y año de ${datos.conjunto.nombre}`}>
@@ -288,6 +291,7 @@ export function TablaVentaPorTienda({ datos }: { datos: VentaPorTiendaApi }) {
             vigente exacto.
           </p>
         )}
+        {leyendaMotivos && <p>{leyendaMotivos}</p>}
         {hayComparable && <p>«Comparable»: la misma variación sin las tiendas que no estuvieron abiertas todo el periodo.</p>}
       </div>
     </div>

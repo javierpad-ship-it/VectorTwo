@@ -60,11 +60,13 @@ beforeEach(() => {
 });
 
 describe("regla 10 · permisos y errores de la ruta", () => {
-  it("sin sesión 401; admin, planner y comprador ven la venta por tienda (requireUser: el comprador ve venta y stock, decisión 99)", async () => {
+  it("sin sesión 401; el comprador 403 (no ve Planificación); admin y planner ven la venta por tienda", async () => {
     estadoRol.rol = "sin_sesion";
     expect((await pedir(GM_MU)).status).toBe(401);
+    estadoRol.rol = "comprador";
+    expect((await pedir(GM_MU)).status).toBe(403);
     expect(base.llamadasVentaTienda).toHaveLength(0);
-    for (const rol of ["admin", "planner", "comprador"] as const) {
+    for (const rol of ["admin", "planner"] as const) {
       estadoRol.rol = rol;
       expect((await pedir(GM_MU)).status, rol).toBe(200);
     }
@@ -207,7 +209,7 @@ describe("la lectura de venta: nodos, rango y forma", () => {
     expect(r.totales.conjunto.periodos["2026-ac"]?.u).toBe(12400);
   });
 
-  it("aunque la función devuelva meses posteriores al corte, «2026 ene–sep» no los incluye", async () => {
+  it("aunque la función devuelva meses posteriores al corte, «2026 ene–set» no los incluye", async () => {
     ajustes.extra = [{ t: T.T01, p: "2026-10", u: 5000, s: 400000 }];
     base.ventaTienda = (args) => ({
       series: [...seriesMujerUrbano().filter((s) => s.t !== T.CD1), { t: T.T01, p: "2026-10", u: 5000, s: 400000 }].filter((s) => args.p_gml_ids.includes(NODO.mu1) && s.p >= "2023-01"),

@@ -227,14 +227,8 @@ describe("M7: rutas", () => {
     for (const r of RUTAS) expect(metodos(r.texto), r.ruta).toEqual(esperado[r.ruta]);
   });
 
-  it("toda ruta usa requirePlanner y ningún otro guard, salvo la lectura de «Ver por tienda» (07f), que usa requireUser (el comprador ve venta y stock, decisión 99)", () => {
+  it("toda ruta usa requirePlanner y ningún otro guard", () => {
     for (const r of RUTAS) {
-      if (r.ruta === RUTA_POR_TIENDA) {
-        const t = sinComentarios(r.texto);
-        expect(t, r.ruta).toMatch(/const \{ response \} = await requireUser\(\);\s*if \(response\) return response;/);
-        expect(t, r.ruta).not.toMatch(/requirePlanner|requireAdmin/);
-        continue;
-      }
       expect(r.texto, r.ruta).toContain("requirePlanner");
       expect(r.texto, r.ruta).not.toMatch(/requireUser|requireAdmin/);
     }
@@ -534,8 +528,9 @@ describe("07f: «Ver por tienda» es de solo lectura, no mezcla fuentes y la fun
     expect(importsDe(fuente(SERVICIO)).filter((o) => /lib\/ia(\/|$)|aprobacion|database\.types/.test(o))).toEqual([]);
   });
 
-  it("la ruta abre con requireUser, valida la consulta con porTiendaQuerySchema y no toca la base", () => {
+  it("la ruta abre con requirePlanner, valida la consulta con porTiendaQuerySchema y no toca la base", () => {
     const t = sinComentarios(fuente(RUTA_POR_TIENDA));
+    expect(t).toMatch(/const \{ response \} = await requirePlanner\(\);\s*if \(response\) return response;/);
     expect(t).toMatch(/leerConsulta\(request, porTiendaQuerySchema\)/);
     expect(t).not.toMatch(/supabaseAdmin|supabaseServer|\.from\(|\.rpc\(/);
     expect(sin(`${LIB}esquemas.ts`)).toMatch(/export const porTiendaQuerySchema = z\.strictObject\(/);

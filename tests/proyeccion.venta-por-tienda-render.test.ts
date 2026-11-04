@@ -15,6 +15,7 @@ import {
   ventaMujerUrbano,
   ventaResto,
   ventaSinAtribuir,
+  ventaRestoSinFilas,
   ventaSinFilas,
 } from "./proyeccion.venta-por-tienda-pantalla.fixture";
 
@@ -60,10 +61,10 @@ beforeEach(() => {
 describe("la tabla de venta por tienda", () => {
   const s = html(createElement(TablaVentaPorTienda, { datos: ventaMujerUrbano() }));
 
-  it("las columnas de la ficha: tienda, años con su variación, ene–sep (las dos), cierre vigente y su variación", () => {
-    for (const c of ["Tienda", "2023", "2024", "2025", "2025 ene–sep", "2026 ene–sep (real)", "2026 cierre vigente", "solo unidades"]) expect(s).toContain(c);
+  it("las columnas de la ficha: tienda, años con su variación, ene–set (las dos), cierre vigente y su variación", () => {
+    for (const c of ["Tienda", "2023", "2024", "2025", "2025 ene–set", "2026 ene–set (real)", "2026 cierre vigente", "solo unidades"]) expect(s).toContain(c);
     expect(s.match(/>Var\.</g)).toHaveLength(4);
-    expect(s).toContain("vs 2025 ene–sep");
+    expect(s).toContain("vs 2025 ene–set");
   });
 
   it("las filas: tiendas de la base, subtotal Σ B con su marca, fuera con su subtotal y el total", () => {
@@ -97,7 +98,7 @@ describe("la tabla de venta por tienda", () => {
     expect(s).toContain(">parcial<");
     expect(s).toContain("+31.8 % u");
     expect(s).toContain("comparable +17.6 % u");
-    expect(s).toContain("El subtotal incluye T10, sin 2025 ene–sep completo");
+    expect(s).toContain("El subtotal incluye T10, sin 2025 ene–set completo");
     expect(s).toContain("«Comparable»: la misma variación sin las tiendas que no estuvieron abiertas todo el periodo.");
   });
 
@@ -111,8 +112,8 @@ describe("la tabla de venta por tienda", () => {
     expect(s).toContain("Su 2026 sale de la base (B2); no se reparte por tienda.");
   });
 
-  it("nota de la base: el estimado se reparte por el real ene–sep y cuadra con la base", () => {
-    expect(s).toContain("«Estimado»: el resto de la base se reparte entre las mismas tiendas en proporción a su real ene–sep");
+  it("nota de la base: el estimado se reparte por el real ene–set y cuadra con la base", () => {
+    expect(s).toContain("«Estimado»: el resto de la base se reparte entre las mismas tiendas en proporción a su real ene–set");
     expect(s).toContain("cuadra exacto con la base de 2027");
   });
 
@@ -163,7 +164,7 @@ describe("el contenido de la tarjeta", () => {
     expect(s).toContain("<strong>vigentes</strong>");
     expect(s).toContain("<strong>mismas tiendas de 2027 (4 tiendas: abiertas los doce meses de 2026)</strong>");
     expect(s).toContain("base corregida del Niño (16,400 u)");
-    expect(s).toContain("Soles netos de IGV. Sin CD. Datos hasta sep 2026.");
+    expect(s).toContain("Soles netos de IGV. Sin CD. Datos hasta set 2026.");
   });
 
   it("muestra los avisos de la API tal como vienen", () => {
@@ -191,9 +192,19 @@ describe("el contenido de la tarjeta", () => {
     expect(contenido()).not.toContain("cambió de datos");
   });
 
+  it("H6: la leyenda de los motivos y el «Estimado» se ven bajo la tabla (sin depender del hover)", () => {
+    const c = contenido(ventaMujerUrbano());
+    expect(c).toContain("Variación sin %:");
+    expect(c).toContain("«nueva» no vendió en el periodo anterior");
+    expect(c).toContain("«parcial» la tienda no estuvo abierta todo uno de los dos periodos");
+    expect(c).toContain("«Estimado»: el resto de la base se reparte");
+  });
+
   it("método anterior y sin filas: los mensajes de la ficha", () => {
     expect(contenido(ventaMetodoAnterior())).toContain("Recalcula la proyección para ver la base 2027");
     expect(contenido(ventaSinFilas())).toContain("Este GM no tiene filas base en 2027");
+    expect(contenido(ventaRestoSinFilas())).toContain("El Resto no tiene filas base en 2027");
+    expect(contenido(ventaRestoSinFilas())).not.toContain("Este GM");
   });
 });
 
@@ -207,6 +218,14 @@ describe("la tarjeta «Venta por tienda»", () => {
     expect(s).toContain('<option value="resto">Resto</option>');
     expect(s).toContain(">Cerrar</button>");
     expect(deshabilitado(boton(s, "Descargar Excel"))).toBe(true);
+  });
+
+  it("la tarjeta «Resto» sin filas base dice «El Resto no tiene filas base», no «Este GM»", () => {
+    falsa.valor = { datos: ventaRestoSinFilas(), cargando: false, error: null, codigo: null };
+    const s = tarjeta({ clave: "resto" });
+    expect(s).toContain("Venta por tienda · Resto");
+    expect(s).toContain("El Resto no tiene filas base en 2027");
+    expect(s).not.toContain("Este GM no tiene filas base");
   });
 
   it("lee la ruta del contrato con el conjunto en `gm` y nada más", () => {
@@ -258,6 +277,16 @@ describe("«Ver por tienda» en la tabla de Crecimientos", () => {
     expect(con).toContain('aria-label="Ver por tienda Resto"');
     expect(con).not.toContain("Ver por tienda Total");
     expect(con.match(/>Analizar y aprobar</g)).toHaveLength(5);
+  });
+
+  it("H5: el botón va en la primera columna (bajo el nombre), no en la última: se ve en el móvil sin desplazar", () => {
+    const filaHombre = con.slice(con.indexOf("HOMBRE · FORMAL"));
+    const iBoton = filaHombre.indexOf('aria-label="Ver por tienda HOMBRE · FORMAL"');
+    expect(iBoton).toBeGreaterThan(-1);
+    // Está en la primera celda de la fila; la última (el enlace «Analizar y aprobar») ya no lo trae.
+    const celdas = filaHombre.split("</td>");
+    expect(celdas[0]).toContain('aria-label="Ver por tienda HOMBRE · FORMAL"');
+    expect(celdas[celdas.length - 2] ?? "").not.toContain("Ver por tienda");
   });
 
   it("marca el conjunto abierto (aria-pressed) y solo ese", () => {

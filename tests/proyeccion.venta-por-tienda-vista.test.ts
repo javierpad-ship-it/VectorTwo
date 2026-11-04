@@ -66,8 +66,8 @@ describe("la clave de la URL y los conjuntos", () => {
 describe("textos", () => {
   it("meses en palabras y leyenda con el corte", () => {
     expect(mesAnioCorto("2024-03")).toBe("mar 2024");
-    expect(mesAnioCorto("2026-09-01")).toBe("sep 2026");
-    expect(textoLeyendaPorTienda("2026-09")).toBe("Soles netos de IGV. Sin CD. Datos hasta sep 2026.");
+    expect(mesAnioCorto("2026-09-01")).toBe("set 2026");
+    expect(textoLeyendaPorTienda("2026-09")).toBe("Soles netos de IGV. Sin CD. Datos hasta set 2026.");
     expect(tituloPorTienda("MUJER · URBANO")).toBe("Venta por tienda · MUJER · URBANO");
   });
 
@@ -79,8 +79,8 @@ describe("textos", () => {
 
   it("etiquetas de periodo: año, ene–k del año anterior y ene–k real del año en curso", () => {
     expect(etiquetaPeriodo({ clave: "2024", anio: 2024, hasta_mes: 12 }, 2026)).toBe("2024");
-    expect(etiquetaPeriodo({ clave: "2025-ac", anio: 2025, hasta_mes: 9 }, 2026)).toBe("2025 ene–sep");
-    expect(etiquetaPeriodo({ clave: "2026-ac", anio: 2026, hasta_mes: 9 }, 2026)).toBe("2026 ene–sep (real)");
+    expect(etiquetaPeriodo({ clave: "2025-ac", anio: 2025, hasta_mes: 9 }, 2026)).toBe("2025 ene–set");
+    expect(etiquetaPeriodo({ clave: "2026-ac", anio: 2026, hasta_mes: 9 }, 2026)).toBe("2026 ene–set (real)");
   });
 
   it("aviso de datos cambiados solo con los motivos que mueven el real por tienda", () => {
@@ -97,7 +97,7 @@ describe("cabecera de la tarjeta", () => {
   it("dice la base, que es el vigente de las mismas tiendas, cuántas son y la corregida del Niño", () => {
     const t = textoPlano(cabeceraPorTienda(ventaMujerUrbano()));
     expect(t).toContain("Base 2027 = 15,600 u");
-    expect(t).toContain("unidades 2026 vigentes (real ene–sep + proyectado oct–dic)");
+    expect(t).toContain("unidades 2026 vigentes (real ene–set + proyectado oct–dic)");
     expect(t).toContain("mismas tiendas de 2027 (4 tiendas: abiertas los doce meses de 2026)");
     expect(t).toContain("Es la «Base 2026 (u)» real de la tabla de arriba");
     expect(t).toContain("T10 entra con su 2026 vigente exacto");
@@ -119,14 +119,14 @@ describe("cabecera de la tarjeta", () => {
 });
 
 describe("columnas", () => {
-  it("tienda, cada año con su variación, las dos columnas de ene–sep, y el cierre vigente con la suya", () => {
+  it("tienda, cada año con su variación, las dos columnas de ene–set, y el cierre vigente con la suya", () => {
     expect(columnasPorTienda(ventaMujerUrbano()).map((c) => c.clave)).toEqual(["tienda", "2023", "2024", "var:2024", "2025", "var:2025", "2025-ac", "2026-ac", "var:2026-ac", "vigente", "var:vigente"]);
   });
 
   it("la variación dice contra qué se compara", () => {
     const c = columnasPorTienda(ventaMujerUrbano());
     expect(c.find((x) => x.clave === "var:2024")?.subtitulo).toBe("vs 2023");
-    expect(c.find((x) => x.clave === "var:2026-ac")?.subtitulo).toBe("vs 2025 ene–sep");
+    expect(c.find((x) => x.clave === "var:2026-ac")?.subtitulo).toBe("vs 2025 ene–set");
     expect(c.find((x) => x.clave === "var:vigente")?.subtitulo).toBe("vs 2025");
     expect(c.find((x) => x.clave === "vigente")?.titulo).toBe("2026 cierre vigente");
   });
@@ -193,7 +193,7 @@ describe("filas y subtotales (§5 y caso §8)", () => {
   });
 
   it("motivos: nueva, parcial y sin dato", () => {
-    // T10 abrió en nov 2025: ene–sep 2025 es 0 → «nueva»; 2025 y el vigente frente a un 2025 parcial → «nueva» y «parcial».
+    // T10 abrió en nov 2025: ene–set 2025 es 0 → «nueva»; 2025 y el vigente frente a un 2025 parcial → «nueva» y «parcial».
     expect(lineas(fila(t.filas, "T10"), "2026-ac")).toEqual(["nueva"]);
     expect(lineas(fila(t.filas, "T10"), "2025")).toEqual(["nueva"]);
     expect(lineas(fila(t.filas, "T10"), "vigente")).toEqual(["parcial"]);
@@ -217,7 +217,7 @@ describe("filas y subtotales (§5 y caso §8)", () => {
     expect(sub.periodos["2026-ac"].u).toBe("11,200 u");
     expect(lineas(sub, "2026-ac")[0]).toBe("+31.8 % u");
     expect(sub.variaciones["2026-ac"].comparable?.texto).toMatch(/^comparable \+17\.6 % u/);
-    expect(sub.variaciones["2026-ac"].comparable?.titulo).toContain("El subtotal incluye T10, sin 2025 ene–sep completo");
+    expect(sub.variaciones["2026-ac"].comparable?.titulo).toContain("El subtotal incluye T10, sin 2025 ene–set completo");
     expect(sub.vigente?.principal).toBe("15,600 u");
     expect(lineas(sub, "vigente")).toEqual(["+27.9 % u"]);
     expect(sub.variaciones["vigente"].comparable?.texto).toBe("comparable +17.6 % u");
@@ -352,12 +352,12 @@ describe("Excel", () => {
     expect(hojas.POR_TIENDA).toHaveLength(1 + t.filas.length);
     const cab = hojas.POR_TIENDA[0];
     expect(cab.slice(0, 4)).toEqual(["GRUPO", "CODIGO", "TIENDA", "ESTADO"]);
-    expect(cab).toContain("2026 ENE–SEP (REAL) U");
-    expect(cab).toContain("2026 ENE–SEP (REAL) S/");
+    expect(cab).toContain("2026 ENE–SET (REAL) U");
+    expect(cab).toContain("2026 ENE–SET (REAL) S/");
     expect(cab).toContain("2026 CIERRE VIGENTE U");
     expect(cab).toContain("2026 CIERRE VIGENTE TIPO");
-    expect(cab).toContain("VAR 2026 ENE–SEP (REAL) U %");
-    expect(cab).toContain("VAR 2026 ENE–SEP (REAL) COMPARABLE U %");
+    expect(cab).toContain("VAR 2026 ENE–SET (REAL) U %");
+    expect(cab).toContain("VAR 2026 ENE–SET (REAL) COMPARABLE U %");
     // Todas las filas tienen el ancho de la cabecera (sin columnas corridas).
     for (const f of hojas.POR_TIENDA) expect(f).toHaveLength(cab.length);
   });
@@ -367,10 +367,10 @@ describe("Excel", () => {
     const col = (n: string) => cab.indexOf(n);
     const t01 = hojas.POR_TIENDA.find((f) => f[1] === "T01") ?? [];
     expect(t01[0]).toBe("BASE");
-    expect(t01[col("2026 ENE–SEP (REAL) U")]).toBe(6000);
-    expect(t01[col("2026 ENE–SEP (REAL) S/")]).toBe(480000);
-    expect(t01[col("VAR 2026 ENE–SEP (REAL) U %")]).toBe(20);
-    expect(t01[col("VAR 2026 ENE–SEP (REAL) S/ %")]).toBe(26.3);
+    expect(t01[col("2026 ENE–SET (REAL) U")]).toBe(6000);
+    expect(t01[col("2026 ENE–SET (REAL) S/")]).toBe(480000);
+    expect(t01[col("VAR 2026 ENE–SET (REAL) U %")]).toBe(20);
+    expect(t01[col("VAR 2026 ENE–SET (REAL) S/ %")]).toBe(26.3);
     expect(t01[col("2026 CIERRE VIGENTE U")]).toBe(8400);
     expect(t01[col("2026 CIERRE VIGENTE TIPO")]).toBe("estimado");
     const sub = hojas.POR_TIENDA.find((f) => f[0] === "SUBTOTAL BASE") ?? [];

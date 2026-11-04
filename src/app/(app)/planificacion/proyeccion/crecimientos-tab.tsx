@@ -301,6 +301,14 @@ export function TablaResumenCrecimientos({
           {f.nombre}
           {f.desglose && <p className="text-xs font-normal text-tinta-suave">{f.desglose}</p>}
           <Insignias items={f.avisos} />
+          {/* 07f: el botón vive bajo el nombre (primera columna) para que se vea en móvil sin desplazar la tabla. */}
+          {onVerPorTienda && f.tipo !== "total" ? (
+            <div className="mt-1.5">
+              <Button variante="secundario" tamano="sm" aria-label={`Ver por tienda ${f.nombre}`} aria-pressed={porTiendaActiva === f.clave} onClick={() => onVerPorTienda(f.clave)}>
+                Ver por tienda
+              </Button>
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -380,11 +388,6 @@ export function TablaResumenCrecimientos({
             <Link href={f.enlace} className="font-medium text-marca-oscura underline underline-offset-2 hover:text-marca" aria-label={`Analizar y aprobar ${f.nombre}`}>
               Analizar y aprobar
             </Link>
-          ) : null}
-          {onVerPorTienda && f.tipo !== "total" ? (
-            <Button variante="secundario" tamano="sm" aria-label={`Ver por tienda ${f.nombre}`} aria-pressed={porTiendaActiva === f.clave} onClick={() => onVerPorTienda(f.clave)}>
-              Ver por tienda
-            </Button>
           ) : null}
         </span>
       ),

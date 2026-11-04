@@ -43,6 +43,9 @@ export const ventaMetodoAnterior = (): VentaPorTiendaApi => armarVentaPorTienda(
 /** Un GM sin filas base de `Y+1`: `motivo_nulo = sin_filas`. */
 export const ventaSinFilas = (): VentaPorTiendaApi => armarVentaPorTienda(entradaMujerUrbano({ filasBase: [] }));
 
+/** El Resto sin filas base de `Y+1`: el mismo caso con `es_resto = true`, para que la tarjeta «Resto» diga «El Resto no tiene filas base» y no «Este GM…». */
+export const ventaRestoSinFilas = (): VentaPorTiendaApi => armarVentaPorTienda(entradaMujerUrbano({ filasBase: [], conjunto: { clave: "resto", nombre: "Resto", es_resto: true } }));
+
 /** Una tienda creada después de calcular, con venta: estado `sin_bloque` y su aviso. */
 export function ventaConSinBloque(): VentaPorTiendaApi {
   const extra: SerieVentaTienda[] = Array.from({ length: 9 }, (_, i) => ({ t: "00000001-0000-4000-8000-000000000012", p: `2026-${String(i + 1).padStart(2, "0")}`, u: 10, s: 500 }));

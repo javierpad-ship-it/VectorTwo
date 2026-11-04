@@ -1,4 +1,5 @@
 import { TIPO_TIENDA } from "@/lib/curvas/red";
+import { formatearNumero } from "@/lib/formato";
 import { textoMotivoTienda } from "./bloques";
 import { diasDelMes, soloFecha } from "./calendario";
 import { agregarFilas, type FilaCrecimiento } from "./crecimientos";
@@ -39,10 +40,11 @@ export type TiendaMaestroVenta = { id: string; codigo: string; nombre: string; t
 
 // ─── Texto ───
 
-const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"];
 const dos = (n: number) => String(n).padStart(2, "0");
 const claveMes = (anio: number, mes: number) => `${anio}-${dos(mes)}`;
-const miles = (n: number) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+/** Miles con el formato `es-PE` compartido de la pestaña (coma de miles): el mismo que la tabla. */
+const miles = (n: number) => formatearNumero(Math.round(n));
 
 /** `2025-11-15` → `nov 2025`. */
 function mesAnio(fecha: string): string {
@@ -66,7 +68,7 @@ export const clavePeriodoAc = (anio: number): string => `${anio}-ac`;
 
 /**
  * Las columnas de periodo (§3.2). `publicados` son los `aaaa-mm` con carga publicada dentro del rango leído. Años completos de `Y − ANIOS_ATRAS` a `Y − 1` con al
- * menos un mes publicado, después el mismo corte ene–`k` del año anterior y el del año en curso (siempre). `meses_faltantes` lista los meses del periodo sin carga
+ * menos un mes publicado, después el mismo corte ene–`k` del año anterior (salvo con `k = 12`, que ya es el año completo) y el del año en curso (siempre). `meses_faltantes` lista los meses del periodo sin carga
  * publicada (también los de antes del primer mes cargado: un primer año que empieza en marzo tiene enero y febrero faltantes).
  */
 export function periodosVenta(anio: number, k: number, publicados: ReadonlySet<string>): PeriodoVentaApi[] {
@@ -76,7 +78,8 @@ export function periodosVenta(anio: number, k: number, publicados: ReadonlySet<s
   for (let z = anio - ANIOS_ATRAS_VENTA_TIENDA; z <= anio - 1; z++) {
     if (meses(z, 12).some((m) => publicados.has(m))) salida.push(periodo(String(z), z, 12));
   }
-  salida.push(periodo(clavePeriodoAc(anio - 1), anio - 1, k));
+  // Con el corte en diciembre (`k = 12`) el «mismo corte» del año anterior es el año completo: no se repite la columna (y la variación se compara con ese año).
+  if (k < 12 || !salida.some((p) => p.clave === String(anio - 1))) salida.push(periodo(clavePeriodoAc(anio - 1), anio - 1, k));
   salida.push(periodo(clavePeriodoAc(anio), anio, k));
   return salida;
 }
@@ -139,10 +142,12 @@ export function variacionVenta(anterior: number, actual: number, opciones: { par
 /** Las comparaciones de la tabla (§3.4) que existen en `periodos`: `2024 ÷ 2023`, `2025 ÷ 2024`, `2026-ac ÷ 2025-ac` y el vigente frente al año anterior completo. */
 export function paresVariacion(anio: number, periodos: readonly PeriodoVentaApi[]): { clave: string; contra: string }[] {
   const hay = new Set(periodos.map((p) => p.clave));
+  // Con `k = 12` no hay columna «2025-ac» (sería la misma que «2025»): el año en curso se compara con el año anterior completo.
+  const contraAc = hay.has(clavePeriodoAc(anio - 1)) ? clavePeriodoAc(anio - 1) : String(anio - 1);
   const pares = [
     { clave: String(anio - 2), contra: String(anio - 3) },
     { clave: String(anio - 1), contra: String(anio - 2) },
-    { clave: clavePeriodoAc(anio), contra: clavePeriodoAc(anio - 1) },
+    { clave: clavePeriodoAc(anio), contra: contraAc },
     { clave: "vigente", contra: String(anio - 1) },
   ];
   return pares.filter((p) => (p.clave === "vigente" || hay.has(p.clave)) && hay.has(p.contra));
