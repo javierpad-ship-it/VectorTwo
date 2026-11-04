@@ -1,6 +1,6 @@
 # 07f · Venta por tienda y año de un género × mundo, dentro de Crecimientos
 
-> Estado: **especificada (2026-11-02), pendiente de que Javier responda §Preguntas abiertas.** Mejora pequeña de M7 sobre `0.15.0 · M7`. Versión prevista **`0.15.0 · M7 b`** (no es la `0.15.1`, que es de sublíneas y cierre por IA), commits `M7:`. **Necesita una migración de solo lectura, que se cita como `00F1_venta_tienda_nodos.sql`** y toma **la siguiente libre** al construir, por orden de cierre (registro único en `docs/PLAN.md` §5; la `0032` ya es de 08b-1). Depende de [07](07-proyeccion-anual.md) (regla 11, bloques), [07c](07c-crecimientos-por-genero-mundo.md) (`B`, `base_siguiente`, B2), [06d](06d-curva-y-crecimiento-por-genero-mundo.md) §4.2 (la pestaña de solo lectura) y [06e](06e-cierre-del-anio-y-base-sin-nino.md) (`base_normalizada = B'`). Cifras sintéticas; ningún dato real de Lukers.
+> Estado: **especificada (2026-11-02), pendiente de que Javier responda §Preguntas abiertas.** Mejora pequeña de M7 sobre `0.15.0 · M7`. Versión prevista **`0.15.0 · M7 b`** (no es la `0.15.1`, que es de sublíneas y cierre por IA), commits `M7:`. **Necesita una migración de solo lectura: `0033_venta_tienda_nodos.sql`** (la ficha la citaba como `00F1`; tomó la siguiente libre al construir, registro único en `docs/PLAN.md` §5; la `0032` es de 08b-1). Depende de [07](07-proyeccion-anual.md) (regla 11, bloques), [07c](07c-crecimientos-por-genero-mundo.md) (`B`, `base_siguiente`, B2), [06d](06d-curva-y-crecimiento-por-genero-mundo.md) §4.2 (la pestaña de solo lectura) y [06e](06e-cierre-del-anio-y-base-sin-nino.md) (`base_normalizada = B'`). Cifras sintéticas; ningún dato real de Lukers.
 
 ## 1. Objetivo
 
@@ -34,7 +34,7 @@ En la pestaña Crecimientos, Javier ve por género × mundo (GM) una «Base 2026
   - casos: MUJER · URBANO (el GM más grande) y el Resto, con `p_desde = 2023-01-01` y `p_hasta = 2026-09-01`;
   - en frío: ≤ 3 s; en caliente: ≤ 1 s; tamaño: ≤ 150 KB (son unas 15 tiendas × 45 meses ≈ 700 tuplas).
   - Si el Resto pasa de 3 s en frío, se mide de nuevo con `p_desde = enero de Y−2`, y la ficha se ajusta a tres años.
-- **Script de humo `scripts/humo-00F1.sql`.** Comprueba que:
+- **Script de humo `scripts/humo-0033.sql`.** Comprueba que:
   - ninguna serie es de un CD;
   - `Σ u` de un GM coincide con la suma de `venta_stock_vigente` de sus equivalencias en tiendas de tipo Tienda;
   - el documento no contiene ninguna clave distinta de `t`, `p`, `u`, `s` y `cargas`.
@@ -295,7 +295,7 @@ export type VentaPorTiendaApi = {
 
 **Tanda 1 (en paralelo).**
 - **`datos`:**
-  - archivos: `supabase/migrations/00F1_venta_tienda_nodos.sql` (con el número libre), `scripts/humo-00F1.sql` y `src/lib/supabase/database.types.ts` (regenerado);
+  - archivos: `supabase/migrations/0033_venta_tienda_nodos.sql` (antes `00F1`), `scripts/humo-0033.sql` y `src/lib/supabase/database.types.ts` (regenerado);
   - aplica en **`vector-two`** (nunca en `lukers-compras`), mide según §2.2 y anota la medición al pie.
 - **`backend` · contratos:**
   - `src/lib/proyeccion/tipos-api.ts`: solo los tipos nuevos de §4;

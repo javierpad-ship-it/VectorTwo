@@ -1,6 +1,10 @@
 /**
  * Tipos de la base de datos.
  *
+ * Actualizados a mano el 2026-11-04 con la 0033 (M7 07f, venta por tienda en Crecimientos, aplicada en `Vector2`): solo la funcion de lectura
+ * `venta_tienda_nodos(p_gml_ids uuid[], p_desde date, p_hasta date) -> Json` (`{ series: [{ t, p, u, s }], cargas: { 'aaaa-mm': carga_id } }`).
+ * Sin tablas ni columnas nuevas. Firma tomada de `pg_proc` de `Vector2` (no se regenero el archivo entero).
+ *
  * Actualizados a mano el 2026-11-04 con la 0032 (M8 08b-1, agrupadores de compras): 5 tablas nuevas (`compra_viajes`, `compra_embarques` con
  * `periodo_llegada` generada, `compra_paquetes`, `compra_entrega_asignaciones` y `compra_agrupador_eventos`, de solo insercion), las columnas
  * `compras.viaje_id` y `compra_linea_recepciones.asignacion_id` (uuid null con FK) y 15 funciones (`guardar_viaje`, `guardar_embarque`,
@@ -4365,6 +4369,14 @@ export type Database = {
           p_gml_ids: string[];
           p_grupos: Json;
           p_tiendas_detalle: string[];
+        };
+        Returns: Json;
+      };
+      venta_tienda_nodos: {
+        Args: {
+          p_desde: string;
+          p_gml_ids: string[];
+          p_hasta: string;
         };
         Returns: Json;
       };
