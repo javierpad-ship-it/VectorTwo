@@ -6,6 +6,7 @@ import {
   claveCompraImportacion,
   claveImportacion,
   huellaContenido,
+  omitirFilasDelPlan,
   payloadImportarCompra,
   previsualizarImportacionCompras,
   reporteAplicado,
@@ -578,5 +579,53 @@ describe("plan y argumentos de importar_compra", () => {
     const dos = previsualizar([fila({ proveedor: "Taller Nuevo" }), fila({ proveedor: "taller nuevo", referencia: "PO-2" })]);
     expect(dos.reporte.proveedores_a_crear).toEqual(["Taller Nuevo"]);
     expect(dos.compras).toHaveLength(2);
+  });
+});
+
+describe("columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b, §3.9, R21): las filas que se omiten salen del plan", () => {
+  const base = () => previsualizar(filasImportacionEjemplo());
+
+  it("las columnas de agrupador NO entran en la huella: la misma línea con o sin ellas es la misma (y una `igual` lo sigue siendo tras moverla)", () => {
+    const sin = previsualizar([fila()]);
+    const con = previsualizar([{ ...fila(), viaje: "261001", embarque: "261201", paquete: "261101" } as FilaImportacionCompra]);
+    expect(con.compras[0].lineas[0].linea.huella_importacion).toBe(sin.compras[0].lineas[0].linea.huella_importacion);
+    const iguales = previsualizar([{ ...fila(), embarque: "261201" } as FilaImportacionCompra], { ...estadoImportacionBase(), lineas_existentes: comoExistentes(sin) });
+    expect(iguales.reporte.totales).toMatchObject({ nuevas: 0, iguales: 1 });
+  });
+
+  it("una fila `nueva` omitida sale del plan, del reporte de líneas, de los avisos y de las cuentas, y pasa a `omitidas` con su proveedor, referencia y línea", () => {
+    const r = base();
+    const fuera = omitirFilasDelPlan(r, [{ fila: 2, motivo: "embarque_desconocido", detalle: "No existe el embarque 999999." }]);
+    expect(fuera.reporte.totales).toEqual({ recibidas: 6, procesadas: 2, omitidas: 4, nuevas: 2, iguales: 0, cambiadas: 0 });
+    expect(fuera.reporte.omitidas.map((o) => [o.fila, o.motivo])).toEqual([
+      [2, "embarque_desconocido"],
+      [4, "marca_y_agrupacion"],
+      [5, "entregas_invalidas"],
+      [6, "tipo_no_disponible"],
+    ]);
+    expect(fuera.reporte.omitidas[0]).toMatchObject({ proveedor: "Proveedor Norte", referencia: "PO-2211", linea_ordinal: "2", detalle: "No existe el embarque 999999." });
+    expect(fuera.reporte.lineas.map((l) => l.fila)).toEqual([1, 3]);
+    expect(fuera.compras.map((c) => c.lineas.map((l) => l.fila))).toEqual([[1], [3]]);
+    expect(fuera.reporte.compras_a_crear.map((c) => [c.referencia, c.lineas, c.lineas_nuevas])).toEqual([["PO-2211", 1, 1], ["FS-001", 1, 1]]);
+  });
+
+  it("si se queda sin líneas nuevas la compra desaparece, y el proveedor nuevo ya no se crea", () => {
+    const fuera = omitirFilasDelPlan(base(), [{ fila: 3, motivo: "viaje_cancelado" }]);
+    expect(fuera.compras.map((c) => c.referencia)).toEqual(["PO-2211"]);
+    expect(fuera.reporte.compras_a_crear.map((c) => c.referencia)).toEqual(["PO-2211"]);
+    expect(fuera.reporte.proveedores_a_crear).toEqual([]);
+    expect(fuera.reporte.avisos.some((a) => a.fila === 3)).toBe(false);
+  });
+
+  it("una fila `igual` omitida se anota sin tocar las cuentas de procesadas; sin omisiones el resultado es el mismo objeto; el original no cambia", () => {
+    const nuevas = base();
+    const iguales = previsualizar(filasImportacionEjemplo(), { ...estadoImportacionBase(), lineas_existentes: comoExistentes(nuevas) });
+    const fuera = omitirFilasDelPlan(iguales, [{ fila: 1, motivo: "paquete_desconocido" }]);
+    expect(fuera.reporte.totales).toMatchObject({ procesadas: 3, iguales: 3, nuevas: 0, omitidas: 4 });
+    expect(fuera.reporte.lineas).toHaveLength(3);
+    expect(omitirFilasDelPlan(nuevas, [])).toBe(nuevas);
+    omitirFilasDelPlan(nuevas, [{ fila: 1, motivo: "embarque_desconocido" }]);
+    expect(nuevas.reporte.totales).toEqual({ recibidas: 6, procesadas: 3, omitidas: 3, nuevas: 3, iguales: 0, cambiadas: 0 });
+    expect(nuevas.compras[0].lineas).toHaveLength(2);
   });
 });

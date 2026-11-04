@@ -20,6 +20,7 @@
  * `MENSAJE_ERROR_COMPRA`.
  */
 import type { MotivoResolverGml } from "@/lib/arbol/tipos";
+import type { AgrupadorImportacionCompraApi, MotivoOmisionCompraAgrupador, ViajeResumenApi } from "./agrupadores/tipos-api";
 import type {
   AccionEvento,
   DestinoCompra,
@@ -121,6 +122,21 @@ export type EntregaLineaApi = {
   sugerencia: { periodo: Mes; unidades: number } | null;
   temporada: "verano" | "invierno";
   origen: OrigenEntrega;
+  /**
+   * Agrupadores (ficha 08b, §3.3): a qué embarques y paquetes viajan las unidades de esta entrega. Siempre presente en las respuestas de
+   * la API; opcional en el tipo solo para no tocar los fixtures de M8.
+   */
+  asignaciones?: AsignacionEntregaApi[];
+  /** Unidades de la entrega que ningún embarque cubre («120 u sin embarque»). */
+  sin_embarque?: number;
+};
+
+/** Una asignación de la entrega a un embarque (y paquete): los chips `Embarque 261101 · P 261101 · 300 u`. */
+export type AsignacionEntregaApi = {
+  id: string;
+  embarque: { id: string; codigo: string };
+  paquete: { id: string; codigo: string } | null;
+  unidades: number;
 };
 
 export type RecepcionLineaApi = {
@@ -209,6 +225,8 @@ export type CompraApi = {
   historial: EventoCompraApi[];
   /** Avisos de sus líneas, sin repetir. */
   avisos: AvisoLineaCompra[];
+  /** El viaje de la compra (ficha 08b; nulo si no tiene). Siempre presente en las respuestas de la API; opcional en el tipo por los fixtures de M8. */
+  viaje?: ViajeResumenApi | null;
 };
 
 export type EventoCompraApi = {
@@ -283,7 +301,9 @@ export type MotivoOmisionCompra =
   | "cambiada_requiere_edicion"
   | "sin_reparto"
   | "mezcla_sin_filas"
-  | "mezcla_no_suma_100";
+  | "mezcla_no_suma_100"
+  // Columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b, §3.9): el importador no crea agrupadores.
+  | MotivoOmisionCompraAgrupador;
 
 /** Avisos que no bloquean (`sin_reparto` es omisión en `0.13.0` y aviso desde `0.13.1`). */
 export type AvisoImportacionCompra = "sin_reparto" | "entrega_pasada" | "directo_con_regla" | "directo_sin_regla" | "exceso" | "miembro_resuelto";
@@ -348,6 +368,11 @@ export type ReporteImportacionComprasApi = {
   /** Solo con `modo = "aplicar"`: una función por compra, todo o nada por compra (§0.13). */
   aplicadas: AplicadaImportacionApi[];
   no_aplicadas: NoAplicadaImportacionApi[];
+  /**
+   * Qué hicieron las columnas `VIAJE`, `EMBARQUE` y `PAQUETE` (ficha 08b, §3.9): una entrada por cada fila que las traía. Siempre presente
+   * (vacío si el archivo no las usa); opcional en el tipo por los fixtures de M8.
+   */
+  agrupadores?: AgrupadorImportacionCompraApi[];
 };
 
 // ─── Cuerpos de petición (tipos de pantalla; los esquemas están en `esquemas.ts`) ───

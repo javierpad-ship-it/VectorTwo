@@ -80,6 +80,11 @@ const MENSAJES_UNICO: ReadonlyArray<readonly [string, string]> = [
   ["factores_volumen_atipico_anio_temporada_key", "Ya existe un factor para ese año y temporada."],
   // M13 (0020). La API lo anticipa con la regla que choca; esto es la red de seguridad (carrera entre dos planners).
   ["intercompany_reglas_clave_uniq", "Ya hay una regla de esa clave desde ese mes: edítala."],
+  // Agrupadores de compras (0032). Las funciones ya responden `codigo_duplicado`; esto es la red de seguridad (carrera entre dos personas).
+  ["compra_viajes_codigo", "Ya existe un viaje con ese código."],
+  ["compra_embarques_codigo", "Ya existe un embarque con ese código."],
+  ["compra_paquetes_codigo", "Ya existe un paquete con ese código."],
+  ["compra_entrega_asignaciones_clave", "Esa mercadería ya está asignada a ese embarque y paquete: se suma a la fila que existe."],
 ];
 
 const MENSAJES_CHECK: ReadonlyArray<readonly [string, string]> = [
@@ -391,6 +396,35 @@ const MENSAJES_FK: ReadonlyArray<readonly [string, { eliminar: string; asignar: 
     {
       eliminar: "No se puede eliminar la carga: todavía tiene filas de venta y stock.",
       asignar: { status: 404, mensaje: "Carga no encontrada." },
+    },
+  ],
+  // Agrupadores de compras (0032): nada se borra (se cancela); esto es la red de seguridad.
+  [
+    "compras_viaje_id_fkey",
+    {
+      eliminar: "No se puede eliminar el viaje: tiene compras. Cancélalo cuando no le queden compras ni embarques.",
+      asignar: { status: 404, mensaje: "No encontramos ese viaje." },
+    },
+  ],
+  [
+    "compra_embarques_viaje_id_fkey",
+    {
+      eliminar: "No se puede eliminar el viaje: tiene embarques. Cancélalo cuando no le queden compras ni embarques.",
+      asignar: { status: 404, mensaje: "No encontramos ese viaje." },
+    },
+  ],
+  [
+    "compra_paquetes_embarque_id_fkey",
+    {
+      eliminar: "No se puede eliminar el embarque: tiene paquetes. Cancélalo cuando no le quede mercadería.",
+      asignar: { status: 404, mensaje: "No encontramos ese embarque." },
+    },
+  ],
+  [
+    "compra_entrega_asignaciones_embarque_id_fkey",
+    {
+      eliminar: "No se puede eliminar el embarque: tiene mercadería asignada. Quítala o cancélalo.",
+      asignar: { status: 404, mensaje: "No encontramos ese embarque." },
     },
   ],
 ];

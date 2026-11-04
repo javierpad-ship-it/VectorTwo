@@ -493,6 +493,11 @@ export type AgrupadorImportacionCompraApi = {
   resultado: "asignado" | "sin_cambio" | "omitido";
   motivo?: MotivoOmisionCompraAgrupador;
   avisos: AvisoImportacionCompraAgrupador[];
+  /**
+   * Solo con `modo = "aplicar"`: la compra se importó pero la asignación falló (un corte entre las tres transacciones, §3.9 punto 4, o
+   * una carrera con otra persona). La compra queda sin ese agrupador; reimportar el archivo lo completa. Aditivo de T3b.
+   */
+  no_asignado?: { motivo: string; mensaje: string };
 };
 
 // ─── Cuerpos de petición (tipos de pantalla; los esquemas están en `esquemas.ts`) ───

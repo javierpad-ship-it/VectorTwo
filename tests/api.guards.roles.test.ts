@@ -125,8 +125,12 @@ describe("rutas de escritura: sesión y rol (guards reales)", () => {
   }
 });
 
+/** Las rutas de los agrupadores de compras (ficha 08b): el comprador las escribe, salvo cerrar, reabrir y cancelar. */
+const esDeAgrupadores = (ruta: string) => /^compras\/(viajes|embarques|paquetes|agrupadores|viaje-activo)\//.test(ruta);
+const nombreDe = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}`;
+
 describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritura (el comprador recibe 403)", () => {
-  const m8 = CASOS.filter((c) => /^(flujo|compras)\//.test(c.ruta));
+  const m8 = CASOS.filter((c) => /^(flujo|compras)\//.test(c.ruta) && !esDeAgrupadores(c.ruta));
 
   it("están las seis escrituras de 0.13.0 y ninguna se conforma con tener sesión", () => {
     const nombre = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}`;
@@ -141,5 +145,38 @@ describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritur
       ].sort()
     );
     expect(m8.every((c) => c.exigeRol)).toBe(true);
+  });
+});
+
+describe("08b: agrupadores de compras (decisiones 92 y 95): el comprador escribe; solo cerrar, reabrir y cancelar son de admin y planner", () => {
+  const agr = CASOS.filter((c) => esDeAgrupadores(c.ruta));
+
+  it("están las dieciocho escrituras de 08b-1", () => {
+    expect(agr.map(nombreDe).sort()).toEqual(
+      [
+        "POST compras/viajes",
+        "PATCH compras/viajes/[id]",
+        "POST compras/viajes/[id]/estado",
+        "POST compras/viajes/[id]/compras",
+        "POST compras/embarques",
+        "PATCH compras/embarques/[id]",
+        "POST compras/embarques/[id]/estado",
+        "POST compras/embarques/[id]/paquetes",
+        "POST compras/embarques/[id]/asignar",
+        "POST compras/embarques/[id]/quitar",
+        "POST compras/embarques/[id]/paquete",
+        "POST compras/embarques/[id]/fecha",
+        "POST compras/embarques/[id]/pasar-pendientes",
+        "PATCH compras/paquetes/[id]",
+        "POST compras/paquetes/[id]/estado",
+        "POST compras/paquetes/[id]/mover",
+        "POST compras/agrupadores/importar",
+        "PUT compras/viaje-activo",
+      ].sort(),
+    );
+  });
+
+  it("solo exigen rol de planner el estado del viaje y el del paquete (la acción de estado de un embarque se decide con el cuerpo: el comprador recibe 403 al cancelar)", () => {
+    expect(agr.filter((c) => c.exigeRol).map(nombreDe).sort()).toEqual(["POST compras/paquetes/[id]/estado", "POST compras/viajes/[id]/estado"].sort());
   });
 });

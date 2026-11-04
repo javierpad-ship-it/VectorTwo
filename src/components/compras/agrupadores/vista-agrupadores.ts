@@ -30,8 +30,8 @@ export const puedeCerrarOCancelar = (rol: Rol): boolean => rol === "admin" || ro
 
 // ─── Viaje activo (§3.8) ───
 
-/** Nombre de la cookie por navegador. La escribe solo `PUT /api/compras/viaje-activo`; ninguna ruta de la API la lee (R22). */
-export const COOKIE_VIAJE_ACTIVO = "v2_viaje_activo";
+/** Nombre de la cookie por navegador. La escribe solo `PUT /api/compras/viaje-activo`; ninguna ruta de la API la lee (R22). Una sola definición: la de `viaje-activo.ts`. */
+export { COOKIE_VIAJE_ACTIVO } from "@/lib/compras/agrupadores/viaje-activo";
 
 export const VIAJE_TODOS = "todos";
 export const VIAJE_SIN_VIAJE = "sin_viaje";

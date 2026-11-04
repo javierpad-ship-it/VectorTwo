@@ -53,4 +53,13 @@ export const ETIQUETA_MOTIVO_OMISION_COMPRA: Record<MotivoOmisionCompra, string>
   sin_reparto: "Lote sin reparto vigente",
   mezcla_sin_filas: "Lote de varias marcas sin filas",
   mezcla_no_suma_100: "La mezcla no suma 100 %",
+  // Columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b, §3.9): el importador no crea agrupadores.
+  viaje_desconocido: "El viaje no existe",
+  viaje_cancelado: "El viaje está cancelado",
+  embarque_desconocido: "El embarque no existe",
+  embarque_no_editable: "El embarque está cancelado o recibido",
+  paquete_desconocido: "El paquete no existe o no es de ese embarque",
+  paquete_sin_embarque: "Indicaste paquete pero no embarque",
+  llegada_distinta_del_embarque: "La llegada cae en otro mes que el embarque",
+  entregas_con_embarque: "Con embarque, la línea lleva una sola entrega",
 };

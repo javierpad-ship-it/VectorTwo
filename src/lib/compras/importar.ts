@@ -1088,6 +1088,79 @@ export function agregarAviso(
   };
 }
 
+// ─── Columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b, §3.9): filas que se quitan del plan ───
+
+/** Una fila que las columnas de agrupador omiten: no se manda a `importar_compra`. */
+export type OmisionDeFila = { fila: number; motivo: MotivoOmisionCompra; detalle?: string };
+
+/**
+ * Quita del plan las filas que las columnas `VIAJE`, `EMBARQUE` y `PAQUETE` omiten (código desconocido, viaje cancelado, llegada
+ * distinta del embarque…; §3.9, punto 3) y las pasa a `omitidas` del reporte, con el mismo proveedor, referencia y línea. Una fila
+ * `nueva` sale del plan y de las cuentas de nuevas y procesadas, y su compra desaparece si se queda sin líneas nuevas; una `igual` no
+ * está en el plan (solo se anota la omisión). Los avisos de las filas omitidas se descartan. No toca nada más: el resto del reporte queda
+ * como lo calculó `previsualizarImportacionCompras`.
+ */
+export function omitirFilasDelPlan(resultado: ResultadoPrevisualizacion, omisiones: readonly OmisionDeFila[]): ResultadoPrevisualizacion {
+  if (omisiones.length === 0) return resultado;
+  const porFila = new Map(omisiones.map((o) => [o.fila, o]));
+  const rep = resultado.reporte;
+
+  const omitidas: FilaOmitidaCompra[] = [];
+  const quitadasNuevas = new Set<number>();
+  const menosPorCompra = new Map<string, number>();
+  for (const l of rep.lineas) {
+    const o = porFila.get(l.fila);
+    if (!o) continue;
+    const compra = rep.compras_a_crear.find((c) => c.clave === l.compra_clave);
+    const plan = resultado.compras.find((c) => c.clave === l.compra_clave);
+    omitidas.push({
+      fila: l.fila,
+      motivo: o.motivo,
+      ...(o.detalle === undefined ? {} : { detalle: o.detalle }),
+      proveedor: compra?.proveedor ?? plan?.proveedor ?? "",
+      referencia: compra?.referencia ?? plan?.referencia ?? "",
+      linea_ordinal: String(l.linea_ordinal),
+    });
+    if (l.clasificacion === "nueva") {
+      quitadasNuevas.add(l.fila);
+      menosPorCompra.set(l.compra_clave, (menosPorCompra.get(l.compra_clave) ?? 0) + 1);
+    }
+  }
+
+  const compras = resultado.compras
+    .map((c) => ({ ...c, lineas: c.lineas.filter((l) => !quitadasNuevas.has(l.fila)) }))
+    .filter((c) => c.lineas.length > 0);
+  const quedan = new Set(compras.map((c) => c.clave));
+  const comprasApi = rep.compras_a_crear
+    .filter((c) => quedan.has(c.clave))
+    .map((c) => {
+      const menos = menosPorCompra.get(c.clave) ?? 0;
+      return menos === 0 ? c : { ...c, lineas: c.lineas - menos, lineas_nuevas: c.lineas_nuevas - menos };
+    });
+  const proveedoresNuevos: string[] = [];
+  const vistos = new Set<string>();
+  for (const c of compras) {
+    if (c.proveedor_es_nuevo && !vistos.has(claveProveedor(c.proveedor))) {
+      vistos.add(claveProveedor(c.proveedor));
+      proveedoresNuevos.push(c.proveedor);
+    }
+  }
+
+  const n = quitadasNuevas.size;
+  return {
+    compras,
+    reporte: {
+      ...rep,
+      totales: { ...rep.totales, omitidas: rep.totales.omitidas + omitidas.length, nuevas: rep.totales.nuevas - n, procesadas: rep.totales.procesadas - n },
+      compras_a_crear: comprasApi,
+      proveedores_a_crear: proveedoresNuevos,
+      lineas: rep.lineas.filter((l) => !quitadasNuevas.has(l.fila)),
+      omitidas: [...rep.omitidas, ...omitidas].sort((a, b) => a.fila - b.fila),
+      avisos: rep.avisos.filter((a) => !quitadasNuevas.has(a.fila)),
+    },
+  };
+}
+
 // ─── Resultado de aplicar ───
 
 export type ResultadoAplicacionCompra =

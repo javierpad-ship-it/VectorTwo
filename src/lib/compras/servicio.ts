@@ -15,6 +15,7 @@ import { falla, fallaDb, fallaMensaje, listo, type Db, type Salida } from "@/lib
 import { hoyLima } from "@/lib/tiendas/estado";
 import { argsCancelarCompra, validarCancelacion } from "./cancelar";
 import {
+  leerAgrupadoresDeCompras,
   rpcCancelarCompra,
   rpcImportarCompra,
   rpcQuitarRecepcion,
@@ -29,6 +30,7 @@ import {
   leerTemporadasConfiguradas,
   type CatalogoLeido,
   type CompraDb,
+  type DatosAgrupadoresCompras,
   type DatosCompras,
   type DatosDeCompra,
   type EntregaDb,
@@ -38,11 +40,15 @@ import {
   type RecepcionDb,
   type RepartoDb,
 } from "./consultas";
+import type { AgrupadorImportacionCompraApi, ViajeResumenApi } from "./agrupadores/tipos-api";
+import type { MotivoOmisionCompraAgrupador } from "./agrupadores/tipos";
+import type { ImportarComprasConAgrupadores } from "./agrupadores/esquemas";
 import type { Cancelar, ComprasQuery, ImportarCompras, Recibir } from "./esquemas";
 import { historial as ordenarHistorial } from "./eventos";
 import {
   agregarAviso,
   argsImportarCompra,
+  omitirFilasDelPlan,
   previsualizarImportacionCompras,
   reporteAplicado,
   type CompraExistente,
@@ -84,6 +90,7 @@ import {
 import {
   ESTADO_HTTP_ERROR_COMPRA,
   MENSAJE_ERROR_COMPRA,
+  type AsignacionEntregaApi,
   type AvisoLineaCompra,
   type CompraApi,
   type EventoCompraApi,
@@ -190,6 +197,30 @@ export async function kPrimaDe(d: Db): Promise<Salida<Mes | null>> {
   return listo(hastaPorDefecto(r.data, hoyLima()));
 }
 
+/** Los nombres que necesitan los agrupadores para rotular líneas (ruta del nodo, marca, agrupación, equivalencia), con la caché corta del catálogo. */
+export type NombresCatalogo = {
+  marcas: ReadonlyMap<string, string>;
+  agrupaciones: ReadonlyMap<string, string>;
+  equivalencias: ReadonlyMap<string, string>;
+  /** Nodo género · mundo · línea con su `ruta` y los ids del árbol (sirve también como `NodoAlcance` del reparto de los lotes). */
+  nodos: IndiceNodos;
+};
+
+export async function nombresDeCatalogo(d: Db): Promise<Salida<NombresCatalogo>> {
+  const c = await catalogoDeLectura(d);
+  if (c.respuesta) return falla(c.respuesta);
+  return listo({ marcas: c.data.marcas, agrupaciones: c.data.agrupaciones, equivalencias: c.data.equivalencias, nodos: c.data.nodos });
+}
+
+/** Ruta legible de una línea: `GÉNERO · MUNDO · LÍNEA` y, si la hay, `› equivalencia`. */
+export function rutaLegible(c: Pick<NombresCatalogo, "nodos" | "equivalencias">, gmlId: string | null, equivalenciaId: string | null): string | null {
+  if (gmlId === null) return null;
+  const n = c.nodos.get(gmlId);
+  if (!n) return null;
+  const eq = equivalenciaId ? c.equivalencias.get(equivalenciaId) : undefined;
+  return eq ? `${n.ruta} › ${eq}` : n.ruta;
+}
+
 // ─── Contexto de lectura ───
 
 type ContextoLectura = {
@@ -203,20 +234,43 @@ type ContextoLectura = {
   vigentePorMarca: Map<string, string>;
   rol: Rol;
   combinaciones: { genero_id: string; mundo_id: string }[];
+  /** Viajes, embarques, paquetes y asignaciones (ficha 08b) para el viaje de la compra y los chips de cada entrega; sin ellos, no se muestran. */
+  agrupadores?: AgrupadoresIndexados;
 };
 
+type AgrupadoresIndexados = {
+  viajes: ReadonlyMap<string, ViajeResumenApi>;
+  embarques: ReadonlyMap<string, string>;
+  paquetes: ReadonlyMap<string, string>;
+  porEntrega: ReadonlyMap<string, DatosAgrupadoresCompras["asignaciones"]>;
+};
+
+function indexarAgrupadores(a: DatosAgrupadoresCompras): AgrupadoresIndexados {
+  const porEntrega = new Map<string, DatosAgrupadoresCompras["asignaciones"]>();
+  for (const x of a.asignaciones) porEntrega.set(x.entrega_id, [...(porEntrega.get(x.entrega_id) ?? []), x]);
+  return {
+    viajes: new Map(a.viajes.map((v) => [v.id, { id: v.id, codigo: v.codigo, nombre: v.nombre, estado: elegir(["abierto", "cerrado", "cancelado"] as const, v.estado, "abierto") }])),
+    embarques: new Map(a.embarques.map((e) => [e.id, e.codigo])),
+    paquetes: new Map(a.paquetes.map((p) => [p.id, p.codigo])),
+    porEntrega,
+  };
+}
+
 async function armarContexto(d: Db, usuario: UsuarioCompras, flujo: ContextoFlujo | undefined, marcasDeLotes: readonly string[]): Promise<Salida<ContextoLectura>> {
-  const [catalogo, k, temporadas, vigentes] = await Promise.all([
+  const [catalogo, k, temporadas, vigentes, agrupadores] = await Promise.all([
     catalogoDeLectura(d),
     flujo ? Promise.resolve(listo<Mes | null>(flujo.k_prima)) : kPrimaDe(d),
     leerTemporadasConfiguradas(d),
     marcasDeLotes.length === 0 ? Promise.resolve(listo({ repartos: [], sin_reparto: [] as string[] })) : leerRepartosVigentes(d, [...new Set(marcasDeLotes)]),
+    leerAgrupadoresDeCompras(d),
   ]);
   if (catalogo.respuesta) return falla(catalogo.respuesta);
   if (k.respuesta) return falla(k.respuesta);
   if (temporadas.error) return fallaDb(temporadas.error, "compras: leer las temporadas");
   if (vigentes.respuesta) return falla(vigentes.respuesta);
+  if (agrupadores.error) return fallaDb(agrupadores.error, "compras: leer los agrupadores");
   return listo({
+    agrupadores: indexarAgrupadores(agrupadores.data),
     catalogo: catalogo.data,
     k_prima: k.data ?? "0000-00",
     hoy: hoyLima(),
@@ -285,6 +339,7 @@ export function armarLineaApi(p: PartesLinea, compra: CompraDb, ctx: ContextoLec
     sugerencia: ctx.sugerencias.get(e.id) ?? null,
     temporada: temporadaGuardada.get(e.id) ?? temporadaDe(Number(e.periodo.slice(5, 7)), ctx.temporadas),
     origen: origenDe.get(e.id) ?? "manual",
+    ...entregaAgrupadores(e, ctx.agrupadores),
   }));
 
   const repartosOrdenados = [...p.repartos].sort((a, b) => comparar(a.id, b.id));
@@ -363,6 +418,19 @@ export function armarLineaApi(p: PartesLinea, compra: CompraDb, ctx: ContextoLec
   };
 }
 
+/** Los chips de una entrega (`Embarque 261101 · P 261101 · 300 u`) y lo que ningún embarque cubre. Sin agrupadores leídos, nada. */
+function entregaAgrupadores(e: { id: string; unidades: number }, a: AgrupadoresIndexados | undefined): { asignaciones?: AsignacionEntregaApi[]; sin_embarque?: number } {
+  if (!a) return {};
+  const filas = [...(a.porEntrega.get(e.id) ?? [])].sort((x, y) => comparar(a.embarques.get(x.embarque_id) ?? "", a.embarques.get(y.embarque_id) ?? "") || comparar(a.paquetes.get(x.paquete_id ?? "") ?? "", a.paquetes.get(y.paquete_id ?? "") ?? "") || comparar(x.id, y.id));
+  const asignaciones = filas.map((x) => ({
+    id: x.id,
+    embarque: { id: x.embarque_id, codigo: a.embarques.get(x.embarque_id) ?? "—" },
+    paquete: x.paquete_id ? { id: x.paquete_id, codigo: a.paquetes.get(x.paquete_id) ?? "—" } : null,
+    unidades: x.unidades,
+  }));
+  return { asignaciones, sin_embarque: Math.max(0, e.unidades - filas.reduce((suma, x) => suma + x.unidades, 0)) };
+}
+
 const aEventoApi = (e: EventoDb): EventoCompraApi => ({
   id: e.id,
   linea_id: e.linea_id,
@@ -428,6 +496,7 @@ export function armarCompraApi(p: PartesCompra, ctx: ContextoLectura): CompraApi
     puede: puede({ estado, cancelada_at: compra.cancelada_at, unidades_recibidas: recibidas, lineas_activas: activas.length }, { rol: ctx.rol }, { fase: "m8", disponibles: FUNCIONES_DISPONIBLES_0_13_0 }),
     historial: eventos ?? [],
     avisos: [...new Set(lineas.flatMap((l) => l.avisos))],
+    ...(ctx.agrupadores ? { viaje: compra.viaje_id ? (ctx.agrupadores.viajes.get(compra.viaje_id) ?? null) : null } : {}),
   };
 }
 
@@ -495,6 +564,13 @@ function cumpleFiltros(api: CompraApi, datos: DatosCompras, q: ComprasQuery, ctx
     const marcasDe = (l: LineaCompraApi) => [l.marca_id, ...(l.reparto?.filas ?? []).map((f) => f.marca_id)];
     if (!api.lineas.some((l) => marcasDe(l).includes(q.marca_id as string))) return false;
   }
+  if (q.viaje_id !== undefined) {
+    // Ficha 08b: `sin_viaje` pide las compras sin viaje; un uuid, las de ese viaje. La cookie del viaje activo nunca se lee aquí (R22).
+    if (q.viaje_id === "sin_viaje") {
+      if (api.viaje) return false;
+    } else if (api.viaje?.id !== q.viaje_id) return false;
+  }
+  if (q.embarque_id !== undefined && !api.lineas.some((l) => l.entregas.some((e) => e.asignaciones?.some((a) => a.embarque.id === q.embarque_id)))) return false;
   if (q.mio && !api.mia) return false;
   if (q.por_confirmar && !api.lineas.some((l) => l.entregas.some((e) => e.vencida))) return false;
   if (!sinFiltros(q)) {
@@ -822,13 +898,45 @@ async function estadoImportacion(d: Db): Promise<Salida<EstadoImportacionCompras
   });
 }
 
+// ─── Columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b, §3.9) ───
+
+/** Las tres columnas nuevas de una fila del archivo (texto de celda; ausentes o vacías = no vino). */
+export type FilaConColumnasAgrupador = { viaje?: string; embarque?: string; paquete?: string };
+
+/** Lo que las columnas de agrupador deciden tras clasificar las filas como M8: qué filas se omiten y qué se hará después de importar. */
+export type EvaluacionAgrupadoresCompras = {
+  /** Filas que no se mandan a `importar_compra` (código desconocido, viaje cancelado, llegada distinta del embarque…). */
+  omisiones: { fila: number; motivo: MotivoOmisionCompraAgrupador; detalle?: string }[];
+  /** Una entrada por cada fila que traía alguna de las tres columnas (en `previsualizar` ya es el reporte final). */
+  filas: AgrupadorImportacionCompraApi[];
+  /** Estado interno de quien evaluó; el servicio de compras no lo mira y se lo devuelve a `aplicar`. */
+  pendiente: unknown;
+};
+
+/**
+ * Ganchos con que `src/lib/compras/agrupadores/servicio.ts` se engancha al importador de compras sin que este archivo lo importe (evita
+ * el ciclo y mantiene a compras independiente de los agrupadores). `evaluar` corre tras clasificar las filas y antes de aplicar nada;
+ * `aplicar` corre DESPUÉS de las `importar_compra` (una transacción por compra) y hace las otras dos transacciones de §3.9
+ * (`asignar_viaje_compras` y `aplicar_movimiento_agrupador`). `comprasImportadas` mapea la clave de cada compra recién creada a su id.
+ */
+export type GanchosAgrupadoresCompras = {
+  evaluar(entrada: { filas: readonly FilaConColumnasAgrupador[]; resultado: ResultadoPrevisualizacion }): Promise<Salida<EvaluacionAgrupadoresCompras>>;
+  aplicar(evaluacion: EvaluacionAgrupadoresCompras, comprasImportadas: ReadonlyMap<string, string>): Promise<AgrupadorImportacionCompraApi[]>;
+};
+
 /**
  * `POST /api/compras/importar` (`0.13.0`: solo la carga inicial). `previsualizar` clasifica cada línea (`nueva`, `igual`, `cambiada`) y
  * dice qué se omite y por qué; `aplicar` hace lo mismo y llama a `importar_compra` UNA vez por compra (todo o nada por compra): un
  * corte deja las compras ya aplicadas completas y las demás sin aplicar, y reimportar completa lo que falta (las aplicadas dan `igual`).
  * El aviso `exceso` lo calcula `calcularExceso` (con el flujo) si se pasa; sin él, no hay aviso.
  */
-export async function importarCompras(d: Db, usuario: UsuarioCompras, cuerpo: ImportarCompras, calcularExceso?: CalculoExceso): Promise<Salida<ReporteImportacionComprasApi>> {
+export async function importarCompras(
+  d: Db,
+  usuario: UsuarioCompras,
+  cuerpo: ImportarCompras | ImportarComprasConAgrupadores,
+  calcularExceso?: CalculoExceso,
+  agrupadores?: GanchosAgrupadoresCompras,
+): Promise<Salida<ReporteImportacionComprasApi>> {
   if (!cuerpo.carga_inicial) return fallaMensaje(MENSAJE_ERROR_COMPRA.carga_inicial_requerida, ESTADO_HTTP_ERROR_COMPRA.carga_inicial_requerida, "carga_inicial_requerida");
   if (!puedeImportar(usuario.rol, cuerpo.carga_inicial)) return fallaMensaje("Tu rol es de solo lectura.", 403);
 
@@ -837,6 +945,15 @@ export async function importarCompras(d: Db, usuario: UsuarioCompras, cuerpo: Im
   if (k.respuesta) return falla(k.respuesta);
 
   let resultado = previsualizarImportacionCompras(cuerpo.filas, cuerpo.mezcla, estado.data, { carga_inicial: cuerpo.carga_inicial, k_prima: k.data });
+  // Columnas VIAJE, EMBARQUE y PAQUETE: la fila se clasifica primero como en M8 (con la huella de lo que dice el archivo) y después se
+  // evalúan; las que se omiten salen del plan antes de calcular el exceso y de aplicar nada.
+  let evaluacion: EvaluacionAgrupadoresCompras | null = null;
+  if (agrupadores) {
+    const ev = await agrupadores.evaluar({ filas: cuerpo.filas as readonly FilaConColumnasAgrupador[], resultado });
+    if (ev.respuesta) return falla(ev.respuesta);
+    evaluacion = ev.data;
+    resultado = omitirFilasDelPlan(resultado, evaluacion.omisiones);
+  }
   if (calcularExceso) {
     const lineas = lineasParaFlujo(resultado);
     if (lineas.length > 0) {
@@ -844,9 +961,10 @@ export async function importarCompras(d: Db, usuario: UsuarioCompras, cuerpo: Im
       for (const [fila, detalle] of excesos) resultado = agregarAviso(resultado, fila, "exceso", detalle);
     }
   }
-  if (cuerpo.modo === "previsualizar") return listo(resultado.reporte);
+  if (cuerpo.modo === "previsualizar") return listo({ ...resultado.reporte, agrupadores: evaluacion?.filas ?? [] });
 
   const respuestas: ResultadoAplicacionCompra[] = [];
+  const importadas = new Map<string, string>();
   for (const compra of resultado.compras) {
     const r = await rpcImportarCompra(d, argsImportarCompra(compra, actorDe(usuario)));
     if (r.error) {
@@ -857,8 +975,12 @@ export async function importarCompras(d: Db, usuario: UsuarioCompras, cuerpo: Im
       break;
     }
     const i = interpretarResultadoFuncion(r.data);
-    if (i.ok) respuestas.push({ clave: compra.clave, ok: true, compra_id: i.compra_id, numero: typeof i.datos.numero === "string" ? i.datos.numero : "" });
-    else respuestas.push({ clave: compra.clave, ok: false, motivo: esMotivoDeFuncion(i.motivo) ? i.motivo : "error", mensaje: errorDeMotivo(i.motivo).mensaje });
+    if (i.ok) {
+      importadas.set(compra.clave, i.compra_id);
+      respuestas.push({ clave: compra.clave, ok: true, compra_id: i.compra_id, numero: typeof i.datos.numero === "string" ? i.datos.numero : "" });
+    } else respuestas.push({ clave: compra.clave, ok: false, motivo: esMotivoDeFuncion(i.motivo) ? i.motivo : "error", mensaje: errorDeMotivo(i.motivo).mensaje });
   }
-  return listo(reporteAplicado(resultado, respuestas));
+  // Las otras dos transacciones de §3.9: un corte deja la compra sin agrupador y el reporte lo dice; reimportar lo completa.
+  const filasAgrupador = agrupadores && evaluacion ? await agrupadores.aplicar(evaluacion, importadas) : [];
+  return listo({ ...reporteAplicado(resultado, respuestas), agrupadores: filasAgrupador });
 }

@@ -53,7 +53,10 @@ const ESPERADAS: Esperada[] = [
 ];
 const METODOS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 const API = path.join(RAIZ, "src", "app", "api");
-const rutasM8 = [...rutasDeApi(path.join(API, "flujo")), ...rutasDeApi(path.join(API, "compras"))];
+// Las rutas de los agrupadores (viajes, embarques, paquetes, agrupadores, viaje-activo; ficha 08b) tienen su propia prueba
+// (`tests/agrupadores.estatico.test.ts`): aquí solo van las 15 de M8.
+const esDeAgrupadores = (ruta: string) => /\/api\/compras\/(viajes|embarques|paquetes|agrupadores|viaje-activo)\//.test(ruta.split(path.sep).join("/"));
+const rutasM8 = [...rutasDeApi(path.join(API, "flujo")), ...rutasDeApi(path.join(API, "compras"))].filter((r) => !esDeAgrupadores(r));
 
 describe("rutas de M8: guards de la ficha (sección 7)", () => {
   it("son exactamente las 15 de 0.13.0 (sin DELETE de compras: se cancelan; sin POST de compras ni de proveedores hasta 0.13.1 y M9a)", () => {
@@ -113,7 +116,7 @@ describe("rutas de M8: guards de la ficha (sección 7)", () => {
 
 describe("datos: solo en consultas.ts, solo por los servicios de M7, M12 y M13", () => {
   it("src/lib/flujo y src/lib/compras no importan @supabase/* ni los clientes fuera de consultas.ts", () => {
-    const permitidos = ["src/lib/flujo/consultas.ts", "src/lib/compras/consultas.ts"];
+    const permitidos = ["src/lib/flujo/consultas.ts", "src/lib/compras/consultas.ts", "src/lib/compras/agrupadores/consultas.ts"];
     const ofensores: string[] = [];
     for (const f of [...libFlujo, ...libCompras]) {
       if (permitidos.includes(f.ruta)) continue;

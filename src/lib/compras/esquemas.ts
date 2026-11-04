@@ -199,7 +199,11 @@ const bandera = (campo: string) =>
       return false;
     });
 
-/** `GET /api/compras?estado&proveedor_id&origen&llegada_desde&llegada_hasta&genero_id&mundo_id&linea_id&marca_id&mio=1&por_confirmar=1&q=`. */
+/**
+ * `GET /api/compras?estado&proveedor_id&origen&llegada_desde&llegada_hasta&genero_id&mundo_id&linea_id&marca_id&mio=1&por_confirmar=1&q=`
+ * más, desde la ficha 08b, `viaje_id=<uuid>|sin_viaje` y `embarque_id=<uuid>`. La API nunca lee la cookie del viaje activo (R22): la pantalla
+ * manda `viaje_id` explícito.
+ */
 export const comprasQuerySchema = z
   .object({
     estado: z.enum(ESTADOS_COMPRA, "El estado debe ser borrador, confirmada, recibida o cancelada.").optional(),
@@ -211,6 +215,8 @@ export const comprasQuerySchema = z
     mundo_id: uuid("El mundo").optional(),
     linea_id: uuid("La línea").optional(),
     marca_id: uuid("La marca").optional(),
+    viaje_id: z.union([uuid("El viaje"), z.literal("sin_viaje")], "El viaje debe ser un identificador o «sin_viaje».").optional(),
+    embarque_id: uuid("El embarque").optional(),
     mio: bandera("mio"),
     por_confirmar: bandera("por_confirmar"),
     q: z.string().trim().max(100, "La búsqueda no puede superar 100 caracteres.").optional(),

@@ -152,6 +152,31 @@ export async function leerCatalogo(db: Db): Promise<{ data: CatalogoLeido | null
   };
 }
 
+// ─── Agrupadores (ficha 08b): solo lectura, para los chips de embarque y el viaje de cada compra ───
+
+export type DatosAgrupadoresCompras = {
+  viajes: Pick<Tables<"compra_viajes">, "id" | "codigo" | "nombre" | "estado">[];
+  embarques: Pick<Tables<"compra_embarques">, "id" | "codigo">[];
+  paquetes: Pick<Tables<"compra_paquetes">, "id" | "codigo">[];
+  asignaciones: Pick<Tables<"compra_entrega_asignaciones">, "id" | "entrega_id" | "embarque_id" | "paquete_id" | "unidades">[];
+};
+
+/**
+ * Viajes, embarques, paquetes y asignaciones (solo lo que muestra una compra), con orden estable. Si las tablas todavía no existen
+ * (la `0032` no está aplicada) la lectura falla y quien llama sigue sin agrupadores: las compras no dependen de ellos.
+ */
+export async function leerAgrupadoresDeCompras(db: Db): Promise<Resultado<DatosAgrupadoresCompras>> {
+  const [viajes, embarques, paquetes, asignaciones] = await Promise.all([
+    leerTodo<DatosAgrupadoresCompras["viajes"][number]>((d, h) => db.from("compra_viajes").select("id, codigo, nombre, estado").order("id").range(d, h)),
+    leerTodo<DatosAgrupadoresCompras["embarques"][number]>((d, h) => db.from("compra_embarques").select("id, codigo").order("id").range(d, h)),
+    leerTodo<DatosAgrupadoresCompras["paquetes"][number]>((d, h) => db.from("compra_paquetes").select("id, codigo").order("id").range(d, h)),
+    leerTodo<DatosAgrupadoresCompras["asignaciones"][number]>((d, h) => db.from("compra_entrega_asignaciones").select("id, entrega_id, embarque_id, paquete_id, unidades").order("id").range(d, h)),
+  ]);
+  const fallo = viajes.error ?? embarques.error ?? paquetes.error ?? asignaciones.error;
+  if (fallo) return { data: { viajes: [], embarques: [], paquetes: [], asignaciones: [] }, error: fallo };
+  return { data: { viajes: viajes.data, embarques: embarques.data, paquetes: paquetes.data, asignaciones: asignaciones.data }, error: null };
+}
+
 // ─── Escritura: SOLO las funciones de `0025` (una transacción por llamada) ───
 
 /** Lo que devuelve una llamada `rpc`: el `jsonb` de la función o el error de Postgres (una excepción de la función deshace todo). */
