@@ -4,11 +4,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   DELEGADOS,
+  ESCRITURAS_ABIERTAS_A_COMPRADOR,
+  LECTURAS_ABIERTAS_A_COMPRADOR,
+  analizarAperturas,
   analizarRuta,
   cuerpoDeFuncion,
   describirViolaciones,
+  escanearAperturas,
   escanearRutas,
   limpiar,
+  metodosConRequireUser,
   primeraSentencia,
   rutasDeApi,
 } from "./api.guards.analizador";
@@ -65,6 +70,49 @@ describe("rutas reales de la API", () => {
       }
     }
     expect(sin, `Handlers con petición que no usan leerCuerpo:\n${sin.join("\n")}`).toEqual([]);
+  });
+});
+
+describe("el comprador solo escribe lo decidido (requireUser en escrituras y lecturas)", () => {
+  const listas = { escrituras: ESCRITURAS_ABIERTAS_A_COMPRADOR, lecturas: LECTURAS_ABIERTAS_A_COMPRADOR };
+
+  it("toda escritura con requireUser está en ESCRITURAS_ABIERTAS_A_COMPRADOR y toda lectura en LECTURAS_ABIERTAS_A_COMPRADOR (y las listas no tienen entradas muertas)", () => {
+    const violaciones = escanearAperturas(API, RAIZ, listas);
+    expect(violaciones, `Aperturas al comprador sin registrar o listas obsoletas:\n${describirViolaciones(violaciones)}\n`).toEqual([]);
+  });
+
+  it("las 17 escrituras abiertas (decisiones 92 y 108) son exactamente las de compras: viajes, embarques, paquetes, agrupadores, viaje activo e importar", () => {
+    expect(ESCRITURAS_ABIERTAS_A_COMPRADOR.size).toBe(17);
+    for (const clave of ESCRITURAS_ABIERTAS_A_COMPRADOR) {
+      expect(clave, clave).toMatch(/^src\/app\/api\/compras\/(?:agrupadores|embarques|paquetes|viajes|viaje-activo|importar)(?:\/|\/route\.ts)/);
+      expect(clave, clave).toMatch(/#(?:POST|PUT|PATCH|DELETE)$/);
+    }
+  });
+
+  it("ninguna lectura abierta es de un método de escritura y viceversa", () => {
+    for (const clave of LECTURAS_ABIERTAS_A_COMPRADOR) expect(clave, clave).toMatch(/#(?:GET|HEAD|OPTIONS)$/);
+    for (const clave of ESCRITURAS_ABIERTAS_A_COMPRADOR) expect(clave, clave).not.toMatch(/#(?:GET|HEAD|OPTIONS)$/);
+  });
+
+  it("solo ESCRITURAS de compras llevan requireUser: el resto de escrituras exige planner o admin", () => {
+    const fueraDeLista: string[] = [];
+    for (const archivo of rutasDeApi(API)) {
+      const rel = path.relative(RAIZ, archivo).split(path.sep).join("/");
+      for (const metodo of metodosConRequireUser(readFileSync(archivo, "utf8"))) {
+        if (["POST", "PUT", "PATCH", "DELETE"].includes(metodo) && !rel.startsWith("src/app/api/compras/")) fueraDeLista.push(`${rel}#${metodo}`);
+      }
+    }
+    expect(fueraDeLista).toEqual([]);
+  });
+
+  it("los catálogos (delegados) solo abren la lectura al comprador: guardEscritura nunca es requireUser", () => {
+    const configuraciones = ["src/lib/arbol/catalogos.ts", "src/lib/marcas/catalogos.ts", "src/lib/estacionalidad/catalogos.ts"];
+    const escrituras: string[] = [];
+    for (const archivo of configuraciones) {
+      for (const m of leerFuente(archivo).matchAll(/guardEscritura\s*:\s*([\w$.]+)/g)) escrituras.push(`${archivo}: ${m[1]}`);
+    }
+    expect(escrituras.length).toBeGreaterThan(0);
+    expect(escrituras.filter((e) => e.endsWith("requireUser"))).toEqual([]);
   });
 });
 
@@ -281,6 +329,72 @@ describe("analizador (casos sintéticos)", () => {
       }
     `;
     expect(analizarRuta("a", raro)).toEqual([]);
+  });
+});
+
+describe("analizador de aperturas al comprador (casos sintéticos)", () => {
+  const ruta = (metodo: string, guard: string) =>
+    `export async function ${metodo}(request: Request) {\n  const { response } = await ${guard}();\n  if (response) return response;\n  return ok(1);\n}\n`;
+  const vacias = { escrituras: new Set<string>(), lecturas: new Set<string>() };
+  const ARCHIVO = "src/app/api/nueva/route.ts";
+
+  it("una escritura nueva con requireUser falla", () => {
+    for (const metodo of ["POST", "PUT", "PATCH", "DELETE"]) {
+      const v = analizarAperturas(ARCHIVO, ruta(metodo, "requireUser"), vacias);
+      expect(v, metodo).toEqual([{ archivo: ARCHIVO, metodo, motivo: expect.stringContaining("escritura con requireUser sin registrar") }]);
+    }
+  });
+
+  it("la misma escritura registrada en la lista pasa", () => {
+    const listas = { ...vacias, escrituras: new Set([`${ARCHIVO}#POST`]) };
+    expect(analizarAperturas(ARCHIVO, ruta("POST", "requireUser"), listas)).toEqual([]);
+  });
+
+  it("registrar el POST no cubre un PATCH de la misma ruta", () => {
+    const listas = { ...vacias, escrituras: new Set([`${ARCHIVO}#POST`]) };
+    const texto = ruta("POST", "requireUser") + ruta("PATCH", "requireUser");
+    expect(analizarAperturas(ARCHIVO, texto, listas).map((v) => v.metodo)).toEqual(["PATCH"]);
+  });
+
+  it("la lista de lecturas no vale para una escritura (ni al revés)", () => {
+    const soloLecturas = { ...vacias, lecturas: new Set([`${ARCHIVO}#POST`]) };
+    expect(analizarAperturas(ARCHIVO, ruta("POST", "requireUser"), soloLecturas)).toHaveLength(1);
+    const soloEscrituras = { ...vacias, escrituras: new Set([`${ARCHIVO}#GET`]) };
+    expect(analizarAperturas(ARCHIVO, ruta("GET", "requireUser"), soloEscrituras)).toHaveLength(1);
+  });
+
+  it("una lectura nueva con requireUser falla hasta registrarla", () => {
+    expect(analizarAperturas(ARCHIVO, ruta("GET", "requireUser"), vacias)).toEqual([
+      { archivo: ARCHIVO, metodo: "GET", motivo: expect.stringContaining("lectura con requireUser sin registrar") },
+    ]);
+    expect(analizarAperturas(ARCHIVO, ruta("GET", "requireUser"), { ...vacias, lecturas: new Set([`${ARCHIVO}#GET`]) })).toEqual([]);
+  });
+
+  it("requirePlanner y requireAdmin no necesitan registro", () => {
+    for (const guard of ["requirePlanner", "requireAdmin"]) {
+      for (const metodo of ["GET", "POST", "PATCH", "DELETE"]) expect(analizarAperturas(ARCHIVO, ruta(metodo, guard), vacias), `${guard} ${metodo}`).toEqual([]);
+    }
+  });
+
+  it("una mención de requireUser en un comentario no cuenta", () => {
+    const texto = `// requireUser\n${ruta("POST", "requirePlanner")}`;
+    expect(metodosConRequireUser(texto)).toEqual([]);
+  });
+
+  it("en un directorio temporal: la escritura nueva con requireUser falla, la registrada pasa y la entrada muerta se señala", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "vector2-aperturas-"));
+    try {
+      mkdirSync(path.join(dir, "api", "nueva"), { recursive: true });
+      writeFileSync(path.join(dir, "api", "nueva", "route.ts"), ruta("POST", "requireUser"));
+      const clave = "api/nueva/route.ts#POST";
+      const api = path.join(dir, "api");
+      expect(escanearAperturas(api, dir, vacias).map((v) => `${v.archivo}#${v.metodo}`)).toEqual([clave]);
+      expect(escanearAperturas(api, dir, { ...vacias, escrituras: new Set([clave]) })).toEqual([]);
+      const muerta = escanearAperturas(api, dir, { ...vacias, escrituras: new Set([clave, "api/borrada/route.ts#POST"]) });
+      expect(muerta).toEqual([expect.objectContaining({ archivo: "api/borrada/route.ts", metodo: "POST", motivo: expect.stringContaining("obsoleta") })]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

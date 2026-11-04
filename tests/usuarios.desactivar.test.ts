@@ -53,7 +53,7 @@ vi.mock("@/lib/auth/guard", () => ({
 import { PATCH } from "@/app/api/usuarios/[id]/route";
 
 const patch = (cuerpo: object) =>
-  PATCH(new Request(`http://localhost/api/usuarios/${OBJETIVO_ID}`, { method: "PATCH", body: JSON.stringify(cuerpo) }) as never, {
+  PATCH(new Request(`http://localhost/api/usuarios/${OBJETIVO_ID}`, { method: "PATCH", body: JSON.stringify(cuerpo), headers: { "content-type": "application/json" } }) as never, {
     params: Promise.resolve({ id: OBJETIVO_ID }),
   });
 

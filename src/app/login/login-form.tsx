@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/alert";
 import { destinoSeguro } from "@/lib/auth/destino";
+import { mensajeDeLogin } from "@/lib/auth/mensaje-login";
 
 /** Clave de localStorage donde se recuerda el correo en este equipo. */
 const CLAVE_RECORDAR = "vector2.login.correo";
@@ -57,14 +58,9 @@ export function LoginForm() {
 
     if (err) {
       setEnviando(false);
-      const mensaje = err.message.toLowerCase();
-      setError(
-        mensaje.includes("invalid")
-          ? "Correo o contraseña incorrectos."
-          : mensaje.includes("banned")
-            ? "Tu usuario está desactivado. Contacta con un administrador."
-            : err.message
-      );
+      // El detalle de Auth solo se ve en la consola del desarrollador; en producción no sale nada.
+      if (process.env.NODE_ENV === "development") console.debug("[login]", err.code, err.status, err.message);
+      setError(mensajeDeLogin(err));
       return;
     }
 

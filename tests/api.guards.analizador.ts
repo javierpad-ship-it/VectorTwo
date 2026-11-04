@@ -268,3 +268,152 @@ export function escanearRutas(dir: string, raiz: string = dir, delegadoValido?: 
     analizarRuta(path.relative(raiz, p).split(path.sep).join("/"), readFileSync(p, "utf8"), delegadoValido)
   );
 }
+
+/**
+ * Regla «el comprador solo escribe lo decidido» (auditoría de seguridad, pendiente de 0.9.2).
+ *
+ * `requireUser` deja pasar a los tres roles, comprador incluido. Para que nadie
+ * abra una escritura al comprador por descuido, toda ruta cuyo handler abra con
+ * `requireUser` debe estar en una de estas dos listas, con la decisión que la
+ * justifica. Una ruta nueva con `requireUser` hace fallar el test hasta que
+ * alguien la registre aquí a propósito (y el cambio sale en la revisión).
+ *
+ * Clave: `src/app/api/<ruta>/route.ts#MÉTODO`. Una entrada que ya no
+ * corresponde a un handler con `requireUser` también falla (lista obsoleta).
+ */
+export const METODOS_DE_ESCRITURA = ["POST", "PUT", "PATCH", "DELETE"] as const;
+
+/**
+ * Escrituras con `requireUser`: el comprador gestiona el flujo de lo que compra
+ * (viajes, embarques, paquetes, agrupadores y su borrador de compra) por las
+ * decisiones 92 (el comprador escribe agrupadores), 95 (un viaje cerrado sigue
+ * aceptando compras y embarques de los tres roles) y 108 (importar compras: el
+ * comprador solo crea borradores propios; `carga_inicial` y estados siguen
+ * restringidos dentro del servicio). Cerrar, reabrir y cancelar van con
+ * `requirePlanner` y no figuran aquí.
+ */
+export const ESCRITURAS_ABIERTAS_A_COMPRADOR: ReadonlySet<string> = new Set([
+  "src/app/api/compras/agrupadores/importar/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/[id]/route.ts#PATCH", // decisión 92
+  "src/app/api/compras/embarques/[id]/asignar/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/[id]/estado/route.ts#POST", // decisión 92; `puedeCambiarEstado(rol, accion)` tras el guard
+  "src/app/api/compras/embarques/[id]/fecha/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/[id]/paquete/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/[id]/paquetes/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/[id]/pasar-pendientes/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/[id]/quitar/route.ts#POST", // decisión 92
+  "src/app/api/compras/importar/route.ts#POST", // decisión 108 (solo borrador propio; carga_inicial 403)
+  "src/app/api/compras/paquetes/[id]/route.ts#PATCH", // decisión 92
+  "src/app/api/compras/paquetes/[id]/mover/route.ts#POST", // decisión 92
+  "src/app/api/compras/viaje-activo/route.ts#PUT", // decisión 92 (preferencia; sin efecto en permisos)
+  "src/app/api/compras/viajes/route.ts#POST", // decisión 92
+  "src/app/api/compras/viajes/[id]/route.ts#PATCH", // decisión 92
+  "src/app/api/compras/viajes/[id]/compras/route.ts#POST", // decisión 92
+]);
+
+/**
+ * Lecturas con `requireUser`: lo que el comprador ve por diseño (PLAN §3,
+ * `src/lib/nav.ts`, decisión 99 para venta y stock del flujo). Una lectura nueva
+ * obliga a decidir qué ve el comprador cuando nace la ruta.
+ */
+export const LECTURAS_ABIERTAS_A_COMPRADOR: ReadonlySet<string> = new Set([
+  "src/app/api/arbol/route.ts#GET",
+  "src/app/api/auth/me/route.ts#GET",
+  "src/app/api/compras/[id]/historial/route.ts#GET",
+  "src/app/api/compras/[id]/route.ts#GET",
+  "src/app/api/compras/agrupadores/historial/route.ts#GET",
+  "src/app/api/compras/agrupadores/opciones/route.ts#GET",
+  "src/app/api/compras/agrupadores/sin-asignar/route.ts#GET",
+  "src/app/api/compras/embarques/[id]/route.ts#GET",
+  "src/app/api/compras/embarques/route.ts#GET",
+  "src/app/api/compras/proveedores/route.ts#GET",
+  "src/app/api/compras/route.ts#GET",
+  "src/app/api/compras/viajes/[id]/route.ts#GET",
+  "src/app/api/compras/viajes/route.ts#GET",
+  "src/app/api/equivalencias/route.ts#GET",
+  "src/app/api/estacionalidad/equivalencias/route.ts#GET",
+  "src/app/api/estacionalidad/faltantes/route.ts#GET",
+  "src/app/api/flujo/conciliacion/route.ts#GET",
+  "src/app/api/flujo/fila/route.ts#GET",
+  "src/app/api/flujo/huecos/route.ts#GET",
+  "src/app/api/flujo/parametros/route.ts#GET",
+  "src/app/api/flujo/route.ts#GET",
+  "src/app/api/marcas/route.ts#GET",
+  "src/app/api/responsables/route.ts#GET",
+  "src/app/api/tiendas/aperturas/route.ts#GET",
+  "src/app/api/tiendas/route.ts#GET",
+]);
+
+export type ListasDeApertura = {
+  escrituras: ReadonlySet<string>;
+  lecturas: ReadonlySet<string>;
+};
+
+/** Los métodos de `texto` cuyo handler abre con `requireUser` (el análisis es el mismo que el de `analizarRuta`). */
+export function metodosConRequireUser(texto: string): string[] {
+  const limpio = limpiar(texto);
+  const metodos = METODOS.join("|");
+  const declarados = [...limpio.matchAll(new RegExp(`export\\s+(?:async\\s+)?function\\s+(${metodos})\\b`, "g"))];
+  const salida: string[] = [];
+  for (const m of declarados) {
+    const cuerpo = cuerpoDeFuncion(limpio, m[1]);
+    if (cuerpo === null) continue;
+    const primera = primeraSentencia(cuerpo);
+    if (primera.tipo === "guard" && primera.guard === "requireUser") salida.push(m[1]);
+  }
+  return salida;
+}
+
+const esEscritura = (metodo: string) => (METODOS_DE_ESCRITURA as readonly string[]).includes(metodo);
+
+/**
+ * Handlers con `requireUser` que no están en la lista que les corresponde
+ * (escrituras o lecturas). `archivo` es la ruta relativa a la raíz del repo.
+ */
+export function analizarAperturas(archivo: string, texto: string, listas: ListasDeApertura): Violacion[] {
+  const violaciones: Violacion[] = [];
+  for (const metodo of metodosConRequireUser(texto)) {
+    const clave = `${archivo}#${metodo}`;
+    if (esEscritura(metodo)) {
+      if (!listas.escrituras.has(clave)) {
+        violaciones.push({
+          archivo,
+          metodo,
+          motivo:
+            "escritura con requireUser sin registrar: el comprador podría escribir. Usa requirePlanner/requireAdmin o añádela a ESCRITURAS_ABIERTAS_A_COMPRADOR citando la decisión",
+        });
+      }
+    } else if (!listas.lecturas.has(clave)) {
+      violaciones.push({
+        archivo,
+        metodo,
+        motivo: "lectura con requireUser sin registrar: decide qué ve el comprador y añádela a LECTURAS_ABIERTAS_A_COMPRADOR",
+      });
+    }
+  }
+  return violaciones;
+}
+
+/** Recorre las rutas y devuelve las aperturas sin registrar y las entradas de las listas que ya no corresponden a nada. */
+export function escanearAperturas(dir: string, raiz: string, listas: ListasDeApertura): Violacion[] {
+  const vistas = new Set<string>();
+  const violaciones: Violacion[] = [];
+  for (const p of rutasDeApi(dir)) {
+    const archivo = path.relative(raiz, p).split(path.sep).join("/");
+    const texto = readFileSync(p, "utf8");
+    for (const metodo of metodosConRequireUser(texto)) vistas.add(`${archivo}#${metodo}`);
+    violaciones.push(...analizarAperturas(archivo, texto, listas));
+  }
+  for (const [lista, nombre] of [
+    [listas.escrituras, "ESCRITURAS_ABIERTAS_A_COMPRADOR"],
+    [listas.lecturas, "LECTURAS_ABIERTAS_A_COMPRADOR"],
+  ] as const) {
+    for (const clave of lista) {
+      if (vistas.has(clave)) continue;
+      const [archivo, metodo] = clave.split("#");
+      violaciones.push({ archivo, metodo, motivo: `entrada obsoleta de ${nombre}: la ruta ya no existe o su handler ya no abre con requireUser` });
+    }
+  }
+  return violaciones;
+}

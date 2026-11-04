@@ -131,7 +131,7 @@ describe("POST /api/periodos-atipicos", () => {
   it("400 con hasta anterior a desde, mes mal formado o cuerpo no JSON; no guarda nada", async () => {
     expect((await crear(json({ ...NINO, desde: "2023-06" }))).status).toBe(400);
     expect((await crear(json({ ...NINO, desde: "2023-13" }))).status).toBe(400);
-    const malo = await crear(new NextRequest(URL_BASE, { method: "POST", body: "no es json" }));
+    const malo = await crear(new NextRequest(URL_BASE, { method: "POST", body: "no es json", headers: { "content-type": "application/json" } }));
     expect(malo.status).toBe(400);
     expect((await leer(malo)).error).toMatch(/JSON/);
     expect(estado.tablas.periodos_atipicos).toEqual([]);

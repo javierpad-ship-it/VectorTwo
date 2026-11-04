@@ -225,7 +225,7 @@ describe("regla 65 · POST …/composicion", () => {
   it("404 agrupación inexistente o id mal formado; 400 cuerpo inválido o claves desconocidas", async () => {
     expect((await pedir(INEXISTENTE)).status).toBe(404);
     expect((await pedir("no-uuid")).status).toBe(404);
-    expect((await composicion(new NextRequest(URL, { method: "POST", body: "no es json" }), ctx(ID))).status).toBe(400);
+    expect((await composicion(new NextRequest(URL, { method: "POST", body: "no es json", headers: { "content-type": "application/json" } }), ctx(ID))).status).toBe(400);
     for (const mal of [{ meses_tienda_nueva: 40 }, { marcar_referencia: true }, { recencia_f: 2 }]) expect((await pedir(ID, mal)).status, JSON.stringify(mal)).toBe(400);
   });
   it("un error de la función es 500 genérico (sin el mensaje de Postgres); una respuesta con otra forma, 500 con mensaje", async () => {

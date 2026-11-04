@@ -36,11 +36,28 @@ const MENSAJE_CUERPO_GRANDE = "La petición es demasiado grande (el máximo es 6
 
 type Parseado<T> = { datos: T; respuesta: null } | { datos: null; respuesta: NextResponse };
 
+const MENSAJE_TIPO_NO_JSON = "El cuerpo debe enviarse como JSON.";
+
+/** `true` si el `Content-Type` es `application/json` (con o sin parámetros como `charset`). */
+export function esContentTypeJson(valor: string | null): boolean {
+  if (valor === null) return false;
+  return valor.split(";")[0].trim().toLowerCase() === "application/json";
+}
+
 /**
  * Lee y valida el JSON del cuerpo con un esquema zod. Si no pasa, devuelve
  * una respuesta 400 con el primer problema en castellano llano.
+ *
+ * Exige `Content-Type: application/json` (415 si falta o es otro) antes de leer
+ * nada: un formulario HTML o un `fetch` cruzado solo pueden mandar `text/plain`,
+ * `multipart` o `x-www-form-urlencoded` sin pre-vuelo CORS, así que esta
+ * comprobación cierra esa vía de CSRF como defensa en profundidad (auditoría S-06).
  */
 export async function leerCuerpo<T>(request: Request, esquema: ZodType<T>): Promise<Parseado<T>> {
+  if (!esContentTypeJson(request.headers.get("content-type"))) {
+    return { datos: null, respuesta: error(MENSAJE_TIPO_NO_JSON, 415) };
+  }
+
   const declarado = Number(request.headers.get("content-length"));
   if (Number.isFinite(declarado) && declarado > MAX_BYTES_CUERPO) {
     return { datos: null, respuesta: error(MENSAJE_CUERPO_GRANDE, 413) };

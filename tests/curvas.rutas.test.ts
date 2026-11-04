@@ -296,7 +296,7 @@ describe("POST /api/curvas/agrupaciones/[id]/calcular (lectura con cuerpo: nunca
     expect((await calcular(json({ recencia_f: 0.4 }), ctx(A[ABRIGO_ID]))).status).toBe(400);
     expect((await calcular(json({}), ctx(INEXISTENTE))).status).toBe(404);
     expect((await calcular(json({}), ctx("no-uuid"))).status).toBe(404);
-    expect((await calcular(new NextRequest(URL, { method: "POST", body: "no es json" }), ctx(A[ABRIGO_ID]))).status).toBe(400);
+    expect((await calcular(new NextRequest(URL, { method: "POST", body: "no es json", headers: { "content-type": "application/json" } }), ctx(A[ABRIGO_ID]))).status).toBe(400);
   });
   it("un error de la función se traduce a 500 genérico; una venta incompleta, 500 con mensaje", async () => {
     estadoFalso.venta.error = { code: "XX000", message: "boom" };
