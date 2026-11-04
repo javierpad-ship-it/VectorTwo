@@ -1,6 +1,6 @@
 # 07f · Venta por tienda y año de un género × mundo, dentro de Crecimientos
 
-> Estado: **especificada (2026-11-02), pendiente de que Javier responda §Preguntas abiertas.** Mejora pequeña de M7 sobre `0.15.0 · M7`. Versión prevista **`0.15.0 · M7 b`** (no es la `0.15.1`, que es de sublíneas y cierre por IA), commits `M7:`. **Necesita una migración de solo lectura: `0033_venta_tienda_nodos.sql`** (la ficha la citaba como `00F1`; tomó la siguiente libre al construir, registro único en `docs/PLAN.md` §5; la `0032` es de 08b-1). Depende de [07](07-proyeccion-anual.md) (regla 11, bloques), [07c](07c-crecimientos-por-genero-mundo.md) (`B`, `base_siguiente`, B2), [06d](06d-curva-y-crecimiento-por-genero-mundo.md) §4.2 (la pestaña de solo lectura) y [06e](06e-cierre-del-anio-y-base-sin-nino.md) (`base_normalizada = B'`). Cifras sintéticas; ningún dato real de Lukers.
+> Estado: **construida y validada por QA (2026-11-04); falta el hito con Javier** (sección P de `docs/pruebas/cowork-checklist.md`). Mejora pequeña de M7. Versión **`0.16.1 · M7 d`** (la ficha reservaba `0.15.0 · M7 b`, pero al cerrar la vigente ya era la `0.16.0 · M8 b` de 08b-1 y una versión no baja: ver «Cambios respecto a la especificación»). Commits `M7:` (`60a49f2`, `846351e`, `fc96e66` y las correcciones de QA). **Migración `0033_venta_tienda_nodos.sql`**, de solo lectura, **aplicada en Vector2** (la ficha la citaba como `00F1`; tomó la siguiente libre al construir, registro único en `docs/PLAN.md` §5). Depende de [07](07-proyeccion-anual.md) (regla 11, bloques), [07c](07c-crecimientos-por-genero-mundo.md) (`B`, `base_siguiente`, B2), [06d](06d-curva-y-crecimiento-por-genero-mundo.md) §4.2 (la pestaña de solo lectura) y [06e](06e-cierre-del-anio-y-base-sin-nino.md) (`base_normalizada = B'`). Cifras sintéticas; ningún dato real de Lukers. Las secciones 1 a 12 son la especificación; lo construido y lo que cambió respecto a ella está en «Construido y validado» y «Cambios respecto a la especificación», al final.
 
 ## 1. Objetivo
 
@@ -277,7 +277,7 @@ export type VentaPorTiendaApi = {
 4. Cada periodo muestra unidades y soles netos de IGV, y la variación de 2026 ene–sep frente a 2025 ene–sep en las dos medidas.
 5. La URL con `?por_tienda=` sobrevive a recargar. El Excel descarga las mismas cifras.
 6. El comprador no ve la pestaña. En una proyección cerrada se ve igual.
-7. Pasan `lint`, `tsc`, `vitest` y `build`, y `APP_VERSION = "0.15.0 · M7 b"`.
+7. Pasan `lint`, `tsc`, `vitest` y `build`, y `APP_VERSION = "0.16.1 · M7 d"` (la ficha decía `0.15.0 · M7 b`).
 
 ## 10. Fuera de alcance
 
@@ -321,9 +321,11 @@ export type VentaPorTiendaApi = {
 **Tanda 3.**
 - **`qa`:** corre las cuatro verificaciones, recorre §9 con la base falsa y añade los casos borde de §7 que falten en `tests/proyeccion.venta-por-tienda-qa.test.ts`, su único archivo.
 - **`seguridad`** (sonnet): revisión de solo lectura (guard, ausencia de CD, IA y escrituras, y `revoke` de la función).
-- **`documentador`:** `CHANGELOG.md`, `docs/PLAN.md`, `docs/DECISIONES.md`, esta ficha (lo construido), `docs/pruebas/cowork-checklist.md` (sección M) y `src/lib/version.ts` (`0.15.0 · M7 b`).
+- **`documentador`:** `CHANGELOG.md`, `docs/PLAN.md`, `docs/DECISIONES.md`, esta ficha (lo construido), `docs/pruebas/cowork-checklist.md` (sección M) y `src/lib/version.ts` (`0.16.1 · M7 d`; la ficha decía `0.15.0 · M7 b`).
 
 ## 12. Propuestas para `docs/DECISIONES.md`
+
+*Registradas como decisiones 110, 111 y 112 (la 113 es la del permiso y la 114 la del Resto).*
 
 1. **La venta por tienda de un GM muestra el año en curso dos veces:** el real hasta `k` (u y S/, comparado con los mismos meses del año anterior) y el cierre vigente (solo u, comparado con el año anterior completo), que es lo que mide `B`.
 2. **El vigente por tienda de las mismas tiendas es una atribución informativa:** el resto de la base del GM se reparte en proporción al real ene–`k`, con el mismo criterio que `aporteSaliente`. El subtotal cuadra exacto con `Σ B`, y las tiendas que entran usan su vigente exacto. Descartado: el reparto fila por fila (exige venta fila × tienda, ≈ 90 000 tuplas por GM).
@@ -331,5 +333,51 @@ export type VentaPorTiendaApi = {
 
 ## Preguntas abiertas (solo Javier)
 
-1. **¿Soles del cierre vigente 2026 por tienda?** M7 solo proyecta unidades. Se podría mostrar un S/ estimado (vigente u × precio medio ene–sep de esa tienda en el GM), rotulado «estimado». **Recomendación: no en esta entrega.** El S/ se queda como referencia del real, y la base es en unidades.
-2. **¿«Ver por tienda» también en el Resto?** La ficha lo incluye porque es el mismo contrato y el Resto también tiene base. **Recomendación: sí.** Si prefieres solo las celdas HOMBRE y MUJER, se quita el botón del Resto y el `gm=resto`, sin más cambios.
+*(Respondidas por defecto al construir; Javier puede revertirlas. Ver «Cambios respecto a la especificación».)*
+
+1. **¿Soles del cierre vigente 2026 por tienda?** M7 solo proyecta unidades. Se podría mostrar un S/ estimado (vigente u × precio medio ene–sep de esa tienda en el GM), rotulado «estimado». **Recomendación: no en esta entrega. Aplicada: no.** El S/ se queda como referencia del real, y la base es en unidades.
+2. **¿«Ver por tienda» también en el Resto?** La ficha lo incluye porque es el mismo contrato y el Resto también tiene base. **Recomendación: sí. Aplicada: sí.** Si prefieres solo las celdas HOMBRE y MUJER, se quita el botón del Resto y el `gm=resto`, sin más cambios.
+
+## Construido y validado (2026-11-04)
+
+**Qué hay.** En la pestaña Crecimientos, cada fila de género × mundo (GM) y la del Resto tiene el botón «Ver por tienda», que abre debajo de la tabla una tarjeta con la venta por tienda y año (unidades y soles netos de IGV, de 2023 a 2026), las tiendas de la base de 2027 aparte de las que quedan fuera y un subtotal de la base que cuadra exacto con `Σ B` de esa celda. No cambia ningún cálculo, no escribe nada y no lee IA.
+
+| Pieza | Archivo |
+|---|---|
+| Función de lectura (migración `0033`, humo `scripts/humo-0033.sql`, tipos regenerados) | `supabase/migrations/0033_venta_tienda_nodos.sql` |
+| Lógica pura: grupos de tiendas, periodos, reparto de la base, variaciones | `src/lib/proyeccion/venta-por-tienda.ts` |
+| Servicio y lectura de la función | `src/lib/proyeccion/servicio-venta-por-tienda.ts`, `leerVentaTiendaNodos` en `consultas.ts` |
+| Ruta `GET …/crecimientos/por-tienda?gm=` | `src/app/api/proyeccion/proyecciones/[id]/crecimientos/por-tienda/route.ts` |
+| Tarjeta, vista pura (filas, textos, motivos, Excel) y botón por fila | `venta-por-tienda.tsx`, `venta-por-tienda-vista.ts` y `crecimientos-tab.tsx` en `src/app/(app)/planificacion/proyeccion/`; el parámetro `por_tienda` vive en `proyeccion-panel.tsx` y `use-proyeccion.ts` |
+
+**Qué se ve.** La cabecera dice «Base 2027 = N u» y cuántas tiendas tiene la base. La tabla trae, por tienda, cada periodo con unidades y soles, y las variaciones de 2024 frente a 2023, 2025 frente a 2024, 2026 ene–sep frente a 2025 ene–sep y el cierre vigente frente a 2025. Una variación que no se puede dar lleva su motivo (`nueva`, `parcial`, `incompleto` o `sin dato`). Un periodo con meses sin publicar lleva en la cabecera «faltan: mes año». Debajo de la tabla hay una leyenda de los motivos. «Descargar Excel» genera `proyeccion-2026-2027-por-tienda.xlsx` con las hojas `POR_TIENDA` y `FILTROS`, en el navegador. La elección se guarda en la URL como `?por_tienda=<clave>`, sobrevive a recargar y se borra al cambiar de pestaña o de proyección.
+
+**Rendimiento medido.** El documento de `venta_tienda_nodos` pesa unos 38 KB (presupuesto: 150 KB). MUJER × URBANO responde en unos 0,7 a 0,9 s; el Resto, en caliente, en 1,3 a 2,1 s. El presupuesto era de 1 s en caliente, así que el Resto lo supera; queda dentro del máximo de 3 s en frío y muy por debajo de los 8 s que corta PostgREST. La palanca prevista, si se vuelve molesto, es bajar `ANIOS_ATRAS_VENTA_TIENDA` de 3 a 2 (un solo número en `venta-por-tienda.ts`; se pierde la columna del año más antiguo). Es un pendiente, no un bloqueo.
+
+**Resultado de QA.**
+- Las cuatro verificaciones (`lint`, `tsc`, `vitest`, `build`) en verde.
+- Humo de la `0033` en la base: 36 comprobaciones, 0 fallos.
+- Fuzz de atribución: 20 000 casos aleatorios de la regla `Σ vigente(base) + sin_atribuir = Σ B`, que se mantuvo exacta en todos.
+- Casos borde de §7 en `tests/proyeccion.venta-por-tienda-qa.test.ts` (su único archivo).
+- Hallazgos corregidos antes de cerrar: la ruta pasó de `requireUser` a `requirePlanner`; formato de miles `es-PE` y mes «set» uniformes; el botón «Ver por tienda» bajó a la primera columna, bajo el nombre del GM, para que se vea en móvil; la leyenda de motivos se hizo visible; el Excel se hizo legible; con `k = 12` ya no sale la columna «ene–dic» duplicada del año completo.
+- **No verificado:** el cuadre con las cifras reales de Vector2 (lo valida Javier con el punto 3 del checklist), la descarga real del Excel en un navegador y la vista de escritorio. Todo lo demás se probó con base falsa y datos sintéticos.
+
+## Cambios respecto a la especificación
+
+1. **Cuatro columnas «Var.».** La lista de columnas de §5 escribía una «Var.» detrás de cada año, incluido 2023, que no tiene año anterior con qué compararse. Lo construido son las cuatro comparaciones de §3.4, cada una pegada al periodo que se compara: 2024 frente a 2023, 2025 frente a 2024, 2026 ene–sep frente a 2025 ene–sep y cierre vigente frente a 2025. «2025 ene–sep» no lleva variación propia y 2023 tampoco.
+2. **Formato `es-PE` y mes «set».** Todos los miles salen con coma (`15,600`) y septiembre se abrevia «set», igual en la tabla, los avisos, los títulos y el Excel. La especificación escribía los ejemplos con espacio y «sep».
+3. **El botón «Ver por tienda» va en la primera columna**, bajo el nombre del GM, y no junto a «Analizar y aprobar». En móvil «Analizar y aprobar» queda fuera de pantalla en la tabla de Crecimientos (heredado, no de 07f), y el botón nuevo debía verse sin desplazarse.
+4. **`ANIOS_ATRAS_VENTA_TIENDA = 3`.** La lectura pide desde enero de `Y − 3` (2023, con `Y = 2026`), como preveía §2.2, y se queda en tres años porque el Resto cabe en el máximo de 3 s en frío. Es una constante exportada para poder bajarla a 2.
+5. **Precedencia de `variacionVenta`.** §3.4 enumeraba los motivos sin orden. Lo construido es: `incompleto` primero (si falta un mes publicado ninguna cifra es fiable), después `nueva`, después `sin_dato`, y por último `parcial`. Así una tienda que abrió a mitad de año con un mes sin publicar se rotula `incompleto`, que es el aviso accionable.
+6. **`totales.fuera.vigente = null`.** §4 solo fijaba el vigente de `base` (igual a `Σ B`) y el de `conjunto` (`null`). El subtotal «Fuera de la base» tampoco lleva vigente: mezcla aperturas exactas con cierres sin cifra, y sumarlas no significaría nada.
+7. **Permiso de la ruta (no es una desviación, pero se registra).** La ficha decía `requirePlanner`; el primer borrador del código usó `requireUser` (por la decisión 99, que deja al comprador ver venta y stock del flujo) y QA lo corrigió. Quedó `requirePlanner`: el comprador no ve Planificación y recibe `403`. Decisión 113.
+8. **Soles del cierre vigente: no se muestran** y **«Ver por tienda» también en el Resto:** las dos preguntas abiertas se aplicaron con la recomendación de la ficha. Decisiones 110 y 114.
+9. **Con `k = 12` no hay columna «ene–dic» duplicada:** el año en curso completo ya es el real, y se compara con el año anterior completo.
+10. **Versión `0.16.1 · M7 d`, no `0.15.0 · M7 b`.** Cuando 07f cerró, la vigente era la `0.16.0 · M8 b` (08b-1), y una versión no puede bajar. Toma el parche de la vigente y el sufijo `· M7 d` por la letra siguiente a `· M7 c` de 07g.
+
+## Pendientes
+
+- **Abrir Planificación al comprador.** Hoy el comprador no ve Planificación y por eso la ruta es solo para planner y admin. Si Javier quiere que los compradores vean la venta por tienda, es un cambio de permiso del módulo entero de Planificación, no de esta ruta (decisión 113). La decisión 99 (el comprador ve venta y stock del flujo) no se extiende a los datos de la proyección.
+- **El Resto, en caliente, tarda más de 1 s** (1,3 a 2,1 s). Mirar si molesta con datos reales; la palanca es `ANIOS_ATRAS_VENTA_TIENDA = 2`.
+- **`Analizar y aprobar` queda fuera de pantalla en móvil** en la tabla de Crecimientos (a 390 px). Heredado de antes de 07f; el botón de 07f se movió para evitarlo, pero «Analizar y aprobar» sigue pendiente.
+- **Sin verificar con cifras reales:** el cuadre con Vector2, la descarga del Excel y el escritorio (los cubre el hito de Javier, sección P).

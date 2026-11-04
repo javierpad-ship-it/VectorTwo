@@ -2,6 +2,33 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.16.1 · M7 d — 2026-11-04
+
+Ficha `docs/modulos/07f-venta-por-tienda-en-crecimientos.md`. Migración `0033_venta_tienda_nodos.sql`, de solo lectura, **aplicada en Vector2** (humo 36 comprobaciones, 0 fallos). Decisiones 110 a 114 de `DECISIONES.md`. `VERSION_METODO` y el contrato de M8 no cambian: no se escribe ni se recalcula nada. Construida y validada por QA; **pendiente del hito con Javier** (sección P de `docs/pruebas/cowork-checklist.md`). La ficha reservaba la etiqueta `0.15.0 · M7 b`, pero al cerrar 07f la vigente ya era la `0.16.0 · M8 b` (08b-1) y una versión no baja: toma el parche `0.16.1` con el sufijo `· M7 d`, por la letra siguiente a la `· M7 c` de 07g.
+
+**Qué resuelve.** En Crecimientos, Javier veía por género × mundo (GM) una «Base 2026 (u) real» sin saber qué tiendas ni qué años había detrás («¿qué estoy evaluando? ¿mismas tiendas?»). Ahora cada fila de GM y la del Resto tienen el botón **«Ver por tienda»** (bajo el nombre del GM; el Total no lo tiene), que abre debajo de la tabla una tarjeta con la venta por tienda y año (unidades y soles netos de IGV, 2023 a 2026). Las tiendas de la base de 2027 salen aparte de las que quedan fuera (cierres de 2027, aperturas de 2026, cerradas), cada una con su motivo, y el subtotal de la base **cuadra exacto con `Σ B`** de esa celda. El CD nunca aparece.
+
+- **Cabecera y tabla.** «Base 2027 = N u» con el número de tiendas; por periodo, «N u» y «S/ N»; cuatro columnas «Var.» (2024 frente a 2023, 2025 frente a 2024, 2026 ene–sep frente a 2025 ene–sep, cierre vigente frente a 2025). Una variación que no se puede dar dice `nueva`, `parcial`, `incompleto` o `—`, con una leyenda de motivos visible. Los subtotales con una tienda de año parcial traen además la variación «comparable». Un periodo con meses sin publicar lleva «faltan: mes año» en su cabecera.
+- **Año en curso en dos columnas** (decisión 110): «2026 ene–sep (real)» en u y S/, y «2026 cierre vigente», solo en unidades (lo que mide `B`). No hay soles estimados del cierre.
+- **Vigente por tienda, estimado y exacto en la suma** (decisión 111): las tiendas que entran usan su vigente exacto; el resto de `Σ B` se reparte entre las mismas tiendas en proporción a su real ene–`k`, con reparto entero por mayor resto; lo que no se puede repartir va a la fila «Sin atribuir a tienda».
+- **Función `venta_tienda_nodos`** (decisión 112): `p_gml_ids`, `p_desde` y `p_hasta`, solo tiendas de tipo Tienda, solo `unidades` y `venta_soles`, `security invoker`, ejecución solo para `service_role`. Sin tablas ni columnas nuevas.
+- **API.** `GET /api/proyeccion/proyecciones/[id]/crecimientos/por-tienda?gm=<genero_id>.<mundo_id>|resto`, **solo `requirePlanner`** (decisión 113: el comprador recibe `403`; la decisión 99 no se extiende a los datos de la proyección). Respuestas `400`, `404 gm_no_encontrado`, `400 genero_no_detallado`, `409 sin_calcular` y `409 calculo_en_curso`; con método anterior o sin filas base, `200` con `base.total = null` y las columnas reales.
+- **Pantalla.** La elección vive en la URL (`?por_tienda=`), sobrevive a recargar y se borra al cambiar de pestaña. «Descargar Excel» baja `proyeccion-2026-2027-por-tienda.xlsx` con las hojas `POR_TIENDA` y `FILTROS`, armado en el navegador. «Ver por tienda» también está en el Resto (decisión 114).
+- **QA.** Cuatro verificaciones en verde; humo de la `0033` 36/0; fuzz de atribución de 20 000 casos con `Σ vigente(base) + sin atribuir = Σ B` exacto en todos; los casos borde de la ficha en `tests/proyeccion.venta-por-tienda-qa.test.ts`. Corregido antes de cerrar: la ruta pasó de `requireUser` a `requirePlanner`; miles con formato `es-PE` y «set» uniformes; el botón «Ver por tienda» bajó a la primera columna para verse en móvil; leyenda de motivos visible; Excel legible; con `k = 12` ya no se duplica la columna del año completo.
+- **Medidas.** El documento de la función pesa unos 38 KB (presupuesto 150 KB). MUJER × URBANO responde en 0,7 a 0,9 s; el Resto, en caliente, en 1,3 a 2,1 s (presupuesto 1 s), dentro del máximo de 3 s en frío y muy por debajo de los 8 s de PostgREST.
+- **Pruebas:** 6 950 pruebas en 314 archivos, todas en verde (2 omitidas, ya existentes). `lint`, `tsc`, `vitest` y `build` pasan.
+
+**Cambios respecto a la especificación** (detalle en la ficha): cuatro columnas «Var.» y no una por año; formato `es-PE` y mes «set»; botón en la primera columna; `ANIOS_ATRAS_VENTA_TIENDA = 3`; `variacionVenta` da precedencia a `incompleto` sobre `nueva`, `sin_dato` y `parcial`; `totales.fuera.vigente = null`; sin soles del cierre y con «Ver por tienda» en el Resto (preguntas abiertas aplicadas por defecto); versión `0.16.1 · M7 d`.
+
+**Qué debe hacer Javier** (sección P del checklist): con una proyección de método 5, abrir «Ver por tienda» en dos GM y en el Resto y comprobar que el subtotal «Base 2027» es igual a la «Base 2026 (u) real» de la fila (punto 3, el que no se pudo verificar con cifras reales), abrir el Excel descargado y mirar la pantalla a 390 px.
+
+**No verificado:** el cuadre con las cifras reales de Vector2, la descarga real del Excel en un navegador y la vista de escritorio.
+
+**Pendientes anotados (no bloquean el hito):**
+- **Abrir Planificación al comprador**, si Javier la quiere: hoy la ruta es solo de planner y admin porque el comprador no ve Planificación (decisión 113); es un cambio de permiso de todo el módulo.
+- **El Resto, en caliente, supera 1 s** (1,3 a 2,1 s). Palanca prevista: bajar `ANIOS_ATRAS_VENTA_TIENDA` de 3 a 2.
+- **`Analizar y aprobar` queda fuera de pantalla en móvil** en la tabla de Crecimientos (heredado; el botón nuevo de 07f se movió para evitarlo).
+
 ## 0.16.0 · M8 b — 2026-11-04
 
 Ficha `docs/modulos/08b-agrupadores-de-compras.md`, **entrega 08b-1** (08b-2, «Recibir embarque», sigue sin construir). Migraciones `0032_agrupadores_compras.sql` y `0034_importar_borrador_propio.sql`, **aplicadas en Vector2** (la `0033` es de 07f). Decisiones 81, 83, 85, 86 y 92 a 98 (agrupadores) y 107 a 109 (carga inicial desde COTV, importador del comprador y compras cruzadas) de `DECISIONES.md`. `VERSION_METODO` y `VERSION_METODO_FLUJO` no cambian: el flujo sigue leyendo las mismas entregas. Construida y validada por QA y seguridad; **pendiente del hito con Javier** (sección O de `docs/pruebas/cowork-checklist.md`).

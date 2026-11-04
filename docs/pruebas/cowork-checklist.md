@@ -2,7 +2,7 @@
 
 Objetivo: recorrer las pantallas nuevas con un navegador real, que es lo único que no han podido hacer ni los tests ni QA. Cowork **observa y reporta**; no decide ni cambia datos salvo donde el paso lo diga.
 
-**Nota de numeración.** Las secciones A a D son de las primeras entregas (hasta `0.9.7`). Las fichas 07, 12 y 13 citan las letras F, G y H para los hitos de M7, M12 y M13; esos hitos todavía no se han pasado a este archivo y las letras quedan reservadas. Las secciones **I** (`0.12.1 · M6`), **J** (`0.13.0 · M8`), **K** (`0.14.0 · M6`), **L** (`0.15.0 · M7`) **N** (`0.15.0 · M7 c`, aprobación en bloque) y **O** (`0.16.0 · M8 b`, agrupadores de compras) son las nuevas; la M queda reservada para M9a.
+**Nota de numeración.** Las secciones A a D son de las primeras entregas (hasta `0.9.7`). Las fichas 07, 12 y 13 citan las letras F, G y H para los hitos de M7, M12 y M13; esos hitos todavía no se han pasado a este archivo y las letras quedan reservadas. Las secciones **I** (`0.12.1 · M6`), **J** (`0.13.0 · M8`), **K** (`0.14.0 · M6`), **L** (`0.15.0 · M7`) **N** (`0.15.0 · M7 c`, aprobación en bloque), **O** (`0.16.0 · M8 b`, agrupadores de compras) y **P** (`0.16.1 · M7 d`, «Ver por tienda» de 07f) son las nuevas; la M queda reservada para M9a. La ficha 07f citaba la letra M para su hito: se usó la **P**, la siguiente libre, porque la M es de M9a y la O de 08b-1.
 
 ## Reglas para Cowork (leer antes de empezar)
 
@@ -246,6 +246,32 @@ Contexto: desde la `0.16.0 · M8 b` el menú Compras tiene **Viajes y embarques*
 21. **Excel.** El Excel de embarques y de viajes se descarga y abre (hojas `EMBARQUES`, `PAQUETES` y `ASIGNACIONES`).
 
 Además, en cada paso de O: la versión del pie del menú es **0.16.0 · M8 b** o posterior y no hay errores en la consola del navegador. **Validación de negocio (Javier):** la barra de viaje activo y los códigos `aamm##` le sirven para trabajar sus viajes, mover la llegada de un embarque refleja bien el flujo, y el comprador puede cargar sus compras sin pedirle nada. **Cowork no cierra, cancela, aplica importaciones ni mueve fechas sin autorización en ese paso, y no usa el usuario admin** (los pasos que lo requieren los hace Javier).
+
+## P. «Ver por tienda» en Crecimientos (hito de `0.16.1 · M7 d`, ficha `docs/modulos/07f-venta-por-tienda-en-crecimientos.md`, §9)
+
+Contexto: desde la `0.16.1 · M7 d`, en la pestaña **Crecimientos**, cada fila de género × mundo (GM) y la del Resto tienen el botón **«Ver por tienda»**, bajo el nombre del GM. Abre una tarjeta con la venta por tienda y año (unidades y soles netos de IGV), con las tiendas de la base de 2027 aparte de las que quedan fuera, y un subtotal que debe ser igual a la «Base 2026 (u) real» de la tabla de arriba. Es solo lectura: no escribe nada, así que **ningún paso es ✍️** y Cowork puede recorrerla entera. Solo la ven admin y planner (el comprador no ve Planificación).
+
+**Prerrequisitos de Javier.**
+1. Una proyección **calculada con el método 5** (si es del método anterior, la tarjeta lo dice y no muestra la base).
+2. Ventas publicadas de 2023 en adelante (45 meses ya cargados).
+3. Un usuario planner y otro comprador de prueba.
+
+**Pasos** (todos de solo lectura; Cowork anota tiempos y errores de consola).
+
+1. **El botón.** En Crecimientos hay «Ver por tienda» en cada GM y en el Resto, **no** en el Total. Se ve sin desplazarse a la derecha, bajo el nombre del GM. Pulsarlo en MUJER · URBANO abre, debajo de la tabla, la tarjeta «Venta por tienda · MUJER · URBANO», con un selector para cambiar de GM o pasar al Resto y el botón «Cerrar». Anotar cuánto tarda en cargar (MUJER · URBANO debería estar bajo 1 s; el Resto puede tardar 1 a 2 s).
+2. **La cabecera.** Dice «Base 2027 = N u» y cuántas tiendas tiene la base (las abiertas todo 2026), y que la base es «2026 vigente = real ene–sep + proyectado oct–dic». Si la base corregida del Niño difiere, la cabecera la cita aparte.
+3. **El cuadre (el punto clave).** El subtotal «Base 2027 · mismas tiendas de 2027 (N)» tiene en la columna «2026 cierre vigente» un número **igual** a la «Base 2026 (u) real» de esa fila en la tabla de arriba. **Comprobar en dos GM y en el Resto.** Si alguno no cuadra, es bloqueante: anotar el GM, ambas cifras y la captura.
+4. **Tiendas de la base y de fuera.** Las tiendas de la base salen primero; después el subtotal; después, aparte, «Fuera de la base» con las que cierran en 2027, las que abrieron en 2026 y las ya cerradas, cada una con su motivo (el texto también sale al pasar el cursor por el badge). **El CD no aparece en ningún sitio.** Una tienda de la base sin venta en el GM sale en ceros.
+5. **Unidades, soles y variaciones.** Cada periodo muestra «N u» y «S/ N», netos de IGV. Hay cuatro columnas «Var.» (2024 frente a 2023, 2025 frente a 2024, 2026 ene–sep frente a 2025 ene–sep y cierre vigente frente a 2025). Una variación que no se puede dar dice «nueva», «parcial», «incompleto» o «—», con el motivo al pasar el cursor, y la leyenda de motivos está visible bajo la tabla. Los miles llevan coma (15,600) y septiembre se escribe «set».
+6. **Comparable y meses faltantes.** Si el subtotal incluye una tienda con año parcial (por ejemplo, una que abrió a fines de 2025), la variación trae una segunda línea «comparable +X %» con el título «sin T…». Si algún mes no está publicado, la cabecera de ese periodo dice «faltan: mar 2024» (o el que sea) y sus variaciones salen «incompleto».
+7. **«Sin atribuir a tienda» y método anterior.** Si aparece la fila «Sin atribuir a tienda» dentro de la base, el subtotal sigue cuadrando contra la tabla de arriba y se ve el aviso que lo explica. Con una proyección de método anterior (si hay una a mano), la cabecera dice «Recalcula la proyección para ver la base 2027» y no hay columna de vigente.
+8. **La dirección web.** Al abrir una tarjeta, la URL trae `?por_tienda=…`. Recargar la página (F5) la deja abierta en el mismo GM. Cambiar de pestaña (por ejemplo, a Matriz) la cierra y borra el parámetro. Cambiar de GM con el selector actualiza la tarjeta.
+9. **Excel (abrirlo a mano).** «Descargar Excel» baja `proyeccion-2026-2027-por-tienda.xlsx`. Abrirlo: la hoja `POR_TIENDA` repite las filas con una columna por cifra (u, S/ y %) y legible, y la hoja `FILTROS` dice proyección, conjunto, corte y fecha. Las cifras son las de la pantalla.
+10. **Celular a 390 px.** El botón «Ver por tienda» se ve sin desplazarse, la tarjeta se abre y la tabla se desplaza hacia el lado sin cortar la primera columna. Sin errores en la consola.
+
+*Roles.* Con el **comprador**: no ve la pestaña; abrir en el navegador `/api/proyeccion/proyecciones/<id>/crecimientos/por-tienda?gm=resto` responde 403. No enviar nada desde la consola. En una proyección cerrada o archivada la tarjeta se ve igual.
+
+Además, en cada paso de P: la versión del pie del menú es **0.16.1 · M7 d** o posterior y no hay errores en la consola del navegador. **Validación de negocio (Javier):** la tarjeta responde a «¿qué tiendas hay detrás de la base y son las mismas?»; el reparto por tienda del cierre vigente (rotulado «estimado») le parece razonable; y si quiere soles estimados del cierre, ver el Resto o abrir Planificación al comprador, lo dice (son decisiones suyas, no defectos). **No hay nada que Cowork deba evitar salvo el usuario admin.** No verificado antes de este hito: el cuadre con las cifras reales de Vector2, la descarga real del Excel y la vista de escritorio.
 
 ## Informe (al terminar cualquier sección)
 

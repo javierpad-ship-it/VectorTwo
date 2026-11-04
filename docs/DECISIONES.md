@@ -1418,3 +1418,43 @@ Todas están redactadas con su alcance completo en `docs/modulos/08c-proveedores
 **Estado.** Registrada ahora porque la ficha 08c la define; **no está construida** (E1 sigue en especificación). El número 88 completo (reducción y almacenamiento de fotos) se registra al construir E1.
 
 **Descartado.** Subir la `revision` en cada edición de ficha de línea (los `409` falsos); dejar la descripción y el modelo sin ningún candado (pisaría texto ajeno).
+
+## 2026-11-04 · M7 (07f): «Ver por tienda» muestra el año en curso dos veces y no inventa soles del cierre (decisión 110)
+
+**Decisión.** La tabla de venta por tienda de un género × mundo (GM) muestra el año en curso en dos columnas: **«2026 ene–sep (real)»**, con unidades y soles, comparada con «2025 ene–sep» (los mismos meses), y **«2026 cierre vigente»**, **solo en unidades**, comparada con el 2025 completo. El cierre vigente es lo que M7 usa para armar `B`, la base del año siguiente. **No se muestran soles del cierre vigente** (pregunta abierta 1 de la ficha, aplicada por defecto con la recomendación; Javier puede cambiarla).
+
+**Por qué.** El real es el único dato duro y es el que se puede comparar de igual a igual con el año anterior; el vigente es el número sobre el que se aplica el crecimiento y mostrar solo el real no cuadra con `B`. Mostrar solo el vigente escondería qué parte es proyección. Los soles del vigente no existen: M7 proyecta unidades, y un precio medio por tienda sería una cifra inventada que parecería real.
+
+**Descartado.** Mostrar solo el real (no cuadra con `B`); mostrar solo el vigente (esconde lo proyectado); un S/ estimado del cierre con el precio medio ene–sep de la tienda (se puede añadir después, rotulado «estimado», si Javier lo pide).
+
+## 2026-11-04 · M7 (07f): el vigente por tienda de las mismas tiendas es una atribución informativa que cuadra exacto con `Σ B` (decisión 111)
+
+**Decisión.** Para cada tienda que entra a la base de 2027, el «cierre vigente» se calcula así: las tiendas que **entran** (abrieron en el año anterior al en curso y ya están en la base) usan su vigente exacto, el de sus filas de tienda; lo que queda de `Σ B` se reparte entre las tiendas **mismas** en proporción a su real ene–`k` del año en curso en ese GM (reparto entero por mayor resto, empates por código), con el mismo criterio que M7 usa en `aporteSaliente` para una tienda que sale. Lo que no se puede repartir (todas las mismas con venta 0, o un resto negativo) va a una fila **«Sin atribuir a tienda»** dentro de la base. El invariante es `Σ vigente(base) + sin atribuir = Σ B`, exacto en enteros, y es el `agregado.base` de la misma celda en la pestaña. Por eso la cifra por tienda se rotula «estimado». El cuadre no depende de que la venta de hoy sea la del cálculo: si se republicó un mes, solo cambia cómo se reparte entre tiendas.
+
+**Por qué.** Javier preguntó «¿qué estoy evaluando? ¿mismas tiendas?» frente a una base que sumaba tiendas sin decir cuáles. M7 no guarda el vigente por tienda, así que se reconstruye; lo importante es que la suma sea exactamente la base que ya aprobó, y que lo estimado se vea como tal.
+
+**Descartado.** Repartir fila por fila (exige venta por fila × tienda × mes, unas 90 000 tuplas por GM, y el límite de 8 s de PostgREST); mostrar la tabla sin el vigente por tienda (no respondería a la pregunta); repartir la base corregida del Niño `B'` por tienda (queda fuera de alcance: la cabecera solo la cita).
+
+## 2026-11-04 · M7 (07f): una función de lectura nueva, `venta_tienda_nodos`, con unidades y soles por tienda y mes, sin CD (decisión 112)
+
+**Decisión.** La migración `0033` agrega solo la función `venta_tienda_nodos(p_gml_ids, p_desde, p_hasta)`: lee `venta_stock_vigente` (cargas publicadas) de las equivalencias de unos nodos, solo de tiendas de tipo `Tienda` (el CD nunca entra) y solo `unidades` y `venta_soles`, y devuelve una serie por tienda y mes más las cargas del rango. Recibe nodos y no «género y mundo» para que sirva igual a una celda GM y al Resto. Sin tablas ni columnas nuevas; `service_role` solamente. Medida: unos 38 KB por documento, 0,7 a 0,9 s en MUJER × URBANO y 1,3 a 2,1 s en el Resto en caliente (el presupuesto de la ficha era 1 s; queda dentro de los 3 s en frío). La palanca si molesta es bajar `ANIOS_ATRAS_VENTA_TIENDA` de 3 a 2.
+
+**Por qué.** Ninguna función existente sirve: `venta_genero_mundo` no trae soles y es de M6; `venta_lineas_ia` no trae tienda ni soles por diseño; `venta_proyeccion` calcula por fila × tienda × mes (varios MB) y arriesga el corte de 8 s; `venta_mensual_tienda` no corta por GM y trae el CD; una consulta directa a `venta_stock_vigente` supera el corte de 1 000 filas de PostgREST.
+
+**Descartado.** Reutilizar `venta_proyeccion` (tamaño y tiempo) o `venta_genero_mundo` (sin soles, de otro módulo).
+
+## 2026-11-04 · M7 (07f): la ruta de venta por tienda es solo de planner y admin; la decisión 99 no se extiende a la proyección (decisión 113)
+
+**Decisión.** `GET /api/proyeccion/proyecciones/[id]/crecimientos/por-tienda` usa `requirePlanner`: admin y planner leen; el comprador recibe `403` y sin sesión, `401`. **La decisión 99** (el comprador ve venta y stock **del flujo**) **no se extiende a los datos de la proyección**: la venta por tienda y año de un GM es un dato de Planificación, y el comprador no ve Planificación.
+
+**Por qué.** La pantalla vive en la pestaña Crecimientos, a la que el comprador no entra, así que abrirle la ruta no le daría nada en la interfaz y sí dejaría una vía por URL a cifras de la proyección que el producto no le muestra. El primer borrador usó `requireUser` apoyándose en la 99; QA lo marcó como más permisivo que la ficha y se corrigió. Si Javier quiere que los compradores vean Planificación, es un cambio de permiso de todo el módulo que se decide aparte, no de esta ruta.
+
+**Descartado.** `requireUser` por analogía con el flujo (más permisivo que la pantalla); una excepción solo para esta ruta (daría datos que la interfaz no ofrece).
+
+## 2026-11-04 · M7 (07f): «Ver por tienda» también en el Resto (decisión 114)
+
+**Decisión.** Además de cada celda de HOMBRE y MUJER por mundo, el Resto (todos los géneros no detallados) tiene el botón «Ver por tienda» (`gm=resto`); el Total no lo tiene. Es la pregunta abierta 2 de la ficha, aplicada por defecto con la recomendación; Javier puede quitarla (se borra el botón y el valor `resto`, sin más cambios).
+
+**Por qué.** Es el mismo contrato: la función recibe nodos, y el Resto también tiene una base `Σ B` que Javier aprueba y quiere ver. El costo es de tiempo: en caliente tarda 1,3 a 2,1 s, más que el presupuesto de 1 s, y queda anotado como pendiente.
+
+**Descartado.** Solo HOMBRE y MUJER (el Resto quedaría con una base que no se puede abrir); un «Ver por tienda» del Total (mezcla tiendas de todos los géneros sin una base que cuadrar).
