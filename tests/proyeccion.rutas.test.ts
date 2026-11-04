@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { MENSAJES_LECTURA_LENTA } from "@/lib/api/plazos";
 import { estadoFalso } from "./curvas.fake-db";
 import { estado as base, reiniciar, type Fila } from "./proyeccion.fake-db";
 import { aprobarCrecimientosFalsos, contexto, reiniciarContexto } from "./proyeccion.contexto-falso";
@@ -216,8 +217,11 @@ describe("crear y calcular", () => {
     const { id } = await nueva();
     base.errorVenta = { code: "57014", message: "canceling statement due to statement timeout" };
     const r = await calcular(enviar("POST", `/proyecciones/${id}/calcular`), ctx(id as string));
-    expect(r.status).toBe(500);
-    expect((await leer(r)).error).toBe("Error inesperado en la base de datos.");
+    // 57014 (corte por tiempo) → 503 `lectura_lenta` con el mensaje de esa lectura, no un 500 genérico.
+    expect(r.status).toBe(503);
+    const cuerpo = await leer(r);
+    expect(cuerpo.codigo).toBe("lectura_lenta");
+    expect(cuerpo.error).toBe(MENSAJES_LECTURA_LENTA.ventaProyeccion);
     expect(proyecciones()[0].calculando_desde).toBeNull();
   });
 

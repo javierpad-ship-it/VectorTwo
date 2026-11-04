@@ -1,3 +1,4 @@
+import { abortable } from "./rpc-abortable";
 import { NextResponse } from "next/server";
 import type { PeticionIa, ProveedorIA, RespuestaIa } from "@/lib/ia/proveedor";
 import { ProveedorFalso, type RespuestaGuionada, USO_BASE, valida } from "./ia.proveedor-falso";
@@ -172,7 +173,7 @@ export function clienteIaFalso() {
     rpc: (nombre: string, args: Record<string, unknown>) => {
       if (nombre === "venta_lineas_ia") {
         estadoIa.llamadasVentaIa += 1;
-        return Promise.resolve({ data: estadoIa.ventaLineas(args as never), error: null });
+        return abortable(Promise.resolve({ data: estadoIa.ventaLineas(args as never), error: null }));
       }
       if (nombre === "registrar_propuesta_ia_gm") return Promise.resolve(registrar(args.p as Fila));
       return base.rpc(nombre, args);

@@ -6,6 +6,7 @@
  * versión vigente (una por marca) con los mismos códigos de Postgres.
  */
 
+import { abortable } from "./rpc-abortable";
 export type Fila = Record<string, unknown>;
 export type ErrorFalso = { code: string; message: string; details: null; hint: null };
 
@@ -185,7 +186,7 @@ export function clienteBd() {
     rpc: (nombre: string, args: Record<string, unknown> = {}) => {
       bd.llamadasRpc.push({ nombre, args });
       bd.tablasTocadas.push(`rpc:${nombre}`);
-      return Promise.resolve({ data: bd.rpc(nombre, args), error: null });
+      return abortable(Promise.resolve({ data: bd.rpc(nombre, args), error: null }));
     },
   };
 }

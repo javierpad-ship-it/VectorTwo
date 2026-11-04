@@ -1,5 +1,6 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types";
+import { conMensajeLecturaLenta, MENSAJES_LECTURA_LENTA, plazoLectura } from "@/lib/api/plazos";
 import { leerTodo } from "@/lib/arbol/consultas";
 import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
 import { periodoADb } from "@/lib/ventas/periodo";
@@ -488,8 +489,8 @@ export async function leerVentaTanda(
     p_tiendas_detalle: [...args.tiendasDetalle],
     p_desde: periodoADb(args.desde),
     p_desde_w12: periodoADb(args.desdeW12),
-  });
-  if (error) return { data: null, error };
+  }).abortSignal(plazoLectura());
+  if (error) return { data: null, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.ventaProyeccion) };
   const v = data as unknown as Partial<VentaProyeccion> | null;
   if (!v || !Array.isArray(v.filas)) return { data: null, error: null };
   return {
@@ -506,9 +507,6 @@ export async function leerVentaTanda(
   };
 }
 
-/** Plazo de la lectura de `venta_tienda_nodos` (07f): PostgREST corta a los 8 s; aquí se corta antes de que se cuelgue la pantalla. */
-export const TIMEOUT_VENTA_TIENDA_MS = 8000;
-
 /**
  * 07f: la venta publicada de unos nodos por tienda × mes, con soles y SIN el CD (una sola función `jsonb`, un solo estado de los datos). `desde` y `hasta` son
  * `aaaa-mm` (rango inclusivo). `data` es `null` si la respuesta no tiene la forma `{ series, cargas }`. Solo lectura. ÚNICO archivo de `src/` que la nombra.
@@ -519,8 +517,9 @@ export async function leerVentaTiendaNodos(
 ): Promise<Resultado<VentaTiendaNodos | null>> {
   const { data, error } = await db
     .rpc("venta_tienda_nodos", { p_gml_ids: [...args.gmlIds], p_desde: periodoADb(args.desde), p_hasta: periodoADb(args.hasta) })
-    .abortSignal(AbortSignal.timeout(TIMEOUT_VENTA_TIENDA_MS));
-  if (error) return { data: null, error };
+    // 07f: PostgREST corta a los 8 s; `plazoLectura()` (7,5 s) corta antes de que se cuelgue la pantalla.
+    .abortSignal(plazoLectura());
+  if (error) return { data: null, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.ventaTienda) };
   const v = data as unknown as { series?: unknown; cargas?: unknown } | null;
   if (!v || !Array.isArray(v.series) || v.cargas === null || typeof v.cargas !== "object" || Array.isArray(v.cargas)) return { data: null, error: null };
   return {

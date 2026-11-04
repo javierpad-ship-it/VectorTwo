@@ -1,3 +1,4 @@
+import { abortable, type Abortable } from "./rpc-abortable";
 import { VERSION_METODO_MIN_M8 } from "@/lib/proyeccion/tipos-api";
 import { NextResponse } from "next/server";
 import { indexarNodos } from "@/lib/arbol/nivel/indice";
@@ -745,26 +746,30 @@ function rpcImportar(a: Record<string, unknown>): { data: unknown; error: ErrorR
 export function clienteFalso() {
   return {
     from: (nombre: string) => new Consulta(nombre),
-    rpc: (nombre: string, args: Record<string, unknown> = {}): Promise<Resultado> => {
+    rpc: (nombre: string, args: Record<string, unknown> = {}): Abortable<Resultado> => {
       escenario.llamadas.push({ nombre, args });
-      switch (nombre) {
-        case "flujo_huella_base":
-          return respuesta(huellaBase());
-        case "stock_flujo":
-          return respuesta(stockFlujo(String(args.p_carga_id)));
-        case "registrar_recepciones":
-          return respuesta(rpcRegistrar(args));
-        case "quitar_recepcion":
-          return respuesta(rpcQuitar(args));
-        case "cancelar_compra":
-          return respuesta(rpcCancelar(args));
-        case "importar_compra":
-          return Promise.resolve(rpcImportar(args));
-        default:
-          return Promise.resolve({ data: null, error: err("42883", `función desconocida: ${nombre}`) });
-      }
+      return abortable(resolverRpc(nombre, args));
     },
   };
+}
+
+function resolverRpc(nombre: string, args: Record<string, unknown>): Promise<Resultado> {
+  switch (nombre) {
+    case "flujo_huella_base":
+      return respuesta(huellaBase());
+    case "stock_flujo":
+      return respuesta(stockFlujo(String(args.p_carga_id)));
+    case "registrar_recepciones":
+      return respuesta(rpcRegistrar(args));
+    case "quitar_recepcion":
+      return respuesta(rpcQuitar(args));
+    case "cancelar_compra":
+      return respuesta(rpcCancelar(args));
+    case "importar_compra":
+      return Promise.resolve(rpcImportar(args));
+    default:
+      return Promise.resolve({ data: null, error: err("42883", `función desconocida: ${nombre}`) });
+  }
 }
 
 // ─── Atajos de las pruebas ───

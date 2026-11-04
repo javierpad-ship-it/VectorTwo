@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
+import { conMensajeLecturaLenta, MENSAJES_LECTURA_LENTA, plazoLectura } from "@/lib/api/plazos";
 import type { FilaUnidadesMensuales } from "./unidades-mensuales";
 
 /**
@@ -17,10 +18,9 @@ type Db = SupabaseClient<Database>;
  * esas (se envía en el cuerpo del POST del rpc, sin límite de URL).
  */
 export async function leerUnidadesMensuales(db: Db, equivalencias: readonly string[] | null) {
-  const { data, error } = await db.rpc(
-    "unidades_mensuales",
-    equivalencias === null ? {} : { p_equivalencias: [...equivalencias] }
-  );
+  const { data, error } = await db
+    .rpc("unidades_mensuales", equivalencias === null ? {} : { p_equivalencias: [...equivalencias] })
+    .abortSignal(plazoLectura());
   const filas: FilaUnidadesMensuales[] = data ?? [];
-  return { data: filas, error };
+  return { data: filas, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.reporte) };
 }

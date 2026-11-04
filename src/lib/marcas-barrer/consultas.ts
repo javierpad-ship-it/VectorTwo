@@ -1,6 +1,7 @@
 import "server-only";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import { conMensajeLecturaLenta, MENSAJES_LECTURA_LENTA, plazoLectura } from "@/lib/api/plazos";
 import { leerTodo } from "@/lib/arbol/consultas";
 import { TANDA_IN, enTandas } from "@/lib/arbol/importar";
 import type { VersionLeida } from "./reglas";
@@ -29,8 +30,10 @@ const nulo = (x: unknown): string | null => (typeof x === "string" ? x : null);
 
 /** `venta_marca_gml(p_marca_ids, p_desde, p_hasta)`: hechos de las unidades pedidas (sin talla) y totales de sus GML. */
 export async function leerVentaMarcaGml(db: Db, marcaIds: readonly string[], desde: string, hasta: string): Promise<Resultado<VentaMarcaGml>> {
-  const { data, error } = await db.rpc("venta_marca_gml", { p_marca_ids: [...marcaIds], p_desde: primerDia(desde), p_hasta: primerDia(hasta) });
-  if (error) return { data: { hechos: [], totales: [], cargas: {} }, error };
+  const { data, error } = await db
+    .rpc("venta_marca_gml", { p_marca_ids: [...marcaIds], p_desde: primerDia(desde), p_hasta: primerDia(hasta) })
+    .abortSignal(plazoLectura());
+  if (error) return { data: { hechos: [], totales: [], cargas: {} }, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.marcasBarrer) };
   const o = esObjeto(data) ? data : {};
   const hechos: HechoBarrer[] = lista(o.hechos).map((h) => ({
     unidad_marca_id: String(h.unidad_marca_id),
@@ -56,8 +59,10 @@ export type ResumenVenta = { unidades: ResumenVentaUnidad[]; por_gml: ResumenVen
 
 /** `venta_marca_gml_resumen(p_desde, p_hasta, p_umbral_pequeno)`: la lista (una fila por unidad con parte al barrer) y su agregado por `g`. */
 export async function leerResumenVenta(db: Db, desde: string, hasta: string, umbral: number = UMBRAL_GML_PEQUENO): Promise<Resultado<ResumenVenta>> {
-  const { data, error } = await db.rpc("venta_marca_gml_resumen", { p_desde: primerDia(desde), p_hasta: primerDia(hasta), p_umbral_pequeno: umbral });
-  if (error) return { data: { unidades: [], por_gml: [], cargas: {} }, error };
+  const { data, error } = await db
+    .rpc("venta_marca_gml_resumen", { p_desde: primerDia(desde), p_hasta: primerDia(hasta), p_umbral_pequeno: umbral })
+    .abortSignal(plazoLectura());
+  if (error) return { data: { unidades: [], por_gml: [], cargas: {} }, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.marcasBarrer) };
   const o = esObjeto(data) ? data : {};
   const cargas: Record<string, string> = {};
   if (esObjeto(o.cargas)) for (const [mes, id] of Object.entries(o.cargas)) cargas[mes] = String(id);

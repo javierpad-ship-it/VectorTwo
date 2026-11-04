@@ -6,6 +6,7 @@
  * sola `cerrada` por año, nombre único por año, `unique (fila_id, anio)`), con los mismos nombres de restricción que Postgres.
  */
 
+import { abortable } from "./rpc-abortable";
 export type Fila = Record<string, unknown>;
 export type ErrorFalso = { code: string; message: string; details: null; hint: null };
 
@@ -488,13 +489,12 @@ export function clienteFalso() {
         const resultado = estado.errorVentaTienda
           ? { data: null, error: { ...estado.errorVentaTienda, details: null, hint: null } }
           : { data: estado.ventaTienda(pedido, estado.llamadasVentaTienda.length), error: null };
-        const promesa = Promise.resolve(resultado);
-        return Object.assign(promesa, { abortSignal: () => promesa });
+        return abortable(Promise.resolve(resultado));
       }
       if (nombre !== "venta_proyeccion") throw new Error(`rpc inesperado: ${nombre}`);
       estado.llamadasVenta += 1;
-      if (estado.errorVenta) return Promise.resolve({ data: null, error: { ...estado.errorVenta, details: null, hint: null } });
-      return Promise.resolve({ data: estado.venta(args as never, estado.llamadasVenta), error: null });
+      if (estado.errorVenta) return abortable(Promise.resolve({ data: null, error: { ...estado.errorVenta, details: null, hint: null } }));
+      return abortable(Promise.resolve({ data: estado.venta(args as never, estado.llamadasVenta), error: null }));
     },
   };
 }

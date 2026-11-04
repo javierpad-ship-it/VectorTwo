@@ -1,6 +1,7 @@
 import type { NextResponse } from "next/server";
 import type { PostgrestError } from "@supabase/supabase-js";
-import { error } from "./respuestas";
+import { error, errorConCodigo } from "./respuestas";
+import { CODIGO_LECTURA_LENTA, esLecturaLenta, mensajeLecturaLenta } from "./plazos";
 
 /**
  * Traducción de errores de Postgres que el usuario puede provocar a mensajes
@@ -9,6 +10,7 @@ import { error } from "./respuestas";
  *   23505 (único)  → 409 "Ya existe …"
  *   23503 (FK)     → 409 "No se puede eliminar: tiene registros asociados."
  *   23514 (check)  → 400
+ *   57014 / aborto → 503 `lectura_lenta` (la consulta se cortó por tiempo; ver `plazos.ts`)
  *   resto          → 500 con un mensaje genérico; el detalle (código, mensaje,
  *                    details, hint) va al log del servidor, nunca a la pantalla
  *
@@ -23,7 +25,8 @@ export const CODIGO_CHECK = "23514";
 export const CODIGO_BLOQUEO = "55P03";
 export const MENSAJE_CALCULO_EN_CURSO = "Hay otro cálculo de curvas en curso. Espera a que termine y vuelve a intentarlo.";
 
-export type DescripcionErrorDb = { status: number; mensaje: string };
+/** `codigo` solo viene en los errores que la pantalla debe distinguir sin leer el texto (`lectura_lenta`). */
+export type DescripcionErrorDb = { status: number; mensaje: string; codigo?: string };
 
 export const MENSAJE_DB_INESPERADO = "Error inesperado en la base de datos.";
 
@@ -455,6 +458,10 @@ export function describirErrorDb(
     return { status: 409, mensaje: MENSAJE_CALCULO_EN_CURSO };
   }
 
+  if (esLecturaLenta(code, message)) {
+    return { status: 503, mensaje: mensajeLecturaLenta(details), codigo: CODIGO_LECTURA_LENTA };
+  }
+
   if (code === CODIGO_UNICO) {
     return { status: 409, mensaje: buscar(MENSAJES_UNICO, texto) ?? "Ya existe un registro con esos datos." };
   }
@@ -489,7 +496,7 @@ export function registrarErrorDb(err: PostgrestError, contexto?: string): void {
 
 /** Respuesta HTTP para un error de PostgREST. Los 500 se registran con su detalle. */
 export function traducirErrorDb(err: PostgrestError, contexto?: string): NextResponse {
-  const { status, mensaje } = describirErrorDb(err.code, err.message, err.details);
+  const { status, mensaje, codigo } = describirErrorDb(err.code, err.message, err.details);
   if (status >= 500) registrarErrorDb(err, contexto);
-  return error(mensaje, status);
+  return codigo ? errorConCodigo(mensaje, status, codigo) : error(mensaje, status);
 }

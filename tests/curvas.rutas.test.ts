@@ -1,3 +1,4 @@
+import { vaciarCacheVentaTienda } from "@/lib/curvas/cache-venta-tienda";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type {
@@ -85,6 +86,7 @@ function sembrar() {
     },
     error: null,
   };
+  vaciarCacheVentaTienda(); // lo que cacheó una prueba anterior (misma huella de cargas) no debe verse en la siguiente
   estadoFalso.ventaTienda = ventaPorTienda(filasFixture("base")).map((v) => ({ ...v, periodo: dia1(v.periodo) }));
   const agr = (id: string, nombre: string, temporada: string, activo = true, orden = 0): Fila => ({ id, nombre, codigo: nombre.slice(0, 3), activo, orden, temporada, descripcion: null });
   estadoFalso.tablas = {

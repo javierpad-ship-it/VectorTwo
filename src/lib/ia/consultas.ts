@@ -4,6 +4,7 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { leerTodo } from "@/lib/arbol/consultas";
 import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
 import type { Database, Json, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import { conMensajeLecturaLenta, MENSAJES_LECTURA_LENTA, plazoLectura } from "@/lib/api/plazos";
 import { periodoADb } from "@/lib/ventas/periodo";
 import type { TerminoPrivado } from "./alias";
 import type { VentaLineasIaApi } from "./entrada";
@@ -410,13 +411,15 @@ export async function leerVentaLineasIa(
   db: Db,
   args: { gmlIds: readonly string[]; grupos: Record<string, string>; desde: string; hasta: string }
 ): Promise<Resultado<VentaLineasIaApi | null>> {
-  const { data, error } = await db.rpc("venta_lineas_ia", {
-    p_gml_ids: [...args.gmlIds],
-    p_grupos: args.grupos as Json,
-    p_desde: periodoADb(args.desde),
-    p_hasta: periodoADb(args.hasta),
-  });
-  if (error) return { data: null, error };
+  const { data, error } = await db
+    .rpc("venta_lineas_ia", {
+      p_gml_ids: [...args.gmlIds],
+      p_grupos: args.grupos as Json,
+      p_desde: periodoADb(args.desde),
+      p_hasta: periodoADb(args.hasta),
+    })
+    .abortSignal(plazoLectura());
+  if (error) return { data: null, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.ventaLineasIa) };
   const v = data as unknown as Partial<VentaLineasIaApi> | null;
   if (!v || !v.dic || !Array.isArray(v.f) || !Array.isArray(v.u)) return { data: null, error: null };
   return { data: { dic: v.dic, f: v.f, c: v.c ?? [], p: v.p ?? [], u: v.u, cargas: v.cargas ?? {} }, error: null };

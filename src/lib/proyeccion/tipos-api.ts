@@ -26,8 +26,15 @@ export const MESES_MIN_AVANCE = 3;
 export const MESES_UNIVERSO = 24;
 export const MESES_COMPOSICION = 12;
 export const ANIOS_HISTORICO = 3;
+/** Nodos por llamada a `venta_proyeccion`. Las tandas por orden de id pesan distinto (de 37 a 130 mil hechos); no se reordenan por peso a propósito: cambiar qué nodos van juntos cambia el orden de las filas y, con él, el de las sumas en coma flotante. */
 export const TANDA_GML = 60;
-export const PARALELO = 3;
+/**
+ * Tandas de `venta_proyeccion` que corren a la vez (cálculo y evaluación IA). Bajó de 3 a 2 (informe de rendimiento de venta/stock, §3.7): con 3 a la
+ * vez la media por llamada era 4,4 s y el máximo 6,4 s (el aislado, 1,3 s) por contención de CPU y de memoria de trabajo, demasiado cerca del corte de 8 s
+ * de PostgREST. Con 2 la llamada se acerca al tiempo aislado y el total de pared casi no cambia. Todas las tandas siguen comparando el mismo estado de
+ * las cargas (I7). Si con 2027 el máximo vuelve a pasar de 4 s, la siguiente palanca es repartir la función, no subir esta cifra.
+ */
+export const PARALELO = 2;
 export const TANDA_UPSERT = 500;
 export const CALCULO_CADUCA_MIN = 15;
 export const RATIO_MIN = 0.05;

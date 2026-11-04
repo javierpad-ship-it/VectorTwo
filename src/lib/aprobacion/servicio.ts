@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { CODIGO_CONSULTA_CANCELADA } from "@/lib/api/plazos";
 import { leerVigentes } from "@/lib/crecimientos/consultas-vigentes";
 import { gmExigidos, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
 import {
@@ -160,7 +161,7 @@ function traducirErrorLote(e: PostgrestError): Salida<never> {
     // escribió nada y el navegador puede reintentar con el mismo `lote_id`.
     case "40P01":
     case "55P03":
-    case "57014":
+    case CODIGO_CONSULTA_CANCELADA:
       return fallaConCodigo("Otra persona estaba guardando lo mismo o la base tardó demasiado: vuelve a intentarlo.", 409, "conflicto_reintentar");
     default:
       return fallaDb(e, "aprobación en bloque: aplicar el lote");

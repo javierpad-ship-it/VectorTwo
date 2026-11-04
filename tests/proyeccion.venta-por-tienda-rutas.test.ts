@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { MENSAJES_LECTURA_LENTA } from "@/lib/api/plazos";
 import { estado as base, reiniciar, type Fila } from "./proyeccion.fake-db";
 import {
   ajustes,
@@ -143,11 +144,14 @@ describe("regla 10 · permisos y errores de la ruta", () => {
     expect(sinFilas.base).toMatchObject({ total: null, motivo_nulo: "sin_filas", tiendas: 4 });
   });
 
-  it("500 si la base falla o la función devuelve algo que no es el documento; el mensaje no filtra el detalle", async () => {
+  it("503 si la lectura se corta por tiempo; 500 si la función devuelve algo que no es el documento; el mensaje no filtra el detalle o la función devuelve algo que no es el documento; el mensaje no filtra el detalle", async () => {
     base.errorVentaTienda = { code: "57014", message: "canceling statement due to statement timeout" };
     const r = await pedir(GM_MU);
-    expect(r.status).toBe(500);
-    expect(JSON.stringify(await leer(r))).not.toContain("statement timeout");
+    expect(r.status).toBe(503);
+    const lenta = await leer(r);
+    expect(lenta.codigo).toBe("lectura_lenta");
+    expect(lenta.error).toBe(MENSAJES_LECTURA_LENTA.ventaTienda);
+    expect(JSON.stringify(lenta)).not.toContain("statement timeout");
     base.errorVentaTienda = null;
     base.ventaTienda = () => ({ series: "no", cargas: [] });
     const malo = await pedir(GM_MU);

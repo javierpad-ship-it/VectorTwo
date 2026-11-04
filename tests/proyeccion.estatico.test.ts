@@ -507,13 +507,12 @@ describe("07f: «Ver por tienda» es de solo lectura, no mezcla fuentes y la fun
   const archivoMigracion = existsSync(dirMigraciones) ? readdirSync(dirMigraciones).find((n) => /^\d{4}_venta_tienda_nodos\.sql$/.test(n)) : undefined;
   const sqlSinComentarios = () => readFileSync(path.join(dirMigraciones, archivoMigracion as string), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
 
-  it("R9: solo consultas.ts nombra venta_tienda_nodos (y los tipos generados), con timeout de 8 s", () => {
+  it("R9: solo consultas.ts nombra venta_tienda_nodos (y los tipos generados), con el plazo de lectura de 7,5 s", () => {
     const usan = src.filter((f) => sinComentarios(f.texto).includes("venta_tienda_nodos") && f.ruta !== TIPOS_DB && f.ruta !== CONSULTAS).map((f) => f.ruta);
     expect(usan).toEqual([]);
     const consultas = sinComentarios(fuente(CONSULTAS));
     expect(consultas).toMatch(/\.rpc\("venta_tienda_nodos"/);
-    expect(consultas).toMatch(/TIMEOUT_VENTA_TIENDA_MS = 8000/);
-    expect(consultas).toMatch(/\.abortSignal\(AbortSignal\.timeout\(TIMEOUT_VENTA_TIENDA_MS\)\)/);
+    expect(consultas).toMatch(/\.abortSignal\(plazoLectura\(\)\)/);
   });
 
   it("R9: el servicio no escribe (insert, update, upsert, delete), no llama a ningún rpc ni nombra tablas ia_*, venta_lineas_ia, historico ni las otras lecturas de venta", () => {

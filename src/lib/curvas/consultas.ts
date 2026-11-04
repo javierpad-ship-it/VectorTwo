@@ -1,5 +1,6 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json, Tables, TablesInsert, TablesUpdate } from "@/lib/supabase/database.types";
+import { conMensajeLecturaLenta, MENSAJES_LECTURA_LENTA, plazoLectura } from "@/lib/api/plazos";
 import { leerLineas, leerNodos, leerTodo } from "@/lib/arbol/consultas";
 import { nodoVigente } from "@/lib/arbol/armar-arbol";
 import { temporadasDeLineasPorAgrupacion } from "@/lib/estacionalidad/reglas";
@@ -7,7 +8,8 @@ import { recortarPeriodo } from "@/lib/ventas/periodo";
 import { leerVentaEstacionalidad, type VentaEstacionalidad } from "./agregado";
 import { alcanceEspejo, temporadaSugerida, temporadasDePeriodo, temporadaSugeridaVisible } from "./atipicos";
 import { leerComposicion, type LecturaComposicion, type MaestroComposicion } from "./composicion";
-import { huellaComposicion, huellaTemporada } from "./huellas";
+import { leerVentaTiendaConHuella } from "./cache-venta-tienda";
+import { huellaCargas, huellaComposicion, huellaTemporada } from "./huellas";
 import { parametrosDeJson } from "./reglas";
 import { temporadaDeFila, type TiendaMaestro, type VentaTiendaMes } from "./tipos";
 import {
@@ -191,8 +193,8 @@ export async function leerVentaDeEstacionalidad(
   db: Db,
   agrupacionId: string | null
 ): Promise<{ data: VentaEstacionalidad | null; error: PostgrestError | null }> {
-  const { data, error } = await db.rpc("venta_estacionalidad_agrupacion", agrupacionId === null ? {} : { p_agrupacion_id: agrupacionId });
-  if (error) return { data: null, error };
+  const { data, error } = await db.rpc("venta_estacionalidad_agrupacion", agrupacionId === null ? {} : { p_agrupacion_id: agrupacionId }).abortSignal(plazoLectura());
+  if (error) return { data: null, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.ventaAgrupacion) };
   return { data: leerVentaEstacionalidad(data), error: null };
 }
 
@@ -209,12 +211,8 @@ export async function leerComposicionDeAgrupacion(
   pRed: Record<string, string[]>,
   hasta: string
 ): Promise<{ data: LecturaComposicion | null; error: PostgrestError | null }> {
-  const { data, error } = await db.rpc("venta_composicion_agrupacion", {
-    p_agrupacion_id: agrupacionId,
-    p_red: pRed,
-    p_hasta: `${recortarPeriodo(hasta)}-01`,
-  });
-  if (error) return { data: null, error };
+  const { data, error } = await db.rpc("venta_composicion_agrupacion", { p_agrupacion_id: agrupacionId, p_red: pRed, p_hasta: `${recortarPeriodo(hasta)}-01` }).abortSignal(plazoLectura());
+  if (error) return { data: null, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.composicionAgrupacion) };
   return { data: leerComposicion(data), error: null };
 }
 
@@ -289,12 +287,31 @@ export async function leerTiendas(db: Db): Promise<{ data: TiendaMaestro[]; erro
   };
 }
 
-/** Venta total por tienda y mes (`venta_mensual_tienda()`, del orden de 500 filas): la red comparable sin corrida y la obsolescencia por red. */
-export async function leerVentaMensualTienda(db: Db): Promise<{ data: VentaTiendaMes[]; error: PostgrestError | null }> {
+/** La lectura directa (sin caché) de `venta_mensual_tienda()`, página a página (cada página con su propio plazo de lectura). */
+async function leerVentaMensualTiendaDeLaBase(db: Db): Promise<{ data: VentaTiendaMes[]; error: PostgrestError | null }> {
   const { data, error } = await leerTodo<{ periodo: string; tienda_id: string; unidades: number }>((d, h) =>
-    db.rpc("venta_mensual_tienda").order("periodo").order("tienda_id").range(d, h)
+    db.rpc("venta_mensual_tienda").order("periodo").order("tienda_id").range(d, h).abortSignal(plazoLectura())
   );
-  return { data: data.map((v) => ({ tienda_id: v.tienda_id, periodo: recortarPeriodo(v.periodo), unidades: Number(v.unidades) })), error };
+  return {
+    data: data.map((v) => ({ tienda_id: v.tienda_id, periodo: recortarPeriodo(v.periodo), unidades: Number(v.unidades) })),
+    error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.ventaMensualTienda),
+  };
+}
+
+/**
+ * Venta total por tienda y mes (`venta_mensual_tienda()`, del orden de 500 filas): la red comparable sin corrida y la obsolescencia por red.
+ * Con caché en proceso por la huella de las cargas publicadas (`cache-venta-tienda.ts`): abrir Proyección la pedía 2 o 3 veces y cada
+ * llamada escanea toda la venta. Cada llamada sigue leyendo la lista (pequeña) de cargas publicadas para saber la huella de HOY.
+ */
+export async function leerVentaMensualTienda(db: Db): Promise<{ data: VentaTiendaMes[]; error: PostgrestError | null }> {
+  const r = await leerVentaTiendaConHuella(
+    async () => {
+      const cargas = await leerCargasPublicadas(db);
+      return { data: cargas.error ? null : huellaCargas(cargas.data), error: cargas.error };
+    },
+    () => leerVentaMensualTiendaDeLaBase(db)
+  );
+  return { data: r.data, error: r.error };
 }
 
 /** `{ "aaaa-mm": carga_id }` de los meses con carga `publicada` (a lo sumo una por mes: unas 50 filas). */

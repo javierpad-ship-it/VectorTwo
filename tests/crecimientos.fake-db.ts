@@ -1,3 +1,4 @@
+import { abortable } from "./rpc-abortable";
 import { NextResponse } from "next/server";
 
 /**
@@ -239,8 +240,8 @@ export function clienteFalso() {
       if (nombre === "venta_genero_mundo") {
         estadoFalso.llamadasVentaGM.push(String(args?.p_desde));
         const { respuesta, error } = estadoFalso.ventaGM;
-        if (error) return Promise.resolve({ data: null, error: { ...error, details: null, hint: null } });
-        return Promise.resolve({ data: respuesta, error: null });
+        if (error) return abortable(Promise.resolve({ data: null, error: { ...error, details: null, hint: null } }));
+        return abortable(Promise.resolve({ data: respuesta, error: null }));
       }
       throw new Error(`rpc inesperado: ${nombre}`);
     },

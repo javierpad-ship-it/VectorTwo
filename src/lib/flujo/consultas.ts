@@ -1,6 +1,7 @@
 import "server-only";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json, Tables } from "@/lib/supabase/database.types";
+import { plazoLectura } from "@/lib/api/plazos";
 import { leerEquivalencias, leerTodo } from "@/lib/arbol/consultas";
 import { cargarEstadoGml, type EstadoGmlCargado } from "@/lib/marcas/gml/estado";
 import { leerAsignaciones, leerPerfiles } from "@/lib/responsables/consultas";
@@ -88,7 +89,8 @@ export async function leerHuellaBase(db: Db): Promise<Resultado<HuellaBaseJson |
 
 /** `stock_flujo(carga_id)`: el stock y la venta de UN mes publicado por `(equivalencia, unidad de marca)`, sin talla. */
 export async function leerStockFlujo(db: Db, cargaId: string): Promise<Resultado<StockFlujoJson | null>> {
-  const { data, error } = await db.rpc("stock_flujo", { p_carga_id: cargaId });
+  const { data, error } = await db.rpc("stock_flujo", { p_carga_id: cargaId }).abortSignal(plazoLectura());
+  // Solo el mensaje común (55 ms de media): `describirErrorDb` lo da si el error es de lectura lenta.
   if (error) return { data: null, error };
   const o = esObjeto(data) ? data : {};
   const excluido = esObjeto(o.excluido) ? o.excluido : {};

@@ -1,3 +1,4 @@
+import { abortable } from "./rpc-abortable";
 import { NextResponse } from "next/server";
 
 /**
@@ -88,6 +89,10 @@ class Consulta implements PromiseLike<Resultado> {
     private readonly tabla: string,
     private readonly origen: Fila[] | null = null
   ) {}
+  /** `.rpc(...).abortSignal(...)` de las lecturas pesadas: la base falsa ignora la señal. */
+  abortSignal() {
+    return this;
+  }
   select(columnas = "*", opciones?: { count?: string; head?: boolean }) {
     (estadoFalso.columnasLeidas[this.tabla] ??= []).push(columnas);
     if (columnas.trim() !== "*") this.columnas = columnas.split(",").map((c) => c.trim());
@@ -236,15 +241,15 @@ export function clienteFalso() {
         const llamada = { p_agrupacion_id: String(args?.p_agrupacion_id), p_red: args?.p_red ?? {}, p_hasta: String(args?.p_hasta) };
         estadoFalso.llamadasComposicion.push(llamada);
         const { respuesta, error } = estadoFalso.composicion;
-        if (error) return Promise.resolve({ data: null, error: { ...error, details: null, hint: null } });
-        return Promise.resolve({ data: respuesta(llamada), error: null });
+        if (error) return abortable(Promise.resolve({ data: null, error: { ...error, details: null, hint: null } }));
+        return abortable(Promise.resolve({ data: respuesta(llamada), error: null }));
       }
       if (nombre === "venta_estacionalidad_agrupacion") {
         const id = args?.p_agrupacion_id ?? null;
         estadoFalso.llamadasVenta.push(id);
         const { porId, error } = estadoFalso.venta;
-        if (error) return Promise.resolve({ data: null, error: { ...error, details: null, hint: null } });
-        return Promise.resolve({ data: porId[String(id)] ?? null, error: null });
+        if (error) return abortable(Promise.resolve({ data: null, error: { ...error, details: null, hint: null } }));
+        return abortable(Promise.resolve({ data: porId[String(id)] ?? null, error: null }));
       }
       if (nombre === "venta_mensual_tienda") {
         estadoFalso.llamadasVentaTienda += 1;

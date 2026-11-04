@@ -1,5 +1,6 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables, TablesInsert } from "@/lib/supabase/database.types";
+import { conMensajeLecturaLenta, MENSAJES_LECTURA_LENTA, plazoLectura } from "@/lib/api/plazos";
 import { leerTodo } from "@/lib/arbol/consultas";
 import type { MarcasArbol } from "./huellas";
 import { comoVentaGeneroMundo, type VentaGeneroMundo } from "./series";
@@ -16,8 +17,8 @@ export type VersionDb = Tables<"crecimientos_genero_mundo">;
 
 /** `venta_genero_mundo(p_desde)`; `data` es `null` con error o con una respuesta que no tiene la forma esperada. */
 export async function leerVentaGeneroMundo(db: Db, desde: string): Promise<{ data: VentaGeneroMundo | null; error: PostgrestError | null }> {
-  const { data, error } = await db.rpc("venta_genero_mundo", { p_desde: desde });
-  if (error) return { data: null, error };
+  const { data, error } = await db.rpc("venta_genero_mundo", { p_desde: desde }).abortSignal(plazoLectura());
+  if (error) return { data: null, error: conMensajeLecturaLenta(error, MENSAJES_LECTURA_LENTA.ventaGeneroMundo) };
   return { data: comoVentaGeneroMundo(data), error: null };
 }
 
