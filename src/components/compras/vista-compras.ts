@@ -11,6 +11,7 @@ import type {
 import { ESTADOS_COMPRA, ORIGENES_COMPRA } from "@/lib/compras/tipos";
 import type { FiltrosCompras } from "@/lib/compras/use-compras";
 import { dinero, mesCorto, mesLargo, sumarMes, ultimoDiaDelMes, unidades } from "./formato";
+import { embarquesDeCompra } from "./vista-agrupadores-compras";
 
 /**
  * Lógica de la pantalla Compras (`/compras/registro`, ficha 08 §4.4 y §4.7): parámetros de la URL, filtros, textos y valores por defecto
@@ -33,6 +34,8 @@ export type ParametrosCompras = {
   mundo: string | null;
   linea: string | null;
   marca: string | null;
+  /** Ficha 08b: compras con alguna entrega asignada a este embarque (el viaje lo filtra la barra del viaje activo, que no vive en la URL). */
+  embarque: string | null;
   porConfirmar: boolean;
   q: string;
   importar: boolean;
@@ -49,6 +52,7 @@ export const PARAMETROS_COMPRAS_VACIOS: ParametrosCompras = {
   mundo: null,
   linea: null,
   marca: null,
+  embarque: null,
   porConfirmar: false,
   q: "",
   importar: false,
@@ -82,6 +86,7 @@ export function leerParametrosCompras(get: (clave: string) => string | null): Pa
     mundo: uuidONulo("mundo"),
     linea: uuidONulo("linea"),
     marca: uuidONulo("marca"),
+    embarque: uuidONulo("embarque"),
     porConfirmar: get("por_confirmar") === "1",
     q: get("q") ?? "",
     importar: get("importar") === "1",
@@ -100,6 +105,7 @@ export function consultaCompras(p: ParametrosCompras): string {
   if (p.mundo) q.set("mundo", p.mundo);
   if (p.linea) q.set("linea", p.linea);
   if (p.marca) q.set("marca", p.marca);
+  if (p.embarque) q.set("embarque", p.embarque);
   if (p.porConfirmar) q.set("por_confirmar", "1");
   if (p.q.trim() !== "") q.set("q", p.q);
   if (p.importar) q.set("importar", "1");
@@ -118,6 +124,7 @@ export function filtrosCompras(p: ParametrosCompras): FiltrosCompras {
     mundo_id: p.mundo ?? undefined,
     linea_id: p.linea ?? undefined,
     marca_id: p.marca ?? undefined,
+    embarque_id: p.embarque ?? undefined,
     por_confirmar: p.porConfirmar || undefined,
   };
 }
@@ -132,15 +139,21 @@ export const hayFiltrosCompras = (p: ParametrosCompras): boolean =>
   p.mundo !== null ||
   p.linea !== null ||
   p.marca !== null ||
+  p.embarque !== null ||
   p.porConfirmar ||
   p.q.trim() !== "";
 
-/** Número, proveedor, referencia y nota; sin distinguir mayúsculas ni acentos. */
+/** Número, proveedor, referencia, nota y, desde la ficha 08b, viaje (código y nombre) y códigos de embarque; sin distinguir mayúsculas ni acentos. */
 export function filtrarCompras(compras: readonly CompraApi[], q: string): CompraApi[] {
   const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("es");
   const t = norm(q.trim());
   if (t === "") return [...compras];
-  return compras.filter((c) => norm(`${c.numero} ${c.proveedor.nombre} ${c.referencia ?? ""} ${c.nota ?? ""}`).includes(t));
+  return compras.filter((c) => {
+    const agrupadores = `${c.viaje?.codigo ?? ""} ${c.viaje?.nombre ?? ""} ${embarquesDeCompra(c)
+      .map((e) => e.codigo)
+      .join(" ")}`;
+    return norm(`${c.numero} ${c.proveedor.nombre} ${c.referencia ?? ""} ${c.nota ?? ""} ${agrupadores}`).includes(t);
+  });
 }
 
 export const ETIQUETA_FILTRO_ESTADO: Record<EstadoCompra, string> = { borrador: "Borrador", confirmada: "Confirmada", recibida: "Recibida", cancelada: "Cancelada" };

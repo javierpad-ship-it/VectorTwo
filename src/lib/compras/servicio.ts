@@ -58,7 +58,7 @@ import {
   type ResultadoAplicacionCompra,
   type ResultadoPrevisualizacion,
 } from "./importar";
-import { compraEsMia, FUNCIONES_DISPONIBLES_0_13_0, puede, puedeImportar, type NodoGeneroMundo } from "./permisos";
+import { compraEsMia, FUNCIONES_DISPONIBLES_0_13_0, MENSAJE_IMPORTAR_SIN_PERMISO, puede, puedeImportar, type NodoGeneroMundo } from "./permisos";
 import { pendientesPorEntrega, esEntregaVencida } from "./pendientes";
 import { argsQuitarRecepcion, argsRegistrarRecepciones, avisosRecepcion, recepcionDeSugerencia, validarQuitarRecepcion, validarRecepciones } from "./recepciones";
 import { hayRepartoCambio, sumarRepartos } from "./reparto";
@@ -88,7 +88,6 @@ import {
   type TipoLinea,
 } from "./tipos";
 import {
-  ESTADO_HTTP_ERROR_COMPRA,
   MENSAJE_ERROR_COMPRA,
   type AsignacionEntregaApi,
   type AvisoLineaCompra,
@@ -925,7 +924,7 @@ export type GanchosAgrupadoresCompras = {
 };
 
 /**
- * `POST /api/compras/importar` (`0.13.0`: solo la carga inicial). `previsualizar` clasifica cada línea (`nueva`, `igual`, `cambiada`) y
+ * `POST /api/compras/importar` (importador normal para los tres roles; carga inicial solo planner y admin). `previsualizar` clasifica cada línea (`nueva`, `igual`, `cambiada`) y
  * dice qué se omite y por qué; `aplicar` hace lo mismo y llama a `importar_compra` UNA vez por compra (todo o nada por compra): un
  * corte deja las compras ya aplicadas completas y las demás sin aplicar, y reimportar completa lo que falta (las aplicadas dan `igual`).
  * El aviso `exceso` lo calcula `calcularExceso` (con el flujo) si se pasa; sin él, no hay aviso.
@@ -937,8 +936,8 @@ export async function importarCompras(
   calcularExceso?: CalculoExceso,
   agrupadores?: GanchosAgrupadoresCompras,
 ): Promise<Salida<ReporteImportacionComprasApi>> {
-  if (!cuerpo.carga_inicial) return fallaMensaje(MENSAJE_ERROR_COMPRA.carga_inicial_requerida, ESTADO_HTTP_ERROR_COMPRA.carga_inicial_requerida, "carga_inicial_requerida");
-  if (!puedeImportar(usuario.rol, cuerpo.carga_inicial)) return fallaMensaje("Tu rol es de solo lectura.", 403);
+  // La decisión de rol es de `puedeImportar`: el importador normal es de los tres roles; la carga inicial, solo de planner y admin.
+  if (!puedeImportar(usuario.rol, cuerpo.carga_inicial)) return fallaMensaje(MENSAJE_IMPORTAR_SIN_PERMISO, 403);
 
   const [estado, k] = await Promise.all([estadoImportacion(d), kPrimaDe(d)]);
   if (estado.respuesta) return falla(estado.respuesta);

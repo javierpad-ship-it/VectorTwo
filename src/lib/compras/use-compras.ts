@@ -41,6 +41,10 @@ export type FiltrosCompras = {
   marca_id?: string;
   mio?: boolean;
   por_confirmar?: boolean;
+  /** Ficha 08b: un viaje concreto o `sin_viaje`. Nunca «todos» (eso es no mandarlo) y nunca se lee de la cookie: llega explícito (R22). */
+  viaje_id?: string;
+  /** Ficha 08b: compras con alguna entrega asignada a ese embarque. */
+  embarque_id?: string;
 };
 
 export function urlCompras(f: FiltrosCompras = {}): string {
@@ -61,10 +65,11 @@ const SIN_COMPRAS: CompraApi[] = [];
 
 /**
  * La lista de compras (con líneas y entregas; el historial va vacío). Mientras llega la lista del filtro nuevo conserva la anterior
- * (`cargando` indica que se relee). Recarga con `recargar()` tras cada escritura.
+ * (`cargando` indica que se relee). Recarga con `recargar()` tras cada escritura. Con `filtros = null` no lee nada: la pantalla espera a
+ * saber el viaje activo para no pedir primero todo y después el filtrado.
  */
-export function useCompras(filtros: FiltrosCompras = {}) {
-  const lectura = useLectura<CompraApi[]>(urlCompras(filtros), true);
+export function useCompras(filtros: FiltrosCompras | null = {}) {
+  const lectura = useLectura<CompraApi[]>(filtros === null ? null : urlCompras(filtros), true);
   return { ...lectura, datos: lectura.datos ?? SIN_COMPRAS };
 }
 

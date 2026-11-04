@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Columna } from "@/components/ui/data-table";
@@ -12,7 +13,21 @@ import {
   type OrigenRecepcion,
   type RecepcionLineaApi,
 } from "@/lib/compras/tipos-api";
+import type { EntregaSinEmbarqueApi } from "@/lib/compras/agrupadores/tipos-api";
 import { dinero, fechaHora, mesCorto, mesLargo, unidades } from "./formato";
+import {
+  admiteAsignarAgrupador,
+  admiteCambiarViaje,
+  embarquesDeCompra,
+  entregaComoSinEmbarque,
+  entregasSinEmbarqueDeCompra,
+  hrefEmbarque,
+  hrefViaje,
+  textoChipAsignacion,
+  textoSinEmbarque,
+  textoViajeCompra,
+  unidadesSinEmbarque,
+} from "./vista-agrupadores-compras";
 import { descripcionLinea, estadoCompra, estadoEntrega, TEXTO_AVISO_LINEA, TEXTO_AVISO_RECEPCION, unidadesConfirmables } from "./vista-compras";
 
 const ETIQUETA_ORIGEN_INGRESO: Record<OrigenRecepcion, string> = { manual: "Manual", sugerencia: "Sugerencia aceptada", importada: "Importada" };
@@ -22,6 +37,10 @@ const ETIQUETA_ORIGEN_INGRESO: Record<OrigenRecepcion, string> = { manual: "Manu
  * por entrega y las vencidas por confirmar), sus ingresos confirmados y, en un lote, su reparto guardado; y el historial de cambios con
  * quién, cuándo y qué. Las acciones (Confirmar ingreso, Quitar, Cancelar) solo aparecen si `puedeEscribir` y la compra lo permite; el
  * comprador ve todo sin botones. El diálogo y la llamada a la API son del panel.
+ *
+ * Ficha 08b (§4.5): «Viaje: 261101 · Feria Sur [Cambiar]» y, por entrega, los chips `Embarque 261101 · P 261101 · 300 u` y «120 u sin
+ * embarque» con «Asignar a embarque…». El viaje y el embarque los asignan los TRES roles (decisión 92), así que esos botones no dependen de
+ * `puedeEscribir`: dependen de que el panel pase `onCambiarViaje` y `onAsignarEmbarque` y de que la compra lo admita.
  */
 export function DetalleCompra({
   compra,
@@ -30,10 +49,16 @@ export function DetalleCompra({
   onConfirmarIngreso,
   onQuitarIngreso,
   onCancelar,
+  onCambiarViaje,
+  onAsignarEmbarque,
 }: {
   compra: CompraApi;
   puedeEscribir: boolean;
   ocupado?: boolean;
+  /** Abre el diálogo del viaje de la compra (los tres roles). Sin él no hay botón. */
+  onCambiarViaje?: () => void;
+  /** Abre el diálogo de asignar esas entregas a un embarque (los tres roles). Sin él no hay botones. */
+  onAsignarEmbarque?: (entregas: EntregaSinEmbarqueApi[]) => void;
   onConfirmarIngreso: (linea: LineaCompraApi, numeroLinea: number, entrega: EntregaLineaApi | null) => void;
   onQuitarIngreso: (linea: LineaCompraApi, numeroLinea: number, recepcion: RecepcionLineaApi) => void;
   onCancelar: () => void;
@@ -81,6 +106,8 @@ export function DetalleCompra({
           {compra.nota && <Dato titulo="Nota" valor={compra.nota} />}
         </dl>
 
+        <AgrupadoresDeCompra compra={compra} ocupado={ocupado} onCambiarViaje={onCambiarViaje} onAsignarEmbarque={onAsignarEmbarque} />
+
         {cancelada && (
           <p className="mt-4 rounded-md bg-alerta-suave px-3 py-2 text-sm text-alerta">
             {compra.saldo_cerrado ? "Saldo cancelado" : "Cancelada"} por {cancelada.nombre ?? "—"} el {fechaHora(cancelada.at)}: «{cancelada.motivo}».
@@ -95,11 +122,68 @@ export function DetalleCompra({
       <div className="space-y-4">
         <h3 className="text-sm font-semibold">Líneas ({compra.lineas.length})</h3>
         {compra.lineas.map((l, i) => (
-          <BloqueLinea key={l.id} linea={l} numero={i + 1} compra={compra} puedeRecibir={puedeRecibir} puedeQuitar={puedeQuitar} ocupado={ocupado} onConfirmarIngreso={onConfirmarIngreso} onQuitarIngreso={onQuitarIngreso} />
+          <BloqueLinea key={l.id} linea={l} numero={i + 1} compra={compra} puedeRecibir={puedeRecibir} puedeQuitar={puedeQuitar} ocupado={ocupado} onConfirmarIngreso={onConfirmarIngreso} onQuitarIngreso={onQuitarIngreso} onAsignarEmbarque={onAsignarEmbarque} />
         ))}
       </div>
 
       <Historial eventos={compra.historial} />
+    </div>
+  );
+}
+
+/**
+ * Viaje de la compra y resumen de sus embarques (ficha 08b §4.5). Solo aparece si la API trajo los agrupadores (`viaje` presente, aunque sea
+ * nulo): una compra sin esa información (fixtures de M8) no muestra la franja.
+ */
+function AgrupadoresDeCompra({
+  compra,
+  ocupado,
+  onCambiarViaje,
+  onAsignarEmbarque,
+}: {
+  compra: CompraApi;
+  ocupado: boolean;
+  onCambiarViaje?: () => void;
+  onAsignarEmbarque?: (entregas: EntregaSinEmbarqueApi[]) => void;
+}) {
+  if (compra.viaje === undefined) return null;
+  const embarques = embarquesDeCompra(compra);
+  const sin = unidadesSinEmbarque(compra);
+  const pendientes = entregasSinEmbarqueDeCompra(compra);
+  return (
+    <div className="mt-4 space-y-2 border-t border-borde pt-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-tinta-suave">Viaje</span>
+        {compra.viaje ? (
+          <Link href={hrefViaje(compra.viaje.id)} className="min-w-0 break-words font-medium text-marca-oscura underline-offset-2 hover:underline">
+            {textoViajeCompra(compra.viaje)}
+          </Link>
+        ) : (
+          <span className="text-tinta-suave">Sin viaje</span>
+        )}
+        {compra.viaje?.estado === "cerrado" && <Badge tono="neutro">Viaje cerrado</Badge>}
+        {onCambiarViaje && admiteCambiarViaje(compra) && (
+          <Button variante="secundario" tamano="sm" onClick={onCambiarViaje} disabled={ocupado}>
+            {compra.viaje ? "Cambiar" : "Asignar a viaje…"}
+          </Button>
+        )}
+      </div>
+      {(embarques.length > 0 || sin > 0) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-tinta-suave">Embarques</span>
+          {embarques.map((e) => (
+            <Link key={e.id} href={hrefEmbarque(e.id)} className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-marca">
+              <Badge tono="marca">{`Embarque ${e.codigo} · ${unidades(e.unidades)} u`}</Badge>
+            </Link>
+          ))}
+          {sin > 0 && <Badge tono="neutro">{textoSinEmbarque(sin)}</Badge>}
+          {onAsignarEmbarque && pendientes.length > 0 && (
+            <Button variante="secundario" tamano="sm" onClick={() => onAsignarEmbarque(pendientes)} disabled={ocupado}>
+              Asignar a embarque…
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -124,6 +208,7 @@ function BloqueLinea({
   ocupado,
   onConfirmarIngreso,
   onQuitarIngreso,
+  onAsignarEmbarque,
 }: {
   linea: LineaCompraApi;
   numero: number;
@@ -131,6 +216,7 @@ function BloqueLinea({
   puedeRecibir: boolean;
   puedeQuitar: boolean;
   ocupado: boolean;
+  onAsignarEmbarque?: (entregas: EntregaSinEmbarqueApi[]) => void;
   onConfirmarIngreso: (linea: LineaCompraApi, numeroLinea: number, entrega: EntregaLineaApi | null) => void;
   onQuitarIngreso: (linea: LineaCompraApi, numeroLinea: number, recepcion: RecepcionLineaApi) => void;
 }) {
@@ -160,6 +246,35 @@ function BloqueLinea({
       },
     },
     { clave: "temporada", titulo: "Temporada", render: (e) => <span className="text-xs text-tinta-suave">{e.temporada === "verano" ? "Verano" : "Invierno"}</span> },
+    ...(compra.viaje !== undefined
+      ? [
+          {
+            clave: "embarque",
+            titulo: "Embarque",
+            render: (e: EntregaLineaApi) => {
+              const asignaciones = e.asignaciones ?? [];
+              const sin = admiteAsignarAgrupador(compra) ? (e.sin_embarque ?? 0) : 0;
+              const pendiente = entregaComoSinEmbarque(compra, l, e);
+              if (asignaciones.length === 0 && sin === 0) return <span className="text-tinta-suave">—</span>;
+              return (
+                <span className="flex flex-col items-start gap-1">
+                  {asignaciones.map((a) => (
+                    <Link key={a.id} href={hrefEmbarque(a.embarque.id)} className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-marca">
+                      <Badge tono="marca">{textoChipAsignacion(a)}</Badge>
+                    </Link>
+                  ))}
+                  {sin > 0 && <Badge tono="neutro">{textoSinEmbarque(sin)}</Badge>}
+                  {onAsignarEmbarque && pendiente && (
+                    <Button variante="fantasma" tamano="sm" onClick={() => onAsignarEmbarque([pendiente])} disabled={ocupado}>
+                      Asignar a embarque…
+                    </Button>
+                  )}
+                </span>
+              );
+            },
+          } satisfies Columna<EntregaLineaApi>,
+        ]
+      : []),
     ...(puedeRecibir
       ? [
           {

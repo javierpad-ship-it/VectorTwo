@@ -1,4 +1,4 @@
-import { COLUMNAS_IMPORTAR_AGRUPADORES, type ClaveColumnaAgrupador, type MotivoOmisionAgrupador } from "@/lib/compras/agrupadores/tipos";
+import type { ClaveColumnaAgrupador, MotivoOmisionAgrupador } from "@/lib/compras/agrupadores/tipos";
 import type { AvisoImportacionAgrupador, ReporteImportacionAgrupadoresApi, TipoAgrupador } from "@/lib/compras/agrupadores/tipos-api";
 import { plural } from "@/lib/formato";
 import { filasMapeadas } from "@/components/importador/mapeo";
@@ -31,19 +31,11 @@ export const CAMPOS_AGRUPADORES: CampoImportador<CampoAgrupador>[] = [
   { campo: "nota", etiqueta: "Nota", alias: ["NOTA", "NOTAS"], opcional: true },
 ];
 
-/** Encabezados de la plantilla, en el orden del contrato. */
-export const ENCABEZADOS_PLANTILLA_AGRUPADORES: string[] = COLUMNAS_IMPORTAR_AGRUPADORES.map((c) => c.encabezado);
-
-const NOTA_EJEMPLO = "Fila de ejemplo: bórrala o reemplázala";
-
-const fila = (valores: Partial<Record<ClaveColumnaAgrupador, string>>): string[] => COLUMNAS_IMPORTAR_AGRUPADORES.map((c) => valores[c.clave] ?? "");
-
-/** Una fila de ejemplo de cada tipo (sintética): un viaje, un embarque del viaje y un paquete del embarque. La plantilla recomienda escribir el código. */
-export const FILAS_EJEMPLO_AGRUPADORES: string[][] = [
-  fila({ tipo: "VIAJE", codigo: "261101", nombre: "Feria Sur · nov-2026", destino: "Ciudad Sur", fecha_inicio: "2026-11-02", fecha_fin: "2026-11-09", responsable: "comprador.uno@ejemplo.com", nota: NOTA_EJEMPLO }),
-  fila({ tipo: "EMBARQUE", codigo: "261101", nombre: "Dic-26 · Feria Sur", viaje: "261101", tipo_embarque: "IMPORTACION", fecha_salida: "2026-11-20", fecha_llegada: "2026-12-18", puerto: "Puerto Sur", referencia_logistica: "BL-0001", responsable: "", nota: NOTA_EJEMPLO }),
-  fila({ tipo: "PAQUETE", codigo: "261101", nombre: "Paquete denim", embarque: "261101", responsable: "", nota: NOTA_EJEMPLO }),
-];
+/**
+ * La plantilla es la de T2 (`src/lib/compras/agrupadores/plantilla.ts`), la misma de la hoja `AGRUPADORES` de la exportación a Excel: el
+ * encabezado en el orden del contrato y una fila de ejemplo de cada tipo, todo inventado y con el código escrito.
+ */
+export { ENCABEZADOS_AGRUPADORES as ENCABEZADOS_PLANTILLA_AGRUPADORES, FILAS_EJEMPLO_AGRUPADORES } from "@/lib/compras/agrupadores/plantilla";
 
 export const NOMBRE_PLANTILLA_AGRUPADORES = "plantilla-agrupadores";
 

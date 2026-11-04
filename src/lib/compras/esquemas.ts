@@ -170,7 +170,7 @@ export const filaMezclaImportacionSchema = z.object({
 });
 export type FilaMezclaImportacion = z.infer<typeof filaMezclaImportacionSchema>;
 
-/** `POST /api/compras/importar`. En `0.13.0` la casilla es obligatoria: sin `carga_inicial` la ruta responde `400 carga_inicial_requerida`. */
+/** `POST /api/compras/importar`. Sin `carga_inicial` (o en `false`) es el importador normal (borrador, origen comprador; los tres roles); con `true`, la carga inicial (solo admin y planner). */
 export const importarComprasSchema = z.object({
   modo: z.enum(["previsualizar", "aplicar"], "El modo debe ser previsualizar o aplicar."),
   carga_inicial: z.boolean("carga_inicial debe ser verdadero o falso.").default(false),

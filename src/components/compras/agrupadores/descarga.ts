@@ -2,7 +2,7 @@ import { descargarLibro } from "@/app/(app)/planificacion/proyeccion/descarga-li
 import { api } from "@/lib/api-client";
 import type { AsignableApi, EmbarqueApi, EmbarqueDetalleApi, ViajeApi } from "@/lib/compras/agrupadores/tipos-api";
 import { urlEmbarque } from "@/lib/compras/agrupadores/use-agrupadores";
-import { hojaAgrupadores, hojaAsignaciones, hojaEmbarques, hojaPaquetes, hojaViajes, NOMBRE_ARCHIVO_AGRUPADORES } from "./hojas-agrupadores";
+import { hojaAgrupadores, hojaAsignaciones, hojaEmbarques, hojaPaquetes, hojaViajes, NOMBRE_ARCHIVO_EMBARQUES, NOMBRE_ARCHIVO_VIAJES } from "./hojas-agrupadores";
 
 /**
  * Excel de Viajes y embarques (ficha 08b §3.11 y §4.1). Solo en el navegador: SheetJS se carga bajo demanda dentro de `descargarLibro`. Los
@@ -32,11 +32,11 @@ export async function descargarEmbarques(args: { embarques: readonly EmbarqueApi
       ASIGNACIONES: hojaAsignaciones(detalles),
       AGRUPADORES: hojaAgrupadores(viajes, detalles, args.asignables),
     },
-    NOMBRE_ARCHIVO_AGRUPADORES,
+    NOMBRE_ARCHIVO_EMBARQUES,
   );
 }
 
 /** `VIAJES` de la lista y `AGRUPADORES` con esos viajes (reimportable: lo existente sale «igual»). */
 export async function descargarViajes(args: { viajes: readonly ViajeApi[]; asignables: readonly AsignableApi[] }): Promise<void> {
-  await descargarLibro({ VIAJES: hojaViajes(args.viajes), AGRUPADORES: hojaAgrupadores(args.viajes, [], args.asignables) }, NOMBRE_ARCHIVO_AGRUPADORES);
+  await descargarLibro({ VIAJES: hojaViajes(args.viajes), AGRUPADORES: hojaAgrupadores(args.viajes, [], args.asignables) }, NOMBRE_ARCHIVO_VIAJES);
 }

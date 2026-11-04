@@ -368,6 +368,6 @@ describe("Excel: hojas de Viajes y embarques", () => {
     expect(asig[1][0]).toBe("261101");
     expect(asig[1][1]).toBe("261101"); // el paquete
     expect(asig[1][2]).toBe("C-000101");
-    expect(asig[1][6]).toBe(300);
+    expect(asig[1][asig[0].indexOf("UNIDADES")]).toBe(300);
   });
 });

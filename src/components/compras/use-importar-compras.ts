@@ -33,21 +33,26 @@ export type CampoCompra =
   | "recibidas"
   | "destino"
   | "alcance"
+  | "viaje"
+  | "embarque"
+  | "paquete"
   | "nota";
 
 /**
- * El texto del error de la API. `403`: el rol no escribe compras (la pantalla ya oculta el botón, pero la API manda); `400
- * carga_inicial_requerida`: la casilla es obligatoria en `0.13.0`. Los demás salen con el mensaje de la API tal cual.
+ * El texto del error de la API. `403`: el comprador pidió la carga inicial, que es de administración y planeamiento (la pantalla no se la
+ * ofrece, pero la API manda; si el mensaje ya lo dice, no se repite). Los demás salen con el mensaje de la API tal cual.
  */
 export function textoErrorImportar(e: unknown): string {
-  if (e instanceof ErrorApi && e.status === 403) return `${e.message} Importar compras es de administración y planeamiento.`;
+  if (e instanceof ErrorApi && e.status === 403) {
+    return /carga inicial/i.test(e.message) ? e.message : `${e.message} La carga inicial es de administración y planeamiento.`;
+  }
   return mensajeError(e);
 }
 
 /**
  * Flujo de cuatro pasos (archivo → mapeo → previsualizar → aplicar) del importador de compras (ficha 08 §4.7). Es hermano de
- * `useImportador`, que no sirve tal cual porque este endpoint recibe además `carga_inicial` (en `0.13.0` la casilla es obligatoria: sin
- * ella la API responde `400 carga_inicial_requerida`) y devuelve el reporte en los dos modos. Aplicar solo se habilita con una
+ * `useImportador`, que no sirve tal cual porque este endpoint recibe además `carga_inicial` (la casilla: solo admin y planner; sin ella es el
+ * importador normal, en borrador, de los tres roles) y devuelve el reporte en los dos modos. Aplicar solo se habilita con una
  * previsualización vigente (el archivo, la hoja y el mapeo no cambiaron desde que se previsualizó). Se aplica con un `confirm`.
  */
 export function useImportarCompras({

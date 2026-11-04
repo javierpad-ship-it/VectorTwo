@@ -172,12 +172,13 @@ describe("permisos: sesión (401), comprador solo lee (403 en toda escritura)", 
     () => recibir(enviar("POST", `/compras/${C12}/recibir`, {}), ctx(C12)),
     () => quitarRecepcion(borrar(`/compras/${C12}/recepciones/${IDS.recepcionC08}?revision=1`), ctx(C12, { recepcionId: IDS.recepcionC08 })),
     () => cancelar(enviar("POST", `/compras/${C12}/cancelar`, {}), ctx(C12)),
-    () => importar(enviar("POST", "/compras/importar", {})),
   ];
+  /** Importar no exige rol en el guard (`requireUser`): el rol lo decide `puedeImportar` con `carga_inicial` (ver `POST /api/compras/importar`). */
+  const importarSoloConSesion = () => importar(enviar("POST", "/compras/importar", {}));
 
   it("sin sesión: 401 en las quince rutas y no llega a la base", async () => {
     escenario.usuario = { rol: "sin_sesion", perfil: PERFILES.planner };
-    for (const f of [...lecturas(), ...escriben()]) expect((await f()).status).toBe(401);
+    for (const f of [...lecturas(), ...escriben(), importarSoloConSesion]) expect((await f()).status).toBe(401);
     expect(escenario.llamadas).toEqual([]);
   });
 
@@ -1005,15 +1006,46 @@ describe("POST /api/compras/importar", () => {
     return { r, cuerpo: await leer<ReporteImportacionComprasApi>(r) };
   };
 
-  it("sin la casilla de carga inicial: 400 carga_inicial_requerida; el comprador recibe 403; un archivo vacío, 400", async () => {
+  it("un archivo vacío da 400; el comprador con carga inicial recibe 403 (sin tocar la base) y con el mensaje del permiso", async () => {
     sinFeria();
-    const r = await importarCon("previsualizar", filasImportacionEjemplo(), { carga_inicial: false });
-    expect(r.r.status).toBe(400);
-    expect(r.cuerpo.codigo).toBe("carga_inicial_requerida");
     expect((await importarCon("previsualizar", [])).r.status).toBe(400);
     comoComprador();
-    expect((await importarCon("previsualizar")).r.status).toBe(403);
+    for (const modo of ["previsualizar", "aplicar"] as const) {
+      const r = await importarCon(modo);
+      expect(r.r.status).toBe(403);
+      expect(r.cuerpo.error).toBe("La carga inicial de compras ya hechas solo la hacen el planner o el administrador.");
+    }
     expect(escrituras()).toEqual([]);
+    expect(tablaDe("compras")).toEqual([]);
+  });
+
+  it("el comprador importa con el importador normal (carga_inicial = false): previsualiza y aplica compras en borrador de origen comprador, a su nombre", async () => {
+    sinFeria();
+    comoComprador("comprador1");
+    const prev = await importarCon("previsualizar", filasImportacionEjemplo(), { carga_inicial: false });
+    expect(prev.r.status, JSON.stringify(prev.cuerpo)).toBe(200);
+    expect(prev.cuerpo.data).toMatchObject({ modo: "previsualizar", carga_inicial: false });
+    expect(escrituras()).toEqual([]);
+
+    // RECIBIDAS solo existe en la carga inicial: esa fila se omite (no se importa nada a medias)
+    const { r, cuerpo } = await importarCon("aplicar", filasImportacionEjemplo(), { carga_inicial: false });
+    expect(r.status, JSON.stringify(cuerpo)).toBe(200);
+    expect(cuerpo.data.carga_inicial).toBe(false);
+    expect(llamadasA("importar_compra").length).toBeGreaterThan(0);
+    const compras = tablaDe("compras");
+    expect(compras.length).toBeGreaterThan(0);
+    expect(compras.every((c) => c.origen === "comprador" && c.estado === "borrador")).toBe(true);
+    expect(compras.every((c) => c.usuario_nombre === PERFILES.comprador1.nombre)).toBe(true);
+  });
+
+  it("admin y planner también usan el importador normal; con carga inicial siguen pudiendo", async () => {
+    sinFeria();
+    escenario.usuario = { rol: "admin", perfil: PERFILES.comprador1 };
+    expect((await importarCon("previsualizar", filasImportacionEjemplo(), { carga_inicial: false })).r.status).toBe(200);
+    expect((await importarCon("previsualizar", filasImportacionEjemplo(), { carga_inicial: true })).r.status).toBe(200);
+    escenario.usuario = { rol: "planner", perfil: PERFILES.comprador1 };
+    expect((await importarCon("previsualizar", filasImportacionEjemplo(), { carga_inicial: false })).r.status).toBe(200);
+    expect((await importarCon("previsualizar", filasImportacionEjemplo(), { carga_inicial: true })).r.status).toBe(200);
   });
 
   it("previsualizar (caso 13): 3 líneas nuevas en 2 compras, proveedor nuevo y 3 omitidas con su motivo; no escribe nada", async () => {

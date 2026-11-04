@@ -132,7 +132,7 @@ const nombreDe = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}
 describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritura (el comprador recibe 403)", () => {
   const m8 = CASOS.filter((c) => /^(flujo|compras)\//.test(c.ruta) && !esDeAgrupadores(c.ruta));
 
-  it("están las seis escrituras de 0.13.0 y ninguna se conforma con tener sesión", () => {
+  it("están las seis escrituras de 0.13.0; todas exigen rol salvo importar, que decide el rol dentro (requireUser + puedeImportar)", () => {
     const nombre = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}`;
     expect(m8.map(nombre).sort()).toEqual(
       [
@@ -144,7 +144,21 @@ describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritur
         "PUT flujo/parametros",
       ].sort()
     );
-    expect(m8.every((c) => c.exigeRol)).toBe(true);
+    expect(m8.filter((c) => !c.exigeRol).map(nombre)).toEqual(["POST compras/importar"]);
+  });
+
+  it("POST compras/importar: el comprador pasa el guard (el rol lo decide puedeImportar con el cuerpo), sin sesión 401, y no toca datos antes de leer el cuerpo", async () => {
+    const caso = CASOS.find((c) => c.ruta === "compras/importar/route.ts" && c.metodo === "POST");
+    expect(caso).toBeDefined();
+    if (!caso) return;
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    for (const rol of ["comprador", "planner", "admin"]) {
+      estado.rol = rol;
+      // cuerpo vacío: pasa el guard y se frena en la validación del cuerpo (400), nunca en un 403 de rol
+      const respuesta = await llamar(caso);
+      expect(respuesta.status, rol).toBe(400);
+      expect(estado.tablasTocadas).toEqual([]);
+    }
   });
 });
 

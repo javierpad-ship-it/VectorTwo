@@ -49,7 +49,7 @@ const ESPERADAS: Esperada[] = [
   { ruta: "compras/[id]/recepciones/[recepcionId]/route.ts", metodo: "DELETE", guard: "requirePlanner" },
   { ruta: "compras/[id]/cancelar/route.ts", metodo: "POST", guard: "requirePlanner" },
   { ruta: "compras/proveedores/route.ts", metodo: "GET", guard: "requireUser" },
-  { ruta: "compras/importar/route.ts", metodo: "POST", guard: "requirePlanner" },
+  { ruta: "compras/importar/route.ts", metodo: "POST", guard: "requireUser" }, // el rol lo decide `puedeImportar` (carga inicial: solo planner y admin)
 ];
 const METODOS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 const API = path.join(RAIZ, "src", "app", "api");
@@ -76,8 +76,8 @@ describe("rutas de M8: guards de la ficha (sección 7)", () => {
     }
   });
 
-  it("en M8 ninguna escritura usa requireUser (la lista blanca de M9a no existe todavía) y las rutas no usan requireAdmin", () => {
-    for (const e of ESPERADAS.filter((x) => x.metodo !== "GET")) {
+  it("en M8 ninguna escritura usa requireUser (la lista blanca de M9a no existe todavía; salvo importar, que decide el rol con `puedeImportar`) y las rutas no usan requireAdmin", () => {
+    for (const e of ESPERADAS.filter((x) => x.metodo !== "GET" && x.ruta !== "compras/importar/route.ts")) {
       const limpio = limpiar(readFileSync(path.join(API, e.ruta), "utf8"));
       const cuerpo = cuerpoDeFuncion(limpio, e.metodo) ?? "";
       expect(cuerpo, `${e.ruta} ${e.metodo}`).not.toMatch(/requireUser|requireAdmin/);

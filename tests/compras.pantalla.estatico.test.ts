@@ -47,7 +47,7 @@ describe("estructura de las tres pantallas", () => {
       expect(c.startsWith('"use client"'), p.archivoPanel).toBe(true);
       expect(c, p.archivoPanel).toContain("useSearchParams");
       expect(c, p.archivoPanel).toMatch(/history\.(replaceState|pushState)/);
-      expect(c, p.archivoPanel).toMatch(/\{ rol \}: \{ rol: Rol \}/);
+      expect(c, p.archivoPanel).toMatch(/\{ rol(?:, perfilId, viajeActivoInicial)? \}: \{ rol: Rol/);
     }
   });
 
@@ -56,7 +56,8 @@ describe("estructura de las tres pantallas", () => {
       const c = fuente(f);
       expect(c, f).toContain('const puedeEscribir = rol === "admin" || rol === "planner"');
     }
-    expect(fuente("src/app/(app)/compras/registro/registro-panel.tsx")).toMatch(/puedeEscribir && \(\s*<Button onClick=\{\(\) => irA\(\{ \.\.\.parametros, importar: true/);
+    // Importar (ficha 08b y decisión de Javier del 2026-11-04): el importador normal es de los tres roles, la carga inicial solo de admin y planner; lo decide `puedeImportar`.
+    expect(fuente("src/app/(app)/compras/registro/registro-panel.tsx")).toMatch(/puedeImportarCompras && \(\s*<Button onClick=\{\(\) => irA\(\{ \.\.\.parametros, importar: true/);
     expect(fuente("src/app/(app)/compras/flujo/flujo-panel.tsx")).toContain("puedeEscribir && datos");
     const detalle = fuente("src/components/compras/detalle-compra.tsx");
     expect(detalle).toContain("const puedeRecibir = puedeEscribir && compra.puede.recibir");
@@ -88,7 +89,7 @@ describe("datos, kit de UI y errores", () => {
     for (const r of ["/api/compras", "/api/compras/${id}", "/api/compras/proveedores", "/api/compras/importar", "/recibir", "/recepciones/${recepcionId}?revision=${revision}", "/cancelar", "/historial"]) expect(compras, r).toContain(r);
     expect(compras).toContain("api.post<CompraApi>(`${urlCompra(compraId)}/recibir`");
     expect(compras).toContain("api.delete<CompraApi>(");
-    expect(compras).toContain("useLectura<CompraApi[]>(urlCompras(filtros), true)");
+    expect(compras).toContain("useLectura<CompraApi[]>(filtros === null ? null : urlCompras(filtros), true)");
     expect(compras).toContain("useColeccion<ProveedorApi>(URL_PROVEEDORES)");
   });
 

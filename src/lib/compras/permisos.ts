@@ -24,11 +24,17 @@ export function puedeEscribirCompras(rol: Rol, fase: FaseEscritura = "m8"): bool
 /** Aplicar reparto, carga inicial, parámetros y desactivar proveedores: siempre planner o admin. */
 export const esPlanner = (rol: Rol): boolean => rol === "admin" || rol === "planner";
 
-/** `POST /api/compras/importar`: con `carga_inicial` solo planner/admin (en `0.13.0` es la única forma de importar). */
-export function puedeImportar(rol: Rol, cargaInicial: boolean, fase: FaseEscritura = "m8"): boolean {
-  if (cargaInicial) return esPlanner(rol);
-  return puedeEscribirCompras(rol, fase);
+/**
+ * `POST /api/compras/importar` (decisión de Javier, 2026-11-04): el importador normal (`carga_inicial = false`: compras en borrador, origen
+ * `comprador`) lo usan los tres roles; la CARGA INICIAL (`carga_inicial = true`: compras ya hechas, confirmadas, con recibidas) sigue siendo
+ * solo de planner y admin. No depende de la fase: es independiente del resto de escrituras de compras (que siguen con `puedeEscribirCompras`).
+ */
+export function puedeImportar(rol: Rol, cargaInicial: boolean): boolean {
+  return cargaInicial ? esPlanner(rol) : true;
 }
+
+/** Mensaje de `403` de `POST /api/compras/importar` cuando `puedeImportar` da `false` (hoy solo: comprador con carga inicial). */
+export const MENSAJE_IMPORTAR_SIN_PERMISO = "La carga inicial de compras ya hechas solo la hacen el planner o el administrador.";
 
 /** Funciones de escritura que ya existen: en `0.13.0` solo recibir y cancelar (editar, confirmar y reparto llegan en `0.13.1`). */
 export type FuncionesDisponibles = { editar: boolean; confirmar: boolean; aplicar_reparto: boolean };

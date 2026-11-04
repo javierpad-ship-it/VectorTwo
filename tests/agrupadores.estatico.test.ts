@@ -174,11 +174,12 @@ describe("viaje activo (R22): la cookie solo la escribe PUT /api/compras/viaje-a
 });
 
 describe("cambios aditivos de M8 (§3.3, §3.9)", () => {
-  it("la ruta de importar compras usa el esquema con las columnas VIAJE, EMBARQUE y PAQUETE y engancha los agrupadores; sigue siendo requirePlanner (la carga inicial es de admin y planner)", () => {
+  it("la ruta de importar compras usa el esquema con las columnas VIAJE, EMBARQUE y PAQUETE y engancha los agrupadores; usa requireUser y decide el rol con puedeImportar (la carga inicial es de admin y planner)", () => {
     const texto = sinComentarios(archivo("src/app/api/compras/importar/route.ts").texto);
     expect(texto).toMatch(/importarComprasConAgrupadoresSchema/);
     expect(texto).toMatch(/ganchosAgrupadoresCompras\(/);
-    expect(texto).toMatch(/requirePlanner/);
+    expect(texto).toMatch(/requireUser/);
+    expect(texto).not.toMatch(/requirePlanner/);
   });
 
   it("el servicio de compras no importa el de agrupadores (se engancha con `GanchosAgrupadoresCompras`: sin ciclo y compras sigue independiente)", () => {

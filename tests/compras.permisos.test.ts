@@ -55,13 +55,13 @@ describe("puede: el estado y el rol, nunca quién creó la compra", () => {
 });
 
 describe("importar y planner", () => {
-  it("la carga inicial es de planner o admin siempre", () => {
+  it("la carga inicial es de planner o admin siempre; el importador normal es de los tres roles", () => {
     expect(puedeImportar("planner", true)).toBe(true);
     expect(puedeImportar("admin", true)).toBe(true);
     expect(puedeImportar("comprador", true)).toBe(false);
-    expect(puedeImportar("comprador", true, "m9a")).toBe(false);
-    expect(puedeImportar("comprador", false, "m9a")).toBe(true);
-    expect(puedeImportar("comprador", false)).toBe(false);
+    expect(puedeImportar("planner", false)).toBe(true);
+    expect(puedeImportar("admin", false)).toBe(true);
+    expect(puedeImportar("comprador", false)).toBe(true);
   });
 
   it("esPlanner", () => {

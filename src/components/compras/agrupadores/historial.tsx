@@ -30,7 +30,8 @@ function ListaEventos({ referencia }: { referencia: RefHistorial }) {
   const lectura = useHistorial(referencia);
   if (lectura.cargando && !lectura.datos) return <p className="py-3 text-sm text-tinta-suave">Cargando el historial…</p>;
   if (lectura.error) return <Alert onCerrar={() => lectura.setError(null)}>{lectura.error}</Alert>;
-  const eventos = lectura.datos?.eventos ?? [];
+  // La API los da del más antiguo al más reciente; aquí, como en el historial de una compra, lo último arriba.
+  const eventos = [...(lectura.datos?.eventos ?? [])].reverse();
   if (eventos.length === 0) return <p className="py-3 text-sm text-tinta-suave">Todavía no hay movimientos.</p>;
   return (
     <ol className="divide-y divide-borde rounded-lg border border-borde bg-superficie">

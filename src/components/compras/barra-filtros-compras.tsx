@@ -11,8 +11,8 @@ import type { OpcionId } from "./vista-flujo";
 
 /**
  * Filtros de la lista de compras (ficha 08 §4.4): estado, «Por confirmar», texto, proveedor, origen, mes de entrega (desde y hasta),
- * género, mundo y línea (en cascada) y marca. Todos viajan al servidor salvo el texto, que se aplica en el navegador. Controlado desde
- * fuera: el panel guarda todo en la URL.
+ * género, mundo y línea (en cascada), marca y, desde la ficha 08b, embarque (el viaje lo filtra la barra del viaje activo). Todos viajan
+ * al servidor salvo el texto, que se aplica en el navegador. Controlado desde fuera: el panel guarda todo en la URL.
  */
 export function BarraFiltrosCompras({
   parametros,
@@ -21,6 +21,7 @@ export function BarraFiltrosCompras({
   mundos,
   lineas,
   marcas,
+  embarques,
   onCambiar,
 }: {
   parametros: ParametrosCompras;
@@ -29,6 +30,8 @@ export function BarraFiltrosCompras({
   mundos: readonly OpcionId[];
   lineas: readonly OpcionId[];
   marcas: readonly OpcionId[];
+  /** Ficha 08b: los embarques para filtrar la lista. Sin ellos (o vacío) el filtro no se ofrece. */
+  embarques?: readonly OpcionId[];
   onCambiar: (cambios: Partial<ParametrosCompras>) => void;
 }) {
   const estadoItems: ChipItem<string>[] = [{ id: "todos", label: "Todas" }, ...ESTADOS_COMPRA.map((e) => ({ id: e as string, label: ETIQUETA_FILTRO_ESTADO[e] }))];
@@ -79,6 +82,14 @@ export function BarraFiltrosCompras({
             {opciones(marcas)}
           </Select>
         </Field>
+        {embarques && embarques.length > 0 && (
+          <Field label="Embarque">
+            <Select value={parametros.embarque ?? ""} onChange={(e) => onCambiar({ embarque: e.target.value || null })}>
+              <option value="">Todos</option>
+              {opciones(embarques)}
+            </Select>
+          </Field>
+        )}
         <Field label="Entrega desde">
           <Input type="month" placeholder="aaaa-mm" value={parametros.desde ?? ""} max={parametros.hasta ?? undefined} onChange={(e) => cambiarDesde(e.target.value)} />
         </Field>
