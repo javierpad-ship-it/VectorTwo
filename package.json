@@ -8,6 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:integracion": "vitest run --config vitest.integracion.config.ts",
+    "humos": "bash scripts/correr-humos.sh",
+    "migraciones:validar": "bash scripts/validar-migraciones-local.sh",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -25,10 +28,12 @@
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24.19.1",
     "@types/papaparse": "^5.5.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.1",
+    "pg": "^8.23.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^8.3.2",

@@ -1,0 +1,126 @@
+# Integracion continua de Vector2.
+#
+# Corre en cada push (a cualquier rama) y en cada pull request. Dos trabajos en paralelo:
+#
+#   calidad          npm ci, lint, tsc --noEmit, pruebas unitarias (vitest) y build de Next. No necesita base de datos: las ~6 950
+#                    unitarias simulan la base con espejos en memoria.
+#   base-de-datos    Postgres 17 de verdad (imagen oficial postgres:17): aplica TODAS las migraciones dos veces (la segunda prueba que
+#                    son idempotentes), corre los humos SQL (scripts/humo-*.sql, falla si algun caso sale en falso), las pruebas de
+#                    integracion (tests/integracion/: funciones de escritura, candados, concurrencia con dos conexiones, triggers de
+#                    inmutabilidad, permisos y deriva de database.types.ts contra el esquema real).
+#
+# Lo mismo en local (necesitas un Postgres: en el contenedor de desarrollo `pg_ctlcluster 16 main start`):
+#
+#   npm ci
+#   npm run lint && npx tsc --noEmit && npx vitest run && npm run build
+#   bash scripts/validar-migraciones-local.sh        # crea vector_two_local y aplica las migraciones dos veces; imprime el DATABASE_URL
+#   export DATABASE_URL=postgres://vt_test:vt_test@localhost:5432/vector_two_local      # el que imprimio el script
+#   bash scripts/correr-humos.sh                      # humos SQL: falla si algun caso esta en falso
+#   npm run test:integracion                          # pruebas contra Postgres real (sin DATABASE_URL se saltan con un aviso)
+#
+# Contra un Postgres con contrasena (como el de esta CI) se usa el mismo DATABASE_URL en los tres scripts; los scripts se niegan a
+# correr contra un host que no sea local, jamas contra Supabase (ver scripts/lib-pg.sh).
+#
+# Seguridad: ninguna llave real. Las variables de abajo son ficticias, solo para que `next build` tenga valores; el build no hace
+# llamadas de red. No hay secretos de GitHub en este flujo. Solo se usan actions/checkout y actions/setup-node (oficiales).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Solo lectura del repositorio y una ejecucion a la vez por rama (la nueva cancela a la anterior).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Node >= 20 (engines de package.json); la CI usa la LTS vigente.
+  NODE_VERSION: "22"
+
+jobs:
+  calidad:
+    name: Lint, tipos, pruebas unitarias y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Valores FICTICIOS: solo para el build (ver .env.local.example). Ninguna llave real.
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-ficticio.supabase.invalid
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key-ficticia
+      SUPABASE_SERVICE_ROLE_KEY: ci-service-role-key-ficticia
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tipos (tsc)
+        run: npx tsc --noEmit
+
+      - name: Pruebas unitarias (sin base de datos)
+        run: npx vitest run
+
+      - name: Build
+        run: npm run build
+
+  base-de-datos:
+    name: Postgres 17, migraciones, humos y pruebas de integracion
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Base ya migrada que usan los humos y las pruebas de integracion (el script la crea desde cero).
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/vector_two_local
+      # En CI una configuracion que dejara las pruebas de integracion SALTADAS tiene que fallar, no pasar en verde.
+      VT_INTEGRACION_OBLIGATORIA: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Cliente de Postgres (psql) y version del servidor
+        run: |
+          command -v psql >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client; }
+          psql --version
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -Atc "select version()"
+
+      - name: Migraciones (dos pasadas sobre una base nueva)
+        run: bash scripts/validar-migraciones-local.sh
+
+      - name: Humos SQL (falla si algun caso sale en falso)
+        run: bash scripts/correr-humos.sh
+
+      - name: Pruebas de integracion contra Postgres real
+        run: npm run test:integracion

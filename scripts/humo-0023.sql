@@ -157,10 +157,11 @@ select n, caso, esperado_ok as debe_aceptarse, ok from casos order by n;
 -- ---------------------------------------------------------------------------------------------------------------------
 -- Estructura
 -- ---------------------------------------------------------------------------------------------------------------------
-\echo '--- columnas de proyeccion_crecimientos: id, proyeccion_id, genero_id, mundo_id, pct, nota, perfil_id, usuario_nombre, activo, created_at, updated_at (esperado ok = t)'
+-- Columnas de 0023 más las que añadieron 0027 (crecimiento_id, version) y 0029 (sobre_base); la FK crecimiento_id (0027) es restrict.
+\echo '--- columnas de proyeccion_crecimientos: id, proyeccion_id, genero_id, mundo_id, pct, nota, perfil_id, usuario_nombre, activo, created_at, updated_at + crecimiento_id, version (0027) y sobre_base (0029) (esperado ok = t)'
 select (select string_agg(column_name, ',' order by column_name) from information_schema.columns
         where table_schema = 'public' and table_name = 'proyeccion_crecimientos')
-     = 'activo,created_at,genero_id,id,mundo_id,nota,pct,perfil_id,proyeccion_id,updated_at,usuario_nombre' as ok;
+     = 'activo,created_at,crecimiento_id,genero_id,id,mundo_id,nota,pct,perfil_id,proyeccion_id,sobre_base,updated_at,usuario_nombre,version' as ok;
 
 \echo '--- tipos y nulabilidad: pct numeric(6,2) not null; activo not null default true; nota, perfil_id y usuario_nombre nulos (esperado ok = t)'
 select (select count(*) from information_schema.columns
@@ -185,7 +186,7 @@ select base_siguiente is null and base_normalizada is null as ok from proyeccion
 \echo '--- FK on delete: proyeccion cascade, genero y mundo restrict, perfil set null (esperado ok = t)'
 select (select string_agg(conname || ':' || confdeltype::text, ',' order by conname) from pg_constraint
         where conrelid = 'public.proyeccion_crecimientos'::regclass and contype = 'f')
-     = 'proyeccion_crecimientos_genero_id_fkey:r,proyeccion_crecimientos_mundo_id_fkey:r,proyeccion_crecimientos_perfil_id_fkey:n,proyeccion_crecimientos_proyeccion_id_fkey:c' as ok;
+     = 'proyeccion_crecimientos_crecimiento_id_fkey:r,proyeccion_crecimientos_genero_id_fkey:r,proyeccion_crecimientos_mundo_id_fkey:r,proyeccion_crecimientos_perfil_id_fkey:n,proyeccion_crecimientos_proyeccion_id_fkey:c' as ok;
 
 \echo '--- indices: genero_id, mundo_id, perfil_id y el unico de la celda (esperado ok = t)'
 select (select count(*) from pg_indexes where schemaname = 'public' and tablename = 'proyeccion_crecimientos'
@@ -244,7 +245,7 @@ select obj_description('public.proyeccion_crecimientos'::regclass, 'pg_class') i
    and col_description('public.proyeccion_crecimientos'::regclass, (select attnum from pg_attribute where attrelid = 'public.proyeccion_crecimientos'::regclass and attname = 'perfil_id')) is not null
    and col_description('public.proyeccion_crecimientos'::regclass, (select attnum from pg_attribute where attrelid = 'public.proyeccion_crecimientos'::regclass and attname = 'activo')) is not null
    and col_description('public.proyeccion_fila_anios'::regclass, (select attnum from pg_attribute where attrelid = 'public.proyeccion_fila_anios'::regclass and attname = 'base_siguiente')) like 'M7 07c%'
-   and col_description('public.proyeccion_fila_anios'::regclass, (select attnum from pg_attribute where attrelid = 'public.proyeccion_fila_anios'::regclass and attname = 'base_normalizada')) like 'M7 07c%' as ok;
+   and col_description('public.proyeccion_fila_anios'::regclass, (select attnum from pg_attribute where attrelid = 'public.proyeccion_fila_anios'::regclass and attname = 'base_normalizada')) similar to 'M(7 07c|6 06e)%' as ok;
 
 \echo '--- comentario de tiendas.venta_esperada_promedio: dice 0.10.8, mensual y sin IGV, y ya no es el de la 0021 (esperado ok = t)'
 select c like 'M4/M7 0.10.8: venta mensual promedio esperada%' and c like '%sin IGV%' and c not like '%0.10.1: soles%' as ok

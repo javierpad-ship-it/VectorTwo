@@ -206,7 +206,7 @@ select n, caso, esperado_ok as debe_aceptarse, ok from casos order by n;
 \echo '--- columnas de crecimientos_genero_mundo (esperado ok = t)'
 select (select string_agg(column_name, ',' order by column_name) from information_schema.columns
         where table_schema = 'public' and table_name = 'crecimientos_genero_mundo')
-     = 'activo,alcance,anio_aplicacion,aprobada_at,base_tipo,base_valor,created_at,estado,genero_id,id,mundo_id,nota,pct,perfil_id,proyeccion_referencia_id,referencia,updated_at,usuario_nombre,version' as ok;
+     = 'activo,alcance,anio_aplicacion,aprobada_at,base_tipo,base_valor,created_at,estado,genero_id,id,mundo_id,nota,pct,perfil_id,proyeccion_referencia_id,referencia,sobre_base,updated_at,usuario_nombre,version' as ok;
 
 \echo '--- tipos y nulabilidad: pct numeric(6,2), base_valor numeric(8,2) nulo, referencia jsonb not null, estado default vigente (esperado ok = t)'
 select (select count(*) from information_schema.columns
@@ -458,6 +458,6 @@ select obj_description('public.crecimientos_genero_mundo'::regclass, 'pg_class')
           and col_description(a.attrelid, a.attnum) is null and a.attname in ('anio_aplicacion', 'alcance', 'estado', 'pct', 'base_tipo', 'base_valor', 'referencia', 'proyeccion_referencia_id', 'perfil_id', 'activo')) = 0
    and col_description('public.proyeccion_crecimientos'::regclass, (select attnum from pg_attribute where attrelid = 'public.proyeccion_crecimientos'::regclass and attname = 'crecimiento_id')) like 'M6 06d:%'
    and col_description('public.proyeccion_crecimientos'::regclass, (select attnum from pg_attribute where attrelid = 'public.proyeccion_crecimientos'::regclass and attname = 'version')) like 'M6 06d:%'
-   and obj_description('public.venta_genero_mundo(date)'::regprocedure, 'pg_proc') like 'M6 06d:%' as ok;
+   and obj_description('public.venta_genero_mundo(date)'::regprocedure, 'pg_proc') like 'M6 06d%' as ok;
 
 rollback;

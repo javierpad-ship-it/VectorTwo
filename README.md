@@ -26,10 +26,20 @@ Comandos de verificación (todos deben pasar antes de un commit):
 ```bash
 npm run lint
 npm run typecheck
-npm test
+npm test                               # unitarias: no necesitan base de datos
 npm run build
-scripts/validar-migraciones-local.sh   # opcional: requiere un Postgres local
 ```
+
+Contra un Postgres real (opcional en local, obligatorio en la CI; en el contenedor de desarrollo, `pg_ctlcluster 16 main start`):
+
+```bash
+bash scripts/validar-migraciones-local.sh   # crea vector_two_local, aplica las migraciones dos veces e imprime el DATABASE_URL a usar
+export DATABASE_URL=postgres://vt_test:vt_test@localhost:5432/vector_two_local
+bash scripts/correr-humos.sh                # humos SQL (scripts/humo-*.sql): falla si algun caso esta en falso
+npm run test:integracion                    # tests/integracion/: funciones de escritura, concurrencia con dos conexiones, triggers, permisos, deriva de tipos
+```
+
+`npm run test:integracion` se salta con un aviso si no hay `DATABASE_URL`; en la CI `VT_INTEGRACION_OBLIGATORIA=1` lo convierte en error. Estos scripts y pruebas se niegan a correr contra un host que no sea local (jamas contra Supabase). La integracion continua (`.github/workflows/ci.yml`) corre todo lo anterior en cada push y pull request, con un Postgres 17 y variables ficticias (no usa secretos de GitHub).
 
 ## Variables de entorno
 
@@ -61,7 +71,7 @@ El primer administrador se crea así: en el dashboard de Supabase, Authenticatio
 
 Migraciones en `supabase/migrations/`, numeradas e idempotentes. Se aplican con el MCP de Supabase desde Claude Code o pegándolas en el SQL Editor del dashboard. Después de cada migración se regeneran los tipos en `src/lib/supabase/database.types.ts`.
 
-`scripts/validar-migraciones-local.sh` crea una base `vector_two_local` en un Postgres local, aplica todas las migraciones dos veces (la segunda pasada prueba que son idempotentes) y lista las tablas con RLS. No toca ningún proyecto Supabase; sirve para validar SQL antes de aplicarlo de verdad.
+`scripts/validar-migraciones-local.sh` crea una base `vector_two_local` en un Postgres local, aplica todas las migraciones dos veces (la segunda pasada prueba que son idempotentes), simula los privilegios por defecto de Supabase (para que un `revoke` olvidado se note) y lista las tablas con RLS. Falla en el primer error. No toca ningún proyecto Supabase; sirve para validar SQL antes de aplicarlo de verdad. Si otra persona o agente usa el mismo clúster local, usa otra base (`DATABASE_URL=.../mi_base`): el script borra y recrea la suya.
 
 Proyecto Supabase: **Vector2** (ref `tzjsxzmsvvhxyiooihyq`, región ca-central-1). Están aplicadas las migraciones `0000` a `0025`, la `0027`, la `0029`, la `0030` (propuesta con IA, 07e), la `0031` (aprobación en bloque, 07g), la `0032` y la `0034` (agrupadores de compras, 08b-1) y la `0033` (función de lectura `venta_tienda_nodos` de 07f, «Ver por tienda»); la `0026` queda reservada para `0.13.1 · M8` (solo funciones) y la `0028` para M9a. `list_migrations` de Vector2 está vacío porque se aplican con `execute_sql`: la fuente de verdad es `supabase/migrations/`. La numeración y lo que cada una trae están en [`docs/PLAN.md`](docs/PLAN.md) (sección 4) y en el CHANGELOG. La versión vigente es **`0.16.1 · M7 d`** (`APP_VERSION` en `src/lib/version.ts`, al pie del menú): «Ver por tienda» en Crecimientos, la venta por tienda y año de cada género × mundo (ficha 07f), pendiente del hito con Javier. Antes quedó la `0.16.0 · M8 b`: los agrupadores de compras, es decir viajes, embarques y paquetes (ficha 08b, entrega 08b-1), también pendiente. Antes quedó la `0.15.0 · M7 c`: la aprobación en bloque de las filas que bloquean el cierre (ficha 07g), también pendiente. Antes quedó la `0.15.0 · M7`: la propuesta con IA por género × mundo (ficha 07e, primer proveedor OpenAI), desplegable con la IA apagada, también pendiente. Antes quedaron construidas la `0.14.0 · M6` (el cierre del año en curso por curva y la base del año siguiente sin el Niño, método 5, ficha 06e) y la `0.13.0 · M8` (flujo, IMI, conciliación, confirmar ingresos, cancelar e importador de carga inicial), también pendientes. Cada migración trae su prueba de humo en `scripts/humo-NNNN.sql`; **esos scripts son para una base local y no deben correrse contra Vector2** (el de `0025` no tiene guarda). Nota operativa: desde Claude Code las sentencias `DROP` quedan esperando una confirmación que no llega; las migraciones se aplican por `execute_sql` sin `DROP` (por eso usan `create or replace trigger`), y cualquier borrado de tabla se hace desde el dashboard.
 
