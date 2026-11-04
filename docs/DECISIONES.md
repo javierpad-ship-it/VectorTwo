@@ -1341,6 +1341,12 @@ Al cerrar 07g, `DECISIONES.md` tiene registradas la 70 a la 80 (07e) y la 82 (07
 |---|---|
 | 08b (agrupadores de compras) | 81, 83, 84, 85, 86 (08b-1 y 08b-2), 92 a 97 y **98** (la que su ficha numeraba 82, que choca con la 82 de 07g ya registrada) |
 | 08c (proveedores y fotos) | 87 a 91 |
-| siguiente libre | 99 |
+| siguiente libre | 100 (la 99 es la del comprador y el flujo) |
 
 Las fichas 08b y 08c ya no se pisan entre sí (81 a 86, 87 a 91 y 92 a 97 eran contiguas); el único choque era el de la 82, y se resolvió en la ficha 08b (la decisión «El viaje va en la compra; el embarque y el paquete van en la entrega» pasa de la 82 a la 98). Quien registre una de esas decisiones usa el número reservado; la 82 es solo de 07g.
+
+## 2026-11-04 · Seguridad: el comprador sigue viendo venta y stock del flujo (decisión 99)
+
+**Contexto.** La auditoría de seguridad total (hallazgo S-11, informativo) marcó que el rol `comprador` ve la venta y el stock dentro del flujo de mercadería, diseño vigente desde `0.13.0`, y pidió confirmación.
+
+**Decisión (Javier, 2026-11-04).** Se mantiene: **el comprador ve venta y stock** del flujo. No se restringe por rol. Si más adelante se quiere ocultar alguna cifra a ese rol, se hace como cambio de diseño explícito en el módulo de flujo, no como corrección de seguridad.
