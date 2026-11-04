@@ -1,6 +1,15 @@
 /**
  * Tipos de la base de datos.
  *
+ * Actualizados a mano el 2026-11-04 con la 0032 (M8 08b-1, agrupadores de compras): 5 tablas nuevas (`compra_viajes`, `compra_embarques` con
+ * `periodo_llegada` generada, `compra_paquetes`, `compra_entrega_asignaciones` y `compra_agrupador_eventos`, de solo insercion), las columnas
+ * `compras.viaje_id` y `compra_linea_recepciones.asignacion_id` (uuid null con FK) y 15 funciones (`guardar_viaje`, `guardar_embarque`,
+ * `guardar_paquete`, `cambiar_estado_agrupador`, `asignar_viaje_compras`, `agrupador_mover_entregas`, `aplicar_movimiento_agrupador`,
+ * `importar_agrupadores`, `compra_foto_entregas`, `agrupadores_desalineados` y 5 ayudantes `agrupador_*`). PENDIENTE: en `Vector2` solo se
+ * aplicaron las tablas, columnas, triggers y las funciones hasta `asignar_viaje_compras` (el `execute_sql` de `agrupador_mover_entregas`, que
+ * contiene `delete`, espero una confirmacion que no llego); faltan `agrupador_mover_entregas`, `aplicar_movimiento_agrupador`,
+ * `importar_agrupadores` y el RLS/permisos de las 5 tablas. Al terminar de aplicarla hay que compararlos con `generate_typescript_types`.
+ *
  * Verificados el 2026-11-03 contra `generate_typescript_types` de `Vector2` (0031 M7 07g, aprobacion en bloque, aplicada): 2 tablas nuevas
  * (`proyeccion_lotes` y `proyeccion_lote_filas`, de solo insercion), `proyeccion_fila_anios.decision_lote_id` (uuid null, FK diferible a
  * `proyeccion_lotes`) y las funciones `aplicar_lote_proyeccion(p) -> Json` y `respuesta_lote_proyeccion(p_lote_id, p_repetido) -> Json`.
@@ -245,6 +254,268 @@ export type Database = {
           },
         ];
       };
+      compra_agrupador_eventos: {
+        Row: {
+          accion: string;
+          antes: Json | null;
+          compras: Json;
+          created_at: string;
+          despues: Json | null;
+          embarque_id: string | null;
+          id: string;
+          motivo: string | null;
+          paquete_id: string | null;
+          perfil_id: string | null;
+          resumen: string | null;
+          usuario_nombre: string | null;
+          viaje_id: string | null;
+        };
+        Insert: {
+          accion: string;
+          antes?: Json | null;
+          compras?: Json;
+          created_at?: string;
+          despues?: Json | null;
+          embarque_id?: string | null;
+          id?: string;
+          motivo?: string | null;
+          paquete_id?: string | null;
+          perfil_id?: string | null;
+          resumen?: string | null;
+          usuario_nombre?: string | null;
+          viaje_id?: string | null;
+        };
+        Update: {
+          accion?: string;
+          antes?: Json | null;
+          compras?: Json;
+          created_at?: string;
+          despues?: Json | null;
+          embarque_id?: string | null;
+          id?: string;
+          motivo?: string | null;
+          paquete_id?: string | null;
+          perfil_id?: string | null;
+          resumen?: string | null;
+          usuario_nombre?: string | null;
+          viaje_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_agrupador_eventos_embarque_id_fkey";
+            columns: ["embarque_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_embarques";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_agrupador_eventos_paquete_id_fkey";
+            columns: ["paquete_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_paquetes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_agrupador_eventos_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_agrupador_eventos_viaje_id_fkey";
+            columns: ["viaje_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_viajes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_embarques: {
+        Row: {
+          activo: boolean;
+          codigo: string;
+          created_at: string;
+          estado: string;
+          fecha_llegada_estimada: string;
+          fecha_llegada_real: string | null;
+          fecha_salida_estimada: string | null;
+          id: string;
+          nombre: string;
+          nota: string | null;
+          perfil_id: string | null;
+          periodo_llegada: string | null;
+          puerto_embarque: string | null;
+          referencia_logistica: string | null;
+          responsable_id: string | null;
+          revision: number;
+          tipo: string;
+          updated_at: string;
+          updated_by_id: string | null;
+          updated_by_nombre: string | null;
+          usuario_nombre: string | null;
+          viaje_id: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          codigo: string;
+          created_at?: string;
+          estado?: string;
+          fecha_llegada_estimada: string;
+          fecha_llegada_real?: string | null;
+          fecha_salida_estimada?: string | null;
+          id?: string;
+          nombre: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          periodo_llegada?: never;
+          puerto_embarque?: string | null;
+          referencia_logistica?: string | null;
+          responsable_id?: string | null;
+          revision?: number;
+          tipo?: string;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+          viaje_id?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          codigo?: string;
+          created_at?: string;
+          estado?: string;
+          fecha_llegada_estimada?: string;
+          fecha_llegada_real?: string | null;
+          fecha_salida_estimada?: string | null;
+          id?: string;
+          nombre?: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          periodo_llegada?: never;
+          puerto_embarque?: string | null;
+          referencia_logistica?: string | null;
+          responsable_id?: string | null;
+          revision?: number;
+          tipo?: string;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+          viaje_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_embarques_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_embarques_responsable_id_fkey";
+            columns: ["responsable_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_embarques_updated_by_id_fkey";
+            columns: ["updated_by_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_embarques_viaje_id_fkey";
+            columns: ["viaje_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_viajes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_entrega_asignaciones: {
+        Row: {
+          activo: boolean;
+          created_at: string;
+          embarque_id: string;
+          entrega_id: string;
+          id: string;
+          paquete_id: string | null;
+          perfil_id: string | null;
+          unidades: number;
+          updated_at: string;
+          updated_by_id: string | null;
+          updated_by_nombre: string | null;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          created_at?: string;
+          embarque_id: string;
+          entrega_id: string;
+          id?: string;
+          paquete_id?: string | null;
+          perfil_id?: string | null;
+          unidades: number;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          created_at?: string;
+          embarque_id?: string;
+          entrega_id?: string;
+          id?: string;
+          paquete_id?: string | null;
+          perfil_id?: string | null;
+          unidades?: number;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_entrega_asignaciones_embarque_id_fkey";
+            columns: ["embarque_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_embarques";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_entrega_asignaciones_entrega_id_fkey";
+            columns: ["entrega_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_linea_entregas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_entrega_asignaciones_paquete_embarque_fkey";
+            columns: ["paquete_id", "embarque_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_paquetes";
+            referencedColumns: ["id", "embarque_id"];
+          },
+          {
+            foreignKeyName: "compra_entrega_asignaciones_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_entrega_asignaciones_updated_by_id_fkey";
+            columns: ["updated_by_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       compra_eventos: {
         Row: {
           accion: string;
@@ -353,6 +624,7 @@ export type Database = {
       compra_linea_recepciones: {
         Row: {
           activo: boolean;
+          asignacion_id: string | null;
           created_at: string;
           fecha_recepcion: string;
           id: string;
@@ -367,6 +639,7 @@ export type Database = {
         };
         Insert: {
           activo?: boolean;
+          asignacion_id?: string | null;
           created_at?: string;
           fecha_recepcion: string;
           id?: string;
@@ -381,6 +654,7 @@ export type Database = {
         };
         Update: {
           activo?: boolean;
+          asignacion_id?: string | null;
           created_at?: string;
           fecha_recepcion?: string;
           id?: string;
@@ -394,6 +668,13 @@ export type Database = {
           usuario_nombre?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "compra_linea_recepciones_asignacion_id_fkey";
+            columns: ["asignacion_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_entrega_asignaciones";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "compra_linea_recepciones_linea_id_fkey";
             columns: ["linea_id"];
@@ -639,6 +920,168 @@ export type Database = {
           },
         ];
       };
+      compra_paquetes: {
+        Row: {
+          activo: boolean;
+          codigo: string;
+          created_at: string;
+          embarque_id: string;
+          estado: string;
+          id: string;
+          nombre: string;
+          nota: string | null;
+          perfil_id: string | null;
+          responsable_id: string | null;
+          updated_at: string;
+          updated_by_id: string | null;
+          updated_by_nombre: string | null;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          codigo: string;
+          created_at?: string;
+          embarque_id: string;
+          estado?: string;
+          id?: string;
+          nombre: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          responsable_id?: string | null;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          codigo?: string;
+          created_at?: string;
+          embarque_id?: string;
+          estado?: string;
+          id?: string;
+          nombre?: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          responsable_id?: string | null;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_paquetes_embarque_id_fkey";
+            columns: ["embarque_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_embarques";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_paquetes_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_paquetes_responsable_id_fkey";
+            columns: ["responsable_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_paquetes_updated_by_id_fkey";
+            columns: ["updated_by_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      compra_viajes: {
+        Row: {
+          activo: boolean;
+          codigo: string;
+          created_at: string;
+          destino: string | null;
+          estado: string;
+          fecha_fin: string | null;
+          fecha_inicio: string;
+          id: string;
+          nombre: string;
+          nota: string | null;
+          perfil_id: string | null;
+          responsable_id: string | null;
+          revision: number;
+          updated_at: string;
+          updated_by_id: string | null;
+          updated_by_nombre: string | null;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          activo?: boolean;
+          codigo: string;
+          created_at?: string;
+          destino?: string | null;
+          estado?: string;
+          fecha_fin?: string | null;
+          fecha_inicio: string;
+          id?: string;
+          nombre: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          responsable_id?: string | null;
+          revision?: number;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          activo?: boolean;
+          codigo?: string;
+          created_at?: string;
+          destino?: string | null;
+          estado?: string;
+          fecha_fin?: string | null;
+          fecha_inicio?: string;
+          id?: string;
+          nombre?: string;
+          nota?: string | null;
+          perfil_id?: string | null;
+          responsable_id?: string | null;
+          revision?: number;
+          updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_viajes_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_viajes_responsable_id_fkey";
+            columns: ["responsable_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_viajes_updated_by_id_fkey";
+            columns: ["updated_by_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       compras: {
         Row: {
           activo: boolean;
@@ -667,6 +1110,7 @@ export type Database = {
           updated_by_id: string | null;
           updated_by_nombre: string | null;
           usuario_nombre: string | null;
+          viaje_id: string | null;
         };
         Insert: {
           activo?: boolean;
@@ -695,6 +1139,7 @@ export type Database = {
           updated_by_id?: string | null;
           updated_by_nombre?: string | null;
           usuario_nombre?: string | null;
+          viaje_id?: string | null;
         };
         Update: {
           activo?: boolean;
@@ -723,6 +1168,7 @@ export type Database = {
           updated_by_id?: string | null;
           updated_by_nombre?: string | null;
           usuario_nombre?: string | null;
+          viaje_id?: string | null;
         };
         Relationships: [
           {
@@ -758,6 +1204,13 @@ export type Database = {
             columns: ["updated_by_id"];
             isOneToOne: false;
             referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compras_viaje_id_fkey";
+            columns: ["viaje_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_viajes";
             referencedColumns: ["id"];
           },
         ];
@@ -4013,6 +4466,122 @@ export type Database = {
         Args: {
           p_lote_id: string;
           p_repetido: boolean;
+        };
+        Returns: Json;
+      };
+      compra_foto_entregas: {
+        Args: {
+          p_compra: string;
+        };
+        Returns: Json;
+      };
+      agrupadores_desalineados: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          asignacion_id: string;
+          embarque_id: string;
+          entrega_id: string;
+          periodo: string;
+          periodo_llegada: string;
+        }[];
+      };
+      agrupador_responsable_asignable: {
+        Args: {
+          p_perfil: string;
+        };
+        Returns: boolean;
+      };
+      agrupador_nombre_clave: {
+        Args: {
+          p_nombre: string;
+        };
+        Returns: string;
+      };
+      agrupador_es_activa: {
+        Args: {
+          p_canceladas: number;
+          p_estado: string;
+          p_linea_activa: boolean;
+          p_recibidas: number;
+          p_unidades: number;
+        };
+        Returns: boolean;
+      };
+      agrupador_siguiente_codigo: {
+        Args: {
+          p_referencia: string;
+          p_tipo: string;
+        };
+        Returns: string;
+      };
+      agrupador_foto_embarque: {
+        Args: {
+          p_embarque: string;
+        };
+        Returns: Json;
+      };
+      guardar_viaje: {
+        Args: {
+          p_actor: Json;
+          p_revision: number | null;
+          p_viaje: Json;
+        };
+        Returns: Json;
+      };
+      guardar_embarque: {
+        Args: {
+          p_actor: Json;
+          p_embarque: Json;
+          p_revision: number | null;
+        };
+        Returns: Json;
+      };
+      guardar_paquete: {
+        Args: {
+          p_actor: Json;
+          p_paquete: Json;
+          p_revision_embarque: number;
+        };
+        Returns: Json;
+      };
+      cambiar_estado_agrupador: {
+        Args: {
+          p_accion: string;
+          p_actor: Json;
+          p_id: string;
+          p_motivo: string | null;
+          p_revision: number;
+          p_tipo: string;
+        };
+        Returns: Json;
+      };
+      asignar_viaje_compras: {
+        Args: {
+          p_actor: Json;
+          p_compras: Json;
+          p_viaje: string | null;
+        };
+        Returns: Json;
+      };
+      agrupador_mover_entregas: {
+        Args: {
+          p_actor?: Json;
+          p_movimientos: Json;
+          p_repartos?: Json;
+        };
+        Returns: Json;
+      };
+      aplicar_movimiento_agrupador: {
+        Args: {
+          p_actor: Json;
+          p_plan: Json;
+        };
+        Returns: Json;
+      };
+      importar_agrupadores: {
+        Args: {
+          p_actor: Json;
+          p_lote: Json;
         };
         Returns: Json;
       };
