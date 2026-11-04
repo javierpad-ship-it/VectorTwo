@@ -1,6 +1,6 @@
 # 08b · Agrupadores de compras: viajes de compras, embarques y paquetes (con el viaje activo, el comprador responsable y las fechas de recepción alineadas)
 
-> **Estado: especificada el 2026-11-02 y ajustada el mismo día con las respuestas de Javier y la revisión independiente del `arquitecto-revisor` (bloqueantes B1–B3, importantes I1–I9 y menores, todos incorporados), y de nuevo con las respuestas de Javier a sus cuatro preguntas (2026-11-02, e–h). **No quedan preguntas abiertas (§10).** Es una mejora de la parte de compras de M8 (ficha [08](08-flujo-y-compras.md)) y se construye en **dos entregas, 08b-1 y 08b-2** (§0.2).
+> **Estado (2026-11-04): 08b-1 construida y validada por QA y seguridad (`0.16.0 · M8 b`, migraciones `0032` y `0034` aplicadas en Vector2); falta el hito con Javier (§11.3 y sección O de `docs/pruebas/cowork-checklist.md`). 08b-2 sigue sin construir.** Lo construido y lo que se apartó de esta especificación está en **§11**, que manda sobre el resto. Historia: especificada el 2026-11-02 y ajustada el mismo día con las respuestas de Javier y la revisión independiente del `arquitecto-revisor` (bloqueantes B1–B3, importantes I1–I9 y menores, todos incorporados), y de nuevo con las respuestas de Javier a sus cuatro preguntas (2026-11-02, e–h). **No quedan preguntas abiertas (§10).** Es una mejora de la parte de compras de M8 (ficha [08](08-flujo-y-compras.md)) y se construye en **dos entregas, 08b-1 y 08b-2** (§0.2).
 >
 > **Pedido de Javier** (2026-11-02, textual): «en el modulo de compras necesito poder generar agrupadores de compras. que son los siguientes: Viaje de compras. Embarque. Paquete. Necesitamos un modulo para gestionar estas agrupaciones. y las fechas de recepción van alineadas a ellos. Tambien tendriamos que incluir un comprador responsable. Tambien hay compras locales que si las clasificamos con embarque y paquete.»
 >
@@ -21,7 +21,7 @@
 >
 > **Numeración** (registro único en `docs/PLAN.md` §5, actualizado el 2026-11-04). Aplicadas: `0000`–`0025`, `0027` y `0029`–`0031` (`0031` = 07g). Reservadas: `0026` (`0.13.1 · M8`) y `0028` (M9a).
 > - **Migraciones de esta ficha**: se citan con marcador, como hace la 08c: **`00B1_agrupadores_compras.sql`** (08b-1) y **`00B2_recibir_embarque.sql`** (08b-2), con `scripts/humo-00B1.sql` y `scripts/humo-00B2.sql`. `datos` les pone el número libre al construir (decisión 48). **08b-1 tomó la `0032`** (`0032_agrupadores_compras.sql`); `00B2` toma la siguiente libre al construir, por orden de cierre (la 08c usa `00E1` y `00E2`, y 07f `00F1`).
-> - **Versión**: la siguiente libre al cerrar cada entrega (hoy `APP_VERSION = "0.15.0 · M7 c"`; reservadas `0.13.1 · M8`, `0.15.0 · M7 b` y `0.15.1 · M7`).
+> - **Versión**: la siguiente libre al cerrar cada entrega. **08b-1 cerró como `0.16.0 · M8 b`** (reservadas `0.13.1 · M8`, `0.15.0 · M7 b` y `0.15.1 · M7`; 08b-2 toma la siguiente libre al cerrar).
 > - Commits `M8:`.
 >
 > **Base real.** El arquitecto no pudo leer `vector-two`: en su sesión no había MCP ni credenciales. Según el coordinador, hoy hay **0 planners activos, 1 admin (Javier) y 2 compradores activos**. En T1 de 08b-1, `datos` corre en solo lectura las consultas de §2.10 y anota el resultado aquí. **Nunca contra `lukers-compras`.**
@@ -554,8 +554,8 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 ## 6. Criterios de aceptación / hito de prueba
 
 **08b-1**
-- [ ] `00B1` aplica dos veces; el humo pasa (I1–I3 e I5, códigos, triggers con `service_role` y `TRUNCATE` en las dos tablas de eventos, `agrupadores_desalineados() = 0`); tipos regenerados; un movimiento de 200 líneas ≤ 2 s.
-- [ ] lint, `tsc`, vitest (casos 1–19, con las pruebas de M8 en verde sin tocarlas) y build.
+- [x] `00B1` (aplicada como `0032`, con las correcciones de `0034`); el humo pasa (122 y 0 en la `0032`; 40 y 0 en la `0034`); tipos regenerados; un movimiento de 200 líneas en 404 ms (tope 2 s) e importar 1 000 filas en 509 ms (tope 3 s).
+- [x] lint, `tsc`, vitest (casos 1–19, con las pruebas de M8 en verde sin tocarlas) y build: verdes al cerrar (6 926 pruebas en 313 archivos).
 - [ ] «Viajes y embarques» aparece dentro de Compras para los tres roles.
 - [ ] **Como comprador (C1 o C2)**: crear el viaje con código propuesto `aamm##` y nombre libre, embarques con puerto y paquetes, un embarque local sin viaje; asignar compras de la carga inicial desde Sin agrupador; cambiar la salida y la llegada, ver la vista previa y después las entregas en el mes nuevo en **Flujo mensual**; historial con motivo y autor. Al intentar cerrar o cancelar, `403`.
 - [ ] **Como admin**: cerrar y cancelar. Con el viaje cerrado, **un comprador** le añade y le quita compras y ve el aviso; al reabrir recibe `403`.
@@ -564,7 +564,7 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 - [ ] Un lote que cruza de temporada muestra `cambia_temporada`.
 - [ ] El viaje activo filtra Compras y no Flujo.
 - [ ] Importar con las columnas nuevas y reimportar sin duplicar.
-- [ ] Excel; 390 px; `seguridad` (sonnet): guards por acción, IDOR, funciones solo `service_role`, cookie.
+- [x] `seguridad` (sonnet): guards por acción, IDOR, funciones solo `service_role`, cookie; hallazgos corregidos (§11.2). Excel y 390 px: los recorre Javier en el hito (§11.3).
 
 **08b-2**
 - [ ] `00B2` aplica dos veces; humo con I4 e I5.
@@ -610,7 +610,7 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 
 ## 9. Decisiones nuevas propuestas (para `docs/DECISIONES.md`)
 
-En `DECISIONES.md` están registradas la 70 a la 80 y la **82, que es de 07g** (aprobación en bloque); la 81 sigue reservada para esta ficha. Esta ficha usa la **81, 83 a 86 y 92 a 97**, y la que antes numeraba como 82 pasa a ser la **98**; las **87–91 las toma la 08c**. Los números quedan reservados en `DECISIONES.md` (entrada del 2026-11-03) hasta que se registren.
+**Registradas el 2026-11-04** en `DECISIONES.md` al cerrar 08b-1: **81, 83, 85, 86 y 92 a 98**; la **84** (recibir un embarque) sigue reservada para 08b-2. Las nuevas de esa jornada que tocan esta ficha son la **107** (la carga inicial de compras se arma desde COTV y sigue solo de admin y planner), la **108** (el comprador puede usar el importador normal de compras) y la **109** (el comprador ingresa cualquier marca, GM o proveedor y solo agrega líneas a su propio borrador). Texto original de esta sección: en `DECISIONES.md` estaban registradas la 70 a la 80 y la **82, que es de 07g** (aprobación en bloque); la 81 estaba reservada para esta ficha. Esta ficha usa la **81, 83 a 86 y 92 a 97**, y la que antes numeraba como 82 pasa a ser la **98**; las **87–91 las toma la 08c**. Los números quedan reservados en `DECISIONES.md` (entrada del 2026-11-03) hasta que se registren.
 
 | N.º | Decisión |
 |---|---|
@@ -633,3 +633,68 @@ En `DECISIONES.md` están registradas la 70 a la 80 y la **82, que es de 07g** (
 - El mes del código `aamm##` sale de la fecha de referencia al crear (decisión 93).
 - El importador de agrupadores solo crea, nunca edita (decisión 97).
 - Cerrar y reabrir un viaje siguen siendo de admin y planner (decisión 95).
+
+## 11. Construido en `0.16.0 · M8 b` (08b-1, 2026-11-04) y cambios respecto a la especificación
+
+Esta sección manda sobre lo anterior en lo que se aparte. Solo cubre **08b-1**; 08b-2 (`00B2`, «Recibir embarque») no está construida, y la columna `compra_linea_recepciones.asignacion_id` existe pero ninguna función la llena todavía.
+
+### 11.1 Qué existe
+
+- **Base de datos.** `0032_agrupadores_compras.sql` (las cinco tablas, `compras.viaje_id`, `compra_linea_recepciones.asignacion_id`, los ayudantes y las funciones de §2.9 de 08b-1, entre ellas `importar_agrupadores`, y el trigger `before truncate` de `compra_eventos`) y `0034_importar_borrador_propio.sql` (reemplaza tres funciones; ver 11.3). Las dos están aplicadas en Vector2. Humo: `scripts/humo-0032.sql` y `scripts/humo-0034.sql`.
+- **API.** 21 rutas nuevas bajo `/api/compras/{viajes,embarques,paquetes,agrupadores,viaje-activo}/**` (más cambios aditivos en `GET /api/compras` y `POST /api/compras/importar`). Lógica pura en `src/lib/compras/agrupadores/`, con `consultas.ts` como único archivo que llama a las funciones SQL y `servicio.ts` que orquesta. Solo `.rpc(`: ninguna escritura directa.
+- **Pantallas.** «Viajes y embarques» (`/compras/agrupadores`: Embarques, Viajes, Sin agrupador e Importar, más la barra de viaje activo) y la integración en Compras (`/compras/registro`: columnas y filtros de viaje y embarque, «Cambiar viaje», chips de embarque y paquete por entrega, columnas `VIAJE`, `EMBARQUE` y `PAQUETE` en el importador y su reporte).
+- **Flujo.** No cambia: lee las mismas entregas, y `VERSION_METODO_FLUJO` sigue como estaba (pasa a 4 con 08b-2).
+
+### 11.2 QA, seguridad y medidas
+
+Las cuatro puertas (lint, `tsc`, vitest y build) en verde: 6 926 pruebas en 313 archivos al cerrar, contando las pruebas de 07f que otro agente tiene en trabajo. Humo de la `0032`: 122 comprobaciones, 0 fallos. Humo de la `0034`: 40 y 0. **Medidas**: importar 1 000 filas en 509 ms (tope de la ficha, 3 s) y mover 200 líneas en 404 ms (tope, 2 s).
+
+Auditoría de `seguridad` (sonnet) y revisión de QA: corregidos **A1 y A2** (bloqueante: con el importador normal, un comprador podía agregar líneas a una compra confirmada ajena y mover el flujo), **M1**, **B1 a B4**, **G** y **H**; el detalle de cada uno está en el commit `30b8f88` y en el encabezado de la migración `0034`. Sin hallazgos abiertos.
+
+### 11.3 Cambios respecto a la especificación
+
+| Qué | La ficha decía | Lo construido | Por qué |
+|---|---|---|---|
+| Migraciones | Una, `00B1` | **`0032`** (la que dice la ficha) y **`0034`** (correcciones tras QA y seguridad, solo funciones) | `datos` toma el número libre al construir (decisión 48); la `0033` es de 07f |
+| «No se reemplaza ninguna función de M8» (§2.9) | `importar_compra` queda como en `0025` | **`0034` reemplaza `importar_compra`** (`create or replace`, misma firma): un actor restringido (comprador) solo agrega líneas a una compra existente si está en borrador y es suya; si no, `compra_no_borrador` (`409`) y no escribe nada | Hallazgo A1/A2: sin eso, el comprador mueve el flujo con el importador normal (decisiones 108 y 109) |
+| Importador de compras abierto al comprador | Era de M9a (ficha 08 §4.7) | `carga_inicial = false` lo usan los tres roles; con `carga_inicial = true` el comprador recibe `403` | Decisiones 107 y 108 (Javier, 2026-11-04) |
+| Quién puede ingresar qué | No lo decía | El comprador puede ingresar cualquier marca, GM o proveedor, sin tope de proveedores nuevos | Decisión 109: compras cruzadas por negociación |
+| Revisión de las compras de un movimiento | Todo lo que mueve entregas sube `compras.revision` | `aplicar_movimiento_agrupador` bloquea y compara la revisión de **todas** las compras del plan, pero sube la revisión y escribe evento **solo en las que cambiaron de verdad**; la respuesta `compras` puede ser `[]` | Hallazgo M1: evitaba `409` falsos en compras que solo estaban en el plan |
+| Asignar compras a un viaje | Bloquea el viaje y las compras | Además **deduplica** las compras repetidas (misma revisión se colapsa; revisiones distintas dan `409 compra_cambio`) y al mover una compra de un viaje a otro **deja evento también en el viaje de origen** | Hallazgos B2 y B3 |
+| Cuerpo de más de 6 MB en el importador de agrupadores | `400` | `413` (lo da `leerCuerpo`) | Coherencia con el resto de la API |
+| Topes numéricos | No se fijaban | Las revisiones y las unidades de un movimiento o de una recepción tienen un máximo (cabe en un `integer` de Postgres); más allá, `400` en vez de un `500` de la base | Hallazgo de QA |
+| Textos | — | Confirmación del importador, aviso y mensaje de responsable no asignable dicen lo que pasa (p. ej. que a un comprador se le omiten las filas hacia una compra confirmada o ajena); la descripción del rol comprador en `roles.ts` se actualizó | Hallazgos G y H |
+
+### 11.4 Hito de 08b-1 para Javier (sección O del checklist)
+
+Antes: algunas compras confirmadas (de la carga inicial o a mano), un usuario comprador de prueba y, para el importador, la lista de viajes y embarques abiertos. Con 0 planners, cerrar y cancelar las prueba el admin.
+
+**Integración en Compras (los nueve puntos de la pantalla de Compras).**
+1. [ ] En `/compras/registro` la barra de **viaje activo** ofrece «Todos», «Sin viaje (locales)» y los viajes (los cerrados al final y marcados); al elegir uno, la lista muestra solo sus compras y la barra lo recuerda al recargar. Elegir «Todos» devuelve todo.
+2. [ ] La lista tiene columnas de **Viaje** y **Embarque**, y un filtro por embarque.
+3. [ ] En el detalle de una compra se lee «Viaje: 261101 · Proveedor Norte» con **Cambiar** (o «Asignar a viaje…» si no tiene) y, por entrega, los chips `Embarque … · P … · N u` y «N u sin embarque».
+4. [ ] **Cambiar viaje** lista los viajes; uno cerrado avisa «está cerrado: igual se registra» y se guarda; el historial de la compra lo registra.
+5. [ ] **Importar como admin o planner**: la casilla «Carga inicial de compras ya hechas» aparece marcada y las compras entran confirmadas.
+6. [ ] **Importar como comprador**: no hay casilla; el aviso dice que las compras entran en borrador a su nombre; con la casilla ausente, mandar `carga_inicial` a mano da `403`.
+7. [ ] El paso de mapeo reconoce las columnas **`VIAJE`, `EMBARQUE` y `PAQUETE`**.
+8. [ ] El reporte previo y el final dicen qué hizo cada fila con su agrupador (se asignó, quedó igual o se omitió y por qué), y reimportar el mismo archivo no duplica nada.
+9. [ ] Todo lo anterior se ve bien a **390 px** (tarjetas en vez de tablas, diálogos sin cortarse) y sin errores en la consola.
+
+**El comprador sobre una compra existente (decisión 109).** Con el usuario comprador y un archivo cuya referencia ya existe:
+10. [ ] Sobre un **borrador propio**: las líneas nuevas se agregan a esa compra.
+11. [ ] Sobre un **borrador de otra persona**: esas filas se omiten con el aviso «ya está confirmada o es de otra persona» y no cambia nada.
+12. [ ] Sobre una compra **confirmada** (propia o ajena): igual, se omiten y la compra y el flujo no cambian. Con admin o planner, esas mismas filas sí se agregan.
+13. [ ] El comprador puede ingresar una marca, un género × mundo y un proveedor que no son «suyos», y varios proveedores nuevos en el mismo archivo.
+
+**Viajes y embarques** (los pasos de §6 que siguen igual): como comprador, crear viaje (código `aamm##` propuesto y nombre libre), embarques con puerto y paquetes, un embarque local sin viaje; asignar compras desde «Sin agrupador»; cambiar salida y llegada con vista previa y ver las entregas en el mes nuevo en **Flujo mensual**; historial con motivo y autor; cerrar o cancelar da `403`. Como admin: cerrar y cancelar, y con el viaje cerrado el comprador le sigue añadiendo y quitando compras con el aviso. **Importador de agrupadores como comprador**: plantilla, todos los viajes y embarques abiertos con paquetes, puerto y responsables (comprador o admin), reporte, aplicar y reimportar sin duplicar; un responsable planner se rechaza.
+
+### 11.5 Pendientes anotados (no bloquean)
+
+- **M2** · Los listados leen el mundo completo de compras en cada petición; medirlo con el volumen real de la carga inicial.
+- **E** · El importador de compras aplica compra por compra (más dos llamadas por compra con columnas de agrupador); falta un tope por llamada para archivos muy grandes.
+- **F** · No hay tope de cantidad de agrupadores ni deshacer de una importación de agrupadores.
+- **`xlsx@0.18.5`** · Revisarlo en el módulo de seguridad.
+- **`delete` y `truncate` residuales** a `service_role` sobre `compra_eventos`: los triggers los rechazan, pero falta quitar el privilegio.
+- **`list_migrations` de Vector2 vacío** (se aplican con `execute_sql`): la verificación de qué está aplicado se hace contra `supabase/migrations/` y PLAN §5.
+- **Texto «B5»** de columnas recortadas a 390 px en las tablas de Compras: heredado de M8.
+- **Camino de compras**: 08b-1 ✔ → E1 de 08c → 08b-2 → E2 → E3; después `0.13.1` y M9a.

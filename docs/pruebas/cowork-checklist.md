@@ -2,15 +2,15 @@
 
 Objetivo: recorrer las pantallas nuevas con un navegador real, que es lo único que no han podido hacer ni los tests ni QA. Cowork **observa y reporta**; no decide ni cambia datos salvo donde el paso lo diga.
 
-**Nota de numeración.** Las secciones A a D son de las primeras entregas (hasta `0.9.7`). Las fichas 07, 12 y 13 citan las letras F, G y H para los hitos de M7, M12 y M13; esos hitos todavía no se han pasado a este archivo y las letras quedan reservadas. Las secciones **I** (`0.12.1 · M6`), **J** (`0.13.0 · M8`), **K** (`0.14.0 · M6`), **L** (`0.15.0 · M7`) y **N** (`0.15.0 · M7 c`, aprobación en bloque) son las nuevas; la M queda reservada para M9a.
+**Nota de numeración.** Las secciones A a D son de las primeras entregas (hasta `0.9.7`). Las fichas 07, 12 y 13 citan las letras F, G y H para los hitos de M7, M12 y M13; esos hitos todavía no se han pasado a este archivo y las letras quedan reservadas. Las secciones **I** (`0.12.1 · M6`), **J** (`0.13.0 · M8`), **K** (`0.14.0 · M6`), **L** (`0.15.0 · M7`) **N** (`0.15.0 · M7 c`, aprobación en bloque) y **O** (`0.16.0 · M8 b`, agrupadores de compras) son las nuevas; la M queda reservada para M9a.
 
 ## Reglas para Cowork (leer antes de empezar)
 
 1. Usa **solo** los usuarios de prueba que Javier cree (un `planner` y un `comprador`). No uses el usuario admin. **Nunca pegues claves en el chat ni en capturas.**
-2. La base es la de producción (no hay otra). No pulses **Retirar**, **Aprobar esta curva**, **Aprobar** un crecimiento, **Reaprobar**, **Desactivar**, **Eliminar**, **Cerrar proyección**, **Cancelar** una compra, **Confirmar ingreso**, **Aceptar sugerencia**, **Aplicar** una importación, **Generar propuesta IA**, **Regenerar**, **Aceptar IA**, **Aprobar** o **Reaprobar** en la pestaña Aprobación, **Deshacer esta aprobación** ni **Nueva evaluación** (estas dos últimas cuestan dinero) en ningún sitio, salvo en un paso ✍️ que Javier haya autorizado. No edites maestros, tiendas, marcas ni agrupaciones fuera de lo que diga un paso ✍️.
+2. La base es la de producción (no hay otra). No pulses **Retirar**, **Aprobar esta curva**, **Aprobar** un crecimiento, **Reaprobar**, **Desactivar**, **Eliminar**, **Cerrar proyección**, **Cancelar** una compra, **Confirmar ingreso**, **Aceptar sugerencia**, **Aplicar** una importación (de compras o de agrupadores), **Cancelar** o **Cerrar** un viaje, embarque o paquete, **Generar propuesta IA**, **Regenerar**, **Aceptar IA**, **Aprobar** o **Reaprobar** en la pestaña Aprobación, **Deshacer esta aprobación** ni **Nueva evaluación** (estas dos últimas cuestan dinero) en ningún sitio, salvo en un paso ✍️ que Javier haya autorizado. No edites maestros, tiendas, marcas ni agrupaciones fuera de lo que diga un paso ✍️.
 3. Los únicos pasos que escriben datos son los marcados con ✍️ (crear periodos atípicos, aprobar curvas, aprobar y reaprobar crecimientos, sincronizar y confirmar factores del Niño, importar y mover compras, cambiar un parámetro, y en dos pasos tocar un maestro y revertirlo). Antes de cada ✍️, pide confirmación a Javier y espera su "sí" **en ese paso**; una autorización general no vale. Si Javier no lo autoriza, salta el paso, anótalo como "no ejecutado" y sigue.
 4. En cada paso: captura de pantalla, qué esperabas, qué viste, y si hubo errores en la consola del navegador. Si algo se ve lento (más de 3 s), anótalo con el tiempo.
-5. Anota la versión que aparece al pie del menú: debe ser la que Javier diga para la sección que vas a recorrer (**0.9.7 · M6** para la D, **0.12.1 · M6** o posterior para la I, **0.13.0 · M8** o posterior para la J, **0.14.0 · M6** o posterior para la K, **0.15.0 · M7** o posterior para la L, **0.15.0 · M7 c** o posterior para la N). Si es otra, detente y avisa.
+5. Anota la versión que aparece al pie del menú: debe ser la que Javier diga para la sección que vas a recorrer (**0.9.7 · M6** para la D, **0.12.1 · M6** o posterior para la I, **0.13.0 · M8** o posterior para la J, **0.14.0 · M6** o posterior para la K, **0.15.0 · M7** o posterior para la L, **0.15.0 · M7 c** o posterior para la N, **0.16.0 · M8 b** o posterior para la O). Si es otra, detente y avisa.
 6. Los números de este documento van con punto decimal (0.66), como los muestra la pantalla; si ves una coma como separador decimal en algún texto de la pantalla, anótalo como hallazgo.
 
 ## A. Roles y seguridad (comprador)
@@ -205,6 +205,47 @@ Contexto: desde la `0.15.0 · M7 c` la proyección tiene una pestaña **«Aproba
 10. **Roles y rendimiento.** Con el **comprador**: no ve la pestaña; abrir en el navegador `/api/proyeccion/proyecciones/<id>/aprobacion` responde 403. Con el planner, un lote de unas 300 filas se simula y se aprueba en pocos segundos; anotar el tiempo de la simulación y de cada tanda, y los errores de consola. No enviar POST desde la consola.
 
 Además, en cada paso de N: la versión del pie del menú es **0.15.0 · M7 c** o posterior y no hay errores en la consola del navegador. **Validación de negocio (Javier):** el resumen por GM le basta para decidir con confianza un lote grande, y aprobar así le ahorra tiempo frente a decidir fila por fila; Cowork solo recoge lo que dicte. **Cowork no aprueba, reaprueba, deshace ni cierra sin autorización en ese paso, y no usa el usuario admin.**
+
+## O. Agrupadores de compras (hito de `0.16.0 · M8 b`, ficha `docs/modulos/08b-agrupadores-de-compras.md`, §6 y §11.4)
+
+Contexto: desde la `0.16.0 · M8 b` el menú Compras tiene **Viajes y embarques** (`/compras/agrupadores`) y las compras muestran su viaje y sus embarques. El **viaje** es lo comercial (dónde y cuándo se compró y viaje activo de cada usuario), el **embarque** es lo logístico (sale, llega, puerto) y el **paquete** subdivide un embarque; **la fecha de llegada vive en el embarque** y mover la llegada mueve las entregas. El comprador escribe todo esto, salvo cerrar, reabrir y cancelar (admin y planner). El importador normal de compras también es del comprador (compras en borrador); la carga inicial no. Esta sección la recorre **Javier** (o Cowork con su autorización en cada ✍️), porque casi todos los pasos escriben en las compras reales.
+
+**Prerrequisitos de Javier.**
+1. Algunas **compras confirmadas** (de la carga inicial o a mano) para que «Sin agrupador» tenga qué asignar.
+2. Un usuario **comprador** de prueba (y otro planner si se quiere probar cerrar sin el admin).
+3. Para el importador de agrupadores, la lista de **viajes y embarques abiertos** (se descarga la plantilla en la pestaña Importar).
+4. Una proyección cerrada con método 4 o posterior (para que Flujo mensual muestre las entregas).
+
+**Pasos** (✍️ = escribe datos; antes de cada uno, pedir el «sí» de Javier en ese paso).
+
+*Compras con viaje y embarque (con el comprador salvo que se diga otro rol).*
+1. **Barra de viaje activo.** En `/compras/registro` la barra ofrece «Todos», «Sin viaje (locales)» y los viajes (los cerrados al final, marcados «(cerrado)»). Al elegir uno, la lista muestra solo sus compras; recargar la página conserva la elección; «Todos» devuelve todo. Huecos y Flujo mensual **no** cambian con el viaje activo.
+2. **Columnas y filtro.** La lista tiene columnas de **Viaje** y **Embarque** y un filtro por embarque.
+3. **Detalle.** Se lee «Viaje: 261101 · Proveedor Norte» con **Cambiar** (o «Asignar a viaje…» si no tiene) y, por cada entrega, chips `Embarque … · P … · N u` y «N u sin embarque».
+4. ✍️ **Cambiar viaje.** El diálogo lista los viajes; uno cerrado avisa «está cerrado: igual se registra» y se guarda; el historial de la compra lo registra con el autor.
+5. ✍️ **Importar como admin o planner.** La casilla «Carga inicial de compras ya hechas» aparece marcada; sin tocarla, las compras entran confirmadas. Desmarcarla da el importador normal (borrador).
+6. ✍️ **Importar como comprador.** No hay casilla; el aviso dice que las compras nuevas entran en borrador a su nombre y que no cuentan en el flujo hasta confirmarse. No enviar `carga_inicial` desde la consola (daría `403`).
+7. **Mapeo de columnas.** El paso de mapeo reconoce `VIAJE`, `EMBARQUE` y `PAQUETE` (códigos de agrupadores que ya existen; el importador no los crea).
+8. ✍️ **Reporte.** El reporte previo y el final dicen qué hizo cada fila con su agrupador (se asignó, quedó igual o se omitió y por qué). Reimportar el mismo archivo no duplica nada.
+9. **390 px.** Todo lo anterior se ve bien en un celular o a 390 px de ancho (tarjetas en lugar de tablas, diálogos sin cortarse) y sin errores en la consola.
+
+*El comprador sobre una compra que ya existe (decisión 109).* Con el usuario comprador y un archivo cuya referencia ya existe:
+10. ✍️ Sobre un **borrador propio**, las líneas nuevas se agregan a esa compra.
+11. ✍️ Sobre el **borrador de otra persona**, esas filas se omiten con el aviso «ya está confirmada o es de otra persona» y no cambia nada.
+12. ✍️ Sobre una compra **confirmada** (propia o ajena), igual: se omiten, y la compra y el flujo no cambian. Con admin o planner, esas mismas filas sí se agregan (el aviso de confirmación lo dice).
+13. ✍️ El comprador puede ingresar una marca, un género × mundo y un proveedor que no son «suyos», y varios proveedores nuevos en el mismo archivo, sin que nada se lo impida.
+
+*Viajes y embarques.*
+14. ✍️ **Como comprador**, crear un viaje (el código `aamm##` se propone y se puede editar; el nombre es libre), un embarque de importación con puerto y fecha de salida y llegada, dos paquetes y un embarque **local** sin viaje. Un local con viaje se rechaza; una salida posterior a la llegada también.
+15. ✍️ **Asignar** compras desde «Sin agrupador» a un embarque y a un paquete (con unidades editables y vista previa); el resumen dice cuántas entregas se mueven y a qué mes. Mover a otro paquete y quitar del embarque.
+16. ✍️ **Cambiar la fecha de llegada** del embarque: la vista previa dice cuántas líneas y compras se mueven de qué mes a qué mes; al guardar, en **Flujo mensual** las entregas aparecen en el mes nuevo. Devolverla recupera el mes anterior. Un lote al barrer que cruza de temporada lo avisa. Cambiar solo la **salida** no mueve nada.
+17. **Historial** del embarque: quién, cuándo, motivo y qué cambió.
+18. **Cerrar y cancelar.** Como comprador, cerrar, reabrir y cancelar un viaje, embarque o paquete dan `403` (o el botón no aparece). ✍️ Como **admin**, cerrar el viaje: el comprador sigue pudiendo añadirle y quitarle compras y ve el aviso «está cerrado: igual se registra»; el viaje cerrado deja de ser el activo por defecto; el comprador no puede reabrirlo.
+19. ✍️ **Importador de agrupadores, como comprador** (pestaña Importar): descargar la plantilla, cargar todos los viajes y embarques abiertos reales (más de 15) con sus paquetes, puerto y responsables (comprador o admin), revisar el reporte (nuevas con el código que tendrán o «se numera al aplicar», omitidas con motivo), aplicar y reimportar sin duplicar. Un responsable planner se rechaza.
+20. **Responsables.** El responsable efectivo se hereda (paquete, embarque, viaje); «Mis embarques» es solo un filtro (el comprador abre con él si es responsable de alguno). Un embarque sin responsable efectivo aparece como faltante.
+21. **Excel.** El Excel de embarques y de viajes se descarga y abre (hojas `EMBARQUES`, `PAQUETES` y `ASIGNACIONES`).
+
+Además, en cada paso de O: la versión del pie del menú es **0.16.0 · M8 b** o posterior y no hay errores en la consola del navegador. **Validación de negocio (Javier):** la barra de viaje activo y los códigos `aamm##` le sirven para trabajar sus viajes, mover la llegada de un embarque refleja bien el flujo, y el comprador puede cargar sus compras sin pedirle nada. **Cowork no cierra, cancela, aplica importaciones ni mueve fechas sin autorización en ese paso, y no usa el usuario admin** (los pasos que lo requieren los hace Javier).
 
 ## Informe (al terminar cualquier sección)
 

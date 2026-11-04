@@ -1350,3 +1350,71 @@ Las fichas 08b y 08c ya no se pisan entre sí (81 a 86, 87 a 91 y 92 a 97 eran c
 **Contexto.** La auditoría de seguridad total (hallazgo S-11, informativo) marcó que el rol `comprador` ve la venta y el stock dentro del flujo de mercadería, diseño vigente desde `0.13.0`, y pidió confirmación.
 
 **Decisión (Javier, 2026-11-04).** Se mantiene: **el comprador ve venta y stock** del flujo. No se restringe por rol. Si más adelante se quiere ocultar alguna cifra a ese rol, se hace como cambio de diseño explícito en el módulo de flujo, no como corrección de seguridad.
+
+## 2026-11-04 · M8 (08b-1): decisiones de los agrupadores de compras, registradas al construir la entrega (81, 83, 85, 86 y 92 a 98)
+
+Eran propuestas de la ficha `docs/modulos/08b-agrupadores-de-compras.md` (2026-11-02, con las respuestas de Javier a, b, c, e, f, g y h y la revisión del `arquitecto-revisor`). 08b-1 está construida (`0.16.0 · M8 b`), así que se registran con el número que la ficha y la entrada del 2026-11-03 les reservaron. **La 84 sigue reservada para 08b-2** (recibir un embarque), que no está construida. La 98 es la que la ficha numeraba 82 antes de que 07g tomara ese número.
+
+- **81 · El viaje es contexto y filtro, nunca presupuesto.** Cumple el papel de `campaigns` de COTV: cada usuario tiene un viaje activo (una cookie por navegador, sin efecto sobre permisos) que filtra las listas de Compras y de Viajes y embarques; Huecos y Flujo no lo usan. Se compra por oportunidad (decisión 2): no hay OTB por viaje. *Descartado:* presupuesto o tope por viaje; filtrar también el flujo.
+- **83 · La fecha de llegada al CD vive en el embarque y alinea las entregas que toca cada operación.** Cambiarla mueve en bloque, con motivo y con vista previa; lo ya recibido no se mueve. Editar la salida nunca mueve entregas. *Descartado:* una fecha por entrega escrita a mano (es lo que había y no se podía mover en bloque).
+- **85 · Un responsable por nivel, heredado, obligatorio solo en el viaje, y siempre un filtro, nunca un permiso.** Efectivo = paquete, si no embarque, si no viaje. Pueden ser responsables los compradores y el admin activos; el planner, no (Javier, f). *Descartado:* responsable obligatorio en los tres niveles; incluir al planner.
+- **86 · Un lote al barrer que se mueve se reparte de nuevo con la misma versión de M12 que ya usaba y el vector de la temporada de su mes nuevo.** Nunca cambia de versión; sin vector para esa temporada, `409 reparto_sin_vector`. *Descartado:* conservar el reparto del mes viejo (un lote que cruza de verano a invierno quedaría con la distribución equivocada).
+- **92 · El comprador escribe agrupadores desde 08b-1** (Javier, b y e). Crea, edita e importa agrupadores; asigna compras (también a un viaje cerrado); cambia salida y llegada; pasa pendientes. Cerrar, reabrir y cancelar, y revertir una recepción, son de admin y planner. El permiso es por rol, no por responsable. Adelanta a M9a solo esta parte de la escritura de compras, porque hoy no hay planners y sin ella solo el admin podría operar el módulo.
+- **93 · Códigos `aamm##` por tipo** (Javier, c): año de dos dígitos, mes de la fecha de referencia al crear y correlativo `01`–`99` (máximo más uno, con candado, sin reutilizar); se puede escribir a mano (`^[A-Z0-9-]{1,30}$`) y el nombre es libre. Viajes, embarques y paquetes numeran por separado. *Descartado:* secuencias de base de datos (dejan huecos y no se pueden corregir a mano).
+- **94 · Orden global de candados viaje, embarques y compras (siempre `for update`, por `id`)**, y `0.13.1` nunca escribe asignaciones: las funciones de esa entrega seguirán este orden para no provocar interbloqueos con las de 08b.
+- **95 · Un viaje cerrado es solo un estado informativo** (Javier, e). Sigue aceptando que los tres roles le añadan o quiten compras y embarques, con el aviso `viaje_cerrado`; deja de ser el viaje activo por defecto y va al final de los selectores. Solo `cancelado` bloquea. Cerrar, reabrir y cancelar quedan para admin y planner.
+- **96 · El puerto real va por embarque** (`compra_embarques.puerto_embarque`; Javier, g). El puerto habitual del proveedor (08c) será solo una sugerencia.
+- **97 · Importador de agrupadores en 08b-1** (Javier, h: habrá más de 15 viajes y embarques abiertos al arrancar). Una hoja con `TIPO`, CSV o Excel, previsualizar y aplicar; solo crea, nunca edita ni asigna compras; idempotente por código o clave natural; todo o nada; para los tres roles. *Descartado:* dejarlo para después (cargar 15 o más agrupadores a mano pantalla por pantalla).
+- **98 · El viaje va en la compra; el embarque y el paquete van en la entrega, por unidades; un paquete pertenece a un único embarque** (Javier, a). Una tabla de asignaciones reparte las unidades de una entrega entre embarques y paquetes, porque la unicidad `(línea, mes)` de M8 funde en una fila a dos embarques que llegan el mismo mes y cambiarla exigía `DROP CONSTRAINT`. *Descartado:* columnas de embarque en la entrega; clave foránea compuesta con `on update cascade` hacia el mes del embarque.
+
+Quedan reservadas, sin registrar: **84** (08b-2) y **87 a 91** (08c; la matización de la 60 que adelanta la 88 se registra en la entrada de abajo). Siguiente número libre al cerrar esta entrada: **110**.
+
+## 2026-11-04 · M8 (08c): respuestas de Javier a las seis preguntas de la revisión y carga desde COTV (decisiones 100 a 106)
+
+Todas están redactadas con su alcance completo en `docs/modulos/08c-proveedores-y-fotos-de-compras.md` (§11 y §12); aquí queda lo que un lector futuro podría cuestionar. La ficha 08c no está construida: son decisiones de diseño, no código.
+
+- **100 · Las fotos de una línea se suben por las dos vías.** Al registrar la compra (en cuanto la línea esté guardada) y después, desde Compras, Fotos o el detalle; mismo componente y misma API. Respuesta de Javier: «El comprador podría subir la foto al momento de ingresar la compra o en un proceso.» Obliga a `0.13.1` a montar el mismo componente de fotos en su formulario de línea. *Descartado:* una cola local de fotos antes de guardar la línea (choca con la PWA, que no escribe sin conexión).
+- **101 · Los proveedores de COTV los carga Claude, una sola vez, sin importador con pantalla** (Javier: «Tú los importas»). Son 34 proveedores y 26 contactos; un importador costaba una tanda completa de backend y frontend más su mantenimiento para usarlo una vez, y la carga única cuesta una columna (`proveedores.clave_origen`) y medio día. Pasa por la misma función que la ficha y por el mismo esquema; los datos bancarios de COTV no se leen.
+- **102 · El costo unitario de una compra se toma siempre como FOB** (Javier: «Sí, sin marcar nada»). El incoterm habitual del proveedor solo informa y no cambia ningún cálculo. *Descartado:* marcar «CV aproximado» en las compras CIF.
+- **103 · Cualquier usuario crea y edita proveedores y cada cambio queda en `proveedor_eventos`, inmutable** (Javier eligió la opción del revisor). Desactivar, eliminar y marcar intercompany siguen siendo del planner. Mismo patrón que `compra_eventos`, con trigger contra `UPDATE`, `DELETE` y `TRUNCATE`.
+- **104 · Al corregir una compra importada (cancelar y reimportar, decisión 57), la línea nueva puede traer en un toque las fotos de la versión cancelada** (Javier eligió el botón). Se copian; las de la compra cancelada no cambian. Solo para líneas con clave de importación.
+- **105 · En el sistema real solo entran datos reales traídos de COTV, nada inventado.** Los datos sintéticos viven solo en local y en las pruebas.
+- **106 · Lo que ya existe en COTV entra por cargas idempotentes con clave de origen, ensayadas completas en local y corridas una sola vez.** Primero proveedores y contactos (C1, al cerrar la entrega E1 de 08c); después, compras con descripción, modelo y fotos (C2). Nada se escribe en tablas a mano: cada carga usa las funciones de producción. Después de C2 ya no se puede deshacer (las compras solo se cancelan), por eso se ensaya completa. Solo `SELECT` sobre COTV; sus datos y los lotes viven en el *scratchpad* de la sesión y nunca en el repositorio.
+
+## 2026-11-04 · M8: la carga inicial de compras se arma desde COTV y sigue siendo solo de admin y planner (decisión 107)
+
+**Contexto.** La ficha 08c (§12.8, G1) preguntaba si las compras de los dos viajes de COTV ya estaban en una carga inicial de Javier, porque cargarlas dos veces las contaría doble en el flujo.
+
+**Decisión (Javier, 2026-11-04).** «Para la carga inicial lo hacemos nosotros, por ejemplo trayendo de COTBV.» La carga inicial de compras se arma **desde COTV, la hace Claude con Javier**, y no hay otra carga previa ajena: G1 queda resuelta en el sentido «no hay otra carga». El camino de enlazar los ítems de COTV con líneas ya cargadas queda solo como respaldo si Javier aporta después otra carga. La carga inicial (`carga_inicial = true`: compras ya hechas, confirmadas, con recibidas) **sigue siendo solo de admin y planner**; el comprador que la intenta recibe `403`.
+
+**Por qué.** La carga inicial crea compras confirmadas que entran de inmediato al flujo y al IMI; es una operación de una sola vez que conviene que supervise quien responde por los números. **Siguen abiertas G2 (mes de llegada, que COTV nunca guardó), G3 (llaves para copiar las fotos) y G4 (compras intercompany de COTV)**, y solo bloquean la carga C2.
+
+**Descartado.** Abrir la carga inicial al comprador (decisión 108: él usa el importador normal).
+
+## 2026-11-04 · M8: el comprador puede usar el importador normal de compras (decisión 108)
+
+**Decisión.** `POST /api/compras/importar` queda abierto a los tres roles con `carga_inicial = false`: las compras nuevas entran en **borrador**, a nombre de quien importa y con origen `comprador`, y no cuentan en el flujo hasta que se confirmen. Con `carga_inicial = true` el comprador recibe `403`. El guard es `requireUser` y la regla vive en `puedeImportar` (`src/lib/compras/permisos.ts`). Está construido en `0.16.0 · M8 b`, antes de `0.13.1` y de M9a, porque es independiente del resto de escrituras de compras (que siguen siendo de admin y planner hasta M9a).
+
+**Por qué.** Los compradores son quienes cargan las compras de sus viajes y el importador es la vía masiva que ya existe; sin ella, con 0 planners activos, solo el admin podría subir un archivo. El borrador no toca el flujo, así que el riesgo de que un error ensucie el IMI es bajo.
+
+**Descartado.** Esperar a M9a (retrasaba la carga de los viajes abiertos); abrir también la carga inicial (decisión 107).
+
+## 2026-11-04 · M8: el comprador puede ingresar cualquier marca, GM o proveedor; solo agrega líneas a su propio borrador (decisión 109)
+
+**Decisión (Javier, 2026-11-04).** El comprador puede ingresar compras de **cualquier marca, género × mundo o proveedor**: sin restricción de propiedad y sin tope de proveedores nuevos por archivo. La razón es de negocio: en las negociaciones se hacen **compras cruzadas por paquetes** (una sola negociación con un proveedor cubre marcas de varios compradores). Esto aplica la decisión 28 sin cambios: el responsable de un género × mundo es un filtro, nunca un permiso. **La única restricción** es sobre compras que ya existen: un comprador solo puede **agregar líneas a su propio borrador**; si la referencia ya existe y está confirmada, es de otra persona o está sin dueño, esas filas se omiten (`compra_no_borrador`) y debe usar otra referencia o agregarle líneas desde la compra. Admin y planner siguen agregando líneas a una compra existente tal como esté.
+
+**Cómo se hace cumplir.** En dos capas. La previsualización omite las filas hacia una compra ajena o confirmada; la función `importar_compra` lo vuelve a comprobar bajo candado (migración `0034`, aplicada en Vector2) con `restringido` en el actor, y además lo deduce sola si el `perfil_id` es de un comprador, de modo que un descuido del backend no la desactiva. El rechazo ocurre antes de crear nada. Una compra cancelada no cuenta: se crea una nueva, como siempre.
+
+**Por qué.** El hallazgo de seguridad A1/A2 de 08b-1 mostró que, sin esta restricción, un comprador podía agregar líneas a una compra **confirmada** ajena (y por tanto mover el flujo) usando solo el importador normal. Prohibir marcas o proveedores habría roto las compras cruzadas; la restricción por estado y dueño protege lo confirmado sin estorbar el trabajo.
+
+**Descartado.** Limitar al comprador a sus marcas o géneros × mundos (choca con las compras cruzadas); un tope de proveedores nuevos por importación; que el comprador no pueda agregar líneas a ninguna compra existente (impedía completar su propio borrador).
+
+## 2026-11-04 · M8: la descripción y el modelo de una línea no pasan por la `revision` de la compra (matiza la decisión 60; propuesta 88 de 08c)
+
+**Decisión.** Cuando se construya la entrega E1 de 08c, la descripción y el modelo de cada línea de compra se protegen con el candado de la línea y los valores previos (`editar_ficha_linea`, con `p_antes`), **no** con `compras.revision`. No suben la revisión de la compra, no escriben `compra_eventos` ni cambian la huella del flujo. Las fotos de una línea tampoco. **Matiza la decisión 60** («toda mutación de compras va por función transaccional con `revision`, pertenencia y evento») solo para esos dos campos de texto: el resto de la mutación de compras sigue como estaba.
+
+**Por qué.** Fotos es la pantalla que más se usa desde el celular y en la feria; si subir una foto o corregir un modelo subiera la `revision`, cada uno daría un `409` falso a quien tiene la compra abierta en otra pestaña, por cambios que no afectan cantidades ni fechas. El candado de la línea y la comparación con el valor previo evitan pisar un texto ajeno sin ese costo.
+
+**Estado.** Registrada ahora porque la ficha 08c la define; **no está construida** (E1 sigue en especificación). El número 88 completo (reducción y almacenamiento de fotos) se registra al construir E1.
+
+**Descartado.** Subir la `revision` en cada edición de ficha de línea (los `409` falsos); dejar la descripción y el modelo sin ningún candado (pisaría texto ajeno).
