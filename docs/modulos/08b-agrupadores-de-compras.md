@@ -610,12 +610,11 @@ Perfiles: C1 y C2 (compradores activos), C3 (comprador inactivo), A (admin). Pro
 
 ## 9. Decisiones nuevas propuestas (para `docs/DECISIONES.md`)
 
-La última registrada en `DECISIONES.md` es la 80. Las 81–86 son de esta ficha, las **87–91 las toma la 08c** y por eso esta ficha sigue en la 92. Si el `documentador` registra antes las de la 08c, el orden se mantiene.
+En `DECISIONES.md` están registradas la 70 a la 80 y la **82, que es de 07g** (aprobación en bloque); la 81 sigue reservada para esta ficha. Esta ficha usa la **81, 83 a 86 y 92 a 97**, y la que antes numeraba como 82 pasa a ser la **98**; las **87–91 las toma la 08c**. Los números quedan reservados en `DECISIONES.md` (entrada del 2026-11-03) hasta que se registren.
 
 | N.º | Decisión |
 |---|---|
 | 81 | El viaje es contexto y filtro, nunca presupuesto. Cumple el papel de `campaigns` de COTV con un viaje activo por navegador, que no da permisos. Matiza «No se adopta: campañas» de la ficha 08 §4.0 |
-| 82 | El viaje va en la compra; el embarque y el paquete van en la entrega, por unidades; el paquete pertenece a un único embarque (Javier, a). Tabla de asignaciones para no tocar `unique (linea_id, periodo)` |
 | 83 | La fecha de llegada al CD vive en el embarque y alinea las entregas que toca cada operación. Cambiarla mueve en bloque, con motivo. Lo recibido no se mueve |
 | 84 | (08b-2) Recibir un embarque es confirmar el ingreso en bloque por una persona; las recepciones quedan vinculadas y `pendientesPorEntrega` las respeta (`VERSION_METODO_FLUJO = 4`) |
 | 85 | Un responsable por nivel, heredado, obligatorio en el viaje y filtro, no permiso. **Pueden ser responsables los compradores y el admin activos; el planner, no** (Javier, f) |
@@ -626,6 +625,7 @@ La última registrada en `DECISIONES.md` es la 80. Las 81–86 son de esta ficha
 | 95 | **Un viaje cerrado es solo un estado informativo** (Javier, e): sigue aceptando que los tres roles le añadan o quiten compras y embarques, con el aviso `viaje_cerrado`; deja de ser el viaje activo por defecto y va al final de los selectores. Solo `cancelado` bloquea. Cerrar, reabrir y cancelar, solo admin y planner |
 | 96 | **El puerto real va por embarque** (`compra_embarques.puerto_embarque`), con el puerto habitual del proveedor (08c) como sugerencia (Javier, g) |
 | 97 | **Importador de agrupadores en 08b-1** (Javier, h: más de 15 abiertos al arrancar): una hoja con `TIPO`, CSV o Excel, previsualizar y aplicar, solo crea, idempotente por código o por clave natural, todo o nada, para los tres roles, con plantilla |
+| 98 | El viaje va en la compra; el embarque y el paquete van en la entrega, por unidades; el paquete pertenece a un único embarque (Javier, a). Tabla de asignaciones para no tocar `unique (linea_id, periodo)` |
 
 ## 10. Preguntas abiertas para Javier
 

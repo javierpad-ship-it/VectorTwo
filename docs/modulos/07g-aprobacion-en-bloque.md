@@ -1,10 +1,10 @@
 # 07g · Aprobación en bloque de las filas que bloquean el cierre (método en 2026, IA en 2027) y reaprobación mensual
 
-> Estado: **especificada (2026-11-02), ajustada el 2026-11-03** con las respuestas de Javier (§9) y la revisión independiente del `arquitecto-revisor` (§10). Lista para construir salvo las preguntas que quedan en §Preguntas abiertas. Mejora de M7 sobre `0.15.0 · M7` (07e construida con la IA apagada). Petición de Javier (2026-11-02): «tendríamos que hacer un módulo para poder aprobar más de una con la sugerencia de la IA», para poder cerrar las proyecciones.
+> Estado: **construida y validada (`0.15.0 · M7 c`, 2026-11-03)**; falta el hito con Javier (§6.2, sección N de `docs/pruebas/cowork-checklist.md`). Especificada el 2026-11-02 y ajustada el 2026-11-03 con las respuestas de Javier (§9) y la revisión independiente del `arquitecto-revisor` (§10); lo que se apartó de la especificación al construir está en «Qué cambió al construir», al final. Mejora de M7 sobre `0.15.0 · M7` (07e construida con la IA apagada). Petición de Javier (2026-11-02): «tendríamos que hacer un módulo para poder aprobar más de una con la sugerencia de la IA», para poder cerrar las proyecciones.
 >
 > - **Relaja a propósito una regla registrada.** «Nada se aprueba en bloque» (07 §2 punto 7, DECISIONES 2026-10-15) y el «una fila a la vez» de «Aceptar IA» (07e D2, decisión 70) pasan a: **las filas que bloquean el cierre se pueden aprobar en bloque, siempre por una persona que filtra, selecciona y confirma viendo el resumen por género × mundo (GM), con traza por lote, reversible y sin pisar nunca una decisión tomada a mano.** Decisión 82 de `docs/DECISIONES.md` (la 81 la reservó 08b).
-> - **Versión prevista `0.15.0 · M7 c`** (la `b` es de 07f; la `0.15.1` es de sublíneas y cierre del año por IA). Las versiones se asignan al cerrar: si otra entrega cierra antes, esta toma la siguiente libre. Commits `M7:`.
-> - **Migración: sí, una.** Se cita con el marcador **`00L1_lotes_proyeccion.sql`** (con `scripts/humo-00L1.sql`) y toma el **número siguiente libre al construir**. Las reservas de otras fichas (07f, 08b, 08c) se respetan; `datos` pone el número (decisión 48). Por qué hace falta: §2.0.
+> - **Versión `0.15.0 · M7 c`** (la `b` es de 07f; la `0.15.1` es de sublíneas y cierre del año por IA). Commits `M7:` (`14a9e98` lógica pura, `be8a598` migración, `137eeae` servicio, rutas y pantallas, `7098ef4` correcciones de QA y seguridad).
+> - **Migración: sí, una.** La ficha la citó con el marcador `00L1_lotes_proyeccion.sql`; se construyó como **`supabase/migrations/0031_lotes_proyeccion.sql`** (con `scripts/humo-0031.sql`), aplicada en Vector2. En el resto de esta ficha, «`00L1`» es la `0031`. Por qué hace falta: §2.0.
 > - Depende de [07](07-proyeccion-anual.md) (regla 37 de cierre, B2, `decidirFila`, `cerrarProyeccion`), [07e](07e-propuesta-con-ia.md) (`asignarMeta`, `lecturaDelGM`, `aceptarIaFila`, `decision_ia_fila_id`, §5.1 y §5.3) y [06e](06e-cierre-del-anio-y-base-sin-nino.md) (método 5, factores, `reaprobar`).
 > - **Cifras reales de referencia** (revisor, 2026-11-03, solo `SELECT`, única proyección en trabajo): bloquean el cierre **679 filas en 2026 y 686 en 2027**, de las cuales **290 por año son «para revisión»** (42 %); 36 GM (26 con pendientes); máximo **119 filas por GM** (mediana 9); 2 918 filas de tienda; `historico` ≈ 1,6 KB por fila (máx. 3,4 KB). **Esa proyección es de método 3** (`version_metodo = 3 < 5`), así que hoy todo lote quedaría bloqueado por `version_metodo`: las mediciones de §6.1 se rehacen después de recalcular con el método 5. La IA está apagada y sin datos (0 configuraciones, 0 propuestas): todo lo de IA se prueba con fixture.
 > - Ejemplos con cifras sintéticas (las del ejemplo A de 07e). Ningún dato real de Lukers en esta ficha ni en los fixtures. Vector-One no tiene aprobación en bloque: no hay nada que citar.
@@ -26,7 +26,7 @@ El rótulo de cada fuente queda siempre visible. Javier revisa las proyecciones 
 | D2 | **Nunca se toca lo decidido a mano.** Un lote **aprobar** solo escribe registros sin decidir (`ya_decidida` en otro caso). Un lote **reaprobar** solo escribe registros con `decision_lote_id` no nulo, es decir, aprobados en bloque y que nadie cambió después: cualquier decisión individual pone esa columna en `null` (§2.3). Un lote **revertir** solo escribe registros con `decision_lote_id` igual al del lote revertido. **Lo decidido a mano** (cifra, «Aceptar», «Aceptar IA» de una fila) **no lo toca ningún tipo de lote.** | Es la regla que pidió Javier. `decision_lote_id` es la marca de «aprobado en bloque y sin tocar». |
 | D3 | **Fuentes y rótulos.** **«Método»** escribe `decidido = propuesto` con `origen = propuesta` (lo mismo que el botón «Aceptar»). **«IA»** escribe `decidido = A_f` con `origen = manual` y `decision_ia_fila_id` (lo mismo que «Aceptar IA»), solo en `Y+1`. Las dos escriben además `decision_lote_id`. En pantalla, «En bloque · Método» y «En bloque · IA»; en 2027, el método de un GM sin IA lleva su propio badge: **«Método · GM sin IA»**. | En datos, lo aprobado en bloque es lo mismo que lo aprobado fila por fila, más la traza del lote. La IA de `0.15.0` solo distribuye 2027 (en `0.15.1`, `cierre_y` abrirá «IA» en `Y` sin cambiar el contrato). |
 | D4 | **Fuente de cada fila de 2027 (Javier, e).** Si el GM tiene propuesta de IA **aceptable** (`al_dia` o `meta_movida`): fuente «IA» para las filas libres con cifra IA. **Las filas libres sin cifra IA (libre nueva) quedan fuera del bloque**, con el motivo «decídela en Por línea o regenera el GM». Si el GM **no tiene IA** (IA apagada, `sin_propuesta`, `fallida`, `bloqueado_privacidad`, `sin_meta`): fuente «Método · GM sin IA», con aviso en la confirmación. Un GM `desactualizada` no tiene fuente: «regenera el GM». **Con la IA encendida no existe un modo global «Solo método» en 2027.** Las filas `fija_pct` (con % propio) de un GM con IA usan el método, porque la IA no las reparte. | Una libre sin cifra IA recibe igual una `A` (por `P^GM`, `lectura-gm.ts:117-128`). Aprobarla por el método rompería `Σ fijas + Σ A = Meta_GM`. Un «Solo método» global en un GM con IA dejaría cifras del método donde la IA reparte la meta. |
-| D5 | **Exclusión dura por baja confianza (Javier, b).** Una fila de 2027 con cifra en la propuesta vigente de su GM y `confianza` `baja` **o nula** no entra en ningún lote, ni por «IA» ni por «Método» (código `confianza_baja`). El `GET` la devuelve con `fuente_sugerida = null` y la casilla deshabilitada; el servidor la rechaza aunque llegue en el cuerpo. Se decide en Por línea. Alcance: §Preguntas A1. | La IA no sabe; aprobarlas sin mirarlas sería aprobar una cifra que la propia IA no respalda. |
+| D5 | **Exclusión dura por baja confianza (Javier, b).** Una fila de 2027 con cifra en la propuesta vigente de su GM y `confianza` `baja` **o nula** no entra en ningún lote, ni por «IA» ni por «Método» (código `confianza_baja`). El `GET` la devuelve con `fuente_sugerida = null` y la casilla deshabilitada; el servidor la rechaza aunque llegue en el cuerpo. Se decide en Por línea. Alcance: solo las filas de 2027 con cifra de IA (§11). | La IA no sabe; aprobarlas sin mirarlas sería aprobar una cifra que la propia IA no respalda. |
 | D6 | **Un año por lote.** La pestaña trabaja 2026 o 2027 y propone 2026 primero. | Decidir 2026 mueve la base y la meta de 2027 (B2). |
 | D7 | **La IA de un GM se aprueba entera o no se aprueba**, calculada de **una sola foto** (una `asignarMeta`). El grupo IA lleva **`registros_lectura`**: todos los registros base activos de 2026 y 2027 del GM, con su `updated_at`. La función SQL los bloquea y, si alguno cambió, rechaza el grupo entero (`cambio_concurrente`). | `A_f` depende de todas las filas del GM (fijas, `B'` que viene de 2026, la meta), no solo de las que se escriben. Bloquear solo lo escrito dejaría pasar un cambio en una fila no seleccionada y el GM ya no sumaría su meta. |
 | D8 | **`valor_esperado` en cada fila**, más la **huella de la simulación** en el cuerpo: el `POST` lleva la huella del resultado simulado que el planner revisó (`huella_simulacion`), y si el servidor obtiene otro resultado responde `409 simulacion_distinta` sin escribir nada. | Nada cambia entre lo que se vio y lo que se aprueba, ni fila por fila ni en conjunto. |
@@ -35,7 +35,7 @@ El rótulo de cada fuente queda siempre visible. Javier revisa las proyecciones 
 | D11 | **Auditoría inmutable por lote.** `proyeccion_lotes` y `proyeccion_lote_filas` son de solo inserción. **La función calcula los conteos con lo que de verdad escribió** (aplicadas, rechazadas por código, filas y unidades por fuente). El efecto por GM que calcula TypeScript se guarda como **«previsto»**. El lote guarda también si el planner marcó «Revisé el resumen por GM». | Un resumen calculado antes de escribir mentiría si SQL rechaza grupos. La tabla es inmutable: lo que se escribe tiene que ser verdad. |
 | D12 | **Revertir (Javier, g).** Cualquier planner puede revertirlo, mientras la proyección esté en trabajo, entero o en parte, y solo vuelve a la propuesta lo que nadie cambió después. La reversión es otro lote (`tipo = revertir`); una reversión no se revierte. Se puede revertir una confirmación completa (todas sus tandas) por `confirmacion_id`. | Es el «Volver a la propuesta» en bloque, acotado a lo que escribió el bloque. |
 | D13 | **Reaprobar (Javier, d).** Tras un recálculo, la pestaña avisa «N filas aprobadas en bloque cambiaron de propuesta tras el último recálculo» y ofrece **«Reaprobar»**. Son reaprobables los registros con `decision_lote_id` no nulo cuyo valor de hoy difiere del decidido. En «Método», el valor de hoy es `propuesto` (aviso `propuesta_cambio`). En «IA», es `A_f`, calculada **tratando como libres las filas que se reaprueban** (§5.1 de 07e con la clasificación ampliada de §3.5). Pasa por la misma selección, simulación, exclusiones (D5) y confirmación que aprobar, y escribe un lote `tipo = reaprobar`. | Cada cierre de mes cambia el vendido de 2026, que entra en la `huella_historia`: todas las propuestas de IA quedan desactualizadas y las propuestas del método cambian. Sin «Reaprobar», lo aprobado en bloque quedaría congelado con cifras viejas, o habría que revertir y volver a aprobar cientos de filas. |
-| D14 | **Bloqueo sin excepción (Javier, c), para todo lote aprobar o reaprobar, de cualquier año.** Bloquean: proyección cerrada, archivada o calculándose; `version_metodo` < 5; **desactualizada por cualquier motivo** (`desactualizadaDe(…).length > 0`, como `cerrarProyeccion`, `servicio.ts:1040`, sin depender de `src/lib/ia/`); los del Niño (`bloqueosNinoDeCierre`); **crecimientos de 2027 sin aprobar** (incluye Resto provisional y `reaprobar` de 06e). Se implementa llamando a `motivoRechazoCerrar` con `filasBase` y `tiendas` vacíos, `forzar = false`, `desactualizada = des.length > 0` y los crecimientos de `Y+1` siempre. Revertir solo exige que la proyección esté en trabajo y sin cálculo en curso (§Preguntas B1). | Las decisiones sobreviven al recálculo: aprobar sobre datos viejos fijaría cifras que ya no se propondrían. |
+| D14 | **Bloqueo sin excepción (Javier, c), para todo lote aprobar o reaprobar, de cualquier año.** Bloquean: proyección cerrada, archivada o calculándose; `version_metodo` < 5; **desactualizada por cualquier motivo** (`desactualizadaDe(…).length > 0`, como `cerrarProyeccion`, `servicio.ts:1040`, sin depender de `src/lib/ia/`); los del Niño (`bloqueosNinoDeCierre`); **crecimientos de 2027 sin aprobar** (incluye Resto provisional y `reaprobar` de 06e). Se implementa llamando a `motivoRechazoCerrar` con `filasBase` y `tiendas` vacíos, `forzar = false`, `desactualizada = des.length > 0` y los crecimientos de `Y+1` siempre. Revertir solo exige que la proyección esté en trabajo y sin cálculo en curso (§11). | Las decisiones sobreviven al recálculo: aprobar sobre datos viejos fijaría cifras que ya no se propondrían. |
 | D15 | **Un lote de 2026 puede crear un `reaprobar` de crecimientos.** `ninoDeFilas` usa la base de 2027 que B2 reescribe. La simulación lo calcula en memoria y avisa: «este lote dejará N GM con crecimientos que reaprobar: hasta reaprobarlos no se podrá aprobar 2027 ni cerrar». Después del lote aparece un enlace a Crecimientos. | Es el efecto de B2 sobre `B'` con el Niño; con D14 bloquearía los lotes de 2027 sin aviso previo. |
 | D16 | **IA no disponible o corrida en curso: `409` del cuerpo entero, nada escrito** (`ia_no_disponible`, `capacidad_apagada`, `corrida_en_curso`). El navegador ofrece «Aprobar solo las de método», que reenvía sin los ítems de IA. Además, la función comprueba que la propuesta de cada grupo IA siga siendo la vigente de su GM (`ia_no_vigente`). | Una sola regla: o se escribe todo lo que pasa, o no se escribe nada por una causa de servicio. |
 | D17 | **Tope de 300 filas por petición**, en tandas automáticas que **no parten un GM** (máximo actual: 119 por GM) y comparten `confirmacion_id`. | Una sola sentencia RPC (la base corta a los 8 s, también `lock_timeout = 8 s`) más la lectura previa con `historico` de las filas de 2026. |
@@ -62,7 +62,7 @@ Pestaña Aprobación (2026 · Método | 2027 · IA)          [cabecera: «N fila
 Revertir: POST …/aprobacion/lotes/[loteId]/revertir  ·  POST …/aprobacion/confirmaciones/[confirmacionId]/revertir
 ```
 
-## 2. Modelo de datos (`00L1_lotes_proyeccion.sql`)
+## 2. Modelo de datos (`00L1_lotes_proyeccion.sql`, construido como `0031_lotes_proyeccion.sql`)
 
 ### 2.0 Por qué hace falta una migración
 
@@ -75,7 +75,7 @@ Revertir: POST …/aprobacion/lotes/[loteId]/revertir  ·  POST …/aprobacion/c
 
 Convenciones de `0018`, `0025` y `0030`:
 - idempotente (`create … if not exists`, `add column if not exists`, `create or replace`); sin `DROP`, `UPDATE`, `DELETE`, `TRUNCATE`, backfill, seed ni `do $$`;
-- RLS sin políticas; `revoke all … from public, anon, authenticated` y `grant … to service_role`; `comment on` en cada objeto;
+- RLS sin políticas; `revoke all … from public, anon, authenticated, service_role` y `grant select, insert` a `service_role` en las dos tablas de lotes (sin `update`, `delete`, `truncate`, `trigger` ni `references`; decisión 82-b); `comment on` en cada objeto;
 - funciones `security invoker`, `set search_path = ''`, sin `--` dentro de `$$`; catálogos sin `check` (zod);
 - inocua para `0.15.0` desplegada.
 
@@ -133,14 +133,18 @@ La FK es diferible porque la función escribe los registros antes de insertar la
 1. **Candado de la proyección primero:** `select … from proyecciones where id = … for no key update` (no bloquea los `insert` con FK de otras tablas). Así un duplicado concurrente espera aquí al primero.
 2. **Idempotencia, después del candado:** si existe `proyeccion_lotes.id = p.lote.id` (en `READ COMMITTED` ya se ve el `commit` del primero): misma proyección y misma `huella_cuerpo` → devuelve lo guardado con `repetido: true`; si no → **`LP004`** (`409 lote_ajeno`). Si aun así salta `23505` en `proyeccion_lotes_pkey`, TypeScript lo traduce releyendo el lote (`repetido`).
 3. Comprobaciones de la proyección: `estado ≠ 'en_trabajo'` → **`LP001`** (`409 cerrada` / `archivada`); cálculo vivo → **`LP002`** (`409 calculo_en_curso`); `calculado_at` distinto → **`LP003`** (`409 datos_cambiaron`). En `revertir`, el lote revertido debe ser `aprobar` o `reaprobar` de la misma proyección (**`LP005`**, `409 no_revertible`).
-4. **Por grupo**, en orden de `(fila_id, anio)` (el mismo orden que debe usar `guardarRegistros`, §3.6, para no interbloquearse): `select … for update` de los `registros` a escribir **y** de los `registros_lectura` (grupo IA: todos los base activos de 2026 y 2027 del GM; lote de 2026: también las filas de tienda que B2 usó). Comprobaciones:
-   - `updated_at::text = updated_at_esperado` en todos (cadena con microsegundos, nunca pasada por `Date`; si no, `cambio_concurrente`);
-   - en el registro objetivo: `aprobar` → `decidido is null` (`ya_decidida`); `reaprobar` → `decision_lote_id is not null and decidido = decidido_esperado` (`cambiada_despues`); `revertir` → `decision_lote_id = revierte_lote_id` (`cambiada_despues`);
-   - grupo IA: su `propuesta_gm_id` es la vigente de `(proyeccion_id, gm_clave)`, con el mismo orden que `leerPropuestaVigenteDeGM` (`created_at desc, id asc`; `ia/consultas.ts:382-385`); si no, `ia_no_vigente`.
-   Si algo falla, no se escribe nada del grupo: la fila que falló lleva su código y las demás del grupo, `grupo_rechazado`. Si todo pasa, se hace el `update` de cada registro con la lista fija de §2.5.
+4. **Dos pasadas sobre el lote entero (así se construyó; el orden de los grupos no cambia el resultado, decisión 82-a).**
+   - **Pasada 1, sin escribir:** `select … for update`, una sola vez, de todos los registros que se leen o se escriben en **todos** los grupos, en orden de `(fila_id, anio)` (el mismo orden que debe usar `guardarRegistros`, §3.6, para no interbloquearse) y solo de esta proyección. Con todo bloqueado, comprueba cada grupo contra el estado del inicio del lote y guarda su veredicto.
+   - **Pasada 2:** escribe según los veredictos, con la lista fija de §2.5.
+   - Comprobaciones:
+     - `updated_at::text = updated_at_esperado` en todos los registros (cadena con microsegundos, nunca pasada por `Date`; si no, `cambio_concurrente`);
+     - en el registro objetivo: `aprobar` → `decidido is null` (`ya_decidida`); `reaprobar` → `decision_lote_id is not null and decidido = decidido_esperado` (`cambiada_despues`); `revertir` → `decision_lote_id = revierte_lote_id` (`cambiada_despues`);
+     - grupo IA: su `propuesta_gm_id` es la vigente de `(proyeccion_id, gm_clave)`, con el mismo orden que `leerPropuestaVigenteDeGM` (`created_at desc, id asc`; `ia/consultas.ts:382-385`); si no, `ia_no_vigente`.
+   - Un grupo `ia` se escribe entero o no se escribe: si una fila falla, la que falló lleva su código y las demás del grupo, `grupo_rechazado`. Los grupos de método y de reversión se arman **por fila** (2026 y 2027 de una fila van juntos o ninguno) y una fila que falla no arrastra a las demás, salvo que falle una `registros_lectura`.
+   - **Un mismo registro en dos filas del lote** da `LP007` (payload inválido), no un rechazo por fila.
 5. Inserta las `proyeccion_lote_filas` (todas, aplicadas y rechazadas). **Calcula el `resumen`** a partir de ellas e inserta la cabecera **al final**. Devuelve `{ lote_id, repetido: false, filas, resumen }`.
 
-Un error no previsto deshace todo. Un interbloqueo (`40P01`) se traduce a `409 conflicto_reintentar` y el navegador reintenta una vez con el mismo `lote_id`.
+Un error no previsto deshace todo. Un interbloqueo (`40P01`) o un error de tiempo de la base (`55P03`, `57014`) se traducen a `409 conflicto_reintentar` y el navegador reintenta una vez con el mismo `lote_id`. Códigos propios de la función: `LP001` a `LP005` (arriba), `LP006` (proyección inexistente, `404`), `LP007` (payload inválido, `500`) y `LP008` (un registro que debía escribirse no se escribió, `500`).
 
 ### 2.5 Payload
 
@@ -176,7 +180,7 @@ Importa de `src/lib/proyeccion/`, y de `src/lib/ia/servicio.ts` solo para ítems
 | Ruta | Método | Cuerpo / consulta | Respuesta · errores |
 |---|---|---|---|
 | `/api/proyeccion/proyecciones/[id]/aprobacion` | GET | `?anio=<Y \| Y+1>&modo=aprobar \| reaprobar` | `AprobacionApi`. `404`; `409 anio_no_admitido` |
-| `…/aprobacion/lotes` | POST | `loteSchema` | `simular` → `200 ResultadoLoteApi` (sin `lote`, con `huella_simulacion`); si no → `201`, o `200` con `repetido`. `409`: `cerrada`, `archivada`, `calculo_en_curso`, `version_metodo`, `proyeccion_desactualizada` (con los motivos), los del Niño, `crecimientos_sin_aprobar`, `anio_no_admitido`, `ia_no_disponible`, `capacidad_apagada`, `corrida_en_curso`, `datos_cambiaron`, `simulacion_distinta`, `revision_requerida`, `lote_ajeno`, `conflicto_reintentar`. Los rechazos por fila van en `filas[]` |
+| `…/aprobacion/lotes` | POST | `loteSchema` | `simular` → `200 ResultadoLoteApi` (sin `lote`, con `huella_simulacion`); si no → `201`, o `200` con `repetido`. `409`: `cerrada`, `archivada`, `calculo_en_curso`, `version_metodo`, `proyeccion_desactualizada` (con los motivos), los del Niño, `crecimientos_sin_aprobar` (no se evalúa en las tandas siguientes de una confirmación ya iniciada, decisión 82-d), `sin_filas_aplicables` (ninguna fila se puede aprobar: no se llama a la función ni se guarda el lote), `anio_no_admitido`, `ia_no_disponible`, `capacidad_apagada`, `corrida_en_curso`, `datos_cambiaron`, `simulacion_distinta`, `revision_requerida`, `lote_ajeno`, `conflicto_reintentar`. Los rechazos por fila van en `filas[]` |
 | `…/aprobacion/lotes` | GET | — | `{ lotes: LoteApi[] }` **de esta proyección**, del más reciente al más antiguo, con conteos derivados |
 | `…/aprobacion/lotes/[loteId]` | GET | — | `LoteApi & { filas: FilaLoteApi[] }`. `404` si no es de la proyección |
 | `…/aprobacion/lotes/[loteId]/revertir` | POST | `revertirSchema = { lote_id: uuid, filas?: uuid[] (1..300, sin repetidos), nota?, simular = false, huella_simulacion? }` | `ResultadoLoteApi`. `404`; `409`: `no_revertible`, `cerrada`, `archivada`, `calculo_en_curso`, `datos_cambiaron`, `simulacion_distinta`, `lote_ajeno`, `conflicto_reintentar` |
@@ -294,6 +298,8 @@ Presupuesto: ≤ 8 s por petición de 300 filas (§6.1); `MAX_FILAS_LOTE` se pue
 | `cambiada_despues` | reaprobar o revertir: alguien la cambió después del lote |
 | `fila_inactiva` · `fila_no_encontrada` · `menor_que_vendido` | como en `decidirFila` |
 
+Además, `sin_filas_aplicables` es un `409` del lote entero (no un código por fila): todas las filas se rechazaron en TypeScript.
+
 ### 3.5 Cambio en 07e: clasificación con filas aprobadas en bloque
 
 `estadoFilaMeta` (`src/lib/ia/meta.ts`) gana el estado **`libre_en_bloque`**. Lo tiene un registro de 2027 decidido por un lote con traza IA (`decision_lote_id` y `decision_ia_fila_id` no nulos):
@@ -406,7 +412,7 @@ Muestra fecha, quién, tipo, año, pedidas, aplicadas y rechazadas, IA y método
 | R9 | Idempotencia: mismo `lote_id` en serie y **en paralelo** → una aplicación y `repetido` (también si salta `23505`); otro cuerpo → `lote_ajeno`. | función, servicio |
 | R10 | Transacción (humo): estado, cálculo o `calculado_at` → nada escrito ni lote; grupo con `updated_at` cambiado → el grupo no se escribe; `Y` e `Y+1` de una fila juntos o ninguno; lote y filas existen si y solo si la función terminó. | SQL |
 | R11 | Revertir: solo `decision_lote_id = L`; en `Y`, B2; limpia trazas; revertir un `revertir` → `no_revertible`; la reversión por confirmación revierte todas las tandas. | servicio, función |
-| R12 | Toda decisión individual limpia `decision_lote_id` del registro decidido; el `Y+1` recalculado lo conserva; `calcular` lo conserva; `copiar_de` no lo copia. | `servicio-edicion.ts`, `persistencia.ts`, `servicio.ts` |
+| R12 | Toda decisión individual limpia `decision_lote_id` del registro decidido, **salvo «Solo crecimiento propio»**, que no cambia lo decidido y por eso conserva la marca del lote (deliberado, H5, decisión 82-f); el `Y+1` recalculado lo conserva; `calcular` lo conserva; `copiar_de` no lo copia. | `servicio-edicion.ts`, `persistencia.ts`, `servicio.ts` |
 | R13 | Bloqueos (D14) para todo lote aprobar o reaprobar, de cualquier año, incluido **cualquier** motivo de `desactualizadaDe` (por ejemplo `tiendas_cambiadas`, `recalculo_pendiente`); revertir no se bloquea por ellos. Estático: `reglas.ts` y `servicio.ts` de aprobación no importan `src/lib/ia/` para los bloqueos. | `reglas.ts`, estático |
 | R14 | Lista de columnas de la función = claves de `payloadAnioDecision` − `activo` + `decision_lote_id`; clave ausente no cambia la columna; el `Y+1` recalculado no lleva columnas de decisión. | estático, SQL |
 | R15 | 301 ítems, `fila_id` repetido, `ia` sin `propuesta_fila_id`, `metodo` con él, reaprobar sin `decidido_esperado`, aplicar sin `huella_simulacion` → `400`. | esquemas |
@@ -495,7 +501,7 @@ HOMBRE · URBANO 2027, `g = 8 %` sobre corregida, umbral 100. `Meta_GM = 26 006`
 5. **Ciclo mensual:** tras publicar y recalcular, la cabecera dice «N filas aprobadas en bloque cambiaron de propuesta». [ESCRIBE] Reaprobar 2026: solo cambian las aprobadas en bloque, ninguna decidida a mano.
 6. **(IA encendida, si 07e ganó)** [ESCRIBE] Aprobar un GM de 2027 al día: las filas de confianza baja no tienen casilla; con todas las libres aprobadas, el desvío del GM en la Matriz es 0. Con dos ventanas: fijar una fila en una y aprobar en la otra → GM no aprobado. Tras un cierre de mes, regenerar el GM y reaprobar.
 7. **Cerrar:** con todo aprobado (las excluidas, decididas en Por línea) y las tiendas nuevas decididas, Cerrar ya no pide filas; M8 da las mismas cifras que si se hubieran aceptado una por una.
-8. Comprador: `403`. Pasan `lint`, `tsc`, `vitest` y `build`; humo en verde; `APP_VERSION = "0.15.0 · M7 c"` (o la siguiente libre).
+8. Comprador: `403`. Pasan `lint`, `tsc`, `vitest` y `build`; humo en verde; `APP_VERSION = "0.15.0 · M7 c"`. **Estado:** construido y validado por QA y seguridad; el recorrido de Javier está en la sección N de `docs/pruebas/cowork-checklist.md` y sigue pendiente.
 
 ## 7. Fuera de alcance
 
@@ -560,9 +566,46 @@ Cada archivo tiene un solo dueño por tanda; los traspasos ocurren entre tandas.
 | Salvaguardas: resumen por GM con crecimiento implícito, 10 + 10 filas, casilla obligatoria, huella de la simulación | D8, §4.4, R22 |
 | `filaBloqueaCierre` exportada | D1, R2 |
 
-## Preguntas abiertas para Javier
+## 11. Qué cambió al construir
 
-Quedan dos. Ninguna impide empezar las tandas 1 y 2; cada una tiene una recomendación que se construye si no hay otra respuesta.
+Todo lo de esta ficha se construyó. Estas son las diferencias respecto a lo especificado, las decisiones tomadas por el camino (registradas como 82-a a 82-g en `docs/DECISIONES.md`) y lo que encontraron QA y seguridad.
 
-1. **Alcance de «sin dato de confianza = baja».** En 2026 la IA no propone (no hay confianza) y un GM sin IA tampoco tiene confianza. Si «sin dato» contara como baja ahí, no se podría aprobar en bloque ninguna fila de 2026 ni ninguna fila de un GM sin IA, lo que contradice (a) y (e). **Recomendación:** la regla aplica solo a las filas de 2027 que tienen cifra en la propuesta vigente de su GM (allí, confianza nula = baja). En 2026 y en GM sin IA no aplica, y sus «para revisión» entran por defecto si no tienen avisos fuertes.
-2. **¿Revertir también se bloquea cuando la proyección está desactualizada?** (c) dice «todos los lotes» y (g) pone para revertir solo la condición «en trabajo». **Recomendación: no bloquear la reversión.** Volver a la propuesta nunca fija cifras viejas, y permite deshacer un error justo antes o después de un recálculo.
+**Respuestas de Javier a las dos preguntas que quedaban abiertas.**
+- «Sin dato de confianza = baja» aplica **solo a las filas de 2027 con cifra de IA** en la propuesta vigente de su GM. En 2026 y en los GM sin IA no hay confianza y esas filas entran por defecto si no tienen avisos fuertes.
+- **Revertir siempre se permite** mientras la proyección esté en trabajo, también si está desactualizada.
+
+**Decisiones tomadas al construir.**
+
+| | Decisión |
+|---|---|
+| a | La función `aplicar_lote_proyeccion` trabaja en dos pasadas: verifica todos los `registros_lectura` y condiciones en la primera y escribe en la segunda. El orden de los grupos no afecta el resultado. Un registro repetido en dos filas del lote da `LP007`. |
+| b | Las tablas de lotes solo admiten `select` e `insert` para `service_role` (M3), además del trigger de inmutabilidad. |
+| c | Un lote con cero filas aplicables responde `409 sin_filas_aplicables` y no se guarda (M2). La simulación sí responde. |
+| d | `crecimientos_sin_aprobar` no se evalúa en las tandas siguientes de una confirmación ya iniciada (mismo `calculado_at`), por D15. Los demás bloqueos sí. |
+| e | Revertir no exige huella y siempre se permite mientras la proyección esté en trabajo. |
+| f | «Solo crecimiento propio» conserva `decision_lote_id`, porque no cambia lo decidido (deliberado, H5; anotado en R12). |
+| g | `libre_en_bloque` cuenta como `libre` para la IA y nunca viaja como cifra fija al prompt. |
+
+**Cambios respecto a la especificación.**
+- La migración se llama `0031_lotes_proyeccion.sql` (la ficha decía `00L1`) y los grupos de método y de reversión se arman por fila, no por GM (§2.4). Los permisos de las tablas de lotes son mínimos (§2.0).
+- La función SQL tiene dos pasadas en lugar de «por grupo» (§2.4) y los códigos `LP006` a `LP008`.
+- El filtro del lote (`filtroLoteSchema`) quedó acotado a 5 listas de hasta 50 valores de hasta 80 caracteres, sin caracteres de control ni de dirección de texto (M2 y M4).
+- Las rutas que escriben lotes declaran `maxDuration = 60` (un lote de 300 filas lee, simula y escribe con presupuesto de 8 s en la base).
+- La lectura del servicio es por columnas: nunca el `historico` entero; en `Y` solo `salientes` y `cola_larga` (H2).
+
+**Hallazgos de QA y seguridad y su resolución** (commit `7098ef4`; las etiquetas son las de los informes de QA y de seguridad, que no viven en el repo. De seguridad constan en el código M2, M3 y M4; la M1 no quedó citada en ningún archivo ni commit).
+
+| Hallazgo | Qué pasaba | Resolución |
+|---|---|---|
+| H1 | Un grupo de método y uno de IA del mismo GM en el mismo lote: según el orden de los UUID, el grupo de método escribía primero y el de IA salía entero `cambio_concurrente`. | Función en dos pasadas (82-a); además `plan.ts` ordena los grupos de IA antes que los de método. Humo con ambos órdenes. |
+| H2 | Se leían las filas completas con su `historico` (cientos de KB por línea) de todos los nodos del lote. | Lecturas por columnas (`decision`, `decision_historico`) y listas largas de ids en tandas; prueba estática y de volumen. |
+| H3 | Un lote de 2026 que deja crecimientos por reaprobar frenaba sus propias tandas siguientes. | 82-d. |
+| H4 | La nota de «Propuesta IA» sobre cómo decidir las libres no mencionaba la aprobación en bloque. | La nota dice que se deciden por línea o por lotes en Aprobación y el enlace es «Ir a Aprobación». |
+| H5 | Duda sobre si «Solo crecimiento propio» debía limpiar la marca del lote. | Se conserva, porque no cambia lo decidido (82-f). Una prueba lo fija. |
+| H6 | El contador `reaprobables` de la cabecera contaba filas que «Reaprobar» no podría tomar (GM sin IA al día, confianza baja). | Solo cuenta lo que Reaprobar podría tomar de verdad. |
+| H7 | La casilla «Revisé el resumen por GM» se evalúa por petición y no por confirmación: en un lote de varias tandas cada tanda decide si la pide con su propio tamaño y sus GM. | **Limitación conocida, no corregida.** El resumen previo de toda la confirmación sí se ve entero en el modal antes de aprobar; lo que no se garantiza es que una tanda pequeña de una confirmación grande pida la casilla. |
+| H8 | Un error de tiempo de la base (`55P03`, `57014`) daba `500`. | Se trata como `40P01`: `409 conflicto_reintentar` y un reintento con el mismo `lote_id`. |
+| I4 | Reintentar una reversión con la proyección ya cerrada o calculándose daba `409` aunque el lote ya existiera. | La reversión busca antes el lote repetido y devuelve lo guardado. |
+| M2 | Un lote cuyas filas TypeScript ya rechazó todas llamaba igualmente a la función y guardaba una cabecera vacía; el filtro del lote no tenía tope. | `409 sin_filas_aplicables` (82-c) y filtro acotado. |
+| M3 | `service_role` tenía `grant all` sobre las tablas inmutables. | Solo `select` e `insert` (82-b). |
+| M4 | El filtro aceptaba saltos de línea y caracteres de control o de dirección de texto, que se guardan tal cual. | Mismas restricciones que la nota. |

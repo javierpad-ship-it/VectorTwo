@@ -1307,7 +1307,7 @@ Salvaguardas:
 - auditoría inmutable por lote;
 - deshacer revirtiendo un lote o una confirmación (cualquier planner, en trabajo, solo lo que nadie cambió después).
 
-Con la IA apagada funciona para el método. El cuadre de la meta sigue sin exigirse al cerrar (07e D19). Especificada en `docs/modulos/07g-aprobacion-en-bloque.md` (ajustada el 2026-11-03 con las respuestas de Javier y la revisión independiente); **sin construir**.
+Con la IA apagada funciona para el método. El cuadre de la meta sigue sin exigirse al cerrar (07e D19). Especificada en `docs/modulos/07g-aprobacion-en-bloque.md` (ajustada el 2026-11-03 con las respuestas de Javier y la revisión independiente). **Implementada y validada por QA y seguridad en `0.15.0 · M7 c` (2026-11-03, migración `0031`); falta el hito con Javier (sección N del checklist).** Lo decidido al construir está en la entrada siguiente.
 
 **Por qué.** Son ≈ 680 filas por año que decidir para cerrar, y cada cierre de mes obliga a revisar el cierre del año y el año siguiente. Decidir fila por fila convierte eso en horas de clics sin más criterio. El motivo de la regla original («el planner revisa y decide») se conserva: el bloque no es automático, se elige con filtros, se ve el efecto por GM antes de confirmar, queda la traza de quién aprobó qué y con qué propuesta, y se puede deshacer. Excluir la baja confianza deja en manos del planner justo las cifras que la IA no respalda. Bloquear con datos viejos evita fijar cifras que el recálculo ya no propondría.
 
@@ -1318,3 +1318,29 @@ Con la IA apagada funciona para el método. El cuadre de la meta sigue sin exigi
 - mezclar 2026 y 2027 en un mismo lote;
 - aprobar en bloque con `decidirFila` en bucle (minutos y sin condición contra decisiones simultáneas);
 - exigir el cuadre al cerrar.
+
+## 2026-11-03 · M7 (07g): decisiones tomadas al construir la aprobación en bloque (ampliación de la 82)
+
+Se registran como parte de la decisión 82 (letras 82-a a 82-g) y no consumen número propio. Ninguna cambia lo que Javier pidió; son detalles de diseño que un lector futuro podría cuestionar. Construida en `0.15.0 · M7 c`; fichas y código en `docs/modulos/07g-aprobacion-en-bloque.md`, `src/lib/aprobacion/` y `supabase/migrations/0031_lotes_proyeccion.sql`.
+
+- **82-a · La función `aplicar_lote_proyeccion` trabaja en dos pasadas.** En la primera bloquea todo y verifica todos los `registros_lectura` y todas las condiciones contra el estado del inicio del lote, sin escribir; en la segunda escribe según esos veredictos. Así el orden de los grupos no afecta el resultado. Antes, un grupo de método escrito primero cambiaba el `updated_at` de un registro que el grupo de IA del mismo GM tenía en su lectura, y la IA salía rechazada o no según el orden de los UUID (hallazgo H1 de QA). Un mismo registro en dos filas del mismo lote da `LP007` (payload inválido) en lugar de rechazar la segunda fila.
+- **82-b · Las tablas de lotes solo admiten `select` e `insert` para `service_role`.** Sin `update`, `delete`, `truncate`, `trigger` ni `references`, además del trigger de inmutabilidad: defensa en profundidad (hallazgo M3 de seguridad; la ficha original decía solo «`grant` a `service_role`»). El trigger sigue siendo la barrera para el dueño de la base, que conserva sus privilegios porque las FK `on delete set null` corren con ellos.
+- **82-c · Un lote sin ninguna fila aplicable responde `409 sin_filas_aplicables` y no se guarda** (hallazgo M2). No se llama a la función SQL ni queda una cabecera vacía en el historial. Vale para aprobar, reaprobar y revertir; revertir una confirmación tolera las tandas vacías. La simulación sí responde, para que el planner vea por qué no se aprobaría nada.
+- **82-d · El bloqueo `crecimientos_sin_aprobar` no se evalúa en las tandas siguientes de una confirmación ya iniciada** (mismo `calculado_at` y filas ya aplicadas). Por D15, un lote de 2026 puede dejar crecimientos de 2027 por reaprobar; si las tandas siguientes del mismo lote se bloquearan por eso, un lote grande quedaría a medias. Los demás bloqueos se evalúan siempre; una confirmación nueva sí vuelve a evaluar este.
+- **82-e · Revertir no exige huella de simulación y siempre se permite mientras la proyección esté en trabajo.** No se bloquea por desactualizada, método anterior ni crecimientos: volver a la propuesta nunca fija cifras viejas y permite deshacer un error justo antes o después de un recálculo (respuesta de Javier a la pregunta B1 de la ficha). La huella es opcional en el esquema; la simulación se recomienda desde la pantalla pero no se exige.
+- **82-f · «Solo crecimiento propio» conserva `decision_lote_id`.** Es la única decisión individual sobre una fila que no limpia la marca del lote, porque no cambia la cifra decidida ni su origen (hallazgo H5 de QA, deliberado). Cualquier otra decisión individual (cifra, «Aceptar», «Aceptar IA», «Volver a la propuesta») la pone en `null`. Excepción anotada en R12 de la ficha.
+- **82-g · `libre_en_bloque` cuenta como `libre` para la IA y nunca viaja como cifra fija al prompt.** Una fila de 2027 aprobada en bloque con IA se trata como libre al generar la propuesta y al calcular `A`: así «Reaprobar» puede actualizarla tras un cierre de mes y la absorción de las demás libres no cambia por haberla aprobado. Para «Aceptar IA» fila por fila no es aceptable (ya está decidida) y en la Matriz cuenta por su `decidido`. A los proveedores de IA nunca sale como una cifra fija (la entrada la trata como libre).
+
+**Descartado.** Escribir los grupos uno por uno verificando cada uno justo antes de escribirlo (depende del orden); guardar lotes vacíos como evidencia de un intento (ensucia el historial sin dejar nada que deshacer); exigir huella para revertir (la reversión no fija cifras).
+
+## 2026-11-03 · Numeración de decisiones de 08b y 08c, a registrar
+
+Al cerrar 07g, `DECISIONES.md` tiene registradas la 70 a la 80 (07e) y la 82 (07g); la 81 quedó reservada para 08b. Las fichas 08b y 08c solo proponen sus decisiones, no están registradas aquí, así que no se renumera nada en este archivo: se **reservan** estos números para cuando se registren.
+
+| Ficha | Números reservados |
+|---|---|
+| 08b (agrupadores de compras) | 81, 83, 84, 85, 86 (08b-1 y 08b-2), 92 a 97 y **98** (la que su ficha numeraba 82, que choca con la 82 de 07g ya registrada) |
+| 08c (proveedores y fotos) | 87 a 91 |
+| siguiente libre | 99 |
+
+Las fichas 08b y 08c ya no se pisan entre sí (81 a 86, 87 a 91 y 92 a 97 eran contiguas); el único choque era el de la 82, y se resolvió en la ficha 08b (la decisión «El viaje va en la compra; el embarque y el paquete van en la entrega» pasa de la 82 a la 98). Quien registre una de esas decisiones usa el número reservado; la 82 es solo de 07g.

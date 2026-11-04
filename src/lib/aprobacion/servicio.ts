@@ -1147,7 +1147,7 @@ async function revertirUnLote(e: Escenario, lote: LoteDb, o: ParametrosReversion
   if (o.simular) {
     return listo(armarResultadoLote({ plan: ev.plan, efecto_gm: ev.efecto, crecimientos_a_reaprobar: ev.crecimientos, pendientes_cierre: ev.pendientes, huella_simulacion: ev.huella, simulado: true }));
   }
-  // Revertir no exige huella (decisión pendiente de confirmar, ficha §Preguntas B1): si el cuerpo trae una y el resultado es otro, no se escribe.
+  // Revertir no exige huella (decisión 82-e): si el cuerpo trae una y el resultado es otro, no se escribe.
   if (o.huella_simulacion !== undefined && o.huella_simulacion !== ev.huella) {
     return fallaConCodigo("El resultado cambió desde que lo revisaste: vuelve a simular y revisa el resumen.", 409, "simulacion_distinta");
   }

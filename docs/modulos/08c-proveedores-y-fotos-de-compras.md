@@ -505,7 +505,7 @@ En cada nodo: líneas, unidades, costo por moneda, costo en soles, venta potenci
 
 ## 9. Decisiones cerradas en esta ficha y preguntas abiertas para Javier
 
-### 9.1 Decisiones del arquitecto (propuestas para `docs/DECISIONES.md`, numeradas después de las 81–86 de 08b)
+### 9.1 Decisiones del arquitecto (propuestas para `docs/DECISIONES.md`, números 87 a 91, reservados en `DECISIONES.md`; 08b usa 81, 83 a 86 y 92 a 98)
 
 - **87 · Proveedores es un maestro de Compras, compartido por todos los viajes.** Su ficha y sus contactos se guardan en una sola función transaccional con `revision`. `proveedor_contactos` pasa de la `0028` de M9a a esta ficha; la `0028` queda solo con `compra_linea_mezcla`. Crea y edita cualquier usuario; `es_intercompany`, desactivar y eliminar, solo el planner.
 - **88 · Las fotos de una línea se reducen en el navegador** a lo que cabe en 800×800 conservando la proporción (JPEG; miniatura de 320 px). Suben **por un route handler con guard**, que las guarda con `service_role` en un bucket privado **sin políticas**. Se leen solo por URLs firmadas de 1 h generadas en el servidor. Máximo 3 activas. Quitar las borra del bucket y conserva quién y cuándo. **No tocan `revision`, eventos ni la huella del flujo.** Se descarta lo de COTV: políticas abiertas a `authenticated` y subida directa del navegador.
