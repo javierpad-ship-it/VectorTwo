@@ -89,8 +89,16 @@ insert into r (caso, ok) values
   ('anon y authenticated no tienen ningun permiso sobre las 8 tablas; service_role tiene select, insert, update y delete',
     (select count(*) from tablas_ia t, unnest(array['select', 'insert', 'update', 'delete', 'truncate']) p(priv)
       where has_table_privilege('anon', 'public.' || t.n, p.priv) or has_table_privilege('authenticated', 'public.' || t.n, p.priv)) = 0
-    and (select count(*) from tablas_ia t, unnest(array['select', 'insert', 'update', 'delete']) p(priv)
-      where not has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0),
+    -- 0035: las 4 inmutables quedan en select e insert para service_role; las 4 mutables conservan update y delete; TRUNCATE solo lo
+    -- conserva ia_configuraciones (ningun trigger lo frena en las mutables, pero ningun servicio lo usa).
+    and (select count(*) from tablas_ia t, unnest(array['select', 'insert']) p(priv)
+      where not has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0
+    and (select count(*) from unnest(array['ia_configuraciones', 'ia_evaluaciones', 'ia_corridas', 'ia_corrida_gms']) t(n), unnest(array['update', 'delete']) p(priv)
+      where not has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0
+    and (select count(*) from unnest(array['ia_entradas', 'ia_llamadas', 'ia_propuestas_gm', 'ia_propuestas_filas']) t(n), unnest(array['update', 'delete', 'truncate']) p(priv)
+      where has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0
+    and (select count(*) from unnest(array['ia_evaluaciones', 'ia_corridas', 'ia_corrida_gms']) t(n)
+      where has_table_privilege('service_role', 'public.' || t.n, 'truncate')) = 0),
   ('las 4 tablas inmutables NO llevan activo ni updated_at; las 3 mutables con activo (config, evaluaciones, corridas) si',
     (select count(*) from information_schema.columns where table_schema = 'public'
        and table_name in ('ia_entradas', 'ia_llamadas', 'ia_propuestas_gm', 'ia_propuestas_filas')
@@ -539,6 +547,10 @@ insert into r (caso, ok) select 'tablas de trabajo e inmutables: ' || caso, ok f
 -- 4. Inmutabilidad (R19): update, delete y truncate fallan; solo se admite poner en NULL una FK set null
 -- ---------------------------------------------------------------------------------------------------------------------
 -- Se corre como superusuario: el trigger rechaza a TODOS los roles (el permiso no interviene).
+-- `set constraints all immediate`: el `cascade` alcanza a tablas de 0031 (proyeccion_fila_anios, proyeccion_lote_filas) que, dentro de esta
+-- misma transaccion, pueden tener eventos de FK pendientes; Postgres rechaza entonces el truncate ANTES de llegar al trigger de
+-- inmutabilidad («cannot TRUNCATE ... because it has pending trigger events») y el caso salia en falso sin probar nada.
+set constraints all immediate;
 create temp table tr (k text primary key, m text);
 insert into tr select 'entradas', pg_temp.msg($q$ truncate table public.ia_entradas cascade $q$);
 insert into tr select 'llamadas', pg_temp.msg($q$ truncate table public.ia_llamadas $q$);
@@ -972,6 +984,9 @@ declare
   v_upd boolean := false;
   v_del boolean := false;
   v_trunc boolean := false;
+  v_upd_d boolean := false;
+  v_del_d boolean := false;
+  v_trunc_d boolean := false;
 begin
   set local role service_role;
   v_venta := public.venta_lineas_ia(array[(select gml1 from ids)], jsonb_build_object((select t1 from ids)::text, '11111'), date '2025-01-01', date '2025-03-01');
@@ -979,16 +994,24 @@ begin
   insert into public.ia_llamadas (corrida_id, corrida_gm_id, paso, tipo_llamada, intento, huella_llamada, estado, bytes_entrada, filas_enviadas, duracion_ms)
     select (select corrida_ok from e), (select gm_sr from g), 'n1', 'natural', 1, repeat('5', 64), 'ok', 1, 1, 1;
   v_ins := true;
-  begin update public.ia_llamadas set costo_usd = 9 where huella_llamada = repeat('5', 64); exception when others then v_upd := sqlerrm like '%inmutable%'; end;
-  begin delete from public.ia_propuestas_gm where id = v_id; exception when others then v_del := sqlerrm like '%inmutable%'; end;
-  begin truncate table public.ia_llamadas; exception when others then v_trunc := sqlerrm like '%inmutable%'; end;
+  -- 0035: service_role ya no tiene update, delete ni truncate sobre las tablas inmutables: lo frena el permiso (42501).
+  begin update public.ia_llamadas set costo_usd = 9 where huella_llamada = repeat('5', 64); exception when others then v_upd := sqlstate = '42501'; end;
+  begin delete from public.ia_propuestas_gm where id = v_id; exception when others then v_del := sqlstate = '42501'; end;
+  begin truncate table public.ia_llamadas; exception when others then v_trunc := sqlstate = '42501'; end;
   reset role;
+  -- El trigger sigue siendo la segunda barrera, la que vale para el dueño (postgres).
+  begin update public.ia_llamadas set costo_usd = 9 where huella_llamada = repeat('5', 64); exception when others then v_upd_d := sqlerrm like '%inmutable%'; end;
+  begin delete from public.ia_propuestas_gm where id = v_id; exception when others then v_del_d := sqlerrm like '%inmutable%'; end;
+  begin truncate table public.ia_llamadas; exception when others then v_trunc_d := sqlerrm like '%inmutable%'; end;
   insert into r (caso, ok) values
     ('service_role: venta_lineas_ia y registrar_propuesta_ia_gm funcionan (permisos de funcion y de tablas)',
       jsonb_array_length(v_venta -> 'u') > 0 and v_id is not null and v_ins),
-    ('service_role: update sobre ia_llamadas lo rechaza el trigger (no el permiso)', v_upd),
-    ('service_role: delete sobre ia_propuestas_gm lo rechaza el trigger (no el permiso)', v_del),
-    ('service_role: truncate sobre ia_llamadas lo rechaza el trigger (no el permiso)', v_trunc),
+    ('service_role: update sobre ia_llamadas lo rechaza el permiso (42501; 0035 le quito update)', v_upd),
+    ('service_role: delete sobre ia_propuestas_gm lo rechaza el permiso (42501; 0035 le quito delete)', v_del),
+    ('service_role: truncate sobre ia_llamadas lo rechaza el permiso (42501; 0035 le quito truncate)', v_trunc),
+    ('dueño (postgres): update sobre ia_llamadas lo rechaza el trigger', v_upd_d),
+    ('dueño (postgres): delete sobre ia_propuestas_gm lo rechaza el trigger', v_del_d),
+    ('dueño (postgres): truncate sobre ia_llamadas lo rechaza el trigger', v_trunc_d),
     ('service_role: la propuesta registrada con el rol de la API existe',
       (select count(*) from ia_propuestas_gm where id = v_id) = 1);
 exception when others then

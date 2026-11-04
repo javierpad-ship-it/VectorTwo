@@ -1175,11 +1175,12 @@ begin
   begin update public.compra_agrupador_eventos set resumen = 'x'; exception when insufficient_privilege then v_ok := true; end;
   begin delete from public.compra_agrupador_eventos; exception when insufficient_privilege then v_ok2 := true; end;
   begin truncate public.compra_agrupador_eventos; exception when insufficient_privilege then v_ok3 := true; end;
-  begin truncate public.compra_eventos; exception when restrict_violation then v_ok4 := true; end;
+  -- 0035: compra_eventos tambien queda en select e insert, asi que el truncate lo frena el permiso; el trigger por sentencia lo prueba el caso del dueño (arriba).
+  begin truncate public.compra_eventos; exception when insufficient_privilege then v_ok4 := true; end;
   reset role;
   insert into r (caso, ok) values
     ('como service_role: update, delete y truncate de compra_agrupador_eventos fallan por permiso (solo select e insert)', v_ok and v_ok2 and v_ok3),
-    ('como service_role: truncate de compra_eventos (que si tiene el permiso) lo rechaza el trigger por sentencia (restrict_violation)', v_ok4);
+    ('como service_role: truncate de compra_eventos lo rechaza el permiso (desde 0035 solo tiene select e insert)', v_ok4);
 exception when others then
   reset role;
   insert into r (caso, ok) values ('service_role e inmutabilidad: prueba sin excepcion (fallo: ' || sqlerrm || ')', false);

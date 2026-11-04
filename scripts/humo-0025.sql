@@ -335,16 +335,21 @@ select 'RLS activo en las 8 tablas y sin ninguna politica',
       'proveedores', 'compras', 'compra_lineas', 'compra_linea_entregas', 'compra_linea_repartos', 'compra_linea_recepciones',
       'compra_eventos', 'flujo_parametros')) = 0;
 insert into r (caso, ok)
-select 'anon y authenticated no tienen ningun permiso sobre las 8 tablas; service_role tiene select, insert, update y delete',
+select 'anon y authenticated no tienen ningun permiso sobre las 8 tablas; service_role tiene select, insert, update y delete (compra_eventos, de solo insercion desde 0035: solo select e insert)',
   (select count(*) from (values ('proveedores'), ('compras'), ('compra_lineas'), ('compra_linea_entregas'), ('compra_linea_repartos'),
         ('compra_linea_recepciones'), ('compra_eventos'), ('flujo_parametros')) t(n)
     cross join (values ('anon'), ('authenticated')) ro(rol)
     cross join (values ('select'), ('insert'), ('update'), ('delete')) p(priv)
     where has_table_privilege(ro.rol, 'public.' || t.n, p.priv)) = 0
   and (select count(*) from (values ('proveedores'), ('compras'), ('compra_lineas'), ('compra_linea_entregas'), ('compra_linea_repartos'),
-        ('compra_linea_recepciones'), ('compra_eventos'), ('flujo_parametros')) t(n)
+        ('compra_linea_recepciones'), ('flujo_parametros')) t(n)
     cross join (values ('select'), ('insert'), ('update'), ('delete')) p(priv)
-    where not has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0;
+    where not has_table_privilege('service_role', 'public.' || t.n, p.priv)) = 0
+  and has_table_privilege('service_role', 'public.compra_eventos', 'select')
+  and has_table_privilege('service_role', 'public.compra_eventos', 'insert')
+  and not has_table_privilege('service_role', 'public.compra_eventos', 'update')
+  and not has_table_privilege('service_role', 'public.compra_eventos', 'delete')
+  and not has_table_privilege('service_role', 'public.compra_eventos', 'truncate');
 insert into r (caso, ok)
 select 'compras_numero_seq: solo service_role la usa (anon y authenticated no)',
   has_sequence_privilege('service_role', 'public.compras_numero_seq', 'usage')
@@ -1053,7 +1058,7 @@ do $$
 declare
   v_imp jsonb; v_rec jsonb; v_q jsonb; v_c jsonb; v_stock jsonb; v_huella jsonb;
   v_compra uuid; v_linea uuid; v_recep uuid;
-  v_upd boolean := false; v_del boolean := false; v_trunc text;
+  v_upd boolean := false; v_del boolean := false; v_trunc text; v_upd_d boolean := false; v_del_d boolean := false;
   v_ok boolean;
   v_pre record;
 begin
@@ -1070,9 +1075,13 @@ begin
   v_c := public.cancelar_compra(v_compra, (v_q ->> 'revision')::int, 'prueba con service_role', v_pre.actor);
   v_stock := public.stock_flujo(v_pre.carga);
   v_huella := public.flujo_huella_base();
-  begin update public.compra_eventos set resumen = 'manipulado' where compra_id = v_compra; exception when others then v_upd := sqlerrm like '%inmutable%'; end;
-  begin delete from public.compra_eventos where compra_id = v_compra; exception when others then v_del := sqlerrm like '%inmutable%'; end;
+  -- 0035: service_role ya no tiene update ni delete sobre compra_eventos: lo frena el permiso (42501), antes que el trigger.
+  begin update public.compra_eventos set resumen = 'manipulado' where compra_id = v_compra; exception when others then v_upd := sqlstate = '42501'; end;
+  begin delete from public.compra_eventos where compra_id = v_compra; exception when others then v_del := sqlstate = '42501'; end;
   reset role;
+  -- El trigger sigue siendo la segunda barrera, la que vale para el dueño (postgres, que conserva sus privilegios).
+  begin update public.compra_eventos set resumen = 'manipulado' where compra_id = v_compra; exception when others then v_upd_d := sqlerrm like '%inmutable%'; end;
+  begin delete from public.compra_eventos where compra_id = v_compra; exception when others then v_del_d := sqlerrm like '%inmutable%'; end;
   insert into r (caso, ok) values
     ('service_role: importar_compra (usa la secuencia compras_numero_seq y escribe 5 tablas) devuelve ok',
       (v_imp ->> 'ok')::boolean and v_imp ->> 'numero' ~ '^C-[0-9]{6}$'),
@@ -1080,8 +1089,10 @@ begin
       (v_rec ->> 'ok')::boolean and (v_q ->> 'ok')::boolean and (v_c ->> 'ok')::boolean and v_c ->> 'estado' = 'cancelada' and (v_c ->> 'revision')::int = 3),
     ('service_role: stock_flujo y flujo_huella_base responden (publicada, con filas)',
       (v_stock ->> 'publicada')::boolean and jsonb_array_length(v_stock -> 'filas') = 2 and v_huella ? 'compras'),
-    ('service_role: update sobre compra_eventos lo rechaza el trigger (no el permiso)', v_upd),
-    ('service_role: delete sobre compra_eventos lo rechaza el trigger (no el permiso)', v_del),
+    ('service_role: update sobre compra_eventos lo rechaza el permiso (42501; 0035 le quito update)', v_upd),
+    ('service_role: delete sobre compra_eventos lo rechaza el permiso (42501; 0035 le quito delete)', v_del),
+    ('dueño (postgres): update sobre compra_eventos lo rechaza el trigger', v_upd_d),
+    ('dueño (postgres): delete sobre compra_eventos lo rechaza el trigger', v_del_d),
     ('service_role: los eventos de la compra siguen intactos (4 eventos: importar, recibir, quitar_recepcion, cancelar)',
       (select count(*) from compra_eventos where compra_id = v_compra) = 4 and (select count(*) from compra_eventos where compra_id = v_compra and resumen = 'manipulado') = 0);
 exception when others then

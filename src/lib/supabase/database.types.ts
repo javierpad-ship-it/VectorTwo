@@ -1,6 +1,20 @@
 /**
  * Tipos de la base de datos.
  *
+ * COMO REGENERAR (nota de la 0035, 2026-11-04). El archivo parte de lo que entrega `generate_typescript_types` y lleva retoques a mano
+ * (se listan abajo). Pasos: (1) aplicar la migracion en Vector2 con `execute_sql` y registrarla en `public.migraciones_aplicadas`;
+ * (2) llamar `mcp__Supabase__generate_typescript_types` con `project_id = tzjsxzmsvvhxyiooihyq` (devuelve `{ "types": "..." }`; el texto
+ * de `types` es el archivo); alternativa con la CLI: `npx supabase gen types typescript --project-id tzjsxzmsvvhxyiooihyq --schema public`;
+ * (3) pasar prettier, conservar esta cabecera y correr `npx tsc --noEmit`.
+ * El generador NO se puede guardar tal cual todavia: `npx tsc --noEmit` falla con 4 errores en `src/lib/compras/agrupadores/consultas.ts`
+ * (lineas ~325, 330, 343 y 348) porque tipa como no nulos los argumentos que las funciones SQL admiten nulos (`guardar_viaje.p_revision`,
+ * `guardar_embarque.p_revision`, `cambiar_estado_agrupador.p_motivo`, `asignar_viaje_compras.p_viaje`). Diferencias reales con el
+ * generador al 2026-11-04 (todas deliberadas, el esquema coincide): (a) el generador lista `prueba_conexion` (tabla de pruebas previa,
+ * fuera de `supabase/migrations/`) y aqui no; (b) esos 4 argumentos son `T | null` aqui y `T` alli; (c) `compra_embarques.periodo_llegada`
+ * (columna generada) es `never` en Insert y Update aqui y `string | null` alli; (d) los argumentos vacios son `Record<PropertyKey, never>`
+ * aqui y `never` alli; (e) el generador agrega `__InternalSupabase` y no pone `;`. Un test de deriva debe comparar tablas, columnas,
+ * relaciones y funciones por estructura, no el texto.
+ *
  * Actualizados a mano el 2026-11-04 con la 0033 (M7 07f, venta por tienda en Crecimientos, aplicada en `Vector2`): solo la funcion de lectura
  * `venta_tienda_nodos(p_gml_ids uuid[], p_desde date, p_hasta date) -> Json` (`{ series: [{ t, p, u, s }], cargas: { 'aaaa-mm': carga_id } }`).
  * Sin tablas ni columnas nuevas. Firma tomada de `pg_proc` de `Vector2` (no se regenero el archivo entero).
@@ -2801,6 +2815,24 @@ export type Database = {
             referencedColumns: ["marca_id"];
           },
         ];
+      };
+      migraciones_aplicadas: {
+        Row: {
+          aplicada_at: string;
+          nombre: string;
+          nota: string | null;
+        };
+        Insert: {
+          aplicada_at?: string;
+          nombre: string;
+          nota?: string | null;
+        };
+        Update: {
+          aplicada_at?: string;
+          nombre?: string;
+          nota?: string | null;
+        };
+        Relationships: [];
       };
       mundos: {
         Row: {
