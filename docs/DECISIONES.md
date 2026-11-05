@@ -1458,3 +1458,12 @@ Todas están redactadas con su alcance completo en `docs/modulos/08c-proveedores
 **Por qué.** Es el mismo contrato: la función recibe nodos, y el Resto también tiene una base `Σ B` que Javier aprueba y quiere ver. El costo es de tiempo: en caliente tarda 1,3 a 2,1 s, más que el presupuesto de 1 s, y queda anotado como pendiente.
 
 **Descartado.** Solo HOMBRE y MUJER (el Resto quedaría con una base que no se puede abrir); un «Ver por tienda» del Total (mezcla tiendas de todos los géneros sin una base que cuadrar).
+
+## 2026-11-05 · M8 (08b-1b): fechas logísticas del embarque, decisiones propuestas (115 a 118, sin registrar)
+
+Propuestas de la ficha `docs/modulos/08b-fechas-logisticas.md`, pendientes de las preguntas P1 a P4 de Javier (§9 de esa ficha). **No están vigentes**: se registran con este número al construir la entrega. Se reservan los números **115 a 118**.
+
+- **115** · El embarque tiene cuatro hitos de fecha (sale, llega a puerto, llega al área de conteo, ingresa al stock) y **solo el ingreso al stock decide el mes del flujo**. Precisa la **83** («llegada al CD»): `fecha_llegada_estimada` conserva el nombre y pasa a significar ingreso previsto. No hay caída automática al hito anterior.
+- **116** · Reprogramar un hito exige motivo y causa (catálogo); completar una fecha vacía, no. Reprogramaciones y retraso se derivan de los eventos. «Ya ocurrió» con una sola columna secuencial, `hito_confirmado`. El desorden entre hitos avisa y no bloquea, salvo salida > ingreso (check de la `0032`).
+- **117** · Una compra puede entrar sin mes propio si trae embarque: toma el mes de ingreso del embarque. No hay entregas sin mes. Matiza 08b §3.9 regla 3 y responde G2 de 08c §12.8.
+- **118** · Los pagos no se modelan en el embarque: `pago` es una causa de reprogramación.
