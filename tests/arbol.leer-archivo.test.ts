@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
-import { esExcel, hojaATabla, libroATabla, nombreBase, serieAFechaIso } from "@/lib/arbol/leer-archivo";
+import {
+  BYTES_EXCEL_MAX,
+  MENSAJE_EXCEL_PESADO,
+  OPCIONES_LECTURA_EXCEL,
+  esExcel,
+  exigirExcelLiviano,
+  hojaATabla,
+  leerArchivoTabular,
+  libroATabla,
+  nombreBase,
+  serieAFechaIso,
+} from "@/lib/arbol/leer-archivo";
 
 function libroDe(filas: unknown[][], nombreHoja = "Sheet1"): XLSX.WorkBook {
   const libro = XLSX.utils.book_new();
@@ -145,5 +156,75 @@ describe("fechas de Excel", () => {
     expect(serieAFechaIso(serie(2019, 3, 15))).toBe("2019-03-15");
     expect(serieAFechaIso(0)).toBeNull();
     expect(serieAFechaIso(Number.NaN)).toBeNull();
+  });
+});
+
+describe("lectura de Excel endurecida", () => {
+  const archivoDe = (bytes: ArrayBuffer | Uint8Array, nombre: string) => new File([bytes as BlobPart], nombre);
+
+  it("un Excel de más de 50 MB se rechaza antes de leerlo a memoria", async () => {
+    const arrayBuffer = vi.fn();
+    const enorme = { name: "venta.xlsx", size: BYTES_EXCEL_MAX + 1, arrayBuffer } as unknown as File;
+    await expect(leerArchivoTabular(enorme)).rejects.toThrow("Ese Excel pesa demasiado: guárdalo como CSV");
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(MENSAJE_EXCEL_PESADO).toBe("Ese Excel pesa demasiado: guárdalo como CSV");
+  });
+
+  it("el tope es exactamente 50 MB: el límite pasa, un byte más no", () => {
+    expect(BYTES_EXCEL_MAX).toBe(50 * 1024 * 1024);
+    expect(() => exigirExcelLiviano({ size: BYTES_EXCEL_MAX })).not.toThrow();
+    expect(() => exigirExcelLiviano({ size: BYTES_EXCEL_MAX + 1 })).toThrow(MENSAJE_EXCEL_PESADO);
+  });
+
+  it("las opciones de lectura conservan cellNF y recortan lo que la app no usa", () => {
+    expect(OPCIONES_LECTURA_EXCEL).toEqual({
+      type: "array",
+      cellNF: true,
+      cellFormula: false,
+      cellHTML: false,
+      cellStyles: false,
+      bookVBA: false,
+    });
+  });
+
+  it("con las opciones recortadas las fechas y los números con formato salen igual", async () => {
+    const hoja = XLSX.utils.aoa_to_sheet([["Fecha", "Monto"], [0, 85000]]);
+    hoja.A2 = { t: "n", v: 43539, z: "dd/mm/yyyy" } as XLSX.CellObject; // 15/03/2019
+    hoja.B2.z = "#,##0.00";
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Hoja1");
+    const bytes = XLSX.write(libro, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const t = await leerArchivoTabular(archivoDe(bytes, "tiendas.xlsx"));
+    expect(t.filas).toEqual([{ Fecha: "2019-03-15", Monto: "85,000.00" }]);
+  });
+
+  it("un .xls (BIFF8) sigue leyéndose por el camino real del importador", async () => {
+    const libro = libroDe([["GENERO_LK", "MUNDO", "Fecha"], ["H", "URBANO", 0]]);
+    libro.Sheets.Sheet1.C2 = { t: "n", v: 43539, z: "dd/mm/yyyy" } as XLSX.CellObject;
+    const binario = XLSX.write(libro, { type: "array", bookType: "biff8" }) as ArrayBuffer;
+    const t = await leerArchivoTabular(archivoDe(binario, "arbol.xls"));
+    expect(t.hojas).toEqual(["Sheet1"]);
+    expect(t.filas).toEqual([{ GENERO_LK: "H", MUNDO: "URBANO", Fecha: "2019-03-15" }]);
+  });
+
+  it("nombres de hoja como __proto__ y constructor no contaminan Object.prototype", async () => {
+    const libro = XLSX.utils.book_new();
+    for (const nombre of ["__proto__", "constructor", "Normal"]) {
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet([["A"], [nombre]]), nombre);
+    }
+    expect(() => libroATabla(XLSX.utils, libro, "__proto__")).not.toThrow();
+    expect(libroATabla(XLSX.utils, libro, "constructor").filas).toEqual([{ A: "constructor" }]);
+
+    // Y por el camino completo: escribir el libro, releerlo con las opciones de la app y tabularlo.
+    const bytes = XLSX.write(libro, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const t = await leerArchivoTabular(archivoDe(bytes, "raro.xlsx"), "constructor");
+    expect(t.hojas).toEqual(expect.arrayContaining(["__proto__", "constructor", "Normal"]));
+    expect(t.filas).toEqual([{ A: "constructor" }]);
+
+    const basura = Object.prototype as Record<string, unknown>;
+    expect(Object.keys(Object.prototype)).toEqual([]);
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    for (const clave of ["A", "!ref", "t", "v", "w", "SheetNames", "Sheets", "polluted"]) expect(basura[clave], clave).toBeUndefined();
+    expect(({} as Record<string, unknown>)["!ref"]).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import Papa from "papaparse";
 import type { CellObject, WorkSheet } from "xlsx";
-import { esExcel, fechasExcelAIso } from "@/lib/arbol/leer-archivo";
+import { esExcel, exigirExcelLiviano, fechasExcelAIso, OPCIONES_LECTURA_EXCEL } from "@/lib/arbol/leer-archivo";
 import { archivoPosiblementeTruncado } from "./cargas";
 import { CAMPOS_VENTA, FILAS_EXCEL_MAX, type CampoVenta, type FilaCruda } from "./tipos";
 
@@ -314,8 +314,9 @@ function rangoDeHoja(hoja: WorkSheet): { filas: number; columnas: number } {
 }
 
 async function abrirLibro(archivo: File, hoja?: string): Promise<LibroAbierto & { utils: typeof import("xlsx").utils }> {
+  exigirExcelLiviano(archivo);
   const XLSX = await import("xlsx");
-  const libro = XLSX.read(await archivo.arrayBuffer(), { type: "array", cellNF: true });
+  const libro = XLSX.read(await archivo.arrayBuffer(), OPCIONES_LECTURA_EXCEL);
   const hojas = libro.SheetNames;
   const nombre = hoja && hojas.includes(hoja) ? hoja : (hojas[0] ?? null);
   if (!nombre) return { hoja: {}, nombre: null, hojas, filas: 0, utils: XLSX.utils };

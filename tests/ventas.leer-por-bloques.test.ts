@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 import {
   cortarEnFilaCompleta,
@@ -214,6 +214,24 @@ describe("leerPorBloques: Excel (secundario)", () => {
     const base = await leerCabecera(archivo);
     expect(base).toMatchObject({ hoja: "Hoja1", columnas: ["A", "B"], filasHoja: 2 });
     expect(base.muestra).toEqual([["1", "2"]]);
+  });
+
+  it("rechaza un Excel de más de 50 MB sin leerlo a memoria", async () => {
+    const arrayBuffer = vi.fn();
+    const enorme = { name: "venta.xlsx", size: 50 * 1024 * 1024 + 1, arrayBuffer } as unknown as File;
+    await expect(leerCabecera(enorme)).rejects.toThrow("Ese Excel pesa demasiado: guárdalo como CSV");
+    await expect(leer(enorme)).rejects.toThrow("Ese Excel pesa demasiado: guárdalo como CSV");
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it("un .xls (BIFF8) sigue leyéndose, con números crudos", async () => {
+    const hoja = XLSX.utils.aoa_to_sheet([["AÑO", "Vta S/"], [2026, 205.70999999999998]]);
+    hoja.A2.z = "#,##0";
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, hoja, "Hoja1");
+    const bytes = XLSX.write(wb, { type: "array", bookType: "biff8" }) as ArrayBuffer;
+    const { filas } = await leer(new File([bytes], "ventas.xls"));
+    expect(filas).toEqual([["2026", "205.70999999999998"]]);
   });
 
   it("parte la hoja en bloques sin perder ni repetir filas", async () => {

@@ -22,6 +22,29 @@ export function esExcel(nombre: string): boolean {
   return EXTENSIONES_EXCEL.test(nombre);
 }
 
+/** Un Excel de más bytes que esto no se parsea (SheetJS lo carga entero en memoria); se pide CSV. */
+export const BYTES_EXCEL_MAX = 50 * 1024 * 1024;
+
+export const MENSAJE_EXCEL_PESADO = "Ese Excel pesa demasiado: guárdalo como CSV";
+
+/**
+ * Opciones de lectura de SheetJS: solo lo que usa la app. No hacen falta fórmulas, HTML, estilos ni macros.
+ * `cellNF` se conserva: `fechasExcelAIso` y `numerosCrudosExcel` dependen del formato de número (`z`/`w`).
+ */
+export const OPCIONES_LECTURA_EXCEL = {
+  type: "array",
+  cellNF: true,
+  cellFormula: false,
+  cellHTML: false,
+  cellStyles: false,
+  bookVBA: false,
+} as const;
+
+/** Rechaza un Excel demasiado grande ANTES de leerlo a memoria y parsearlo. */
+export function exigirExcelLiviano(archivo: { size: number }): void {
+  if (archivo.size > BYTES_EXCEL_MAX) throw new Error(MENSAJE_EXCEL_PESADO);
+}
+
 /** Quita la extensión .csv/.xlsx/.xls para armar nombres derivados. */
 export function nombreBase(nombre: string): string {
   return nombre.replace(/\.(csv|xlsx|xlsm|xls)$/i, "");
@@ -119,9 +142,10 @@ export function libroATabla(utils: typeof import("xlsx").utils, libro: WorkBook,
  */
 export async function leerArchivoTabular(archivo: File, hoja?: string): Promise<TablaLeida> {
   if (esExcel(archivo.name)) {
+    exigirExcelLiviano(archivo);
     const XLSX = await import("xlsx");
     const datos = await archivo.arrayBuffer();
-    const libro = XLSX.read(datos, { type: "array", cellNF: true });
+    const libro = XLSX.read(datos, OPCIONES_LECTURA_EXCEL);
     return libroATabla(XLSX.utils, libro, hoja);
   }
 

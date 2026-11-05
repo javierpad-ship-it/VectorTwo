@@ -64,6 +64,9 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      - name: Auditoria de dependencias de produccion
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Lint
         run: npm run lint
 
