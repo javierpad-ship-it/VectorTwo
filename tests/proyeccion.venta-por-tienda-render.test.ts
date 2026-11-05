@@ -3,12 +3,14 @@ import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ResumenCrecimientos, TablaResumenCrecimientos } from "../src/app/(app)/planificacion/proyeccion/crecimientos-tab";
-import { ContenidoVentaPorTienda, TablaVentaPorTienda, VentaPorTienda } from "../src/app/(app)/planificacion/proyeccion/venta-por-tienda";
+import { CrecimientosTab, ResumenCrecimientos, TablaResumenCrecimientos } from "../src/app/(app)/planificacion/proyeccion/crecimientos-tab";
+import { ContenidoVentaPorTienda, SelectorPorTienda, TablaVentaPorTienda, VentaPorTienda } from "../src/app/(app)/planificacion/proyeccion/venta-por-tienda";
 import type { ProyeccionApi } from "../src/lib/proyeccion/tipos-api";
 import { proyeccion } from "./proyeccion.pantalla.fixture";
 import { resumenCrecimientos } from "./proyeccion.crecimientos-pantalla.fixture";
+import { VERSION_METODO } from "../src/lib/proyeccion/tipos-api";
 import {
+  conjuntosOnce,
   ventaConMesFaltante,
   ventaConSinBloque,
   ventaMetodoAnterior,
@@ -24,13 +26,16 @@ import {
  * Así se prueban los estados de carga, error y datos sin red ni efectos.
  */
 type Lectura = { datos: unknown; cargando: boolean; error: string | null; codigo: string | null };
-const falsa: { valor: Lectura | null; url: string | null } = { valor: null, url: null };
+const falsa: { valor: Lectura | null; lista: Lectura | null; resumen: Lectura | null; url: string | null } = { valor: null, lista: null, resumen: null, url: null };
 vi.mock("../src/app/(app)/planificacion/proyeccion/use-proyeccion", async (original) => {
   const real = await original<typeof import("../src/app/(app)/planificacion/proyeccion/use-proyeccion")>();
   return {
     ...real,
     useLectura: (url: string | null, ...resto: unknown[]) => {
-      falsa.url = url;
+      // La lista de conjuntos (`…/por-tienda` sin `gm`) y el resumen (`…/crecimientos`) tienen su propia lectura falsa; el resto, `valor` (la tarjeta).
+      const propia = url?.endsWith("/crecimientos/por-tienda") ? falsa.lista : url?.endsWith("/crecimientos") ? falsa.resumen : null;
+      if (propia) return { ...propia, setError: () => {}, recargar: () => Promise.resolve() };
+      if (!url?.endsWith("/crecimientos/por-tienda") && !url?.endsWith("/crecimientos")) falsa.url = url;
       return falsa.valor ? { ...falsa.valor, setError: () => {}, recargar: () => Promise.resolve() } : (real.useLectura as (u: string | null, ...r: unknown[]) => unknown)(url, ...resto);
     },
   };
@@ -55,6 +60,8 @@ const tarjeta = (extra: Partial<Parameters<typeof VentaPorTienda>[0]> = {}, p: P
 
 beforeEach(() => {
   falsa.valor = null;
+  falsa.lista = null;
+  falsa.resumen = null;
   falsa.url = null;
 });
 
@@ -313,6 +320,149 @@ describe("«Ver por tienda» en la tabla de Crecimientos", () => {
   });
 });
 
+describe("corrección 2026-11-05 · la venta por tienda no depende de las filas por GM", () => {
+  const vieja = () => resumenCrecimientos({ version_metodo: VERSION_METODO - 1, total: null, sin_aprobar: null, cambiados: [], filas: [] });
+  const base = { datos: vieja(), proyeccion: proyeccion(), bloqueada: false, onRecalcular: noop, onRecargar: noop, onObjetivoGuardado: () => Promise.resolve(), onPorTienda: noop };
+  const resumenVieja = (extra: Partial<Parameters<typeof ResumenCrecimientos>[0]> = {}) => html(createElement(ResumenCrecimientos, { ...base, ...extra }));
+  const lista = (datos: unknown = conjuntosOnce()): Lectura => ({ datos, cargando: false, error: null, codigo: null });
+  const GM = "g-mujer.m-urbano";
+  const CLAVE_TABLA = 'aria-label="Venta por tienda y año de MUJER · URBANO"';
+
+  it("método anterior sin conjunto elegido: el aviso «recalcula» Y la sección con el selector de los 11 conjuntos; no hay tabla de GM ni botones «Ver por tienda»", () => {
+    falsa.lista = lista();
+    const s = resumenVieja();
+    expect(s).toContain("Esta proyección se calculó con un método anterior");
+    expect(s).toContain(">Venta por tienda<");
+    expect(s).toContain("Elige un género · mundo (o el Resto) para ver qué vendió cada tienda año por año y decidir el crecimiento de 2027.");
+    expect(s).toContain(">Elige un conjunto…</option>");
+    expect(s.match(/<option value="[^"]+">/g)).toHaveLength(11);
+    for (const n of ["HOMBRE · CASUAL", "HOMBRE · DEPORTIVO", "HOMBRE · FORMAL", "HOMBRE · RI", "HOMBRE · URBANO", "MUJER · CASUAL", "MUJER · DEPORTIVO", "MUJER · FORMAL", "MUJER · RI", "MUJER · URBANO", "Resto"]) {
+      expect(s).toContain(`>${n}</option>`);
+    }
+    expect(s).not.toContain("Ver por tienda");
+    expect(s).not.toContain("<table");
+    expect(s).not.toContain("Venta por tienda ·");
+  });
+
+  it("método anterior con un conjunto en la URL: la tabla por tienda aparece SIN recalcular, con las cifras reales, sin vigente y con el aviso y el botón «Recalcular»", () => {
+    falsa.lista = lista();
+    falsa.valor = { datos: ventaMetodoAnterior(), cargando: false, error: null, codigo: null };
+    const s = resumenVieja({ porTienda: GM });
+    expect(s).toContain("Venta por tienda · MUJER · URBANO");
+    expect(s).toContain(CLAVE_TABLA);
+    expect(s).toContain("Tienda T01");
+    expect(s).toContain("6,000 u");
+    expect(s).toContain("S/ 480,000");
+    expect(s).not.toContain("2026 cierre vigente");
+    expect(s).toContain("Recalcula la proyección para ver la base 2027");
+    expect(s).toContain("Las cifras reales por tienda ya son las de hoy. La base 2027 y el cierre vigente 2026 por tienda aparecerán cuando recalcules la proyección.");
+    // El selector de la tarjeta sigue dando los 11 conjuntos para cambiar sin volver a ningún lado.
+    expect(s).toMatch(/<option value="g-mujer\.m-urbano" selected="">MUJER · URBANO<\/option>/);
+    expect(s.match(/<option value="[^"]+"/g)).toHaveLength(11);
+    expect(s).not.toContain(">Elige un conjunto…<");
+    // «Recalcular» a mano: el del aviso del método y el de la tarjeta.
+    expect(s.match(/>Recalcular<\/button>/g)).toHaveLength(2);
+  });
+
+  it("«Recalcular» de la tarjeta solo si se puede: en una cerrada no hay ninguno, y mientras calcula tampoco", () => {
+    falsa.lista = lista();
+    falsa.valor = { datos: ventaMetodoAnterior(), cargando: false, error: null, codigo: null };
+    const cerrada = resumenVieja({ porTienda: GM, proyeccion: proyeccion({ estado: "cerrada" }) });
+    expect(cerrada).toContain(CLAVE_TABLA);
+    expect(cerrada).toContain("aparecerán cuando recalcules la proyección");
+    expect(cerrada).not.toContain(">Recalcular</button>");
+    const calculando = resumenVieja({ porTienda: GM, proyeccion: proyeccion({ calculando: true }) });
+    expect(calculando.match(/>Recalcular<\/button>/g)).toHaveLength(1);
+  });
+
+  it("sin calcular (409 sin_calcular): «Calcula la proyección para ver la venta por tienda» con el botón «Calcular»; en una cerrada, sin botón", () => {
+    falsa.lista = lista();
+    falsa.valor = { datos: null, cargando: false, error: "Calcula la proyección para ver la venta por tienda.", codigo: "sin_calcular" };
+    const s = resumenVieja({ porTienda: "resto" });
+    expect(s).toContain("Calcula la proyección para ver la venta por tienda.");
+    expect(s).toContain(">Calcular</button>");
+    expect(resumenVieja({ porTienda: "resto", proyeccion: proyeccion({ estado: "cerrada" }) })).not.toContain(">Calcular</button>");
+  });
+
+  it("cálculo en curso: el mensaje de siempre, con «Actualizar pantalla»", () => {
+    falsa.lista = lista();
+    falsa.valor = { datos: null, cargando: false, error: "El cálculo está en curso. Espera a que termine.", codigo: "calculo_en_curso" };
+    const s = resumenVieja({ porTienda: "resto" });
+    expect(s).toContain("El cálculo está en curso. Espera a que termine.");
+    expect(s).toContain(">Actualizar pantalla</button>");
+  });
+
+  it("una clave que no está en la lista de la API se dice y deja elegir otra en el selector; el selector sigue ahí", () => {
+    falsa.lista = lista();
+    const s = resumenVieja({ porTienda: "x-1.y-2" });
+    expect(s).toContain("Ese género · mundo no existe en esta proyección: elige otro en el selector.");
+    expect(s).toContain(">Elige un conjunto…</option>");
+    expect(s).not.toContain("Venta por tienda ·");
+  });
+
+  it("si la lista no se puede leer, el error se muestra (no se traga) y el selector cae al Resto", () => {
+    falsa.lista = { datos: null, cargando: false, error: "Error 500", codigo: null };
+    const s = resumenVieja();
+    expect(s).toContain("No se pudo leer la lista de géneros y mundos: Error 500");
+    expect(s.match(/<option value="[^"]+">/g)).toEqual(['<option value="resto">']);
+  });
+
+  it("mientras la lista llega, el selector lo dice y no ofrece nada que elegir todavía", () => {
+    falsa.lista = { datos: null, cargando: true, error: null, codigo: null };
+    const s = resumenVieja();
+    expect(s).toContain(">Leyendo los conjuntos…</option>");
+    expect(deshabilitado(/<select[^>]*>/.exec(s)?.[0])).toBe(true);
+  });
+
+  it("sin filas por GM con el método actual: también se ofrece el selector (con filas no, ya están los botones de la tabla)", () => {
+    falsa.lista = lista();
+    const sinFilas = html(createElement(ResumenCrecimientos, { ...base, datos: resumenCrecimientos({ filas: [] }) }));
+    expect(sinFilas).toContain(">Elige un conjunto…</option>");
+    const conFilas = html(createElement(ResumenCrecimientos, { ...base, datos: resumenCrecimientos() }));
+    expect(conFilas).not.toContain(">Elige un conjunto…</option>");
+    expect(conFilas).toContain("Total (mismas tiendas)");
+  });
+
+  it("método actual con filas: todo sigue igual (botón por fila, tarjeta debajo de la tabla) y el selector de la tarjeta trae los 11 conjuntos de la API", () => {
+    falsa.lista = lista();
+    const s = html(createElement(ResumenCrecimientos, { ...base, datos: resumenCrecimientos(), porTienda: "g-hombre.m-urbano" }));
+    expect(s.match(/>Ver por tienda</g)).toHaveLength(5);
+    expect(s).toContain("Venta por tienda · HOMBRE · URBANO");
+    expect(s.indexOf("Venta por tienda · HOMBRE · URBANO")).toBeGreaterThan(s.indexOf("Total (mismas tiendas)"));
+    expect(s.indexOf("Venta por tienda · HOMBRE · URBANO")).toBeLessThan(s.indexOf("Puente al Total 2027"));
+    expect(s.match(/<option value="[^"]+"/g)).toHaveLength(11);
+  });
+
+  it("la pestaña entera: si el resumen no se puede leer, la venta por tienda sigue disponible junto al error", () => {
+    falsa.resumen = { datos: null, cargando: false, error: "No se pudo leer los crecimientos.", codigo: null };
+    falsa.lista = lista();
+    falsa.valor = { datos: ventaMetodoAnterior(), cargando: false, error: null, codigo: null };
+    const s = html(createElement(CrecimientosTab, { proyeccion: proyeccion(), bloqueada: false, porTienda: GM, onPorTienda: noop, onCambio: () => Promise.resolve(), onRecalcular: noop }));
+    expect(s).toContain("No se pudo leer los crecimientos.");
+    expect(s).toContain("Venta por tienda · MUJER · URBANO");
+    expect(s).toContain(CLAVE_TABLA);
+  });
+
+  it("la pestaña entera con el resumen de método anterior: el selector y la tarjeta salen de la lectura de la API", () => {
+    falsa.resumen = { datos: vieja(), cargando: false, error: null, codigo: null };
+    falsa.lista = lista();
+    const sin = html(createElement(CrecimientosTab, { proyeccion: proyeccion(), bloqueada: false, porTienda: null, onPorTienda: noop, onCambio: () => Promise.resolve(), onRecalcular: noop }));
+    expect(sin).toContain(">Elige un conjunto…</option>");
+    falsa.valor = { datos: ventaMetodoAnterior(), cargando: false, error: null, codigo: null };
+    const con = html(createElement(CrecimientosTab, { proyeccion: proyeccion(), bloqueada: false, porTienda: GM, onPorTienda: noop, onCambio: () => Promise.resolve(), onRecalcular: noop }));
+    expect(con).toContain(CLAVE_TABLA);
+  });
+});
+
+describe("el selector sin conjunto elegido", () => {
+  it("lista los conjuntos con un texto que invita a elegir y no trae botones", () => {
+    const s = html(createElement(SelectorPorTienda, { opciones: [{ clave: "resto", nombre: "Resto" }], anioSiguiente: 2027, onClave: noop }));
+    expect(s).toContain("Venta por tienda");
+    expect(s).toContain('<option value="resto">Resto</option>');
+    expect(s).not.toContain("<button");
+  });
+});
+
 describe("estructura (patrones obligatorios)", () => {
   it("la tarjeta lee con useLectura, no escribe nada y no habla con Supabase ni con fetch", () => {
     for (const f of ["venta-por-tienda.tsx", "venta-por-tienda-vista.ts"]) {
@@ -325,6 +475,8 @@ describe("estructura (patrones obligatorios)", () => {
     expect(t.startsWith('"use client"')).toBe(true);
     expect(t).toContain("useLectura<VentaPorTiendaApi>");
     expect(t).toContain("/crecimientos/por-tienda?gm=");
+    // La lista de conjuntos (corrección 2026-11-05) se lee con la misma ruta sin `gm`.
+    expect(t).toContain("useLectura<ConjuntosPorTiendaApi>");
     expect(t).toContain("<AlertaError");
     expect(t).toContain("descargarLibro");
   });
@@ -343,6 +495,16 @@ describe("estructura (patrones obligatorios)", () => {
     expect(p).toMatch(/function cambiarPestana\(p: Pestana\) \{\s*cambiarUrl\(\{[^}]*por_tienda: null/);
     expect(p).toMatch(/function elegirProyeccion\(id: string\) \{\s*cambiarUrl\(\{[^}]*por_tienda: null/);
     expect(p).toMatch(/onPorTienda=\{\(clave\) => cambiarUrl\(\{ por_tienda: clave \}\)\}/);
+  });
+
+  it("el panel lee ?por_tienda= igual en método anterior y en el actual: no depende de las filas ni del resumen (sobrevive a recargar)", () => {
+    const p = fuente("proyeccion-panel.tsx");
+    expect(p).toMatch(/<CrecimientosTab[^>]*porTienda=\{porTienda\}/);
+    const c = fuente("crecimientos-tab.tsx");
+    // El método anterior ya no devuelve solo el aviso: monta la misma sección con la clave de la URL.
+    expect(c).toMatch(/esMetodoAnterior\(datos\)\) \{[\s\S]*?<PorTienda clave=\{porTienda\} resumen=\{null\} ofrecerSelector/);
+    expect(c).toContain("useConjuntosPorTienda");
+    expect(c).not.toMatch(/opcionesPorTienda\(datos\)/);
   });
 
   it("la pestaña no abre ninguna acción de escritura nueva: el único PATCH sigue siendo el objetivo", () => {

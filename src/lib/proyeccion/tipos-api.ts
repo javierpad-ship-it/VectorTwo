@@ -1237,3 +1237,10 @@ export type VentaPorTiendaApi = {
   totales: { base: TotalVentaApi; fuera: TotalVentaApi; conjunto: TotalVentaApi };
   avisos: { codigo: "filas_sin_base" | "meses_faltantes" | "sin_atribuir" | "sin_bloque"; mensaje: string }[];
 };
+
+/**
+ * Corrección 2026-11-05: `GET …/crecimientos/por-tienda` SIN `gm` devuelve la lista de conjuntos que se pueden ver por tienda (HOMBRE y MUJER × cada mundo activo, más el Resto), con la
+ * `clave` que acepta `?gm=` (`<genero_id>.<mundo_id>` o `resto`). Sale del catálogo de géneros y mundos, no de las filas de la proyección: sirve aunque nunca se haya calculado.
+ */
+export type ConjuntoPorTiendaApi = { clave: string; nombre: string; es_resto: boolean };
+export type ConjuntosPorTiendaApi = { conjuntos: ConjuntoPorTiendaApi[] };

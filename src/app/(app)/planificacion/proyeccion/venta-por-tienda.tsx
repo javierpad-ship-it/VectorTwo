@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import { Field, Select } from "@/components/ui/form";
-import type { ProyeccionApi, VentaPorTiendaApi } from "@/lib/proyeccion/tipos-api";
+import type { ConjuntosPorTiendaApi, ProyeccionApi, VentaPorTiendaApi } from "@/lib/proyeccion/tipos-api";
 import { AlertaError, BotonEnlace, Cargando, NUM } from "./comunes";
 import { descargarLibro } from "./descarga-libro";
 import {
@@ -18,6 +18,8 @@ import {
   motivosPresentes,
   tablaPorTienda,
   textoAlertaDatosCambiados,
+  textoBaseAlRecalcular,
+  textoElegirConjunto,
   textoFaltan,
   textoLeyendaMotivos,
   textoLeyendaPorTienda,
@@ -42,6 +44,43 @@ import { formatearMomento, nombreArchivoProyeccion } from "./vista";
 /** La lectura de un conjunto: `clave` es `<genero_id>.<mundo_id>` o `resto`. Se vuelve a leer al cambiar de conjunto o de proyección. */
 export function useVentaPorTienda(proyeccionId: string, clave: string) {
   return useLectura<VentaPorTiendaApi>(`${rutaProyeccion(proyeccionId)}/crecimientos/por-tienda?gm=${encodeURIComponent(clave)}`);
+}
+
+/**
+ * Corrección 2026-11-05: la lista de conjuntos que se pueden ver por tienda (`GET …/crecimientos/por-tienda` sin `gm`). No depende de las filas ni del cálculo de la proyección:
+ * con método anterior o sin calcular también responde, así el selector siempre tiene sus opciones.
+ */
+export function useConjuntosPorTienda(proyeccionId: string) {
+  return useLectura<ConjuntosPorTiendaApi>(`${rutaProyeccion(proyeccionId)}/crecimientos/por-tienda`);
+}
+
+/**
+ * La sección «Venta por tienda» SIN conjunto elegido (proyección de método anterior, sin calcular o sin filas por GM: no hay tabla con botones «Ver por tienda»). Trae el
+ * selector de los conjuntos y una línea que dice para qué sirve; al elegir, la URL toma `?por_tienda=` y aparece la tarjeta.
+ */
+export function SelectorPorTienda({ opciones, anioSiguiente, cargando = false, onClave }: { opciones: readonly OpcionPorTienda[]; anioSiguiente: number; cargando?: boolean; onClave: (clave: string) => void }) {
+  return (
+    <Card titulo="Venta por tienda" descripcion={textoElegirConjunto(anioSiguiente)}>
+      <div className="min-w-0 space-y-3">
+        <Field label="Género · mundo" className="w-full sm:max-w-xs">
+          <Select
+            value=""
+            disabled={cargando && opciones.length <= 1}
+            onChange={(e) => {
+              if (e.target.value) onClave(e.target.value);
+            }}
+          >
+            <option value="">{cargando && opciones.length <= 1 ? "Leyendo los conjuntos…" : "Elige un conjunto…"}</option>
+            {opciones.map((o) => (
+              <option key={o.clave} value={o.clave}>
+                {o.nombre}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+    </Card>
+  );
 }
 
 export function VentaPorTienda({
@@ -161,6 +200,16 @@ export function ContenidoVentaPorTienda({
       {cambiaron && (
         <Alert tono="alerta">
           <span className="block">{cambiaron}</span>
+          {puedeRecalcular && onRecalcular && (
+            <span className="mt-1 block">
+              <BotonEnlace onClick={onRecalcular}>Recalcular</BotonEnlace>
+            </span>
+          )}
+        </Alert>
+      )}
+      {datos.base.motivo_nulo === "metodo_anterior" && (
+        <Alert tono="info">
+          <span className="block">{textoBaseAlRecalcular(datos.anio_siguiente, datos.anio_en_curso)}</span>
           {puedeRecalcular && onRecalcular && (
             <span className="mt-1 block">
               <BotonEnlace onClick={onRecalcular}>Recalcular</BotonEnlace>

@@ -3,14 +3,19 @@ import { describe, expect, it } from "vitest";
 import { construirHojaLibro, nombreHojaValido } from "../src/app/(app)/planificacion/proyeccion/descarga-libro";
 import {
   cabeceraPorTienda,
+  claveDeConjuntoConocida,
   clavePorTiendaValida,
   columnasPorTienda,
   etiquetaPeriodo,
   hojasPorTienda,
   mesAnioCorto,
+  opcionesDeConjuntos,
+  opcionesParaPorTienda,
   opcionesPorTienda,
   tablaPorTienda,
   textoAlertaDatosCambiados,
+  textoBaseAlRecalcular,
+  textoElegirConjunto,
   textoFaltan,
   textoLeyendaPorTienda,
   textoPlano,
@@ -21,6 +26,7 @@ import { nombreArchivoProyeccion } from "../src/app/(app)/planificacion/proyecci
 import type { VentaPorTiendaApi } from "../src/lib/proyeccion/tipos-api";
 import { resumenCrecimientos } from "./proyeccion.crecimientos-pantalla.fixture";
 import {
+  conjuntosOnce,
   ventaConMesFaltante,
   ventaConSinBloque,
   ventaMetodoAnterior,
@@ -60,6 +66,50 @@ describe("la clave de la URL y los conjuntos", () => {
     expect(o.map((x) => x.nombre)).toEqual(["HOMBRE · FORMAL", "HOMBRE · URBANO", "MUJER · FORMAL", "MUJER · CASUAL", "Resto"]);
     expect(o.at(-1)?.clave).toBe("resto");
     expect(o.some((x) => /total/i.test(x.nombre))).toBe(false);
+  });
+});
+
+describe("corrección 2026-11-05 · el selector sale de la lista de la API, no de las filas del resumen", () => {
+  it("los 11 conjuntos: HOMBRE y MUJER × CASUAL, DEPORTIVO, FORMAL, RI, URBANO, y el Resto al final", () => {
+    const o = opcionesDeConjuntos(conjuntosOnce());
+    expect(o).toHaveLength(11);
+    expect(o.map((x) => x.nombre)).toEqual([
+      ...["HOMBRE", "MUJER"].flatMap((g) => ["CASUAL", "DEPORTIVO", "FORMAL", "RI", "URBANO"].map((m) => `${g} · ${m}`)),
+      "Resto",
+    ]);
+    expect(o.at(-1)?.clave).toBe("resto");
+    expect(o.every((x) => clavePorTiendaValida(x.clave))).toBe(true);
+  });
+
+  it("con la lista cargada manda la lista; sin ella, las filas del resumen del método actual; sin ninguna (método anterior), solo el Resto", () => {
+    expect(opcionesParaPorTienda(conjuntosOnce(), resumenCrecimientos())).toHaveLength(11);
+    expect(opcionesParaPorTienda(conjuntosOnce(), null)).toHaveLength(11);
+    expect(opcionesParaPorTienda(null, resumenCrecimientos()).map((x) => x.nombre)).toEqual(["HOMBRE · FORMAL", "HOMBRE · URBANO", "MUJER · FORMAL", "MUJER · CASUAL", "Resto"]);
+    expect(opcionesParaPorTienda(null, null)).toEqual([{ clave: "resto", nombre: "Resto" }]);
+  });
+
+  it("una clave de la URL es conocida si está en la lista; sin lista se mira el resumen; sin ninguno se da por buena (decide la API)", () => {
+    expect(claveDeConjuntoConocida("g-mujer.m-ri", conjuntosOnce(), null)).toBe(true);
+    expect(claveDeConjuntoConocida("g-mujer.m-nada", conjuntosOnce(), null)).toBe(false);
+    expect(claveDeConjuntoConocida("resto", conjuntosOnce(), null)).toBe(true);
+    expect(claveDeConjuntoConocida("g-hombre.m-urbano", null, resumenCrecimientos())).toBe(true);
+    expect(claveDeConjuntoConocida("g-mujer.m-ri", null, resumenCrecimientos())).toBe(false);
+    expect(claveDeConjuntoConocida("g-mujer.m-ri", null, null)).toBe(true);
+  });
+
+  it("los textos: elegir conjunto y «la base aparecerá al recalcular», en español llano", () => {
+    expect(textoElegirConjunto(2027)).toBe("Elige un género · mundo (o el Resto) para ver qué vendió cada tienda año por año y decidir el crecimiento de 2027.");
+    expect(textoBaseAlRecalcular(2027, 2026)).toBe("Las cifras reales por tienda ya son las de hoy. La base 2027 y el cierre vigente 2026 por tienda aparecerán cuando recalcules la proyección.");
+  });
+
+  it("con método anterior la tabla trae las columnas reales (2023, 2024, 2025, ene–set de los dos años) sin vigente ni base", () => {
+    const v = ventaMetodoAnterior();
+    expect(v.base).toMatchObject({ total: null, motivo_nulo: "metodo_anterior" });
+    const t = tablaPorTienda(v);
+    expect(t.conVigente).toBe(false);
+    expect(t.columnas.some((c) => c.tipo === "vigente")).toBe(false);
+    expect(t.columnas.filter((c) => c.tipo === "periodo").map((c) => c.clave)).toEqual(expect.arrayContaining(["2023", "2024", "2025"]));
+    expect(t.filas.filter((f) => f.tipo === "tienda").length).toBeGreaterThan(0);
   });
 });
 

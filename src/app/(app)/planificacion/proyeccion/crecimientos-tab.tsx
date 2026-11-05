@@ -29,8 +29,8 @@ import {
   type OpcionesFilasResumen,
 } from "./crecimientos-vista";
 import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
-import { VentaPorTienda } from "./venta-por-tienda";
-import { opcionesPorTienda } from "./venta-por-tienda-vista";
+import { SelectorPorTienda, useConjuntosPorTienda, VentaPorTienda } from "./venta-por-tienda";
+import { claveDeConjuntoConocida, opcionesParaPorTienda } from "./venta-por-tienda-vista";
 import { enlaceCrecimientoGeneroMundo, formatearPct, leerPorcentaje, textoFaltanCrecimientos, textoReaprobarCierre, unidades } from "./vista";
 
 /**
@@ -41,7 +41,9 @@ import { enlaceCrecimientoGeneroMundo, formatearPct, leerPorcentaje, textoFaltan
  * reaprobar (versiones de antes de 0.14.0 en un GM con Niño) para cerrar, y un enlace «Analizar y aprobar» a cada GM. Lo único editable es el
  * objetivo global (`PATCH` de la proyección, que no la desactualiza; es una meta sobre el año real). En una proyección cerrada o archivada todo se
  * ve igual y el objetivo queda en solo lectura. 07f: cada GM y el Resto traen «Ver por tienda», que abre debajo de la tabla la venta por tienda y año de
- * esa fila (lectura pura; la elección vive en `?por_tienda=`).
+ * esa fila (lectura pura; la elección vive en `?por_tienda=`). Corrección 2026-11-05: la venta por tienda NO depende de que haya filas por GM. Con la proyección en método anterior
+ * (o sin filas por GM, o si el resumen no se pudo leer) la pestaña muestra igual la sección «Venta por tienda» con un selector de los conjuntos (que sale de la API, no de la tabla) y,
+ * al elegir uno, la tarjeta con las cifras reales por tienda y año; así se decide el crecimiento antes de recalcular.
  */
 export function CrecimientosTab({
   proyeccion,
@@ -81,6 +83,18 @@ export function CrecimientosTab({
     <div className="space-y-4">
       {lectura.error && <AlertaError error={lectura.error} onCerrar={() => lectura.setError(null)} onRecargar={() => void lectura.recargar()} />}
       {lectura.cargando && !datos && <Cargando texto="Leyendo los crecimientos…" />}
+      {/* Si el resumen no se pudo leer, la venta por tienda sigue disponible (no depende de él). */}
+      {!datos && lectura.error && onPorTienda && (
+        <PorTienda
+          clave={porTienda}
+          resumen={null}
+          ofrecerSelector
+          proyeccion={proyeccion}
+          puedeRecalcular={proyeccion.estado === "en_trabajo" && !bloqueada && !proyeccion.calculando}
+          onPorTienda={onPorTienda}
+          onRecalcular={() => void recalcular()}
+        />
+      )}
       {datos && (
         <ResumenCrecimientos
           // El campo del objetivo parte de lo guardado cada vez que cambia.
@@ -126,18 +140,24 @@ export function ResumenCrecimientos({
   const y = proyeccion.anio_en_curso;
   const enlaceGeneral = enlaceCrecimientoGeneroMundo(s, proyeccion.id);
 
+  const puedeRecalcular = enTrabajo && !bloqueada && !proyeccion.calculando;
+
   if (esMetodoAnterior(datos)) {
+    // Método anterior: no hay filas por GM ni base que mostrar, pero la venta real por tienda y año sí (corrección 2026-11-05): el selector y la tarjeta van igual.
     return (
-      <Alert tono="alerta">
-        <span className="block">{textoMetodoAnterior(enTrabajo)}</span>
-        {enTrabajo && (
-          <span className="mt-1 block">
-            <BotonEnlace onClick={onRecalcular} disabled={bloqueada}>
-              Recalcular
-            </BotonEnlace>
-          </span>
-        )}
-      </Alert>
+      <div className="space-y-4">
+        <Alert tono="alerta">
+          <span className="block">{textoMetodoAnterior(enTrabajo)}</span>
+          {enTrabajo && (
+            <span className="mt-1 block">
+              <BotonEnlace onClick={onRecalcular} disabled={bloqueada}>
+                Recalcular
+              </BotonEnlace>
+            </span>
+          )}
+        </Alert>
+        {onPorTienda && <PorTienda clave={porTienda} resumen={null} ofrecerSelector proyeccion={proyeccion} puedeRecalcular={puedeRecalcular} onPorTienda={onPorTienda} onRecalcular={onRecalcular} />}
+      </div>
     );
   }
 
@@ -199,8 +219,17 @@ export function ResumenCrecimientos({
         onVerPorTienda={onPorTienda ? (clave) => onPorTienda(clave) : undefined}
       />
 
-      {porTienda && onPorTienda && (
-        <PorTienda clave={porTienda} datos={datos} proyeccion={proyeccion} puedeRecalcular={enTrabajo && !bloqueada && !proyeccion.calculando} onPorTienda={onPorTienda} onRecalcular={onRecalcular} />
+      {onPorTienda && (
+        <PorTienda
+          clave={porTienda}
+          resumen={datos}
+          // Sin filas por GM no hay botones «Ver por tienda» que usar: se ofrece el selector (con filas, el botón de cada fila y el selector de la tarjeta bastan).
+          ofrecerSelector={datos.filas.length === 0}
+          proyeccion={proyeccion}
+          puedeRecalcular={puedeRecalcular}
+          onPorTienda={onPorTienda}
+          onRecalcular={onRecalcular}
+        />
       )}
 
       {datos.total && <PieCrecimientos datos={datos} proyeccion={proyeccion} editable={enTrabajo && !bloqueada && !proyeccion.calculando} onGuardado={onObjetivoGuardado} onRecargar={onRecargar} />}
@@ -208,41 +237,76 @@ export function ResumenCrecimientos({
   );
 }
 
-/** 07f: la tarjeta «Venta por tienda» del conjunto elegido. Una clave que no es de esta proyección (un enlace viejo) se dice y se puede cerrar. Se vuelve a leer al recalcular. */
+/**
+ * 07f: la venta por tienda del conjunto elegido. Con `resumen` (método actual) se valida la clave contra sus filas hasta que llega la lista de la API; sin él (método anterior, sin
+ * resumen) la lista de la API (`GET …/por-tienda` sin `gm`) es la única fuente: no depende de las filas. Sin conjunto elegido y con `ofrecerSelector`, solo el selector. Una clave que no
+ * es de esta proyección (un enlace viejo) se dice y se puede cerrar. La tarjeta se vuelve a leer al recalcular.
+ */
 function PorTienda({
   clave,
-  datos,
+  resumen,
+  ofrecerSelector,
   proyeccion,
   puedeRecalcular,
   onPorTienda,
   onRecalcular,
 }: {
-  clave: string;
-  datos: ResumenCrecimientosProyeccionApi;
+  clave: string | null;
+  /** El resumen SOLO si es del método actual; `null` en método anterior o si no se pudo leer. */
+  resumen: ResumenCrecimientosProyeccionApi | null;
+  ofrecerSelector: boolean;
   proyeccion: ProyeccionApi;
   puedeRecalcular: boolean;
   onPorTienda: (clave: string | null) => void;
   onRecalcular: () => void;
 }) {
-  const opciones = opcionesPorTienda(datos);
-  if (!opciones.some((o) => o.clave === clave)) {
-    return (
-      <Alert tono="alerta" onCerrar={() => onPorTienda(null)}>
-        Ese género · mundo no tiene filas en esta proyección: elige otro con «Ver por tienda».
-      </Alert>
-    );
-  }
+  if (!clave && !ofrecerSelector) return null;
+  return <PorTiendaActiva clave={clave} resumen={resumen} ofrecerSelector={ofrecerSelector} proyeccion={proyeccion} puedeRecalcular={puedeRecalcular} onPorTienda={onPorTienda} onRecalcular={onRecalcular} />;
+}
+
+function PorTiendaActiva({
+  clave,
+  resumen,
+  ofrecerSelector,
+  proyeccion,
+  puedeRecalcular,
+  onPorTienda,
+  onRecalcular,
+}: {
+  clave: string | null;
+  resumen: ResumenCrecimientosProyeccionApi | null;
+  ofrecerSelector: boolean;
+  proyeccion: ProyeccionApi;
+  puedeRecalcular: boolean;
+  onPorTienda: (clave: string | null) => void;
+  onRecalcular: () => void;
+}) {
+  const conjuntos = useConjuntosPorTienda(proyeccion.id);
+  const opciones = opcionesParaPorTienda(conjuntos.datos, resumen);
+  const desconocida = clave !== null && !claveDeConjuntoConocida(clave, conjuntos.datos, resumen);
+  const selector = ofrecerSelector && (clave === null || desconocida) ? <SelectorPorTienda opciones={opciones} anioSiguiente={proyeccion.anio_en_curso + 1} cargando={conjuntos.cargando} onClave={(c) => onPorTienda(c)} /> : null;
   return (
-    <VentaPorTienda
-      key={`${clave}-${proyeccion.calculado_at ?? ""}`}
-      proyeccion={proyeccion}
-      clave={clave}
-      opciones={opciones}
-      puedeRecalcular={puedeRecalcular}
-      onClave={(c) => onPorTienda(c)}
-      onCerrar={() => onPorTienda(null)}
-      onRecalcular={onRecalcular}
-    />
+    <div className="space-y-4">
+      {conjuntos.error && <AlertaError error={{ mensaje: `No se pudo leer la lista de géneros y mundos: ${conjuntos.error}`, codigo: conjuntos.codigo }} onCerrar={() => conjuntos.setError(null)} onRecargar={() => void conjuntos.recargar()} />}
+      {desconocida && (
+        <Alert tono="alerta" onCerrar={() => onPorTienda(null)}>
+          {resumen ? "Ese género · mundo no tiene filas en esta proyección: elige otro con «Ver por tienda»." : "Ese género · mundo no existe en esta proyección: elige otro en el selector."}
+        </Alert>
+      )}
+      {selector}
+      {clave && !desconocida && (
+        <VentaPorTienda
+          key={`${clave}-${proyeccion.calculado_at ?? ""}`}
+          proyeccion={proyeccion}
+          clave={clave}
+          opciones={opciones}
+          puedeRecalcular={puedeRecalcular}
+          onClave={(c) => onPorTienda(c)}
+          onCerrar={() => onPorTienda(null)}
+          onRecalcular={onRecalcular}
+        />
+      )}
+    </div>
   );
 }
 

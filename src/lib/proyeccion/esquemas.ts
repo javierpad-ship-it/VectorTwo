@@ -220,13 +220,15 @@ export const cerradaQuerySchema = z.object({
 
 /**
  * `GET …/crecimientos/por-tienda?gm=<genero_id>.<mundo_id>|resto` (07f): un género × mundo o el Resto. Los ids son uuid (la clave de la fila de
- * `GET …/crecimientos`); cualquier otro parámetro se rechaza.
+ * `GET …/crecimientos`); cualquier otro parámetro se rechaza. Sin `gm` (corrección 2026-11-05) la ruta devuelve la lista de conjuntos válidos; un `gm` vacío sigue siendo `400`
+ * (la ruta lo comprueba: `leerConsulta` trata `""` como ausente).
  */
 const UUID_GM = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 export const porTiendaQuerySchema = z.strictObject({
   gm: z
-    .string("gm es obligatorio: «genero_id.mundo_id» o «resto».")
-    .refine((v) => v === "resto" || new RegExp(`^${UUID_GM}\\.${UUID_GM}$`, "i").test(v), "gm debe ser «genero_id.mundo_id» o «resto»."),
+    .string("gm debe ser «genero_id.mundo_id» o «resto».")
+    .refine((v) => v === "resto" || new RegExp(`^${UUID_GM}\\.${UUID_GM}$`, "i").test(v), "gm debe ser «genero_id.mundo_id» o «resto».")
+    .optional(),
 });
 
 export type CrearProyeccionCuerpo = z.infer<typeof crearSchema>;

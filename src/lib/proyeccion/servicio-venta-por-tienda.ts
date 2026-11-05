@@ -5,7 +5,7 @@ import { leerFilasConAnios, leerGenerosMundos, leerVentaTiendaNodos } from "./co
 import { generosDeMatriz, type FilaCrecimiento } from "./crecimientos";
 import { calculoEnCurso, MENSAJE_CALCULO_EN_CURSO_PROYECCION } from "./reglas";
 import { falla, fallaDb, fallaMensaje, kDe, listo, parametrosDe, proyeccionOr404, sello, type Db, type Salida } from "./servicio-base";
-import type { ResumenProyeccion, VentaPorTiendaApi } from "./tipos";
+import type { ConjuntosPorTiendaApi, ResumenProyeccion, VentaPorTiendaApi } from "./tipos";
 import { armarVentaPorTienda, desdeVentaTienda, vigentesDeTiendasNuevas, type FilaTiendaNueva, type TiendaMaestroVenta } from "./venta-por-tienda";
 
 /**
@@ -22,6 +22,26 @@ export const MENSAJE_GM_NO_ENCONTRADO = "Ese género y mundo no existen en el ca
 const MENSAJE_VENTA_ILEGIBLE = "No se pudo leer la venta por tienda. Inténtalo de nuevo.";
 
 const numeroONulo = (v: number | string | null | undefined): number | null => (v === null || v === undefined ? null : Number(v));
+
+/**
+ * `GET …/crecimientos/por-tienda` SIN `gm` (corrección 2026-11-05): los conjuntos que se pueden ver por tienda, HOMBRE y MUJER (`generosDeMatriz`) × cada mundo activo y el Resto, con la
+ * clave que acepta `?gm=`. Sale solo del catálogo de géneros y mundos (no de las filas de la proyección ni de su cálculo): sirve con una proyección de método anterior o sin calcular.
+ * `404` si la proyección no existe. No lee venta, filas ni tiendas.
+ */
+export async function leerConjuntosPorTienda(id: string): Promise<Salida<ConjuntosPorTiendaApi>> {
+  const d = db();
+  const pR = await proyeccionOr404(d, id);
+  if (pR.respuesta) return falla(pR.respuesta);
+  const gm = await leerGenerosMundos(d);
+  if (gm.error) return fallaDb(gm.error, "por tienda: leer géneros y mundos");
+  const mundos = gm.mundos.filter((m) => m.activo !== false);
+  const conjuntos: ConjuntosPorTiendaApi["conjuntos"] = [];
+  for (const g of generosDeMatriz(gm.generos)) {
+    for (const m of mundos) conjuntos.push({ clave: `${g.id}.${m.id}`, nombre: `${g.nombre} · ${m.nombre}`, es_resto: false });
+  }
+  conjuntos.push({ clave: "resto", nombre: "Resto", es_resto: true });
+  return listo({ conjuntos });
+}
 
 /**
  * `GET …/crecimientos/por-tienda?gm=`: la venta por tienda y año de un género × mundo (`genero_id.mundo_id`) o del Resto (`resto`). `404` si la proyección no existe o el

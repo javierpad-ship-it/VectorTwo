@@ -73,8 +73,8 @@ describe("regla 10 · permisos y errores de la ruta", () => {
     }
   });
 
-  it("400 con gm ausente, mal formado o con un parámetro de más; el mensaje va en castellano y no se llama a la base", async () => {
-    for (const gm of [null, "", "mujer", "abc.def", `${GEN.mujer}`, `${GEN.mujer}.${MUN.urbano}.x`, "RESTO", `${GEN.mujer},${MUN.urbano}`]) {
+  it("400 con gm vacío, mal formado o con un parámetro de más; el mensaje va en castellano y no se llama a la base (sin gm es la lista de conjuntos)", async () => {
+    for (const gm of ["", "mujer", "abc.def", `${GEN.mujer}`, `${GEN.mujer}.${MUN.urbano}.x`, "RESTO", `${GEN.mujer},${MUN.urbano}`]) {
       const r = await pedir(gm);
       expect(r.status, String(gm)).toBe(400);
       expect(typeof (await leer(r)).error).toBe("string");
@@ -161,6 +161,68 @@ describe("regla 10 · permisos y errores de la ruta", () => {
 
   it("la respuesta no se guarda en caché", async () => {
     expect((await pedir(GM_MU)).headers.get("Cache-Control")).toBe("no-store");
+  });
+});
+
+describe("corrección 2026-11-05 · la lista de conjuntos (GET sin gm)", () => {
+  type Lista = { conjuntos: { clave: string; nombre: string; es_resto: boolean }[] };
+  const MUNDOS = ["CASUAL", "DEPORTIVO", "FORMAL", "RI", "URBANO"];
+  const sembrarCincoMundos = () => {
+    base.tablas.mundos = MUNDOS.map((nombre, i) => ({ id: `b0000001-0000-4000-8000-00000000000${i + 1}`, nombre, orden: i + 1, activo: true }));
+  };
+
+  it("devuelve HOMBRE y MUJER × sus cinco mundos y el Resto: 11 conjuntos con la clave que acepta ?gm=", async () => {
+    sembrarCincoMundos();
+    const r = await pedir(null);
+    expect(r.status).toBe(200);
+    const { conjuntos } = (await leer<Lista>(r)).data;
+    expect(conjuntos).toHaveLength(11);
+    expect(conjuntos.map((c) => c.nombre)).toEqual([
+      ...["HOMBRE", "MUJER"].flatMap((g) => MUNDOS.map((m) => `${g} · ${m}`)),
+      "Resto",
+    ]);
+    expect(conjuntos.at(-1)).toEqual({ clave: "resto", nombre: "Resto", es_resto: true });
+    expect(conjuntos.slice(0, -1).every((c) => !c.es_resto && /^[0-9a-f-]{36}\.[0-9a-f-]{36}$/i.test(c.clave))).toBe(true);
+    expect(conjuntos.some((c) => c.nombre.startsWith("NIÑO"))).toBe(false);
+  });
+
+  it("no depende de las filas ni del cálculo: igual con una proyección de método anterior o sin calcular, y sin leer venta, filas ni tiendas", async () => {
+    sembrarCincoMundos();
+    for (const opciones of [{ resumen: { version_metodo: 3 } }, { parametros: {} }]) {
+      reiniciar();
+      sembrarVentaPorTienda(opciones);
+      sembrarCincoMundos();
+      const operaciones: string[] = [];
+      base.alOperar = (tabla, operacion) => operaciones.push(`${operacion} ${tabla}`);
+      const r = await pedir(null);
+      expect(r.status).toBe(200);
+      expect((await leer<Lista>(r)).data.conjuntos).toHaveLength(11);
+      expect(operaciones.filter((o) => !/ (proyecciones|generos|mundos)$/.test(o))).toEqual([]);
+      expect(base.llamadasVentaTienda).toHaveLength(0);
+    }
+  });
+
+  it("deja fuera los mundos inactivos y los géneros que no son HOMBRE ni MUJER", async () => {
+    base.tablas.mundos = [
+      { id: MUN.urbano, nombre: "URBANO", orden: 1, activo: true },
+      { id: MUN.casual, nombre: "CASUAL", orden: 2, activo: false },
+    ];
+    const { conjuntos } = (await leer<Lista>(await pedir(null))).data;
+    expect(conjuntos.map((c) => c.nombre)).toEqual(["HOMBRE · URBANO", "MUJER · URBANO", "Resto"]);
+  });
+
+  it("cada clave de la lista la acepta la propia ruta con ?gm= (200)", async () => {
+    const { conjuntos } = (await leer<Lista>(await pedir(null))).data;
+    for (const c of conjuntos) expect((await pedir(c.clave)).status, c.clave).toBe(200);
+  });
+
+  it("404 si la proyección no existe; 401 y 403 con el mismo guard", async () => {
+    expect((await pedir(null, INEXISTENTE)).status).toBe(404);
+    expect((await pedir(null, "no-es-uuid")).status).toBe(404);
+    estadoRol.rol = "sin_sesion";
+    expect((await pedir(null)).status).toBe(401);
+    estadoRol.rol = "comprador";
+    expect((await pedir(null)).status).toBe(403);
   });
 });
 

@@ -162,7 +162,8 @@ export type VentaPorTiendaApi = {
 | Caso | Respuesta |
 |---|---|
 | Correcto | `200 { data: VentaPorTiendaApi }` |
-| `gm` ausente o mal formado | `400` (zod, mensaje en castellano) |
+| `gm` mal formado o vacío | `400` (zod, mensaje en castellano) |
+| `gm` ausente (corrección 2026-11-05, §5) | `200 { data: { conjuntos: [{ clave, nombre, es_resto }] } }`: la lista de conjuntos válidos, sin depender del cálculo |
 | Proyección inexistente o `id` que no es uuid | `404` |
 | Género o mundo que no existen en el catálogo | `404 gm_no_encontrado` |
 | Género que no es HOMBRE ni MUJER (`generosDeMatriz`) | `400 genero_no_detallado`: «Ese género va en el Resto: usa gm=resto» |
@@ -204,6 +205,19 @@ export type VentaPorTiendaApi = {
   - `sin_filas`: «Este GM no tiene filas base en 2027».
 - **Excel.** El botón «Descargar Excel» genera en el navegador (`descargarLibro`) dos hojas: `POR_TIENDA`, con las mismas filas y una columna por cifra (u, S/ y %), y `FILTROS` (proyección, conjunto, corte, fecha). El archivo se llama `nombreArchivoProyeccion(Y, "por-tienda")`.
 - **Comprador:** no ve la pestaña. **Cerrada o archivada:** se ve igual.
+
+### Corrección 2026-11-05 · la venta por tienda no depende de las filas por GM
+
+**Problema (Javier).** Con la proyección vigente calculada con el método anterior (`version_metodo` 3, el caso real de hoy: todas sus filas con `base_siguiente` vacía) la pestaña Crecimientos solo mostraba el aviso «recalcula» y no dibujaba la tabla por GM. Sin filas no había botones «Ver por tienda» y la tarjeta quedaba inalcanzable, justo cuando Javier necesita ver la venta por tienda y año de cada género × mundo para decidir los crecimientos, antes de poder recalcular y aprobar.
+
+**Qué cambia (solo la pantalla y una opción de la ruta; ningún cálculo ni migración).**
+- **La sección «Venta por tienda» se ve siempre**, también con método anterior (`esMetodoAnterior`), con un resumen que no se pudo leer y con el método actual sin filas por GM. Trae un selector de conjuntos (HOMBRE y MUJER × cada mundo activo, más el Resto: con los cinco mundos de hoy, 11) y, al elegir, la tarjeta de siempre con las columnas reales (2023, 2024, 2025, 2025 ene–k, 2026 ene–k, u y S/, variaciones). La tabla no trae la columna de vigente ni la base 2027, y un aviso lo dice: «Las cifras reales por tienda ya son las de hoy. La base 2027 y el cierre vigente 2026 por tienda aparecerán cuando recalcules la proyección», con el botón «Recalcular» a mano (solo si la proyección está en trabajo y no se está calculando).
+- **La lista de conjuntos sale de la API, no de las filas del resumen.** `GET …/crecimientos/por-tienda` **sin `gm`** devuelve `{ conjuntos: [{ clave, nombre, es_resto }] }`, con la `clave` que acepta `?gm=` (`<genero_id>.<mundo_id>` o `resto`). Sale de `generos` y `mundos` (géneros de `generosDeMatriz` × mundos activos, y el Resto al final), así que responde aunque la proyección sea de método anterior o no se haya calculado. Mismo guard (`requirePlanner` como primera sentencia: sin sesión `401`, comprador `403`), `404` si la proyección no existe, y un `gm` presente pero vacío sigue siendo `400`. No lee venta, filas ni tiendas. Un par género × mundo sin nodos aparece igual en la lista y su tarjeta dice «Este GM no tiene filas base» (`sin_filas`) con las tiendas en cero.
+- **Con el método actual todo sigue como antes** (botón «Ver por tienda» en cada fila y la tarjeta debajo de la tabla); el selector de la tarjeta usa la lista de la API (los 11 conjuntos) en lugar de solo los GM con filas. Sin filas por GM se ofrece además el selector suelto.
+- **Estado en la URL.** `?por_tienda=` funciona igual en los dos casos y sobrevive a recargar: el panel lo lee sin mirar el resumen. Una clave que no está en la lista se avisa y se puede cerrar.
+- **Mensajes.** `409 sin_calcular`: «Calcula la proyección para ver la venta por tienda» con el botón «Calcular»; cálculo en curso: el mensaje que ya existía; si la lista no se puede leer, el error se muestra con `Alert` y el selector cae al Resto.
+
+Pruebas: `tests/proyeccion.venta-por-tienda-render.test.ts` (método anterior con y sin conjunto, selector de 11, URL, `sin_calcular`, cerrada), `tests/proyeccion.venta-por-tienda-vista.test.ts`, `tests/proyeccion.venta-por-tienda-rutas.test.ts` (lista de conjuntos) y `tests/api.guards.roles.test.ts` (mismo guard sin `gm`).
 
 ## 6. Reglas de negocio (vitest)
 

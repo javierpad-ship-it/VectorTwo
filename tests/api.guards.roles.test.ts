@@ -219,6 +219,15 @@ describe("07f: GET …/crecimientos/por-tienda (guard requirePlanner real)", () 
     expect(estado.tablasTocadas).toEqual([]);
   });
 
+  it("la lista de conjuntos (sin gm, corrección 2026-11-05) tiene el mismo guard: sin sesión 401 y el comprador 403, sin tocar datos", async () => {
+    estado.user = null;
+    expect((await consultar()).status).toBe(401);
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    estado.rol = "comprador";
+    expect((await consultar()).status).toBe(403);
+    expect(estado.tablasTocadas).toEqual([]);
+  });
+
   it("el comprador recibe 403 y no toca ninguna tabla de datos", async () => {
     estado.user = { id: "u1", email: "c@ejemplo.pe" };
     estado.rol = "comprador";
@@ -226,11 +235,11 @@ describe("07f: GET …/crecimientos/por-tienda (guard requirePlanner real)", () 
     expect(estado.tablasTocadas).toEqual([]);
   });
 
-  it("admin y planner pasan el guard (nunca 401 ni 403): sin gm, 400 antes de leer datos", async () => {
+  it("admin y planner pasan el guard (nunca 401 ni 403): con un gm mal formado, 400 antes de leer datos", async () => {
     estado.user = { id: "u1", email: "c@ejemplo.pe" };
     for (const rol of ["admin", "planner"]) {
       estado.rol = rol;
-      const respuesta = await consultar();
+      const respuesta = await consultar("?gm=mal");
       expect(respuesta.status, rol).toBe(400);
       expect(estado.tablasTocadas, rol).toEqual([]);
     }

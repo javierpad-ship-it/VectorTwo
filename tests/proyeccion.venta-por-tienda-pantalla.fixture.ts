@@ -1,4 +1,4 @@
-import type { VentaPorTiendaApi } from "../src/lib/proyeccion/tipos-api";
+import type { ConjuntosPorTiendaApi, VentaPorTiendaApi } from "../src/lib/proyeccion/tipos-api";
 import { armarVentaPorTienda, vigentesDeTiendasNuevas, type EntradaVentaPorTienda, type FilaTiendaNueva, type SerieVentaTienda } from "../src/lib/proyeccion/venta-por-tienda";
 import {
   bloquesFixture,
@@ -75,3 +75,17 @@ export function ventaResto(): VentaPorTiendaApi {
   };
   return armarVentaPorTienda(entrada);
 }
+
+/**
+ * Corrección 2026-11-05: la lista que da `GET …/crecimientos/por-tienda` sin `gm`: HOMBRE y MUJER × CASUAL, DEPORTIVO, FORMAL, RI y URBANO, más el Resto (11 conjuntos), con
+ * claves de prueba `g-hombre.m-casual` … (las de la API real son uuid). No sale de las filas del resumen: sirve con la proyección en método anterior.
+ */
+export const MUNDOS_LISTA = ["CASUAL", "DEPORTIVO", "FORMAL", "RI", "URBANO"] as const;
+export const conjuntosOnce = (): ConjuntosPorTiendaApi => ({
+  conjuntos: [
+    ...(["hombre", "mujer"] as const).flatMap((g) =>
+      MUNDOS_LISTA.map((m) => ({ clave: `g-${g}.m-${m.toLowerCase()}`, nombre: `${g.toUpperCase()} · ${m}`, es_resto: false }))
+    ),
+    { clave: "resto", nombre: "Resto", es_resto: true },
+  ],
+});

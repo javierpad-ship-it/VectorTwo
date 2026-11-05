@@ -10,6 +10,7 @@ import type {
   EstadoTiendaVenta,
   MotivoVariacion,
   PeriodoVentaApi,
+  ConjuntosPorTiendaApi,
   ProyeccionApi,
   ResumenCrecimientosProyeccionApi,
   TiendaVentaApi,
@@ -31,6 +32,36 @@ export type OpcionPorTienda = { clave: string; nombre: string };
 export function opcionesPorTienda(r: Pick<ResumenCrecimientosProyeccionApi, "filas">): OpcionPorTienda[] {
   return [...r.filas.map((f) => ({ clave: f.clave, nombre: [f.genero, f.mundo].filter(Boolean).join(" · ") || f.clave })), { clave: "resto", nombre: "Resto" }];
 }
+
+/** Corrección 2026-11-05: los conjuntos que da la API (`GET …/por-tienda` sin `gm`: HOMBRE y MUJER × sus mundos y el Resto), en el orden en que llegan. */
+export const opcionesDeConjuntos = (l: Pick<ConjuntosPorTiendaApi, "conjuntos">): OpcionPorTienda[] => l.conjuntos.map((c) => ({ clave: c.clave, nombre: c.nombre }));
+
+/**
+ * Las opciones del selector. La lista de la API manda (no depende de las filas de la proyección: sirve con método anterior o sin filas); mientras no llega, o si falla, se usan las
+ * filas del resumen cuando la proyección es del método actual (`resumen` ya viene en `null` si no lo es). Sin ninguna de las dos, solo el Resto, que existe siempre.
+ */
+export function opcionesParaPorTienda(lista: Pick<ConjuntosPorTiendaApi, "conjuntos"> | null, resumen: Pick<ResumenCrecimientosProyeccionApi, "filas"> | null): OpcionPorTienda[] {
+  if (lista) return opcionesDeConjuntos(lista);
+  if (resumen) return opcionesPorTienda(resumen);
+  return [{ clave: "resto", nombre: "Resto" }];
+}
+
+/**
+ * ¿La clave de `?por_tienda=` es de un conjunto de esta proyección? Con la lista de la API o con el resumen del método actual se sabe; sin ninguno (método anterior y la lista
+ * todavía en camino) se da por buena y la API decide (`404 gm_no_encontrado`, que la tarjeta muestra).
+ */
+export function claveDeConjuntoConocida(clave: string, lista: Pick<ConjuntosPorTiendaApi, "conjuntos"> | null, resumen: Pick<ResumenCrecimientosProyeccionApi, "filas"> | null): boolean {
+  if (lista) return lista.conjuntos.some((c) => c.clave === clave);
+  if (resumen) return opcionesPorTienda(resumen).some((o) => o.clave === clave);
+  return true;
+}
+
+/** El texto de la sección cuando todavía no se eligió ningún conjunto (proyección sin filas por GM). */
+export const textoElegirConjunto = (anioSiguiente: number): string => `Elige un género · mundo (o el Resto) para ver qué vendió cada tienda año por año y decidir el crecimiento de ${anioSiguiente}.`;
+
+/** El aviso de la tarjeta cuando la proyección es de un método anterior: el real ya se ve, la base y el vigente llegan al recalcular. */
+export const textoBaseAlRecalcular = (anioSiguiente: number, anioEnCurso: number): string =>
+  `Las cifras reales por tienda ya son las de hoy. La base ${anioSiguiente} y el cierre vigente ${anioEnCurso} por tienda aparecerán cuando recalcules la proyección.`;
 
 // ─── Textos ───
 
