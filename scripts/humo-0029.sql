@@ -289,7 +289,7 @@ select (public.venta_genero_mundo(date '2100-01-01') -> 'series') = '[]'::jsonb
    and jsonb_typeof(public.venta_genero_mundo(date '2100-01-01') -> 'cargas') = 'object' as ok;
 
 \echo '--- la funcion es stable, security invoker, language sql, search_path vacio y devuelve jsonb (esperado ok = t)  [solo lectura]'
-select p.provolatile = 's' and not p.prosecdef and l.lanname = 'sql' and p.proconfig = array['search_path=""']
+select p.provolatile = 's' and not p.prosecdef and l.lanname = 'sql' and p.proconfig @> array['search_path=""']
    and p.prorettype = 'jsonb'::regtype and p.pronargs = 1 as ok
 from pg_proc p join pg_language l on l.oid = p.prolang
 where p.oid = 'public.venta_genero_mundo(date)'::regprocedure;

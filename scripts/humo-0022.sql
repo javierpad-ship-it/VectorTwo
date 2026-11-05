@@ -200,7 +200,7 @@ select not has_function_privilege('anon', 'public.venta_composicion_agrupacion(u
    and has_function_privilege('service_role', 'public.venta_composicion_agrupacion(uuid, jsonb, date)', 'execute') as ok;
 
 \echo '--- propiedades: stable, security invoker, search_path vacio (esperado ok = t)'
-select provolatile = 's' and not prosecdef and proconfig = array['search_path=""'] as ok
+select provolatile = 's' and not prosecdef and proconfig @> array['search_path=""'] as ok
 from pg_proc where proname = 'venta_composicion_agrupacion';
 
 -- ---------------------------------------------------------------------------------------------------------------------

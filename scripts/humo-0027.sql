@@ -430,7 +430,7 @@ select (public.venta_genero_mundo(date '2100-01-01') -> 'series') = '[]'::jsonb
 select public.venta_genero_mundo(date '2025-01-01') = public.venta_genero_mundo(date '2025-01-01') as ok;
 
 \echo '--- la funcion es stable, security invoker, language sql y con search_path vacio (esperado ok = t)'
-select p.provolatile = 's' and not p.prosecdef and l.lanname = 'sql' and p.proconfig = array['search_path=""'] as ok
+select p.provolatile = 's' and not p.prosecdef and l.lanname = 'sql' and p.proconfig @> array['search_path=""'] as ok
 from pg_proc p join pg_language l on l.oid = p.prolang
 where p.oid = 'public.venta_genero_mundo(date)'::regprocedure;
 

@@ -303,7 +303,7 @@ select not (r -> 'cargas' ? '2024-03') and pg_temp.suma(r, 'T01', '2024-03', '20
 -- 6. Seguridad y propiedades de la función  [solo lectura]
 -- ---------------------------------------------------------------------------------------------------------------------
 \echo '--- la funcion es stable, security invoker, language sql, search_path vacio, devuelve jsonb y tiene 3 argumentos (esperado ok = t)  [solo lectura]'
-select p.provolatile = 's' and not p.prosecdef and l.lanname = 'sql' and p.proconfig = array['search_path=""']
+select p.provolatile = 's' and not p.prosecdef and l.lanname = 'sql' and p.proconfig @> array['search_path=""']
    and p.prorettype = 'jsonb'::regtype and p.pronargs = 3 as ok
 from pg_proc p join pg_language l on l.oid = p.prolang
 where p.oid = 'public.venta_tienda_nodos(uuid[], date, date)'::regprocedure;

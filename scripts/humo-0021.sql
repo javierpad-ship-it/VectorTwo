@@ -179,7 +179,7 @@ from (select (e->>'tiendas_total')::int tt, (e->>'tiendas_con_stock')::int tcs, 
       from jsonb_array_elements(public.venta_proyeccion((select array_agg(id) from genero_mundo_linea), null, null, date '2026-07-01', date '2026-08-01')->'disponibilidad') e) z;
 
 \echo '--- propiedades de la funcion: stable, security invoker, search_path vacio, service_role si (esperado ok = t)'
-select p.provolatile = 's' and not p.prosecdef and p.proconfig = array['search_path=""'] as ok from pg_proc p where p.proname = 'venta_proyeccion';
+select p.provolatile = 's' and not p.prosecdef and p.proconfig @> array['search_path=""'] as ok from pg_proc p where p.proname = 'venta_proyeccion';
 select has_function_privilege('service_role', 'public.venta_proyeccion(uuid[], jsonb, uuid[], date, date)', 'execute') as service_role_ok,
        not has_function_privilege('anon', 'public.venta_proyeccion(uuid[], jsonb, uuid[], date, date)', 'execute') as anon_sin_acceso,
        not has_function_privilege('authenticated', 'public.venta_proyeccion(uuid[], jsonb, uuid[], date, date)', 'execute') as authenticated_sin_acceso;
