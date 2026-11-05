@@ -729,6 +729,8 @@ Si un día hay costos CIF u otra condición que deban corregirse, es una ficha n
 
 **Decisión 106 · Lo que ya existe en COTV entra a `vector-two` por cargas idempotentes con clave de origen, ensayadas completas en local y corridas una sola vez.** Primero los proveedores con sus contactos (C1, al cerrar E1). Después, y solo con las respuestas de §12.8, las compras de COTV con su descripción y modelo, y la copia de sus fotos (C2). La clave de origen es el `id` de COTV (`proveedores.clave_origen`, `compra_linea_fotos.clave_origen` y, para las compras, la `REFERENCIA` del importador). Nada se carga escribiendo tablas a mano: proveedores por `guardar_proveedor`, compras por el importador de carga inicial (`importar_compra`), descripción y modelo por `editar_ficha_linea` y fotos por `agregar_foto_linea`, todas con sus validaciones.
 
+> **Cambios de 08b-1b (revisión 5, 2026-11-05; decisiones propuestas 117 y 121).** Javier fijó la jerarquía: **una compra a un proveedor es una orden de compra (OC)**; varias OC van en un embarque y varios embarques forman un viaje; un proveedor puede tener **dos OC en un mismo viaje**. Y eligió agrupar la carga «**solo por proveedor + viaje**». Por eso C2 ya no crea una compra por cabecera de COTV: **agrupa los ítems en una compra por (proveedor de Vector2, viaje)**, con una sola `FECHA_COMPRA` por grupo (el día en Lima del registro del ítem más antiguo, no `purchase_date`), `LLEGADA = 2026-12` y columnas informativas para que Javier parta un grupo antes de importar si el proveedor tuvo dos OC. Cambian §12.1 (patrones 1 y 3, Q5), §12.2 b y c, §12.4, §12.5 y §12.6. El detalle y su porqué están en [08b-1b §2.7](08b-fechas-logisticas.md); la OC, que se completa después, en su §2.11 y §3.7.
+
 ### 12.0 Fuente y reglas de la carga
 
 - **Origen**: proyecto Supabase `control-otb-viaje` (ref `hcqwabksrheneitpyhtm`), la base que usa COTV. Código de referencia: `/home/user/cotbv2`. **Solo `SELECT`** con `mcp__Supabase__execute_sql` y ese `project_id`. Nunca se escribe en COTV. Nunca se toca `lukers-compras`.
@@ -756,9 +758,9 @@ Si un día hay costos CIF u otra condición que deban corregirse, es una ficha n
 
 **Patrones que se leen en el código de COTV** (los confirma o corrige C0 con las consultas de abajo):
 
-1. **Una compra por ítem.** `savePurchase` y `createNeed` crean siempre una cabecera y un solo ítem, y `deletePurchase` borra el ítem pero **no** la cabecera. Con 436 cabeceras y 391 ítems hay **al menos 45 compras vacías** (sin ítems), que no se cargan.
+1. **Una compra por ítem.** `savePurchase` y `createNeed` crean siempre una cabecera y un solo ítem, y `deletePurchase` borra el ítem pero **no** la cabecera. Con 436 cabeceras y 391 ítems hay **al menos 45 compras vacías** (sin ítems), que no se cargan. En Vector2 una compra es una OC, así que C2 **agrupa** los ítems por proveedor y viaje (§12.2 b); las cabeceras de COTV no se trasladan una a una.
 2. **Proveedores creados al vuelo con el nombre tal como se tecleó** (`resolveSupplierId`, búsqueda exacta). Es de esperar: repetidos que solo difieren en mayúsculas, espacios o razón social, y proveedores sin país, sin dirección y sin contactos.
-3. **La fecha de compra es el día del registro** (`purchase_date` no está en el formulario: toma `current_date` del servidor, en UTC; un registro de la noche de Lima cae al día siguiente).
+3. **La fecha de compra es el día del registro** (`purchase_date` no está en el formulario: toma `current_date` del servidor, en UTC; un registro de la noche de Lima cae al día siguiente). Por eso C2 no usa `purchase_date`: usa el día en Lima de `purchase_items.created_at` (`timestamptz`; existe según `supabase/schema.sql` y `lib/data.ts:68` de COTV, y C0 lo confirma con la consulta de 08b-1b §2.7).
 4. **No hay** estado de compra, moneda, mes de llegada, tallas ni color. El costo es `fob_unit_cost` y la proforma de COTV lo trata como dólares (TC 3,4). `units` es `numeric`: puede haber decimales.
 5. **La marca es texto libre** y `brand_group` está casi vacío (lo dice el commit `e11c4da` de COTV). Las agrupaciones de COTV son 4 (`ULTRA LOW`, `FAST FASHION`, `MARCA CONOCIDA`, `PREMIUM`) y dos no existen en Vector2.
 6. **Géneros con otros códigos**: COTV usa `H`, `M`, `JH`, `JM`, `NH`, `NM` y `BB`; Vector2, `H`, `M`, `JOVENCITOS`, `JOVENCITAS`, `NINOS`, `NINAS`, `BEBE` y `OTROS`. Los mundos son los mismos cinco.
@@ -772,7 +774,7 @@ Si un día hay costos CIF u otra condición que deban corregirse, es una ficha n
 | Q2 | Proveedores | total; distintos por `upper(btrim(name))`; con espacios al borde; sin país, estado, dirección, RUC; con algún dato bancario (solo el conteo); países distintos y cuántos no están en `PAISES`; sin ninguna compra | por anotar |
 | Q3 | Repetidos y parecidos | grupos con el mismo nombre limpio (sin signos y sin las palabras de razón social de §3.2) y cuántos proveedores caen en ellos; el detalle se mira en la sesión con `parecidos.ts` | por anotar |
 | Q4 | Contactos | total; proveedores con 0, 1 o más contactos; máximo por proveedor; sin correo; correo que no pasa `^[^@\s]+@[^@\s]+\.[^@\s]+$`; sin teléfono; sin cargo | por anotar |
-| Q5 | Compras | total; sin ítems; con más de un ítem; sin proveedor; sin comprador; con nota; mínimo y máximo de `purchase_date`; cuántas por viaje (por `campaign_id`, sin nombre) | por anotar |
+| Q5 | Compras | total; sin ítems; con más de un ítem; sin proveedor; sin comprador; con nota; mínimo y máximo de `purchase_date`; cuántas por viaje (por `campaign_id`, sin nombre). **Agrupación** (08b-1b §2.7): que `created_at` exista y sea `timestamptz` en `purchases` y `purchase_items`; ítems cuyo día de Lima difiere de `purchase_date`; grupos proveedor + viaje; grupos con ítems en más de un día; máximo y percentil 90 de líneas por grupo | por anotar |
 | Q6 | Ítems | total; `units` no enteras; mínimo y máximo de `units` y de `fob_unit_cost`; costo 0; sin modelo; sin `brand_group`; marcas distintas; con PVP objetivo; ítems cuyo viaje no es el de su necesidad | por anotar |
 | Q7 | A qué apuntan | ítems por `origen` × `gender` × `mundo` de su necesidad (son códigos de catálogo, no nombres); ternas género × mundo × línea distintas; necesidades usadas sin ningún mes con unidades | por anotar |
 | Q8 | Fotos | filas; ítems con 1, 2 y 3 fotos; `storage.objects` del bucket `purchase-photos`: objetos, bytes totales, promedio y máximo (`metadata->>'size'`), los que no son `image/jpeg`, **objetos sin fila** y **filas sin objeto** | por anotar |
@@ -801,14 +803,16 @@ Además, en el ensayo (C0) se mide **cuántos ítems resuelven** su género × m
 
 Quién y cuándo: `p_actor = { id: null, nombre: "Carga desde COTV", rol: "admin", origen: "carga_cotv" }`; el evento es `importar` (§11.P4).
 
-**(b) Compras e ítems → `compras` y `compra_lineas` (carga C2). ¿Es viable?** Sí, **por el importador de carga inicial**, pero no solo con lo que hay en COTV: **falta el mes de llegada**, que es obligatorio (`compra_lineas.llegada_periodo not null`, `llegada_invalida` en el importador) y que el flujo necesita para saber en qué mes entra la mercadería. COTV nunca lo guardó: `otb_need_months` es el reparto del OTB de la necesidad, no la llegada de lo comprado. Por eso C2 arma una **planilla de carga inicial ya llena** con todo lo que dice COTV y deja vacías las columnas que solo Javier sabe (G2). Javier la completa y **la importa él** por la pantalla de siempre (`POST /api/compras/importar`, `carga_inicial`): así cada fila pasa por todas las validaciones de M8 y de 08b-1, y la compra queda a su nombre.
+**(b) Compras e ítems → `compras` y `compra_lineas` (carga C2). ¿Es viable?** Sí, **por el importador de carga inicial**, pero no solo con lo que hay en COTV: **falta el mes de llegada**, que es obligatorio (`compra_lineas.llegada_periodo not null`, `llegada_invalida` en el importador) y que el flujo necesita para saber en qué mes entra la mercadería. COTV nunca lo guardó: `otb_need_months` es el reparto del OTB de la necesidad, no la llegada de lo comprado. Por eso C2 arma una **planilla de carga inicial ya llena** con todo lo que dice COTV, **una compra por proveedor y viaje**, y `LLEGADA = 2026-12` (G2 respondida por Javier: «inicialmente ponle a todo llegada en diciembre», decisión propuesta 117). Javier la revisa, parte los grupos que correspondan a dos OC y **la importa él** por la pantalla de siempre (`POST /api/compras/importar`, `carga_inicial`): así cada fila pasa por todas las validaciones de M8 y de 08b-1, y la compra queda a su nombre.
 
 | Columna del importador | Sale de COTV | Regla |
 |---|---|---|
 | `PROVEEDOR` | `purchases.supplier_id` | Nombre del proveedor de C1, buscado por `clave_origen` (o por el proveedor al que se unió) |
-| `REFERENCIA` | `purchases.id` | `COTV-{id}` (41 caracteres, ≤ 80). Es la clave de origen de la compra |
-| `LINEA_ORDINAL` | orden del ítem en su compra | Por `created_at`, `id`; casi siempre 1 (patrón 1) |
-| `FECHA_COMPRA` | `purchase_date` | Tal cual (patrón 3: es la fecha de registro) |
+| `REFERENCIA` | `purchases.campaign_id` y `supplier_id` | **`COTV-{codigo_viaje}-{supplier_id}`** (48 caracteres, ≤ 80): el código del viaje en Vector2 y el `id` de COTV del proveedor que quedó en C1 al unir repetidos. **Una compra por (proveedor de Vector2, viaje)**: los ítems de los proveedores unidos en C1 van juntos. Si el proveedor tuvo dos OC en el viaje, Javier cambia la `REFERENCIA` de las filas de la segunda (por ejemplo, `…-2`) antes de importar |
+| `LINEA_ORDINAL` | orden del ítem en su grupo | 1, 2, 3… por `purchase_items.created_at` y `id`. Partir un grupo no obliga a renumerar |
+| `FECHA_COMPRA` | `purchase_items.created_at` | **Una sola por grupo, igual en todas sus filas**: el día en Lima (`at time zone 'America/Lima'`) del ítem más antiguo. No `purchase_date` (patrón 3). El importador **omite** las filas de una compra con otra fecha (`cabecera_inconsistente`, `src/lib/compras/importar.ts:572-576`): si Javier parte un grupo, pone una sola fecha en cada parte |
+| `DIA_REGISTRO` (informativa) | `purchase_items.created_at` | El día en Lima de cada ítem, para decidir dónde partir. El importador la ignora |
+| `ITEM_COTV` (informativa) | `purchase_items.id` | Enlaza descripción, modelo y fotos con su línea aunque Javier parta el grupo (§12.2 c). El importador la ignora |
 | `VIAJE` | `campaign_id` | Código del `compra_viajes` que Javier crea en 08b-1 para cada uno de los 2 viajes (G3) |
 | `GENERO` | `otb_needs.gender` | Tabla fija: `H`→`H`, `M`→`M`, `JH`→`JOVENCITOS`, `JM`→`JOVENCITAS`, `NH`→`NINOS`, `NM`→`NINAS`, `BB`→`BEBE`. Otro código → fila a revisar |
 | `MUNDO` | `otb_needs.mundo` | Tal cual (los mismos cinco) |
@@ -818,11 +822,12 @@ Quién y cuándo: `p_actor = { id: null, nombre: "Carga desde COTV", rol: "admin
 | `TALLAS` | — | Vacía = `ambas`, el valor del importador para «sin distinguir». COTV nunca separó tallas |
 | `UNIDADES` | `units` | Entero > 0. Con decimales, la fila sale `unidades_invalida` y Javier decide |
 | `COSTO_UNITARIO` · `MONEDA` | `fob_unit_cost` · `USD` | FOB en dólares (decisión 102) |
-| `LLEGADA` · `RECIBIDAS` | — | **Vacías: las llena Javier** (G2). Lo que ya llegó al CD va en `RECIBIDAS`, para no contarlo dos veces contra el stock de M5 |
-| `NOTA` (de la compra) | `buyer_id` → `profiles.full_name`, `notes` | «Registrada en COTV por {nombre}» y la nota de COTV, ≤ 500 |
+| `LLEGADA` · `RECIBIDAS` | — | **`LLEGADA = 2026-12`** en todas las filas (G2, decisión propuesta 117); Javier reparte después entre los embarques reales (08b-1b §2.7). `RECIBIDAS` vacía salvo lo que ya llegó al CD, para no contarlo dos veces contra el stock de M5 |
+| `EMBARQUE` · `PAQUETE` · `OC` | — | Vacías. La OC se completa después, en pantalla o reimportando la planilla con la columna `OC` (08b-1b §3.7): es única por proveedor |
+| `NOTA` (de la compra) | `buyer_id` → `profiles.full_name`, `notes` | **Una por grupo**, igual en todas sus filas: «Registrada en COTV por {compradores distintos}» y las notas distintas de las cabeceras del grupo, separadas por « · », ≤ 500 (lo que exceda se corta con aviso en la sesión) |
 | (después) `descripcion` · `modelo` | `product_name` · `model` | No son columnas del importador hasta E2: C2 los escribe con `editar_ficha_linea` en cada línea creada (≤ 200 y ≤ 60; lo que exceda se corta con aviso) |
 
-**Qué se pierde**: el PVP objetivo (`target_sale_price`), la agrupación de COTV (manda la de la marca en Vector2), el vínculo con la necesidad OTB, la hora del registro y quién lo hizo como usuario (queda en la nota). **Tallas y color** no se pierden: COTV nunca los tuvo y Vector2 no maneja color. Las compras vacías (patrón 1) no se cargan.
+**Qué se pierde**: el PVP objetivo (`target_sale_price`), la agrupación de COTV (manda la de la marca en Vector2), el vínculo con la necesidad OTB, la cabecera de COTV de cada ítem (se agrupan), la hora del registro (queda el día, en `DIA_REGISTRO` de la planilla) y quién lo hizo como usuario (queda en la nota). **Tallas y color** no se pierden: COTV nunca los tuvo y Vector2 no maneja color. Las compras vacías (patrón 1) no se cargan.
 
 **Origen y estado.** `origen = carga_inicial` y `estado = confirmada`, como toda carga inicial: COTV no tiene estados y lo que se registraba allí era lo comprado. Las compras de necesidades `INTERCOMPANY` dependen de G4.
 
@@ -830,7 +835,7 @@ Quién y cuándo: `p_actor = { id: null, nombre: "Carga desde COTV", rol: "admin
 
 - **Dónde están**: bucket privado `purchase-photos` de COTV, ruta plana `{uuid}.jpg`, JPEG de lado largo ≤ 1 000 px (patrón 7). Tamaño y formato exactos: Q8.
 - **Qué hay que hacerles**: reducirlas a ≤ 800 px de lado largo (≤ 400 KB) y sacar la miniatura de 320 px (≤ 60 KB), con las calidades de `comprimir.ts` (0,82 → 0,72 → 0,62; miniatura 0,75), pasarlas por `quitarMetadatos` y `validarJpeg` (la misma lógica pura de `src/lib/fotos/`), subir los dos objetos a `compras/{compra_id}/{linea_id}/{foto_id}.jpg` y llamar a `agregar_foto_linea` con `clave_origen = cotv:photo:{id}`. Si la línea ya tiene 3 fotos, sale `max_fotos` y se lista.
-- **A qué línea van**: la línea creada en C2 a partir del ítem de COTV (por su `REFERENCIA` y su ordinal), o la línea de la carga inicial de Javier con la que se enlazó el ítem (G1, camino «enlazar»). Sin línea, la foto no se copia y se lista.
+- **A qué línea van**: la línea creada en C2 a partir del ítem de COTV. El enlace sale de la planilla **tal como Javier la importó** (con sus referencias partidas, si partió alguna): `ITEM_COTV` → (`PROVEEDOR`, `REFERENCIA` del grupo, `LINEA_ORDINAL`) → la línea con esa `clave_importacion`. Lo mismo para `editar_ficha_linea` (descripción y modelo). O la línea de la carga inicial de Javier con la que se enlazó el ítem (G1, camino «enlazar»). Sin línea, la foto no se copia y se lista.
 - **¿Se puede con las herramientas disponibles? No del todo, y hay que decirlo claro.** El MCP de Supabase solo ejecuta SQL: lee las filas y los metadatos de `storage.objects` (Q8), pero **no descarga el contenido** de un objeto, y desde SQL tampoco se puede firmar una URL de Storage. Para bajar las 163 fotos hace falta **una llave de COTV** (una llave secreta nueva, creada solo para esto en el panel de COTV y revocada al terminar, o la `service_role`); para subirlas a `vector-two`, **su llave `service_role`** (la de `.env.local` de Javier; en este entorno no hay ninguna). Las dos las tiene que dar Javier, por variable de entorno de la sesión, nunca en un archivo del repo (G3). Sin ellas, C2 carga compras, descripción y modelo, y las fotos esperan.
 - **Cómo pasan sin tocar el repo**: un *script* de un solo uso **fuera del repo** (en el *scratchpad*) baja cada objeto a una carpeta propia del *scratchpad*, lo reduce con Pillow (`uv run --with pillow`; no añade dependencias al proyecto), lo valida importando la lógica pura de `src/lib/fotos/`, lo sube con `service_role` y llama a la función. `seguridad` lee el *script* antes de correrlo en `vector-two`. Al terminar se borran las fotos descargadas y el *script*.
 - **Cuota**: 163 fotos de ≤ 460 KB entre foto y miniatura son, en el peor caso, unos 75 MB, y en la práctica unos 25 MB: caben de sobra en el plan gratuito (§8, riesgo 1).
@@ -850,12 +855,12 @@ Quién y cuándo: `p_actor = { id: null, nombre: "Carga desde COTV", rol: "admin
 1. **C0 · Inventario y ensayo** (sin Javier): Q1–Q9; volcado de COTV y copia de los maestros de `vector-two` al *scratchpad*; PostgreSQL local con todas las migraciones y `00E1`; C1 y C2 completos en local.
 2. **C1 · Proveedores y contactos** en `vector-two`: tanda T6 de E1, cuando `00E1` está aplicada y QA dio por bueno el hito local.
 3. **Javier crea los 2 viajes** en Viajes y embarques (08b-1) y responde §12.8.
-4. **C2a · Compras**: planilla llena → Javier completa `LLEGADA`, `RECIBIDAS` y lo que no casó → la importa él → C2 escribe descripción y modelo. O, si G1 dice que ya están en su carga inicial, C2 enlaza los ítems con sus líneas.
+4. **C2a · Compras**: planilla llena y agrupada por proveedor y viaje, con las hojas `GRUPOS` y `LEEME` → Javier revisa `RECIBIDAS`, parte por `REFERENCIA` los grupos que eran dos OC y corrige lo que no casó → la importa él → C2 escribe descripción y modelo por `ITEM_COTV`. La función que agrupa (`agruparItemsCotv`, en `scripts/cotv/planilla-c2.ts`, sin datos y con su prueba) la construye `backend` en la T2 de 08b-1b. O, si G1 dice que ya están en su carga inicial, C2 enlaza los ítems con sus líneas.
 5. **C2b · Fotos**: con las llaves de G3.
 
 ### 12.5 Cómo se carga, se valida y (no) se revierte
 
-**Idempotencia.** Proveedores por `clave_origen` (`ya_cargado`), compras por la clave natural del importador (`PROVEEDOR | REFERENCIA | LINEA`: una fila ya importada sale `igual`), fotos por `clave_origen` (`ya_cargada`). Correr cualquier paso dos veces crea 0 la segunda vez. Si un paso se corta a la mitad, se vuelve a correr entero.
+**Idempotencia.** Proveedores por `clave_origen` (`ya_cargado`), compras por la clave natural del importador (`PROVEEDOR | REFERENCIA | LINEA`, con la referencia del **grupo**: una fila ya importada sale `igual`; reimportar exige la planilla que Javier importó, con sus partes), fotos por `clave_origen` (`ya_cargada`). Correr cualquier paso dos veces crea 0 la segunda vez. Si un paso se corta a la mitad, se vuelve a correr entero.
 
 **C1 paso a paso.**
 
@@ -872,27 +877,27 @@ Quién y cuándo: `p_actor = { id: null, nombre: "Carga desde COTV", rol: "admin
 | Proveedores | 34 menos los unidos | `proveedores` con `clave_origen like 'cotv:supplier:%'` | igual |
 | Contactos | 26 menos los repetidos al unir | sus `proveedor_contactos` | igual; y por proveedor, el mismo número |
 | Eventos | — | `proveedor_eventos` con `accion = 'importar'` | uno por proveedor cargado |
-| Compras | cabeceras con ítems, menos las que G1 o G4 dejan fuera | `compras` con `referencia like 'COTV-%'` | igual |
+| Compras | **grupos** (proveedor de Vector2 × viaje) con ítems, más los que Javier partió, menos los que G1 o G4 dejan fuera | `compras` con `referencia like 'COTV-%'` | igual; y 0 filas `cabecera_inconsistente` en el reporte |
 | Líneas, unidades y costo | ítems; `sum(units)`; `sum(units × fob_unit_cost)` | sus `compra_lineas`; `sum(unidades)`; `sum(unidades × costo_unitario)` | igual |
 | Descripción y modelo | ítems con `product_name` / `model` | líneas con `descripcion` / `modelo` | igual |
 | Fotos | filas de las líneas cargadas | `compra_linea_fotos` con `clave_origen like 'cotv:photo:%'`, cada una con sus 2 objetos en `storage.objects` | igual; 0 huérfanas (`fotos_huerfanas`) |
 
 Además, **muestras**: 5 proveedores y 5 compras al azar comparados campo a campo en la sesión, y 5 fotos que Javier abre en el celular.
 
-**Revertir.** Antes de C2, un proveedor de C1 no tiene compras: `eliminar_proveedor` lo **borra** (queda su evento con `proveedor_id` nulo), así que C1 sí se puede deshacer. Después de C2 ya no: las compras solo se cancelan (con motivo «carga COTV errónea») y quedan a la vista, los proveedores con compras solo se desactivan y las fotos se quitan (quedan registradas). Por eso C2 se ensaya completo en local y se corre **una sola vez**.
+**Revertir.** Antes de C2, un proveedor de C1 no tiene compras: `eliminar_proveedor` lo **borra** (queda su evento con `proveedor_id` nulo), así que C1 sí se puede deshacer. Después de C2 ya no: las compras solo se cancelan (con motivo «carga COTV errónea») y quedan a la vista; una compra mal agrupada se cancela (libera sus claves) y sus filas se reimportan con otra `REFERENCIA` (dividir, unir o mover líneas entre compras es mejora de `0.13.1`), los proveedores con compras solo se desactivan y las fotos se quitan (quedan registradas). Por eso C2 se ensaya completo en local y se corre **una sola vez**.
 
 ### 12.6 Qué se hace sin Javier y qué no
 
 | Sin Javier (agente principal y `datos`) | Necesita a Javier |
 |---|---|
-| Inventario Q1–Q9 y su anotación aquí (solo cifras) | Responder G1 a G4 (§12.8) |
+| Inventario Q1–Q9 y su anotación aquí (solo cifras) | Responder G1, G3 y G4 (§12.8; G2 respondida) |
 | Ensayo completo en local (C0) | Crear los 2 viajes en 08b-1 (o autorizar que se creen con el nombre y las fechas de COTV) |
-| C1: proveedores y contactos en `vector-two`, con su validación | Completar `LLEGADA` y `RECIBIDAS` en la planilla, corregir las líneas y marcas que no casen e importarla |
+| C1: proveedores y contactos en `vector-two`, con su validación | Revisar `RECIBIDAS`, partir por `REFERENCIA` los grupos que eran dos OC (hoja `GRUPOS`), corregir las líneas y marcas que no casen e importarla |
 | Armar la planilla de C2 y la lista de lo que no casa; proponer el enlace ítem ↔ línea si G1 = «ya están» | Confirmar los enlaces dudosos |
 | Descripción y modelo de las líneas cargadas | Dar las dos llaves para las fotos (G3) y revocar la de COTV al terminar |
 | Validación y muestras | Mirar 5 fotos en el celular |
 
-**Costo**: C0 y C1, medio día de agentes. C2 compras, medio día más el tiempo de Javier con la planilla. C2 fotos, un día (el *script*, el ensayo y la corrida). Ninguna suma código ni pruebas a la aplicación.
+**Costo**: C0 y C1, medio día de agentes. C2 compras, medio día más el tiempo de Javier con la planilla. C2 fotos, un día (el *script*, el ensayo y la corrida). Ninguna suma código a la aplicación; la única pieza en el repo es la función pura que agrupa la planilla C2 (`scripts/cotv/`, sin datos, con su prueba), porque agrupar y uniformar la fecha es lo que puede romper la carga.
 
 ### 12.7 El hito de E1 con datos reales
 
@@ -909,7 +914,7 @@ Si C2 todavía no está hecho cuando E1 cierra, Javier recorre los tres primeros
 
 ### 12.8 Preguntas para Javier (solo bloquean C2)
 
-**Respuesta parcial de Javier (2026-11-04), decisión 107:** «Para la carga inicial lo hacemos nosotros, por ejemplo trayendo de COTBV». Efecto: la carga inicial de compras se arma **desde COTV** (hecha por Claude con Javier), así que **G1 queda resuelta en el sentido «no hay otra carga previa»: se cargan compras desde COTV y no hay enlace con una carga inicial ajena** (el camino «enlazar» queda solo como respaldo si Javier aporta después otra carga). La carga inicial sigue siendo **solo admin/planner** (el comprador no marca `carga_inicial`; sí puede usar el importador normal, decisión 108). Siguen abiertas G2 (mes de llegada), G3 (llaves para las fotos) y G4 (intercompany).
+**Respuesta parcial de Javier (2026-11-04), decisión 107:** «Para la carga inicial lo hacemos nosotros, por ejemplo trayendo de COTBV». Efecto: la carga inicial de compras se arma **desde COTV** (hecha por Claude con Javier), así que **G1 queda resuelta en el sentido «no hay otra carga previa»: se cargan compras desde COTV y no hay enlace con una carga inicial ajena** (el camino «enlazar» queda solo como respaldo si Javier aporta después otra carga). La carga inicial sigue siendo **solo admin/planner** (el comprador no marca `carga_inicial`; sí puede usar el importador normal, decisión 108). Siguen abiertas G3 (llaves para las fotos) y G4 (intercompany). **G2 respondida (2026-11-05, decisión propuesta 117, 08b-1b §2.7)**: «inicialmente ponle a todo llegada en diciembre» (`LLEGADA = 2026-12`, sin embarque), y la agrupación «solo por proveedor + viaje».
 
 1. **G1 · ¿Las compras de los dos viajes de COTV ya están en tu archivo de carga inicial de compras?** Si tus órdenes (las de SAP o las que cargas a mano) ya traen lo comprado en esos viajes, cargarlas además desde COTV las contaría dos veces en el flujo. *Recomendación: si ya están, no se cargan compras desde COTV; yo enlazo cada ítem de COTV con tu línea y le paso descripción, modelo y fotos. Si no están, se cargan desde COTV con la planilla de G2.*
 2. **G2 · ¿Me completas el mes de llegada?** COTV nunca guardó cuándo llega la mercadería, y sin ese mes una compra no puede entrar al flujo. *Recomendación: te paso la planilla de carga inicial ya llena con todo lo de COTV; tú completas `LLEGADA` (y `RECIBIDAS` si algo ya llegó al CD), corriges las líneas o marcas que no se encontraron y la importas tú. No uso el mes del OTB de la necesidad: no es lo mismo que la llegada y sería inventar.*
