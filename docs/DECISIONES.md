@@ -1459,11 +1459,12 @@ Todas están redactadas con su alcance completo en `docs/modulos/08c-proveedores
 
 **Descartado.** Solo HOMBRE y MUJER (el Resto quedaría con una base que no se puede abrir); un «Ver por tienda» del Total (mezcla tiendas de todos los géneros sin una base que cuadrar).
 
-## 2026-11-05 · M8 (08b-1b): fechas logísticas del embarque, decisiones propuestas (115 a 118, sin registrar)
+## 2026-11-05 · M8 (08b-1b): fechas logísticas del embarque, decisiones propuestas (115 a 119, sin registrar)
 
-Propuestas de la ficha `docs/modulos/08b-fechas-logisticas.md`, pendientes de las preguntas P1 a P4 de Javier (§9 de esa ficha). **No están vigentes**: se registran con este número al construir la entrega. Se reservan los números **115 a 118**.
+Propuestas de la ficha `docs/modulos/08b-fechas-logisticas.md` (revisión 2, con las respuestas de Javier P1–P4 del 2026-11-05). **No están vigentes**: se registran con este número al construir la entrega; antes, Javier responde las tres preguntas nuevas de §9 de la ficha. Se reservan los números **115 a 119**.
 
-- **115** · El embarque tiene cuatro hitos de fecha (sale, llega a puerto, llega al área de conteo, ingresa al stock) y **solo el ingreso al stock decide el mes del flujo**. Precisa la **83** («llegada al CD»): `fecha_llegada_estimada` conserva el nombre y pasa a significar ingreso previsto. No hay caída automática al hito anterior.
-- **116** · Reprogramar un hito exige motivo y causa (catálogo); completar una fecha vacía, no. Reprogramaciones y retraso se derivan de los eventos. «Ya ocurrió» con una sola columna secuencial, `hito_confirmado`. El desorden entre hitos avisa y no bloquea, salvo salida > ingreso (check de la `0032`).
-- **117** · Una compra puede entrar sin mes propio si trae embarque: toma el mes de ingreso del embarque. No hay entregas sin mes. Matiza 08b §3.9 regla 3 y responde G2 de 08c §12.8.
-- **118** · Los pagos no se modelan en el embarque: `pago` es una causa de reprogramación.
+- **115** · Cuatro hitos por embarque (sale, llega a puerto, llega a conteo, ingresa al stock) y **el mes del flujo es el del ingreso al stock**. `fecha_llegada_estimada` conserva su significado de origen (llegada al CD = área de conteo) y sigue obligatoria; el ingreso es una columna nueva (`fecha_ingreso_estimada`, nula = el conteo); `periodo_llegada` = mes de `coalesce(real, ingreso, conteo)`. Precisa la **83**.
+- **116** · Reprogramar exige motivo y causa (catálogo con `pago`, `cola_conteo`, `programacion`, `correccion`…); completar, confirmar o que el ingreso calculado siga al conteo, no. Contadores y retraso derivados de los eventos. «Ya ocurrió» con `hito_confirmado` secuencial (Javier, P3). Solo salida > conteo bloquea.
+- **117** · Compras con viaje y sin mes: el **«Por dividir»** del viaje (un embarque provisional por viaje, con mes provisional, que cuenta en el flujo); se divide pasando unidades a los embarques reales sin doble conteo. El origen (California o Nueva York) es un dato de texto del embarque. Matiza 08b §3.9 regla 3 y responde G2 de 08c §12.8.
+- **118** · Pagos: causa de la reprogramación, no un campo (Javier, P2).
+- **119** · El ingreso se programa: por defecto, conteo + días de cola (`flujo_parametros`, general y al barrer, inicial 0); editable por embarque y **por paquete** (ingreso propio); lo al barrer se programa por paquete y en tandas, y se reparte de nuevo con la temporada del mes nuevo (decisión 86). Cambiar la cola no mueve lo existente. Sin cola con capacidad por ahora.
