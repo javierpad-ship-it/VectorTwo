@@ -46,6 +46,54 @@ fi
 vt_psql_admin -v ON_ERROR_STOP=1 -q -c "drop database if exists $VT_DB with (force);" -c "create database $VT_DB;"
 vt_psql -v ON_ERROR_STOP=1 -q -c "create schema if not exists auth; create table if not exists auth.users (id uuid primary key default gen_random_uuid(), email text); insert into auth.users (email) values ('jperezalbela@jeruth.pe');"
 
+# Esquema `storage` mínimo (solo local y CI; en Supabase ya existe y la 0039 no lo crea). La 0039 inserta el bucket `compras-fotos` y
+# `fotos_huerfanas` lee `storage.objects`. Se imita lo que importa para las pruebas: tablas `buckets` y `objects` con las columnas que
+# usa el repo, RLS ACTIVO y SIN políticas (el humo exige 0 políticas en el esquema), los grants que Supabase deja a anon, authenticated y
+# service_role (solo los frena el RLS sin políticas) y el trigger `protect_objects_delete`, que rechaza el DELETE directo (los objetos
+# se borran con la API de Storage, no por SQL). Se crea como `postgres`, el dueño con el que luego corren las migraciones.
+vt_psql -v ON_ERROR_STOP=1 -q <<'SQL'
+set role postgres;
+create schema if not exists storage;
+create table if not exists storage.buckets (
+  id text primary key,
+  name text not null unique,
+  owner uuid,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  public boolean default false,
+  avif_autodetection boolean default false,
+  file_size_limit bigint,
+  allowed_mime_types text[],
+  owner_id text
+);
+create table if not exists storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text references storage.buckets(id),
+  name text,
+  owner uuid,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  last_accessed_at timestamptz default now(),
+  metadata jsonb,
+  path_tokens text[],
+  version text,
+  owner_id text,
+  user_metadata jsonb
+);
+alter table storage.buckets enable row level security;
+alter table storage.objects enable row level security;
+grant usage on schema storage to anon, authenticated, service_role;
+grant all on storage.buckets, storage.objects to service_role;
+grant select, insert, update, delete on storage.buckets, storage.objects to anon, authenticated;
+create or replace function storage.protect_delete() returns trigger language plpgsql as $f$
+begin
+  raise exception 'Direct deletion from storage tables is not allowed. Use the Storage API instead.' using errcode = '42501';
+end
+$f$;
+create or replace trigger protect_objects_delete before delete on storage.objects for each statement execute function storage.protect_delete();
+create or replace trigger protect_buckets_delete before delete on storage.buckets for each statement execute function storage.protect_delete();
+SQL
+
 # Privilegios por defecto de Supabase: todo objeto nuevo que crea el rol `postgres` en `public` nace con permisos para anon,
 # authenticated y service_role (por eso cada migracion hace `revoke ... from anon, authenticated`, y la 0013 los quita de los
 # defaults `for role postgres`). Sin esto la base local NO simula produccion y un `revoke` olvidado pasaria inadvertido. Se fijan

@@ -128,10 +128,10 @@ describe.skipIf(!HAY_BASE)("permisos (Postgres real)", () => {
     expect(llamada.data?.ok).toBe(true);
   });
 
-  it("las 8 tablas de solo insercion: service_role solo tiene select e insert (0035); el resto de las tablas conserva el patron de la 0013", async (ctx) => {
+  it("las tablas de solo insercion (8 de la 0035, el registro y proveedor_eventos de la 0039): service_role solo tiene select e insert; el resto de las tablas conserva el patron de la 0013", async (ctx) => {
     const hay0035 = await escalar<boolean>(c, "select to_regclass('public.migraciones_aplicadas') is not null");
     if (!hay0035) ctx.skip();
-    const SOLO_INSERCION = ["compra_eventos", "compra_agrupador_eventos", "ia_entradas", "ia_llamadas", "ia_propuestas_gm", "ia_propuestas_filas", "proyeccion_lotes", "proyeccion_lote_filas", "migraciones_aplicadas"];
+    const SOLO_INSERCION = ["compra_eventos", "compra_agrupador_eventos", "ia_entradas", "ia_llamadas", "ia_propuestas_gm", "ia_propuestas_filas", "proyeccion_lotes", "proyeccion_lote_filas", "migraciones_aplicadas", "proveedor_eventos"];
     const privilegios = await filas<{ tabla: string; privilegios: string }>(
       c,
       `select g.table_name as tabla, string_agg(g.privilege_type, ',' order by g.privilege_type) as privilegios

@@ -15,6 +15,13 @@
  * aqui y `never` alli; (e) el generador agrega `__InternalSupabase` y no pone `;`. Un test de deriva debe comparar tablas, columnas,
  * relaciones y funciones por estructura, no el texto.
  *
+ * Actualizados a mano el 2026-11-06 con la 0039 (08c E1, proveedores y fotos de compras): 3 tablas nuevas (`proveedor_contactos`,
+ * `proveedor_eventos`, de solo insercion, y `compra_linea_fotos`), 12 columnas nuevas en `proveedores` (`direccion`, `region`,
+ * `puerto_embarque`, `incoterm`, `moneda`, `plazo_produccion_dias`, `plazo_transito_dias`, `condiciones_pago`, `revision`, `updated_by_id`,
+ * `updated_by_nombre`, `clave_origen`), `compra_lineas.descripcion` y `.modelo`, y 9 funciones (`proveedor_foto`, `guardar_proveedor`,
+ * `cambiar_activo_proveedor`, `eliminar_proveedor`, `agregar_foto_linea`, `quitar_foto_linea`, `traer_fotos_linea`, `editar_ficha_linea` y
+ * `fotos_huerfanas`, todas con `Returns: Json`). El bucket de Storage no aparece en estos tipos (es del esquema `storage`).
+ *
  * Actualizados a mano el 2026-11-04 con la 0033 (M7 07f, venta por tienda en Crecimientos, aplicada en `Vector2`): solo la funcion de lectura
  * `venta_tienda_nodos(p_gml_ids uuid[], p_desde date, p_hasta date) -> Json` (`{ series: [{ t, p, u, s }], cargas: { 'aaaa-mm': carga_id } }`).
  * Sin tablas ni columnas nuevas. Firma tomada de `pg_proc` de `Vector2` (no se regenero el archivo entero).
@@ -660,6 +667,108 @@ export type Database = {
           },
         ];
       };
+      compra_linea_fotos: {
+        Row: {
+          activo: boolean;
+          alto: number;
+          ancho: number;
+          bytes: number;
+          bytes_miniatura: number;
+          clave_origen: string | null;
+          compra_id: string;
+          created_at: string;
+          id: string;
+          linea_id: string;
+          origen_foto_id: string | null;
+          quitada_at: string | null;
+          quitada_por_id: string | null;
+          quitada_por_nombre: string | null;
+          ruta: string;
+          ruta_miniatura: string;
+          subida_por_id: string | null;
+          subida_por_nombre: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          alto: number;
+          ancho: number;
+          bytes: number;
+          bytes_miniatura: number;
+          clave_origen?: string | null;
+          compra_id: string;
+          created_at?: string;
+          id?: string;
+          linea_id: string;
+          origen_foto_id?: string | null;
+          quitada_at?: string | null;
+          quitada_por_id?: string | null;
+          quitada_por_nombre?: string | null;
+          ruta: string;
+          ruta_miniatura: string;
+          subida_por_id?: string | null;
+          subida_por_nombre?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          alto?: number;
+          ancho?: number;
+          bytes?: number;
+          bytes_miniatura?: number;
+          clave_origen?: string | null;
+          compra_id?: string;
+          created_at?: string;
+          id?: string;
+          linea_id?: string;
+          origen_foto_id?: string | null;
+          quitada_at?: string | null;
+          quitada_por_id?: string | null;
+          quitada_por_nombre?: string | null;
+          ruta?: string;
+          ruta_miniatura?: string;
+          subida_por_id?: string | null;
+          subida_por_nombre?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "compra_linea_fotos_compra_id_fkey";
+            columns: ["compra_id"];
+            isOneToOne: false;
+            referencedRelation: "compras";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_fotos_linea_id_fkey";
+            columns: ["linea_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_lineas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_fotos_origen_foto_id_fkey";
+            columns: ["origen_foto_id"];
+            isOneToOne: false;
+            referencedRelation: "compra_linea_fotos";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_fotos_quitada_por_id_fkey";
+            columns: ["quitada_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "compra_linea_fotos_subida_por_id_fkey";
+            columns: ["subida_por_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       compra_linea_recepciones: {
         Row: {
           activo: boolean;
@@ -841,6 +950,7 @@ export type Database = {
           compra_id: string;
           costo_unitario: number | null;
           created_at: string;
+          descripcion: string | null;
           destino: string;
           equivalencia_id: string | null;
           genero_mundo_linea_id: string | null;
@@ -848,6 +958,7 @@ export type Database = {
           id: string;
           llegada_periodo: string;
           marca_id: string | null;
+          modelo: string | null;
           nota: string | null;
           tallas: string;
           tienda_id: string | null;
@@ -866,6 +977,7 @@ export type Database = {
           compra_id: string;
           costo_unitario?: number | null;
           created_at?: string;
+          descripcion?: string | null;
           destino?: string;
           equivalencia_id?: string | null;
           genero_mundo_linea_id?: string | null;
@@ -873,6 +985,7 @@ export type Database = {
           id?: string;
           llegada_periodo: string;
           marca_id?: string | null;
+          modelo?: string | null;
           nota?: string | null;
           tallas?: string;
           tienda_id?: string | null;
@@ -891,6 +1004,7 @@ export type Database = {
           compra_id?: string;
           costo_unitario?: number | null;
           created_at?: string;
+          descripcion?: string | null;
           destino?: string;
           equivalencia_id?: string | null;
           genero_mundo_linea_id?: string | null;
@@ -898,6 +1012,7 @@ export type Database = {
           id?: string;
           llegada_periodo?: string;
           marca_id?: string | null;
+          modelo?: string | null;
           nota?: string | null;
           tallas?: string;
           tienda_id?: string | null;
@@ -2963,56 +3078,203 @@ export type Database = {
         };
         Relationships: [];
       };
+      proveedor_contactos: {
+        Row: {
+          activo: boolean;
+          cargo: string | null;
+          correo: string | null;
+          created_at: string;
+          es_principal: boolean;
+          id: string;
+          nombre: string;
+          orden: number;
+          proveedor_id: string;
+          telefono: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          activo?: boolean;
+          cargo?: string | null;
+          correo?: string | null;
+          created_at?: string;
+          es_principal?: boolean;
+          id?: string;
+          nombre: string;
+          orden?: number;
+          proveedor_id: string;
+          telefono?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          activo?: boolean;
+          cargo?: string | null;
+          correo?: string | null;
+          created_at?: string;
+          es_principal?: boolean;
+          id?: string;
+          nombre?: string;
+          orden?: number;
+          proveedor_id?: string;
+          telefono?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proveedor_contactos_proveedor_id_fkey";
+            columns: ["proveedor_id"];
+            isOneToOne: false;
+            referencedRelation: "proveedores";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      proveedor_eventos: {
+        Row: {
+          accion: string;
+          antes: Json | null;
+          created_at: string;
+          despues: Json | null;
+          id: string;
+          perfil_id: string | null;
+          proveedor_id: string | null;
+          proveedor_nombre: string;
+          resumen: string | null;
+          usuario_nombre: string | null;
+        };
+        Insert: {
+          accion: string;
+          antes?: Json | null;
+          created_at?: string;
+          despues?: Json | null;
+          id?: string;
+          perfil_id?: string | null;
+          proveedor_id?: string | null;
+          proveedor_nombre: string;
+          resumen?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Update: {
+          accion?: string;
+          antes?: Json | null;
+          created_at?: string;
+          despues?: Json | null;
+          id?: string;
+          perfil_id?: string | null;
+          proveedor_id?: string | null;
+          proveedor_nombre?: string;
+          resumen?: string | null;
+          usuario_nombre?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "proveedor_eventos_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proveedor_eventos_proveedor_id_fkey";
+            columns: ["proveedor_id"];
+            isOneToOne: false;
+            referencedRelation: "proveedores";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       proveedores: {
         Row: {
           activo: boolean;
           ciudad: string | null;
+          clave_origen: string | null;
           codigo: string | null;
+          condiciones_pago: string | null;
           created_at: string;
+          direccion: string | null;
           es_intercompany: boolean;
           id: string;
           identificacion: string | null;
+          incoterm: string | null;
+          moneda: string | null;
           nombre: string;
           nota: string | null;
           pais: string | null;
           perfil_id: string | null;
+          plazo_produccion_dias: number | null;
+          plazo_transito_dias: number | null;
+          puerto_embarque: string | null;
+          region: string | null;
+          revision: number;
           updated_at: string;
+          updated_by_id: string | null;
+          updated_by_nombre: string | null;
           usuario_nombre: string | null;
         };
         Insert: {
           activo?: boolean;
           ciudad?: string | null;
+          clave_origen?: string | null;
           codigo?: string | null;
+          condiciones_pago?: string | null;
           created_at?: string;
+          direccion?: string | null;
           es_intercompany?: boolean;
           id?: string;
           identificacion?: string | null;
+          incoterm?: string | null;
+          moneda?: string | null;
           nombre: string;
           nota?: string | null;
           pais?: string | null;
           perfil_id?: string | null;
+          plazo_produccion_dias?: number | null;
+          plazo_transito_dias?: number | null;
+          puerto_embarque?: string | null;
+          region?: string | null;
+          revision?: number;
           updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
           usuario_nombre?: string | null;
         };
         Update: {
           activo?: boolean;
           ciudad?: string | null;
+          clave_origen?: string | null;
           codigo?: string | null;
+          condiciones_pago?: string | null;
           created_at?: string;
+          direccion?: string | null;
           es_intercompany?: boolean;
           id?: string;
           identificacion?: string | null;
+          incoterm?: string | null;
+          moneda?: string | null;
           nombre?: string;
           nota?: string | null;
           pais?: string | null;
           perfil_id?: string | null;
+          plazo_produccion_dias?: number | null;
+          plazo_transito_dias?: number | null;
+          puerto_embarque?: string | null;
+          region?: string | null;
+          revision?: number;
           updated_at?: string;
+          updated_by_id?: string | null;
+          updated_by_nombre?: string | null;
           usuario_nombre?: string | null;
         };
         Relationships: [
           {
             foreignKeyName: "proveedores_perfil_id_fkey";
             columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "proveedores_updated_by_id_fkey";
+            columns: ["updated_by_id"];
             isOneToOne: false;
             referencedRelation: "perfiles";
             referencedColumns: ["id"];
@@ -4685,6 +4947,83 @@ export type Database = {
         Args: {
           p_actor: Json;
           p_lote: Json;
+        };
+        Returns: Json;
+      };
+      proveedor_foto: {
+        Args: {
+          p_proveedor: string;
+        };
+        Returns: Json;
+      };
+      guardar_proveedor: {
+        Args: {
+          p_actor: Json;
+          p_contactos: Json;
+          p_id: string | null;
+          p_proveedor: Json;
+          p_revision: number | null;
+        };
+        Returns: Json;
+      };
+      cambiar_activo_proveedor: {
+        Args: {
+          p_activo: boolean;
+          p_actor: Json;
+          p_id: string;
+        };
+        Returns: Json;
+      };
+      eliminar_proveedor: {
+        Args: {
+          p_actor: Json;
+          p_id: string;
+        };
+        Returns: Json;
+      };
+      agregar_foto_linea: {
+        Args: {
+          p_actor: Json;
+          p_compra: string;
+          p_foto: Json;
+          p_linea: string;
+        };
+        Returns: Json;
+      };
+      quitar_foto_linea: {
+        Args: {
+          p_actor: Json;
+          p_compra: string;
+          p_foto: string;
+          p_linea: string;
+        };
+        Returns: Json;
+      };
+      traer_fotos_linea: {
+        Args: {
+          p_actor: Json;
+          p_compra: string;
+          p_fotos: Json;
+          p_linea: string;
+          p_origen: string;
+        };
+        Returns: Json;
+      };
+      editar_ficha_linea: {
+        Args: {
+          p_actor: Json;
+          p_antes: Json;
+          p_compra: string;
+          p_descripcion: string | null;
+          p_linea: string;
+          p_modelo: string | null;
+        };
+        Returns: Json;
+      };
+      fotos_huerfanas: {
+        Args: {
+          p_horas: number;
+          p_limite?: number;
         };
         Returns: Json;
       };

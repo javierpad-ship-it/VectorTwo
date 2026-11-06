@@ -30,6 +30,7 @@ const CASOS: Caso[] = [
   { tabla: "ia_entradas", update: "update public.ia_entradas set bytes = 999", delete: "delete from public.ia_entradas", truncate: "truncate table public.ia_entradas cascade" },
   { tabla: "ia_llamadas", update: "update public.ia_llamadas set duracion_ms = 999", delete: "delete from public.ia_llamadas", truncate: "truncate table public.ia_llamadas cascade" },
   { tabla: "ia_propuestas_gm", update: "update public.ia_propuestas_gm set filas_validas = 0", delete: "delete from public.ia_propuestas_gm", truncate: "truncate table public.ia_propuestas_gm cascade" },
+  { tabla: "proveedor_eventos", update: "update public.proveedor_eventos set resumen = 'x'", delete: "delete from public.proveedor_eventos", truncate: "truncate table public.proveedor_eventos" },
   { tabla: "ia_propuestas_filas", update: "update public.ia_propuestas_filas set razon = 'x'", delete: "delete from public.ia_propuestas_filas", truncate: "truncate table public.ia_propuestas_filas cascade" },
 ];
 
@@ -43,6 +44,9 @@ describe.skipIf(!HAY_BASE)("inmutabilidad (Postgres real)", () => {
     const imp = await rpc(c, "importar_compra", [cargaImportar(b, "R-INM", "INM-1"), actor(b.admin, "Admin")], ["jsonb", "jsonb"]);
     expect(imp.data?.ok).toBe(true);
     await sembrarViaje(c, b, "Viaje inmutable");
+    // proveedor_eventos (0039): lo deja guardar_proveedor al crear un proveedor.
+    const prov = await rpc(c, "guardar_proveedor", [null, null, { nombre: "Proveedor inmutable IT" }, [], actor(b.admin, "Admin")], ["uuid", "integer", "jsonb", "jsonb", "jsonb"]);
+    expect(prov.data?.ok).toBe(true);
     // lotes de proyeccion: una cabecera y una linea, con insert directo (la funcion ya se prueba en proyeccion-lotes).
     await c.query(
       "insert into public.proyeccion_lotes (id, confirmacion_id, proyeccion_id, tipo, anio, huella_cuerpo, calculado_at_proyeccion, resumen, perfil_id) values ('00000000-0000-4000-8000-0000000d0001', gen_random_uuid(), $1, 'aprobar', 2026, repeat('a', 64), now(), '{}'::jsonb, $2)",
