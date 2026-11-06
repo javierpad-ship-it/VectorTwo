@@ -190,5 +190,5 @@ Actualización de la tanda C1 (2026-11-04, cambios en el árbol de trabajo, aún
 
 | ID | Sev. | Resumen | Estado |
 |---|---|---|---|
-| S-17 | MENOR | `service_role` conserva UPDATE/DELETE/TRUNCATE sobre `compra_eventos` y las `ia_*` inmutables (los triggers los rechazan; falta quitar el privilegio) | **En curso**: la migración `0035` (sin aplicar al 2026-11-04) lo deja en `select, insert` |
+| S-17 | MENOR | `service_role` conserva UPDATE/DELETE/TRUNCATE sobre `compra_eventos` y las `ia_*` inmutables (los triggers los rechazan; falta quitar el privilegio) | **Corregido (2026-11-06)**: la migración `0035` está aplicada en Vector2 y deja las 8 tablas de solo inserción en `select, insert` para `service_role` (el trigger queda como segunda barrera); lo comprueba `scripts/humo-0035.sql` en local. La aplicación en Vector2 la confirmó el orquestador; no se volvió a consultar `role_table_grants` al cerrar 08b-1b |
 | S-18 | INFO | CI en preparación (`.github/workflows/ci.yml`, sin commitear): acciones por etiqueta `@v4` y sin `npm audit` | **Abierto**; fijar por SHA y añadir `npm audit --omit=dev --audit-level=high` cuando `xlsx` esté resuelto |

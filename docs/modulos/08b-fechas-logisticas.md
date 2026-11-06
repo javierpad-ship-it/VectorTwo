@@ -1,6 +1,8 @@
 # 08b-1b · Línea de tiempo de la compra, número de OC y fechas logísticas del embarque
 
-> **Estado (2026-11-05): especificada, sin construir. Revisión 5: lista para construir.** Es la revisión 4 (commit `31d2060`) con la **revisión independiente** del `arquitecto-revisor` (opus) integrada entera (dos bloqueantes, cuatro altos, siete medios y los bajos) y las **respuestas definitivas de Javier** a sus preguntas y a la jerarquía de compras. Es una mejora de 08b-1 (ficha [08b](08b-agrupadores-de-compras.md), que manda en todo lo que esta no cambie; su §11 describe lo construido). La diseñó el `arquitecto` (opus) leyendo las migraciones `0025`, `0032`, `0034` y `0036` (las versiones vigentes de las funciones de agrupadores son las de la `0036`), `src/lib/compras/**`, `src/components/compras/agrupadores/**` y el plan de carga de COTV (08c §12). No quedan preguntas para Javier (§12).
+> **Estado (2026-11-06): construida en `0.17.0 · M8 b`, con QA contra Postgres real y auditoría de seguridad sin bloqueantes; falta el hito con Javier (sección Q de `docs/pruebas/cowork-checklist.md`).** Migración `0038_fechas_logisticas_embarque.sql` aplicada en Vector2 (PostgreSQL 17.11). Decisiones 115 a 126 vigentes. **Lo construido y lo que se apartó de esta especificación está en la §13, que manda sobre el resto de la ficha.** El cuerpo (§0 a §12) se conserva como se especificó, con las pocas marcas de lo que cambió.
+>
+> **Historia (2026-11-05): especificada, revisión 5, lista para construir.** Es la revisión 4 (commit `31d2060`) con la **revisión independiente** del `arquitecto-revisor` (opus) integrada entera (dos bloqueantes, cuatro altos, siete medios y los bajos) y las **respuestas definitivas de Javier** a sus preguntas y a la jerarquía de compras. Es una mejora de 08b-1 (ficha [08b](08b-agrupadores-de-compras.md), que manda en todo lo que esta no cambie; su §11 describe lo construido). La diseñó el `arquitecto` (opus) leyendo las migraciones `0025`, `0032`, `0034` y `0036` (las versiones vigentes de las funciones de agrupadores son las de la `0036`), `src/lib/compras/**`, `src/components/compras/agrupadores/**` y el plan de carga de COTV (08c §12). No quedan preguntas para Javier (§12).
 >
 > **Pedidos de Javier** (textuales):
 > - «déjalo para completar y tiene que ser editable, la logística no siempre es tan previsible, se demoran los pagos, los embarques, la aduana. Deberíamos marcar fecha de embarque, fecha prevista en puerto, fecha prevista en el área de conteo, fecha prevista de ingreso al stock».
@@ -712,16 +714,18 @@ Los tres roles: todo lo de esta ficha (el comprador ya ve Compras y escribe agru
 
 ## 6. Criterios de aceptación / hito de prueba
 
-- [ ] `datos` confirma al empezar T0 los hechos de §9.1 (PostgreSQL 17, `0037` última, 0 filas).
-- [ ] La `0038` aplica dos veces y queda en `migraciones_aplicadas`; humo en verde; tipos regenerados; F2 sin movimiento (en local, con el fixture).
-- [ ] lint, `tsc`, vitest (F1–F46 y los casos 1–19 de 08b sin tocarlos; las pruebas del importador de M8 sin tocar, salvo las nuevas de `OC`) y build en verde. Concurrencia (a) a (g) sin `40P01`. La prueba estática de `mesDeDestino` en verde.
+> Marcados con `[x]` los que cerraron los agentes (datos, backend, qa y seguridad); los de **Javier** siguen abiertos y son la sección Q del checklist (`docs/pruebas/cowork-checklist.md`), con los pasos tal como quedaron al construir (§13.4).
+
+- [x] `datos` confirma al empezar T0 los hechos de §9.1 (PostgreSQL 17, `0037` última, 0 filas).
+- [x] La `0038` aplica dos veces y queda en `migraciones_aplicadas`; humo en verde; tipos regenerados; F2 sin movimiento (en local, con el fixture).
+- [x] lint, `tsc`, vitest (F1–F46 y los casos 1–19 de 08b sin tocarlos; las pruebas del importador de M8 sin tocar, salvo las nuevas de `OC`) y build en verde. Concurrencia (a) a (g) sin `40P01`. La prueba estática de `mesDeDestino` en verde.
 - [ ] **Javier, línea de tiempo**: abrir una compra y ver sus seis hitos con los marcadores ⚪🔵🔴⚫🚀🟢 y el estado en texto; registrar el caso de su ejemplo (Zarpe y Arribo sin fecha, Ingreso CD, Inicio operativo con hora) y verlo igual que en su reporte. Ver «Próximo hito» en la lista de Compras y filtrar los vencidos. Descargar el Excel y revisar la hoja `LINEA_DE_TIEMPO`.
 - [ ] **Javier, número de OC**: ver una compra nueva con su código X y «OC sin registrar»; registrar la OC, cambiarla con un motivo y ver las dos cosas en el historial; intentar poner la misma OC en otra compra del mismo proveedor y ver que no lo deja; buscar la compra por su OC en la lista; reimportar una planilla con la columna `OC` y comprobar que no se duplicó ninguna compra.
 - [ ] **Javier, fechas**: crear un embarque con su Ingreso CD y ver que ingresa al stock el mismo día. Fijar el ingreso al stock en otro mes y ver en Flujo mensual que las compras cambian de mes; «Igualar al Ingreso CD» y verlas volver. Reprogramar el Ingreso CD por «Aduana». Marcar «ya zarpó». Editar el nombre de un embarque y comprobar que el zarpe **no** se borra.
 - [ ] **Javier, lo al barrer**: «Programar lo al barrer» en un embarque con un lote, primero todo junto y después en dos tandas; ver el cambio de temporada en la vista previa y el lote en sus meses en el Flujo. Atrasar el Ingreso CD después de la tanda 1 y ver que la vista previa la corre a la llegada y te avisa.
 - [ ] **Javier, COTV** (cuando C2 esté lista): revisar en la planilla la hoja `GRUPOS`, partir por `REFERENCIA` los proveedores que tuvieron dos OC, importarla con `LLEGADA = 2026-12` y ver una compra por proveedor y viaje (o por OC partida) en diciembre en el Flujo, con la orden de compra en su línea de tiempo. Crear «California» y «Nueva York» con origen y fechas, asignar por proveedor (una compra partida entre los dos: dos tramos) y comprobar que el total del flujo no cambió y que nada queda en «Sin agrupador».
 - [ ] Un embarque ya ingresado al CD con su ingreso al stock pasado se ve «Por confirmar» y no sale en Atrasados. Historial con causa y motivo, contador de reprogramaciones, Atrasados, todo a 390 px, y los marcadores legibles sin color (lector de pantalla y escala de grises).
-- [ ] `seguridad` (sonnet): guards, IDOR de paquetes y asignaciones en `mover_a_paquete` con unidades y en `paquetes/[id]/ingreso`, que `linea_de_tiempo` no exponga embarques de otra compra, que `/oc` no permita editar sin `antes` correcto ni una compra cancelada, que el comprador no pise OC ajenas por el importador (asimetría deliberada de la decisión 121), que `paquetes/[id]/ingreso` no escriba en un paquete que cambió de embarque, funciones solo `service_role`, catálogos zod y `check` de la base.
+- [x] `seguridad` (sonnet): guards, IDOR de paquetes y asignaciones en `mover_a_paquete` con unidades y en `paquetes/[id]/ingreso`, que `linea_de_tiempo` no exponga embarques de otra compra, que `/oc` no permita editar sin `antes` correcto ni una compra cancelada, que el comprador no pise OC ajenas por el importador (asimetría deliberada de la decisión 121), que `paquetes/[id]/ingreso` no escriba en un paquete que cambió de embarque, funciones solo `service_role`, catálogos zod y `check` de la base.
 
 ## 7. Fuera de alcance
 
@@ -739,7 +743,7 @@ Los tres roles: todo lo de esta ficha (el comprador ya ve Compras y escribe agru
 - Recibir y confirmar el ingreso al stock: 08b-2 (hereda el piso de §2.5 y convierte `por_confirmar` en `real`).
 - Columna de ingreso propio de paquete en el importador de agrupadores (los paquetes importados nacen sin él).
 
-## 8. Decisiones propuestas (a registrar al construir; siguen propuestas hasta entonces; 115, 117, 119, 120 y 121 reajustadas en la revisión 5)
+## 8. Decisiones (propuestas el 2026-11-05; **vigentes desde el 2026-11-06**, registradas en `docs/DECISIONES.md` junto con la 122 a la 126 que salieron al construir, ver §13.5)
 
 | N.º | Decisión |
 |---|---|
@@ -859,7 +863,7 @@ Orden de agentes: `datos` → `backend` → `frontend` → `qa` → `seguridad` 
 
 Revisión 1 → 2: `fecha_llegada_estimada` dejó de reinterpretarse como ingreso (vuelve a ser la llegada al CD) y el ingreso pasó a columna nueva; se sumaron `origen`, ingreso por paquete y las causas `cola_conteo` y `programacion`. Revisión 3 fue la simplificación de §11.1 sin la línea de tiempo; no se commiteó por separado.
 
-## 12. Preguntas abiertas para Javier
+## 12. Preguntas abiertas para Javier (sin cambios: siguen sin haberlas)
 
 **Ninguna.** Las cuatro preguntas de la revisión independiente y la de la revisión 4 (¿una OC puede cubrir varias compras?) quedaron respondidas por Javier el 2026-11-05 (§11.0).
 
@@ -867,3 +871,61 @@ Se construye con estos valores por defecto, que Javier confirma en el hito (§6)
 
 - **Orden de compra de COTV**: el día en Lima en que se registró el ítem más antiguo del grupo. *Por defecto*: se usa así y él la corrige en la planilla si la orden real es otra.
 - **Inicio operativo**: «empieza el conteo y el proceso en el CD», distinto del Ingreso CD (llega) y del Ingreso al stock (disponible). *Por defecto*: tres hitos separados; el mes lo manda solo el Ingreso al stock.
+
+## 13. Construido en `0.17.0 · M8 b` (08b-1b, 2026-11-06) y cambios respecto a la especificación
+
+Esta sección manda sobre lo anterior en lo que se aparte. 08b-2 («Recibir embarque») sigue sin construirse: el ingreso real (`fecha_llegada_real`) existe pero nadie lo escribe todavía, así que el estado `por_confirmar` es el que ve Javier hasta entonces.
+
+### 13.1 Qué existe
+
+Commits (en orden): `86c0675` (migración `0038` aplicada en Vector2, humo, pruebas de concurrencia y tipos), `5940732` (contratos y lógica pura: línea de tiempo, `mesDeDestino`, ingreso por paquete, `OC` en el importador, planilla C2 agrupada), `b759bcc`, `53f5417` y `b08375f` (T3a: API de agrupadores, API de Compras con la OC y el próximo hito, importadores), `133094e` (T3b: pantallas), `93a7ce9` (correcciones de QA y seguridad) y `e0593a9` (pantalla «Programar lo al barrer»).
+
+- **Base de datos.** `0038` (columnas, `check`, `set expression` de `periodo_llegada`, índices `compras_numero_oc_idx` y `compras_proveedor_oc_uidx`, siete funciones reemplazadas desde las versiones de la `0036` y tres nuevas: `agrupador_hitos_resumen`, `editar_oc_compra` y el ayudante `agrupador_hito_violado`). Humo: `scripts/humo-0038.sql` (incluye F2: aplicarla sobre un fixture cargado no mueve nada). Se registra sola en `migraciones_aplicadas`.
+- **API.** Rutas nuevas `POST /api/compras/embarques/[id]/fechas`, `POST /api/compras/paquetes/[id]/ingreso` y `PUT /api/compras/[id]/oc`. Cambios en `PATCH …/embarques/[id]` (solo las claves presentes, nunca vacía fechas), `POST …/embarques/[id]/paquete` (mueve una tanda por unidades, con motivo, causa y huella si cambia un mes), `GET /api/compras` y `GET /api/compras/[id]` (campos aditivos `linea_de_tiempo`, `proximo_hito`, `numero_oc`; búsqueda por OC y por código X; filtro de hitos vencidos). `POST …/embarques/[id]/fecha` queda como alias de una versión (decisión 123).
+- **Lógica pura** en `src/lib/compras/agrupadores/` (`movimiento.ts` con `mesDeDestino` y los planes, `hitos.ts`, `importar.ts`, `excel.ts`, `avisos.ts`) y `src/lib/compras/` (`oc.ts`, `importar.ts`). Prueba estática de que ningún lector del mes se escapa de `mesDeDestino`.
+- **Pantallas.** En Viajes y embarques: alta y diálogo «Fechas del embarque» con vista previa, línea de tiempo del embarque, «Ingreso al stock» por paquete, «Programar lo al barrer», «Mover a paquete» con unidades, lista con «Próximo hito», atrasados y reprogramados, historial con causa y motivo. En Compras: código X y OC, «Registrar OC» o «Cambiar OC», línea de tiempo en el detalle, «Próximo hito» con filtro y buscador por OC y por código X, reporte del importador con la OC. Excel con la hoja `LINEA_DE_TIEMPO`.
+- **Planilla C2 de COTV.** `scripts/cotv/planilla-c2.ts` (`agruparItemsCotv`, hojas `COMPRAS`, `GRUPOS` y `LEEME`), sin datos y con su prueba (`tests/cotv.planilla-c2.test.ts`, F42). Ensayada con datos sintéticos contra el importador real: 0 `cabecera_inconsistente` y las columnas informativas se ignoran. **No se ha corrido con datos reales.**
+
+### 13.2 QA, seguridad y medidas
+
+- **QA contra Postgres real.** Nueve escenarios con un adaptador que ejecuta la lógica de TypeScript sobre una base local con las migraciones: 0 divergencias entre lo que el servicio predice y lo que la base hace, tras las correcciones (F10, F11 y F13 en la vista previa, F23 en fechas y F46 en códigos, entre otros). Humos 17/17, integración 95/95 (concurrencia (a) a (g) sin `40P01`), 7 441 pruebas en 334 archivos, `lint`, `tsc` y `build` en verde.
+- **PostgreSQL 17 y 16.** En Vector2 (17.11) la migración usó `set expression`. El contenedor local es 16, que no lo tiene: ahí un bloque `do` recrea la columna (el único `drop` de la migración, que no corre en Vector2). La CI usa la imagen `postgres:17`, así que corre el camino real.
+- **Seguridad (sonnet).** Sin bloqueantes. F1 (la causa no salía en el historial) y F3 corregidos; F2: motivo obligatorio en el servidor al cambiar o quitar una OC, **sin restricción por rol** (decisión 125); F4 aceptado (decisión 92); F5: la decisión 121 pasa a vigente. Ver `docs/seguridad/auditoria-2026-11-08b1b.md`.
+- **Medidas.** `agrupador_hitos_resumen` con 500 embarques: 40 ms (presupuesto 50 ms). Lista de Compras con más de 1 000 asignaciones: 83 a 113 ms.
+
+### 13.3 Cambios respecto a la especificación
+
+| Qué | La ficha decía | Lo construido | Por qué |
+|---|---|---|---|
+| Nombres de columnas de la planilla C2 | Los de 08c §12.2 b, escritos a mano en §2.7 | Los de la **plantilla real del importador de compras** (`PROVEEDOR`, `FECHA_COMPRA`, `REFERENCIA`, `LINEA_ORDINAL`, `TIPO`, `GENERO`, `MUNDO`, `LINEA`, `EQUIVALENCIA`, `MARCA`, `AGRUPACION_MARCA`, `TALLAS`, `UNIDADES`, `COSTO_UNITARIO`, `MONEDA`, `LLEGADA`, `ENTREGAS`, `RECIBIDAS`, `DESTINO`, `ALCANCE`, `NOTA`, `VIAJE`, `EMBARQUE`, `PAQUETE`, `OC`) más las informativas `DIA_REGISTRO` e `ITEM_COTV` | La planilla se prueba contra el importador real: cualquier otro nombre no se lee |
+| `LLEGADA` en la planilla | Valor `2026-12` en todas las filas | Constante `LLEGADA_INICIAL_COTV = "2026-12"` del propio archivo, un **mes** (como siempre en el importador), sin parámetro | Decisión de Javier («inicialmente ponle a todo llegada en diciembre»); la planilla no la recalcula |
+| `editar_oc_compra` y el rol | «La función recibe el actor y lo vuelve a comprobar» (§3.7) | **Sin chequeo de rol en SQL.** Compara el valor previo, no sube la `revision` y deja el evento; la asimetría (el comprador solo aplica OC por archivo en compras nuevas o en su borrador) la hace cumplir el servidor | Los tres roles editan la OC en pantalla (decisión 121) y el rol lo resuelve el servidor. Es una defensa menos que `importar_compra` (que sí vuelve a comprobar al actor): quien llame la función directamente con `service_role` no queda limitado por rol |
+| Orden de la OC en el importador | Una llamada después de `importar_compra` y **antes** de las de agrupador (§3.7) | La OC es la **cuarta y última** llamada por compra: después de `importar_compra` y de las de agrupador | La OC va fuera de la huella y en su propia transacción por compra: un corte deja la compra sin OC y reimportar la completa (comentario de `aplicarOcs` en `servicio.ts`) |
+| I2 en TypeScript y en SQL | La misma comprobación en los dos lados | **TypeScript es más tolerante**: no rechaza un plan por asignaciones **previas** desalineadas que el plan no toca; **SQL** (`AG002`) sí lo rechaza, porque exige la alineación de todas las asignaciones activas de los embarques del plan | La base es la última barrera. En la práctica solo importa si hay asignaciones desalineadas de antes (`agrupadores_desalineados()`, hoy 0): el plan fallaría en SQL con un mensaje técnico en vez de uno de la vista previa |
+| Texto del estado `real` | «Ocurrió ✓» | **«Real ✓»** | Texto elegido en la pantalla; el estado interno sigue siendo `real` |
+| Columna `ORDEN_DE_COMPRA` del archivo | Se autodetectaba como `OC` | **Ya no se autodetecta**: el mapeo de columnas no la reconoce sola | Antes caía en `REFERENCIA` y ahora sería ambigua con `FECHA_COMPRA` y `OC`; el usuario la elige a mano en el mapeo |
+| Aviso `oc_de_otro_proveedor` y repetida | «Antes de guardar, mientras se escribe» (§4.1) | Se muestra **al guardar**; escribir no consulta nada (la repetida en el mismo proveedor se bloquea al guardar con `409 oc_repetida`). El botón dice «Cambiar OC», no «Editar OC» | Mostrarlo al escribir pide un endpoint de consulta; queda como pendiente si Javier lo quiere |
+| Embarques `recibido` | Con «Cambiar fechas» | **Sin «Cambiar fechas»** hasta 08b-2 (como los cancelados, solo queda el historial) | Hasta que exista «Recibir embarque» no hay cómo tratar lo ya recibido; se retoma con 08b-2 |
+| Vista previa y recepciones vinculadas | Cuenta las asignaciones con recepciones | Hasta 08b-2 la vista previa no leía `compra_linea_recepciones.asignacion_id` y no veía las recepciones vinculadas; **corregido en `93a7ce9`** (`COLUMNAS_RECEPCION` incluye `asignacion_id`) | Hallazgo de QA contra Postgres real |
+| Motivo y causa del ingreso propio de un paquete | Sin motivo al completar una fecha vacía (decisión 116) | **Siempre motivo y causa**, también la primera vez (decisión 122) | Corrección posterior a QA y seguridad (`93a7ce9`): el ingreso propio puede mover un lote al barrer de mes y de temporada |
+| Mover una tanda a paquete (`POST …/paquete`) | Asignaciones enteras, sin motivo | Por **unidades**, con motivo y causa cuando reprograma y huella solo si cambia un mes (decisión 124) | Es la pieza de «Programar lo al barrer» |
+| Alias `/fecha` | Una versión, sin causa | Una versión, con causa `otro` (decisión 123) | El historial no admite una reprogramación sin causa |
+| Motivo al cambiar o quitar la OC | Solo registrar y cambiar con `antes` | **Motivo obligatorio** al cambiar o quitar, en el servidor y en el formulario, sin restricción por rol (decisión 125) | Hallazgo F2 de seguridad |
+| Desvíos menores de la migración | — | (1) el ayudante `agrupador_hito_violado` evita repetir la expresión de I7; (2) `agrupador_hitos_resumen` devuelve además la fila `ingreso_paquete` por cada paquete con ingreso propio; (3) `editar_oc_compra` devuelve `oc_invalida` si la OC no cabe en el `check` (40 caracteres, sin espacios al borde); (4) `paquetes` solo vale en `cambiar_fecha` y `mover_paquete` | Para que el SQL sea verificable (están en el encabezado de la migración) |
+
+### 13.4 Hito de 08b-1b para Javier (sección Q del checklist)
+
+Pendiente de recorrer. Lo que debe validar, con sus palabras: ver una compra «como en mi reporte» con los seis hitos y su estado en texto; reprogramar un embarque dejando causa y motivo; ver «Próximo hito» y filtrar los vencidos; registrar y cambiar la OC (y que no deje repetirla en el mismo proveedor); programar lo al barrer en dos tandas con vista previa; que un ingreso pasado con la mercadería ya en el CD diga «Por confirmar» y no «Vencido»; y el Excel con `LINEA_DE_TIEMPO`. La carga real de COTV (planilla C2) no entra en este hito: se hace después de E1 de 08c.
+
+### 13.5 Decisiones de construcción (registradas en `docs/DECISIONES.md`)
+
+122 (ingreso propio de paquete siempre con motivo y causa), 123 (alias `/fecha` con causa `otro`, se borra en la versión siguiente), 124 (`/paquete` exige huella solo si cambia el mes), 125 (motivo obligatorio al cambiar o quitar una OC, sin restricción por rol) y 126 (matiza la 94 y 08b §2.9: `for no key update` de la `0036`). Las 115 a 121 pasan de propuestas a vigentes sin cambio de contenido.
+
+### 13.6 Pendientes anotados (no bloquean)
+
+- Borrar el alias `POST …/embarques/[id]/fecha` en la versión siguiente.
+- Cotejo de hashes del paquete `@e965/xlsx`.
+- El aviso de OC al escribir (endpoint de consulta), si Javier lo quiere.
+- Cola con capacidad del ingreso al stock (futuro).
+- E1 de 08c y 08b-2 siguen: 08b-2 hereda el piso del ingreso de un paquete, la I2 por paquete y convierte `por_confirmar` en `real`.
+- La carga C2 de COTV (corrida real) depende de E1, de G3 y G4 de 08c y de que Javier cree los dos viajes.

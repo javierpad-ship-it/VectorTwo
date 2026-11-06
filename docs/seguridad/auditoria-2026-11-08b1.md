@@ -21,8 +21,8 @@
 | G | INFO | Textos del importador (confirmación, aviso y mensaje de responsable no asignable) no decían que al comprador se le omiten filas hacia compras ajenas o confirmadas | **Corregido (0.16.0)** | `detalleCompraNoBorrador`, `src/components/compras/importar-compras.tsx` |
 | H | INFO | Descripción del rol comprador desactualizada | **Corregido (0.16.0)** | `src/lib/auth/roles.ts` (`DESCRIPCION_ROL.comprador`) |
 | I | — | **Texto no consta en el repo**; no figura en el CHANGELOG ni en la ficha. Pedir el informe original al orquestador | **No verificable** | — |
-| R-1 | MENOR | `delete` y `truncate` residuales a `service_role` sobre `compra_eventos` | **En curso** (0035 sin aplicar) | `role_table_grants`: aún DELETE, TRUNCATE, UPDATE |
-| R-2 | INFO | `list_migrations` vacío (las migraciones se aplican con `execute_sql`) | **En curso** (0035 crea `public.migraciones_aplicadas`; sin aplicar) | `to_regclass('public.migraciones_aplicadas')` es nulo |
+| R-1 | MENOR | `delete` y `truncate` residuales a `service_role` sobre `compra_eventos` | **Corregido (2026-11-06)**: la `0035` está aplicada en Vector2 (`select, insert` en las 8 tablas de solo inserción, también `compra_eventos`) | Antes: `role_table_grants` mostraba DELETE, TRUNCATE y UPDATE; ahora `scripts/humo-0035.sql` (local) y la migración. Aplicación en Vector2 confirmada por el orquestador |
+| R-2 | INFO | `list_migrations` vacío (las migraciones se aplican con `execute_sql`) | **Corregido (2026-11-06)**: la `0035` está aplicada y creó `public.migraciones_aplicadas`; desde entonces cada migración (`0036` a `0038`) se registra ahí. `list_migrations` del MCP sigue vacío, y es lo esperado | Antes: `to_regclass('public.migraciones_aplicadas')` era nulo. Aplicación en Vector2 confirmada por el orquestador |
 
 ## Verificado sin hallazgo (08b-1)
 
