@@ -36,6 +36,7 @@ export type CampoCompra =
   | "viaje"
   | "embarque"
   | "paquete"
+  | "oc"
   | "nota";
 
 /**
@@ -129,7 +130,7 @@ export function useImportarCompras({
     setEnviando(modo);
     setError(null);
     try {
-      const reporte = await importarCompras({ modo, carga_inicial: cargaInicial, filas: filasMapeadas(archivo, mapeo, campos) });
+      const reporte = await importarCompras({ modo, carga_inicial: cargaInicial, filas: filasMapeadas(archivo, mapeo, campos), archivo_nombre: archivo.nombre.slice(0, 120) });
       if (modo === "previsualizar") {
         setPrevia({ firma: firmaActual, reporte });
         setFinal(null);

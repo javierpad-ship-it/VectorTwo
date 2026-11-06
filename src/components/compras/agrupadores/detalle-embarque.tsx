@@ -19,25 +19,29 @@ import {
 } from "@/lib/compras/agrupadores/tipos-api";
 import { cambiarEstadoEmbarque, cancelarPaquete, useAccion } from "@/lib/compras/agrupadores/use-agrupadores";
 import { plural } from "@/lib/formato";
-import { mesLargo, unidades } from "../formato";
+import { fechaLima, mesLargo, unidades } from "../formato";
 import { DialogoAPaquete } from "./dialogo-a-paquete";
 import { DialogoAsignar } from "./dialogo-asignar";
 import { DialogoCancelarAgrupador } from "./dialogo-cancelar";
-import { DialogoFecha } from "./dialogo-fecha";
+import { DialogoFechas } from "./dialogo-fechas";
+import { DialogoIngresoPaquete } from "./dialogo-ingreso-paquete";
 import { DialogoMoverPaquete } from "./dialogo-mover-paquete";
 import { DialogoPasarPendientes } from "./dialogo-pasar-pendientes";
 import { DialogoQuitar } from "./dialogo-quitar";
 import { HistorialAgrupador } from "./historial";
+import { LineaTiempoEmbarque } from "./linea-tiempo";
 import { AvisosBadges, EstadoEmbarqueBadge, EstadoPaqueteBadge, RecepcionBadge, ResponsableTexto, TipoEmbarqueBadge } from "./insignias";
 import { ModalEmbarque } from "./modal-embarque";
 import { ModalPaquete } from "./modal-paquete";
 import { TablaAsignaciones } from "./tabla-asignaciones";
 import { textoAvisoDetalle, puedeCerrarOCancelar, textoCostoMonedas, textoFecha, textoUnidadesEmbarque } from "./vista-agrupadores";
+import { fechaCorta } from "./vista-fechas";
 import { pideRelectura, textoErrorAccion } from "./vista-errores";
 
 type Dialogo =
   | { tipo: "editar" }
   | { tipo: "fecha" }
+  | { tipo: "ingreso-paquete"; paquete: PaqueteApi }
   | { tipo: "paquete-nuevo" }
   | { tipo: "paquete-editar"; paquete: PaqueteApi }
   | { tipo: "agregar" }
@@ -68,7 +72,7 @@ export function mensajeDeMovimiento(texto: string, r: RespuestaMovimientoApi): M
 
 /**
  * Detalle de un embarque (ficha 08b §4.2): cabecera con sus datos, avisos y acciones; los paquetes y «Sin paquete», cada uno con su tabla de
- * asignaciones (las históricas, atenuadas); y el historial. Acciones de los tres roles: Editar, Cambiar fecha de llegada, marcar en tránsito
+ * asignaciones (las históricas, atenuadas); la línea de tiempo con sus cinco hitos; y el historial. Acciones de los tres roles: Editar, Cambiar fechas, Fijar ingreso de un paquete, marcar en tránsito
  * o volver a planificado, Nuevo paquete, Agregar compras, Quitar del embarque, Mover a paquete y Pasar pendientes. Solo admin y planner
  * cancelan el embarque o un paquete; los botones se ocultan por rol y la API decide. En un embarque cancelado o recibido solo queda
  * «Quitar del embarque». Recibir un embarque es de la siguiente entrega (08b-2).
@@ -98,6 +102,7 @@ export function DetalleEmbarque({
   onMensaje: (m: MensajeAgrupador | null) => void;
 }) {
   const accion = useAccion();
+  const [hoy] = useState(() => fechaLima());
   const [dialogo, setDialogo] = useState<Dialogo>(null);
   const [seleccion, setSeleccion] = useState<ReadonlySet<string>>(new Set());
   const puedeCancelar = puedeCerrarOCancelar(rol);
@@ -167,19 +172,16 @@ export function DetalleEmbarque({
           <Dato titulo="Responsable">
             <ResponsableTexto responsable={r} faltante={embarque.avisos.includes("sin_responsable")} />
           </Dato>
+          <Dato titulo="Origen">{embarque.origen ?? <span className="text-tinta-suave">—</span>}</Dato>
           <Dato titulo="Puerto de embarque">{embarque.puerto_embarque ?? <span className="text-tinta-suave">—</span>}</Dato>
           <Dato titulo="Referencia logística">{embarque.referencia_logistica ?? <span className="text-tinta-suave">—</span>}</Dato>
-          <Dato titulo="Sale (estimada)">{textoFecha(embarque.fecha_salida_estimada)}</Dato>
-          <Dato titulo="Llega (estimada)">
-            {textoFecha(embarque.fecha_llegada_estimada)}
-            {embarque.avisos.includes("atrasado") && (
-              <span className="ml-2">
-                <Badge tono="alerta">Atrasado</Badge>
-              </span>
-            )}
-          </Dato>
-          <Dato titulo="Llegada real">{embarque.fecha_llegada_real ? textoFecha(embarque.fecha_llegada_real) : <span className="text-tinta-suave">Sin recibir</span>}</Dato>
-          <Dato titulo="Mes de llegada">{mesLargo(embarque.periodo_llegada)}</Dato>
+          <Dato titulo="Ingreso real">{embarque.fecha_llegada_real ? textoFecha(embarque.fecha_llegada_real) : <span className="text-tinta-suave">Sin recibir</span>}</Dato>
+          <Dato titulo="Mes del flujo (Ingreso al stock)">{mesLargo(embarque.periodo_llegada)}</Dato>
+          {(embarque.reprogramaciones_total ?? 0) > 0 && (
+            <Dato titulo="Reprogramaciones">
+              <Badge tono="alerta">Reprogramado ×{embarque.reprogramaciones_total}</Badge>
+            </Dato>
+          )}
           <Dato titulo="Unidades">
             <span className="font-mono text-xs tabular-nums">{textoUnidadesEmbarque(embarque.totales)}</span>
           </Dato>
@@ -202,9 +204,9 @@ export function DetalleEmbarque({
             </div>
           )}
         </dl>
-        {embarque.avisos.filter((a) => a !== "atrasado" && a !== "sin_responsable").length > 0 && (
+        {embarque.avisos.filter((a) => a !== "sin_responsable").length > 0 && (
           <div className="mt-3">
-            <AvisosBadges avisos={embarque.avisos} omitir={["atrasado", "sin_responsable"]} />
+            <AvisosBadges avisos={embarque.avisos} omitir={["sin_responsable"]} />
           </div>
         )}
         {embarque.avisos.includes("en_embarque_cancelado") && (
@@ -214,11 +216,25 @@ export function DetalleEmbarque({
         )}
       </Card>
 
+      <Card
+        titulo="Línea de tiempo"
+        descripcion="Los cinco hitos del embarque, con su estado, el retraso contra lo planeado al crear y cuántas veces se reprogramó."
+        acciones={
+          enCurso ? (
+            <Button tamano="sm" variante="secundario" onClick={() => setDialogo({ tipo: "fecha" })}>
+              Cambiar fechas
+            </Button>
+          ) : undefined
+        }
+      >
+        <LineaTiempoEmbarque embarque={embarque} hoy={hoy} />
+      </Card>
+
       <div className="flex flex-wrap gap-2">
         {enCurso && <Button onClick={() => setDialogo({ tipo: "editar" })}>Editar</Button>}
         {enCurso && (
           <Button variante="secundario" onClick={() => setDialogo({ tipo: "fecha" })}>
-            Cambiar fecha de llegada
+            Cambiar fechas
           </Button>
         )}
         {embarque.estado === "planificado" && (
@@ -307,9 +323,25 @@ export function DetalleEmbarque({
             <p className="text-xs text-tinta-suave">
               Responsable: <ResponsableTexto responsable={p.responsable_efectivo} faltante={p.avisos.includes("sin_responsable")} />
             </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              <span>
+                <span aria-hidden="true">{"\u{1F7E2}"} </span>
+                Ingreso al stock:{" "}
+                <strong className="tabular-nums">
+                  {p.ingreso_propio && p.fecha_ingreso ? `ingreso propio: ${textoFecha(p.fecha_ingreso)}` : `hereda del embarque (${textoFecha(embarque.fecha_llegada_real ?? embarque.fecha_ingreso_estimada ?? embarque.fecha_llegada_estimada)})`}
+                </strong>
+              </span>
+              {p.ajustado_desde && <span className="text-xs text-alerta">Ajustado a la llegada del embarque (antes: {fechaCorta(p.ajustado_desde, hoy)}).</span>}
+              {(p.lotes_al_barrer ?? 0) > 0 && <span className="text-xs text-tinta-suave">{plural(p.lotes_al_barrer ?? 0, "lote al barrer", "lotes al barrer")}</span>}
+              {enCurso && p.estado === "abierto" && (
+                <Button tamano="sm" variante="secundario" onClick={() => setDialogo({ tipo: "ingreso-paquete", paquete: p })}>
+                  Fijar ingreso…
+                </Button>
+              )}
+            </div>
             <TablaAsignaciones
               asignaciones={asignacionesDe(p)}
-              periodoEmbarque={embarque.periodo_llegada}
+              periodoEmbarque={p.periodo_ingreso ?? embarque.periodo_llegada}
               seleccion={seleccion}
               onAlternar={alternar}
               puedeSeleccionar
@@ -338,13 +370,18 @@ export function DetalleEmbarque({
           viajes={opciones?.viajes ?? []}
           asignables={asignables}
           puertos={opciones?.puertos ?? []}
+          origenes={opciones?.origenes ?? []}
           codigosExistentes={codigosEmbarque}
           onCerrar={cerrar}
           onRecargar={onRecargar}
+          onCambiarFechas={() => setDialogo({ tipo: "fecha" })}
           onGuardado={() => tras({ tono: "exito", texto: `Embarque ${embarque.codigo} actualizado.` })}
         />
       )}
-      {dialogo?.tipo === "fecha" && <DialogoFecha embarque={embarque} onCerrar={cerrar} onRecargar={onRecargar} onAplicado={movimiento(`Fecha de llegada del embarque ${embarque.codigo} cambiada.`)} />}
+      {dialogo?.tipo === "fecha" && <DialogoFechas embarque={embarque} onCerrar={cerrar} onRecargar={onRecargar} onAplicado={movimiento(`Fechas del embarque ${embarque.codigo} actualizadas.`)} />}
+      {dialogo?.tipo === "ingreso-paquete" && (
+        <DialogoIngresoPaquete embarque={embarque} paquete={dialogo.paquete} onCerrar={cerrar} onRecargar={onRecargar} onAplicado={movimiento(`Ingreso al stock del paquete ${dialogo.paquete.codigo} actualizado.`)} />
+      )}
       {(dialogo?.tipo === "paquete-nuevo" || dialogo?.tipo === "paquete-editar") && (
         <ModalPaquete
           embarque={embarque}

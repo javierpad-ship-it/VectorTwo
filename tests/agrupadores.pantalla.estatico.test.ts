@@ -182,7 +182,7 @@ describe("datos, kit de UI y errores", () => {
     expect(c).toContain("disabled={accion.ocupado || planVigente === null}");
     expect(c).toMatch(/pideRelectura\(r\.error\.codigo\)/);
     // Los cuatro movimientos con vista previa pasan por el cascarón.
-    for (const f of ["dialogo-fecha", "dialogo-asignar", "dialogo-quitar", "dialogo-pasar-pendientes", "dialogo-mover-paquete"]) expect(fuente(`${DIR_COMPONENTES}/${f}.tsx`), f).toContain("<DialogoMovimiento");
+    for (const f of ["dialogo-fechas", "dialogo-ingreso-paquete", "dialogo-asignar", "dialogo-quitar", "dialogo-pasar-pendientes", "dialogo-mover-paquete"]) expect(fuente(`${DIR_COMPONENTES}/${f}.tsx`), f).toContain("<DialogoMovimiento");
   });
 
   it("los formularios se deshabilitan mientras envían, no se cierran enviando y los errores de la API se muestran con Alert", () => {
@@ -205,7 +205,7 @@ describe("datos, kit de UI y errores", () => {
   });
 
   it("los formularios son accesibles: etiquetas con Field, grupos de chips rotulados, casillas con texto accesible y errores con role=alert", () => {
-    for (const f of ["modal-embarque", "modal-viaje", "modal-paquete", "dialogo-fecha"]) expect(fuente(`${DIR_COMPONENTES}/${f}.tsx`), f).toContain("<Field");
+    for (const f of ["modal-embarque", "modal-viaje", "modal-paquete", "dialogo-fechas", "dialogo-ingreso-paquete"]) expect(fuente(`${DIR_COMPONENTES}/${f}.tsx`), f).toContain("<Field");
     expect(fuente(`${DIR_COMPONENTES}/filtros-embarques.tsx`)).toContain('etiqueta="Responsable"');
     expect(fuente(`${DIR_COMPONENTES}/filtros-embarques.tsx`)).toContain('etiqueta="Estado"');
     expect(fuente(`${DIR_COMPONENTES}/tabla-asignaciones.tsx`)).toContain("label={`Marcar ");
@@ -266,6 +266,47 @@ describe("datos, kit de UI y errores", () => {
     for (const f of COMPONENTES_TSX) {
       const c = sinComentarios(fuente(f));
       expect(c, f).not.toMatch(/Recibir embarque|Registrar otra llegada|Volver de recibido/);
+    }
+  });
+});
+
+describe("fechas del embarque (08b-1b T3b-1)", () => {
+  it("el hook habla con /fechas y /paquetes/[id]/ingreso, con vista previa", () => {
+    const h = fuente(HOOK);
+    expect(h).toContain("`${urlEmbarque(embarqueId)}/fechas`");
+    expect(h).toContain("`${urlPaquete(paqueteId)}/ingreso`");
+    expect(h).not.toContain("cambiarFechaLlegada");
+  });
+
+  it("los diálogos de fechas usan el cascarón con vista previa, con motivo y causa; ninguno escribe sin pasar por él", () => {
+    expect(fuente(`${DIR_COMPONENTES}/dialogo-fechas.tsx`)).toContain("cambiarFechasEmbarque(embarque.id");
+    expect(fuente(`${DIR_COMPONENTES}/dialogo-ingreso-paquete.tsx`)).toContain("fijarIngresoPaquete(paquete.id");
+    for (const f of ["dialogo-fechas", "dialogo-ingreso-paquete"]) {
+      const c = fuente(`${DIR_COMPONENTES}/${f}.tsx`);
+      expect(c, f).toContain("LISTA_CAUSAS_FECHA");
+      expect(c, f).toContain("MAX_MOTIVO_MOVIMIENTO");
+    }
+  });
+
+  it("editar un embarque no manda fechas por el PATCH: solo el alta las escribe, y el «ya ocurrió» del alta va por /fechas", () => {
+    const m = sinComentarios(fuente(`${DIR_COMPONENTES}/modal-embarque.tsx`));
+    expect(m).toMatch(/if \(edita\) cuerpo\.revision = embarque\.revision;\s*else \{[\s\S]*fecha_salida_estimada[\s\S]*fecha_llegada_estimada[\s\S]*\}/);
+    expect(m).not.toMatch(/fecha_salida_estimada: form/);
+    expect(m).toContain("cambiarFechasEmbarque(creado.id");
+  });
+
+  it("el estado de un hito nunca depende solo del color: toda insignia de estado lleva su texto", () => {
+    const t = sinComentarios(fuente(`${DIR_COMPONENTES}/linea-tiempo.tsx`));
+    expect(t).toContain("textoEstadoCorto(hito, hoy)");
+    expect(t).toContain('aria-hidden="true"');
+    expect(t).toContain('aria-label="Línea de tiempo del embarque"');
+  });
+
+  it("el reloj de las pantallas de fechas se lee una sola vez al montar (sin Date en el render)", () => {
+    for (const f of ["dialogo-fechas.tsx", "dialogo-ingreso-paquete.tsx", "modal-embarque.tsx", "lista-embarques.tsx", "detalle-embarque.tsx"]) {
+      const c = sinComentarios(fuente(`${DIR_COMPONENTES}/${f}`));
+      expect(c, f).not.toMatch(/new Date\(/);
+      expect(c, f).toMatch(/useState\(\(\) => (?:fechaLima|ahoraEnLima)\(\)\)/);
     }
   });
 });

@@ -60,22 +60,94 @@ export function hojaViajes(viajes: readonly ViajeApi[]): Hoja {
   return hoja;
 }
 
-/** Hoja `EMBARQUES`: una fila por embarque, con fechas, responsable efectivo, unidades y costo. */
+export const ENCABEZADOS_EMBARQUES = [
+  "CÓDIGO",
+  "NOMBRE",
+  "TIPO",
+  "VIAJE",
+  "ORIGEN",
+  "PUERTO",
+  "REFERENCIA LOGÍSTICA",
+  "ZARPE",
+  "ESTADO ZARPE",
+  "ARRIBO",
+  "ESTADO ARRIBO",
+  "INGRESO CD",
+  "ESTADO INGRESO CD",
+  "INICIO OPERATIVO",
+  "ESTADO INICIO OPERATIVO",
+  "INGRESO AL STOCK",
+  "ESTADO INGRESO AL STOCK",
+  "MES DEL FLUJO",
+  "INGRESO REAL",
+  "PRÓXIMO HITO",
+  "REPROGRAMACIONES",
+  "RESPONSABLE",
+  "ESTADO",
+  "RECEPCIÓN",
+  "UNIDADES",
+  "RECIBIDAS (EST.)",
+  "PENDIENTES (EST.)",
+  "HISTÓRICAS",
+  "COMPRAS",
+  "LÍNEAS",
+  "PAQUETES",
+  "PROVEEDORES",
+  "COSTO",
+  "AVISOS",
+] as const;
+
+/** Columnas (base 0) de `EMBARQUES` que son fecha (`aaaa-mm-dd`): quien escribe el libro las convierte a fecha de Excel. */
+export const COLUMNAS_FECHA_EMBARQUES: readonly number[] = [7, 9, 11, 15, 18];
+/** Columna del inicio operativo de `EMBARQUES` (fecha y hora, `aaaa-mm-dd hh:mm`, o solo la fecha si no hay hora). */
+export const COLUMNA_FECHA_HORA_EMBARQUES = 13;
+
+const NOMBRE_HITO_EXCEL: Record<Hito, string> = { orden_compra: "Orden de compra", zarpe: "Zarpe", arribo: "Arribo", ingreso_cd: "Ingreso CD", inicio_operativo: "Inicio operativo", ingreso_stock: "Ingreso al stock" };
+
+/**
+ * Hoja `EMBARQUES`: una fila por embarque, con los cinco hitos (fecha y estado en texto, como en la pantalla), el origen, el mes del flujo,
+ * el próximo hito, las reprogramaciones, el responsable efectivo, las unidades y el costo. Las fechas van como `aaaa-mm-dd` (el inicio
+ * operativo, con su hora si la tiene) para convertirlas a fecha de Excel al escribir el libro (`COLUMNAS_FECHA_EMBARQUES`).
+ */
 export function hojaEmbarques(embarques: readonly EmbarqueApi[]): Hoja {
-  const hoja: Hoja = [
-    ["CÓDIGO", "NOMBRE", "TIPO", "VIAJE", "PUERTO", "REFERENCIA LOGÍSTICA", "SALIDA ESTIMADA", "LLEGADA ESTIMADA", "LLEGADA REAL", "RESPONSABLE", "ESTADO", "RECEPCIÓN", "UNIDADES", "RECIBIDAS (EST.)", "PENDIENTES (EST.)", "HISTÓRICAS", "COMPRAS", "LÍNEAS", "PAQUETES", "PROVEEDORES", "COSTO", "AVISOS"],
-  ];
+  const hoja: Hoja = [[...ENCABEZADOS_EMBARQUES]];
   for (const e of embarques) {
+    const h = (hito: Hito): HitoApi | undefined => e.hitos?.find((x) => x.hito === hito);
+    const fecha = (hito: Hito, plana: string | null | undefined): string | null => {
+      const x = h(hito);
+      const f = x ? x.fecha : (plana ?? null);
+      if (f === null) return null;
+      return hito === "inicio_operativo" && x?.hora ? `${f} ${x.hora}` : f;
+    };
+    const estado = (hito: Hito): string | null => {
+      const x = h(hito);
+      return x ? TEXTO_ESTADO_HITO_EXCEL[x.estado] : null;
+    };
+    const p = e.proximo_hito;
+    // El mes del flujo es el del ingreso al stock vigente (el real, si no el fijado, si no el Ingreso CD): se lee de la fecha, no de `periodo_llegada`.
+    const ingresoStock = fecha("ingreso_stock", e.fecha_llegada_real ?? e.fecha_ingreso_estimada ?? e.fecha_llegada_estimada);
     hoja.push([
       e.codigo,
       e.nombre,
       ETIQUETA_TIPO_EMBARQUE[e.tipo],
       e.viaje ? e.viaje.codigo : null,
+      e.origen ?? null,
       e.puerto_embarque,
       e.referencia_logistica,
-      e.fecha_salida_estimada,
-      e.fecha_llegada_estimada,
+      fecha("zarpe", e.fecha_salida_estimada),
+      estado("zarpe"),
+      fecha("arribo", e.fecha_puerto_estimada),
+      estado("arribo"),
+      fecha("ingreso_cd", e.fecha_llegada_estimada),
+      estado("ingreso_cd"),
+      fecha("inicio_operativo", e.fecha_inicio_operativo_estimada),
+      estado("inicio_operativo"),
+      ingresoStock,
+      estado("ingreso_stock"),
+      ingresoStock === null ? null : ingresoStock.slice(0, 7),
       e.fecha_llegada_real,
+      p ? `${NOMBRE_HITO_EXCEL[p.hito]}${p.fecha ? ` · ${p.fecha.slice(8, 10)}/${p.fecha.slice(5, 7)}/${p.fecha.slice(0, 4)}` : ""} · ${TEXTO_ESTADO_HITO_EXCEL[p.estado]}` : null,
+      e.reprogramaciones_total ?? 0,
       e.responsable_efectivo?.nombre ?? null,
       ETIQUETA_ESTADO_EMBARQUE[e.estado],
       ETIQUETA_RECEPCION_EMBARQUE[e.recepcion],
@@ -86,7 +158,7 @@ export function hojaEmbarques(embarques: readonly EmbarqueApi[]): Hoja {
       e.totales.compras,
       e.totales.lineas,
       e.totales.paquetes,
-      e.proveedores.map((p) => p.nombre).join("; ") || null,
+      e.proveedores.map((x) => x.nombre).join("; ") || null,
       costoTexto(e.totales.costo),
       e.avisos.join("; ") || null,
     ]);
@@ -94,12 +166,34 @@ export function hojaEmbarques(embarques: readonly EmbarqueApi[]): Hoja {
   return hoja;
 }
 
-/** Hoja `PAQUETES`: una fila por paquete de los embarques con detalle. */
+/** Columna (base 0) de `PAQUETES` con el ingreso propio del paquete (`aaaa-mm-dd`). */
+export const COLUMNAS_FECHA_PAQUETES: readonly number[] = [5];
+
+/** Hoja `PAQUETES`: una fila por paquete, con su ingreso al stock propio (vacío si hereda el del embarque). */
 export function hojaPaquetes(embarques: readonly EmbarqueDetalleApi[]): Hoja {
-  const hoja: Hoja = [["EMBARQUE", "CÓDIGO", "NOMBRE", "RESPONSABLE", "ESTADO", "ASIGNACIONES", "COMPRAS", "LÍNEAS", "UNIDADES", "RECIBIDAS (EST.)", "PENDIENTES (EST.)", "HISTÓRICAS", "NOTA", "AVISOS"]];
+  const hoja: Hoja = [["EMBARQUE", "CÓDIGO", "NOMBRE", "RESPONSABLE", "ESTADO", "INGRESO AL STOCK PROPIO", "INGRESO", "ASIGNACIONES", "COMPRAS", "LÍNEAS", "UNIDADES", "RECIBIDAS (EST.)", "PENDIENTES (EST.)", "HISTÓRICAS", "LOTES AL BARRER", "NOTA", "AVISOS"]];
   for (const e of embarques) {
     for (const p of e.paquetes) {
-      hoja.push([e.codigo, p.codigo, p.nombre, p.responsable_efectivo?.nombre ?? null, ETIQUETA_ESTADO_PAQUETE[p.estado], p.totales.asignaciones, p.totales.compras, p.totales.lineas, p.totales.unidades, p.totales.recibidas, p.totales.pendientes, p.totales.historicas, p.nota, p.avisos.join("; ") || null]);
+      const propio = p.ingreso_propio === true && (p.fecha_ingreso ?? null) !== null;
+      hoja.push([
+        e.codigo,
+        p.codigo,
+        p.nombre,
+        p.responsable_efectivo?.nombre ?? null,
+        ETIQUETA_ESTADO_PAQUETE[p.estado],
+        propio ? (p.fecha_ingreso ?? null) : null,
+        propio ? "Propio" : "Hereda del embarque",
+        p.totales.asignaciones,
+        p.totales.compras,
+        p.totales.lineas,
+        p.totales.unidades,
+        p.totales.recibidas,
+        p.totales.pendientes,
+        p.totales.historicas,
+        p.lotes_al_barrer ?? 0,
+        p.nota,
+        p.avisos.join("; ") || null,
+      ]);
     }
   }
   return hoja;

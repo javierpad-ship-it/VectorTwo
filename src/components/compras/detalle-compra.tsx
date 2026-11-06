@@ -14,6 +14,10 @@ import {
   type RecepcionLineaApi,
 } from "@/lib/compras/tipos-api";
 import type { EntregaSinEmbarqueApi } from "@/lib/compras/agrupadores/tipos-api";
+import type { AvisoOcApi } from "@/lib/compras/tipos-api";
+import { EditorOc } from "./editor-oc";
+import { LineaDeTiempoCompra } from "./linea-tiempo-compra";
+import { textoOc } from "./vista-oc";
 import { dinero, fechaHora, mesCorto, mesLargo, unidades } from "./formato";
 import {
   admiteAsignarAgrupador,
@@ -51,10 +55,19 @@ export function DetalleCompra({
   onCancelar,
   onCambiarViaje,
   onAsignarEmbarque,
+  onOcGuardada,
+  onRecargar,
+  hoy,
 }: {
   compra: CompraApi;
   puedeEscribir: boolean;
   ocupado?: boolean;
+  /** Ficha 08b-1b: se llama tras guardar la OC (los tres roles pueden). Sin él no hay botón «Registrar OC» / «Cambiar OC». */
+  onOcGuardada?: (texto: string, avisos: AvisoOcApi[]) => void | Promise<void>;
+  /** Relee la compra cuando la OC cambió por fuera (`oc_cambio`). */
+  onRecargar?: () => void | Promise<void>;
+  /** Hoy en Lima (`aaaa-mm-dd`) para el «Debía ocurrir hace N días» de la línea de tiempo; sin él se omite. */
+  hoy?: string;
   /** Abre el diálogo del viaje de la compra (los tres roles). Sin él no hay botón. */
   onCambiarViaje?: () => void;
   /** Abre el diálogo de asignar esas entregas a un embarque (los tres roles). Sin él no hay botones. */
@@ -72,16 +85,23 @@ export function DetalleCompra({
       <section className="rounded-xl border border-borde bg-superficie p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold">
-              Compra {compra.numero} <span className="text-tinta-suave">·</span> {compra.proveedor.nombre}
+            <h2 className="break-words text-lg font-semibold">
+              Compra {compra.numero} <span className="text-tinta-suave">·</span>{" "}
+              <span className={compra.numero_oc === null ? "font-normal text-tinta-suave" : "break-all"}>{textoOc(compra.numero_oc)}</span>
+            </h2>
+            {onOcGuardada && (
+              <div className="mt-1.5">
+                <EditorOc compra={compra} onGuardada={onOcGuardada} onRecargar={onRecargar} ocupadoFuera={ocupado} />
+              </div>
+            )}
+            <p className="mt-1 text-sm text-tinta-suave">
+              {compra.proveedor.nombre}
               {compra.proveedor.es_intercompany && (
                 <span className="ml-2 align-middle">
                   <Badge tono="marca">CD intercompany</Badge>
                 </span>
-              )}
-            </h2>
-            <p className="mt-0.5 text-sm text-tinta-suave">
-              {compra.fecha_compra}
+              )}{" "}
+              · {compra.fecha_compra}
               {compra.referencia ? ` · ref. ${compra.referencia}` : ""} · {compra.moneda} · {ETIQUETA_ORIGEN_COMPRA[compra.origen]}
             </p>
           </div>
@@ -118,6 +138,15 @@ export function DetalleCompra({
           <p className="mt-3 rounded-md bg-marca-suave px-3 py-2 text-sm text-marca-oscura">Justificación del exceso al confirmar: {compra.justificacion_exceso}</p>
         )}
       </section>
+
+      {compra.linea_de_tiempo !== undefined && (
+        <LineaDeTiempoCompra
+          tramos={compra.linea_de_tiempo}
+          hoy={hoy}
+          cancelada={compra.estado === "cancelada"}
+          onAsignarEmbarque={onAsignarEmbarque && admiteAsignarAgrupador(compra) && entregasSinEmbarqueDeCompra(compra).length > 0 ? () => onAsignarEmbarque(entregasSinEmbarqueDeCompra(compra)) : undefined}
+        />
+      )}
 
       <div className="space-y-4">
         <h3 className="text-sm font-semibold">Líneas ({compra.lineas.length})</h3>

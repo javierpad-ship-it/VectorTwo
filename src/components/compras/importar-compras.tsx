@@ -21,6 +21,7 @@ import {
   type FilaOmitidaCompra,
   type LineaImportacionApi,
   type NoAplicadaImportacionApi,
+  type OcImportacionApi,
   type ReporteImportacionComprasApi,
 } from "@/lib/compras/tipos-api";
 import { COLUMNAS_COMPRAS_AGRUPADOR } from "@/lib/compras/agrupadores/tipos";
@@ -29,13 +30,13 @@ import { mesCorto, unidades } from "./formato";
 import { ReporteAgrupadoresCompras } from "./reporte-agrupadores-compras";
 import { useImportarCompras, type CampoCompra } from "./use-importar-compras";
 import { totalesAgrupadores } from "./vista-agrupadores-compras";
-import { ETIQUETA_MOTIVO_OMISION_COMPRA } from "./vista-importar";
+import { ETIQUETA_ACCION_OC, ETIQUETA_MOTIVO_OC, ETIQUETA_MOTIVO_OMISION_COMPRA, totalesOc } from "./vista-importar";
 
 /** Columnas de la plantilla. El ordinal de la línea se rotula `LINEA_ORDINAL` para no confundirlo con la línea de producto (`LINEA`). */
 const CAMPOS: CampoImportador<CampoCompra>[] = [
   { campo: "proveedor", etiqueta: "Proveedor", alias: ["PROVEEDOR", "NOMBRE_PROVEEDOR"] },
   { campo: "fecha_compra", etiqueta: "Fecha de la compra", alias: ["FECHA_COMPRA", "FECHA"] },
-  { campo: "referencia", etiqueta: "Referencia", alias: ["REFERENCIA", "REF", "ORDEN_DE_COMPRA", "OC", "PO"] },
+  { campo: "referencia", etiqueta: "Referencia", alias: ["REFERENCIA", "REF", "PO"] },
   { campo: "linea_ordinal", etiqueta: "Número de línea", alias: ["LINEA_ORDINAL", "N_LINEA", "NRO_LINEA", "NUMERO_LINEA", "ORDINAL", "ITEM"] },
   { campo: "unidades", etiqueta: "Unidades", alias: ["UNIDADES", "CANTIDAD", "UNID"] },
   { campo: "tipo", etiqueta: "Tipo", alias: ["TIPO"], opcional: true, hint: "ESPECIFICA o UNA_MARCA; vacío = específica." },
@@ -57,15 +58,27 @@ const CAMPOS: CampoImportador<CampoCompra>[] = [
   { campo: "viaje", etiqueta: "Viaje (código)", alias: ["VIAJE", "CODIGO_VIAJE"], opcional: true, hint: "Código de un viaje que ya existe; se asigna a la compra." },
   { campo: "embarque", etiqueta: "Embarque (código)", alias: ["EMBARQUE", "CODIGO_EMBARQUE"], opcional: true, hint: "Código de un embarque existente. LLEGADA debe caer en su mes y la línea lleva una sola entrega." },
   { campo: "paquete", etiqueta: "Paquete (código)", alias: ["PAQUETE", "CODIGO_PAQUETE"], opcional: true, hint: "Código de un paquete de ese embarque. Exige EMBARQUE." },
+  // Ficha 08b-1b §3.7: el número de la orden de compra real. No sirve para encontrar ni crear la compra (eso es PROVEEDOR + REFERENCIA), no entra
+  // en la huella de la línea y vacía no borra la OC guardada. ORDEN_DE_COMPRA ya no se reconoce solo: antes caía en REFERENCIA y ahora sería ambiguo.
+  {
+    campo: "oc",
+    etiqueta: "OC (número de la orden de compra)",
+    alias: ["OC", "NUMERO_OC", "NRO_OC", "N_OC"],
+    opcional: true,
+    hint: "Opcional; la misma en todas las filas de la compra. Vacía no borra la OC que ya tiene. El comprador solo la pone en compras nuevas o en su borrador.",
+  },
   { campo: "nota", etiqueta: "Nota", alias: ["NOTA", "NOTAS"], opcional: true },
 ];
 
-const COLUMNAS_PLANTILLA_BASE = ["PROVEEDOR", "FECHA_COMPRA", "REFERENCIA", "LINEA_ORDINAL", "TIPO", "GENERO", "MUNDO", "LINEA", "EQUIVALENCIA", "MARCA", "AGRUPACION_MARCA", "TALLAS", "UNIDADES", "COSTO_UNITARIO", "MONEDA", "LLEGADA", "ENTREGAS", "RECIBIDAS", "DESTINO", "ALCANCE"];
-const FILA_EJEMPLO_BASE = ["Proveedor Norte", "2026-10-14", "PO-2211", "1", "ESPECIFICA", "HOMBRE", "URBANO", "DENIM", "", "ALFA", "", "centrales", "500", "38", "PEN", "", "2026-11:300;2026-12:200", "0", "CD", ""];
+/** Los campos de la plantilla (exportados para las pruebas del mapeo automático). */
+export { CAMPOS as CAMPOS_COMPRAS };
+
+const COLUMNAS_PLANTILLA_BASE = ["PROVEEDOR", "FECHA_COMPRA", "REFERENCIA", "OC", "LINEA_ORDINAL", "TIPO", "GENERO", "MUNDO", "LINEA", "EQUIVALENCIA", "MARCA", "AGRUPACION_MARCA", "TALLAS", "UNIDADES", "COSTO_UNITARIO", "MONEDA", "LLEGADA", "ENTREGAS", "RECIBIDAS", "DESTINO", "ALCANCE"];
+const FILA_EJEMPLO_BASE = ["Proveedor Norte", "2026-10-14", "PO-2211", "", "1", "ESPECIFICA", "HOMBRE", "URBANO", "DENIM", "", "ALFA", "", "centrales", "500", "38", "PEN", "", "2026-11:300;2026-12:200", "0", "CD", ""];
 const NOTA_EJEMPLO = "Fila de ejemplo: bórrala o reemplázala";
 
 /**
- * La plantilla: sin carga inicial no hay `RECIBIDAS` (solo vale con la carga inicial). Las columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b
+ * La plantilla: sin carga inicial no hay `RECIBIDAS` (solo vale con la carga inicial). `OC` (08b-1b §3.7) va junto a REFERENCIA y la fila de ejemplo la deja vacía. Las columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b
  * §3.9) van al final, antes de NOTA, y la fila de ejemplo las deja vacías: con un código que no existe, la fila saldría omitida.
  */
 export function plantillaCompras(cargaInicial: boolean): { columnas: string[]; fila: string[] } {
@@ -119,6 +132,9 @@ function mensajeConfirmarAplicar(nombre: string, r: ReporteImportacionComprasApi
   }
   const ag = totalesAgrupadores(r.agrupadores ?? []);
   if (ag.asignado > 0) partes.push(`Se asignará viaje o embarque a ${plural(ag.asignado, "fila", "filas")} del archivo (dos pasos más por compra: si uno falla, la compra queda sin ese agrupador y reimportar lo completa).`);
+  const oc = totalesOc(r.oc ?? []);
+  if (oc.aplicables > 0) partes.push(`Se pondrá o cambiará la OC de ${plural(oc.aplicables, "compra", "compras")}${oc.cambiadas > 0 ? ` (${oc.cambiadas} ya tenían otra OC: queda en el historial como «Importado de ${nombre}»)` : ""}.`);
+  if (oc.omitidas > 0) partes.push(`La OC de ${plural(oc.omitidas, "compra", "compras")} no se aplicará (el reporte dice por qué); sus líneas siguen su regla.`);
   if (r.omitidas.length > 0) partes.push(`Quedarán fuera ${plural(r.omitidas.length, "fila omitida", "filas omitidas")}: no se cargarán.`);
   return partes.join("\n");
 }
@@ -342,6 +358,8 @@ export function ReporteImportacionCompras({ titulo, reporte, nombreArchivo }: { 
 
         <ReporteAgrupadoresCompras filas={reporte.agrupadores ?? []} aplicado={aplicado} />
 
+        <ReporteOcCompras filas={reporte.oc ?? []} aplicado={aplicado} />
+
         {aplicado && reporte.aplicadas.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-sm font-semibold">Compras aplicadas ({reporte.aplicadas.length})</h3>
@@ -368,5 +386,72 @@ export function ReporteImportacionCompras({ titulo, reporte, nombreArchivo }: { 
         )}
       </div>
     </Card>
+  );
+}
+
+/**
+ * La columna `OC` del archivo, por compra (ficha 08b-1b §3.7): «OC registrada», «OC cambiada: A → B», «sin cambio» u «omitida» con su motivo.
+ * Una OC omitida no frena la compra ni sus líneas. Los avisos (`oc_de_otro_proveedor`) no bloquean. Sin filas (el archivo no trae `OC`),
+ * no se muestra nada.
+ */
+export function ReporteOcCompras({ filas, aplicado }: { filas: readonly OcImportacionApi[]; aplicado: boolean }) {
+  if (filas.length === 0) return null;
+  const t = totalesOc(filas);
+  const columnas: Columna<OcImportacionApi>[] = [
+    { clave: "compra", titulo: "Compra", render: (f) => (f.compra ? <span className="font-medium">{f.compra.numero}</span> : <span className="text-xs text-tinta-suave">compra nueva</span>) },
+    {
+      clave: "origen",
+      titulo: "Proveedor · referencia",
+      render: (f) => (
+        <span className="break-words text-xs">
+          {f.proveedor}
+          <span className="block text-tinta-suave">{f.referencia}</span>
+        </span>
+      ),
+    },
+    {
+      clave: "oc",
+      titulo: "OC",
+      render: (f) => (
+        <span className="break-all text-xs">
+          {f.antes !== null && f.numero_oc !== null && f.antes !== f.numero_oc ? (
+            <>
+              <span className="text-tinta-suave">{f.antes}</span> → <span className="font-medium">{f.numero_oc}</span>
+            </>
+          ) : (
+            <span className="font-medium">{f.numero_oc ?? f.antes ?? "—"}</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      clave: "resultado",
+      titulo: "Resultado",
+      render: (f) => {
+        const a = ETIQUETA_ACCION_OC[f.accion];
+        return (
+          <span className="flex flex-col items-start gap-0.5">
+            <Badge tono={a.tono}>{aplicado ? a.aplicado : a.previsto}</Badge>
+            {f.accion === "omitida" && f.motivo && <span className="text-xs text-alerta">{ETIQUETA_MOTIVO_OC[f.motivo]}</span>}
+            {f.detalle && <span className="max-w-72 text-[11px] text-tinta-suave">{f.detalle}</span>}
+            {f.avisos.map((av) => (
+              <span key={av.aviso + av.detalle} className="max-w-72 text-[11px] text-alerta">
+                ⚠ {av.detalle}
+              </span>
+            ))}
+          </span>
+        );
+      },
+    },
+  ];
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">Números de OC ({filas.length})</h3>
+      <p className="text-xs text-tinta-suave">
+        {aplicado ? "Registradas" : "Se registrarán"}: {t.registradas} · {aplicado ? "cambiadas" : "se cambiarán"}: {t.cambiadas} · sin cambio: {t.sinCambio} · {aplicado ? "no se aplicaron" : "no se aplicarán"}: {t.omitidas}. Una OC que no se
+        aplica no frena la compra ni sus líneas.
+      </p>
+      <DataTable columnas={columnas} filas={[...filas]} claveFila={(f) => f.compra_clave} />
+    </div>
   );
 }

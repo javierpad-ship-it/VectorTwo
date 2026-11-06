@@ -79,7 +79,8 @@ export function PestanaImportar({
           <ul className="list-disc space-y-1 pl-5 text-xs text-tinta-suave">
             <li>Solo crea viajes, embarques y paquetes. Lo que ya existe no se edita ni se mueve, y no asigna compras: eso se hace en pantalla o con las columnas del importador de compras.</li>
             <li>El responsable es el correo de un comprador o administrador activo y es obligatorio en los viajes; en embarques y paquetes, vacío hereda.</li>
-            <li>Las fechas van como aaaa-mm-dd. Un embarque necesita la fecha de llegada; un viaje, la de inicio.</li>
+            <li>Las fechas van como aaaa-mm-dd. Un embarque necesita el Ingreso CD (FECHA_INGRESO_CD, o la columna vieja FECHA_LLEGADA); un viaje, la de inicio.</li>
+            <li>Un embarque admite además FECHA_ZARPE (o FECHA_SALIDA), FECHA_ARRIBO, INICIO_OPERATIVO (fecha, o fecha y hora: aaaa-mm-dd hh:mm), FECHA_INGRESO_STOCK (vacía = el mismo día del Ingreso CD) y ORIGEN (California, Nueva York…).</li>
             <li>Un código vacío se numera al aplicar (aamm## según la fecha). Una fila puede apuntar a un viaje o a un embarque del mismo archivo, pero solo por código.</li>
           </ul>
         </div>
@@ -232,7 +233,7 @@ export function ReporteImportacionAgrupadores({
         {cambiadas.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-sm font-semibold">Ya existen con otros datos ({formatearNumero(cambiadas.length)})</h3>
-            <p className="text-xs text-tinta-suave">Esta importación nunca edita lo que ya existe: estas filas no se tocan. Corrígelas en pantalla (Editar o Cambiar fecha de llegada).</p>
+            <p className="text-xs text-tinta-suave">Esta importación nunca edita lo que ya existe: estas filas no se tocan. Corrígelas en pantalla (Editar o Cambiar fechas).</p>
             <DataTable columnas={columnasCambiadas} filas={cambiadas} claveFila={(f) => `${f.fila}`} />
           </div>
         )}

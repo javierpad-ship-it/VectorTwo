@@ -20,7 +20,7 @@ const textoUbicacion = (u: UbicacionMovimientoApi): string => `${mesCorto(u.peri
  * Vista previa de un movimiento (ficha 08b §3, §4.2): la frase que dice qué mueve, los avisos (temporada, fusión de entregas, mes cerrado…
  * ninguno bloquea) y, debajo, de dónde a dónde va cada línea. El plan lo calcula el servidor con `?previsualizar=1`, sin escribir.
  */
-export function VistaPreviaPlan({ plan }: { plan: PlanMovimientoApi }) {
+export function VistaPreviaPlan({ plan, extra }: { plan: PlanMovimientoApi; extra?: ReactNode }) {
   const columnas: Columna<MovimientoApi>[] = [
     { clave: "compra", titulo: "Compra", render: (m) => <span className="whitespace-nowrap font-medium">{m.compra_numero}</span> },
     { clave: "linea", titulo: "Línea", render: (m) => <span className="text-xs">{m.linea}</span> },
@@ -32,6 +32,7 @@ export function VistaPreviaPlan({ plan }: { plan: PlanMovimientoApi }) {
   return (
     <section aria-label="Vista previa" className="space-y-3 rounded-lg border border-marca/30 bg-marca-suave/40 p-3">
       <p className="text-sm font-medium text-tinta">{resumenPlan(plan)}</p>
+      {extra}
       {plan.avisos.length > 0 && (
         <ul className="space-y-1 text-xs text-alerta">
           {plan.avisos.map((a, i) => (
@@ -71,6 +72,7 @@ export function DialogoMovimiento<C extends { huella_plan?: string }>({
   confirmar,
   pista,
   ancho = "max-w-3xl",
+  vistaExtra,
   children,
 }: {
   titulo: string;
@@ -88,6 +90,8 @@ export function DialogoMovimiento<C extends { huella_plan?: string }>({
   /** Qué falta para poder previsualizar, mientras `cuerpo` es nulo. */
   pista?: string;
   ancho?: string;
+  /** Lo que la vista previa dice además del plan (p. ej. los cambios de fechas y los meses que se mueven, 08b-1b §4.3). */
+  vistaExtra?: (plan: PlanMovimientoApi) => ReactNode;
   children: ReactNode;
 }) {
   const accion = useAccion();
@@ -145,7 +149,7 @@ export function DialogoMovimiento<C extends { huella_plan?: string }>({
         {children}
         {cuerpo === null && pista && <p className="text-xs text-tinta-suave">{pista}</p>}
         {guardado !== null && planVigente === null && cuerpo !== null && <Alert tono="info">Cambiaste algo: vuelve a mirar la vista previa antes de aplicar.</Alert>}
-        {planVigente && <VistaPreviaPlan plan={planVigente} />}
+        {planVigente && <VistaPreviaPlan plan={planVigente} extra={vistaExtra?.(planVigente)} />}
       </div>
     </Modal>
   );

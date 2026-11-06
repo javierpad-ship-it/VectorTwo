@@ -55,7 +55,7 @@ export function useImportarAgrupadores({ alAplicar }: { alAplicar?: (r: ReporteI
     setFinal(null);
     setLeyendo(true);
     try {
-      const tabla: TablaLeida = await leerArchivoTabular(f, hoja);
+      const tabla: TablaLeida = await leerArchivoTabular(f, hoja, { conHora: true });
       if (tabla.columnas.length === 0 || tabla.filas.length === 0) {
         setArchivo(null);
         setError(tabla.hojas.length > 1 ? `La hoja "${tabla.hoja}" no tiene cabecera o está vacía. Prueba con otra hoja.` : "El archivo no tiene cabecera o está vacío.");

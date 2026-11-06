@@ -3,11 +3,35 @@ import { Badge } from "@/components/ui/badge";
 import { DataTable, type Columna } from "@/components/ui/data-table";
 import { ETIQUETA_ORIGEN_COMPRA, type CompraApi } from "@/lib/compras/tipos-api";
 import { fechaHora, unidades } from "./formato";
+import { textoOc } from "./vista-oc";
+import { textoProximoHito } from "./vista-linea-tiempo";
 import { hrefEmbarque, hrefViaje, embarquesDeCompra, textoSinEmbarque, textoViajeCompra, unidadesSinEmbarque } from "./vista-agrupadores-compras";
 import { estadoCompra, ETIQUETA_CORTA_AVISO_LINEA, TEXTO_AVISO_LINEA, textoCosto, textoEntregas, unidadesPorConfirmar } from "./vista-compras";
 
+/** «🔴 Arribo · 18-nov · Previsto» (+1 tramo): el hito más urgente de la compra, con el estado siempre en texto. */
+function ProximoHito({ compra: c, hoy }: { compra: CompraApi; hoy?: string }) {
+  const p = textoProximoHito(c.proximo_hito ?? null, hoy);
+  if (p === null) return <span className="text-xs text-tinta-suave">{c.estado === "cancelada" ? "—" : "Sin hitos pendientes"}</span>;
+  return (
+    <div className="min-w-36 space-y-0.5 text-xs">
+      <p className="font-medium">
+        <span aria-hidden="true">{p.marcador} </span>
+        {p.hito}
+      </p>
+      <p className="whitespace-nowrap tabular-nums" title={p.fechaCompleta ?? undefined}>
+        {p.fecha ?? "Sin fecha"}
+      </p>
+      <p className="flex flex-wrap items-center gap-1">
+        <Badge tono={p.tono}>{p.estado}</Badge>
+        {p.mas && <span className="text-tinta-suave">{p.mas}</span>}
+      </p>
+      {p.embarque && <p className="text-tinta-suave">Embarque {p.embarque}</p>}
+    </div>
+  );
+}
+
 /**
- * Lista de compras (ficha 08 §4.4): número, fecha, proveedor, origen, líneas, unidades, costo, entregas (primera y última), recibidas,
+ * Lista de compras (ficha 08 §4.4): código X con su OC (08b-1b), próximo hito, fecha, proveedor, origen, líneas, unidades, costo, entregas (primera y última), recibidas,
  * estado, quién la creó, último cambio y avisos; desde la ficha 08b, también su viaje y los embarques a los que viaja (con lo que queda sin
  * embarque). Abrir una compra lleva a su detalle. Dentro de `DataTable`, que desplaza en horizontal en pantallas angostas. El costo es
  * visible para todos los roles.
@@ -17,11 +41,14 @@ export function ListaCompras({
   enlace,
   cargando = false,
   vacio = "Ninguna compra con estos filtros.",
+  hoy,
 }: {
   compras: readonly CompraApi[];
   enlace: (c: CompraApi) => string;
   cargando?: boolean;
   vacio?: string;
+  /** Hoy en Lima (`aaaa-mm-dd`) para «Vencido (hace 4 días)»; sin él, solo «Vencido». */
+  hoy?: string;
 }) {
   const columnas: Columna<CompraApi>[] = [
     {
@@ -32,9 +59,15 @@ export function ListaCompras({
           <Link href={enlace(c)} className="font-medium text-marca-oscura underline-offset-2 hover:underline">
             {c.numero}
           </Link>
+          {c.numero_oc && <p className="break-all text-xs font-medium text-tinta">{textoOc(c.numero_oc)}</p>}
           {c.referencia && <p className="text-xs text-tinta-suave">ref. {c.referencia}</p>}
         </div>
       ),
+    },
+    {
+      clave: "proximo_hito",
+      titulo: "Próximo hito",
+      render: (c) => <ProximoHito compra={c} hoy={hoy} />,
     },
     { clave: "fecha", titulo: "Fecha", render: (c) => <span className="whitespace-nowrap">{c.fecha_compra}</span> },
     { clave: "proveedor", titulo: "Proveedor", render: (c) => c.proveedor.nombre },

@@ -9,7 +9,7 @@ import { DialogoAPaquete } from "../src/components/compras/agrupadores/dialogo-a
 import { DialogoAsignar } from "../src/components/compras/agrupadores/dialogo-asignar";
 import { DialogoCancelarAgrupador } from "../src/components/compras/agrupadores/dialogo-cancelar";
 import { DialogoComprasViaje } from "../src/components/compras/agrupadores/dialogo-compras-viaje";
-import { DialogoFecha } from "../src/components/compras/agrupadores/dialogo-fecha";
+import { DialogoFechas } from "../src/components/compras/agrupadores/dialogo-fechas";
 import { VistaPreviaPlan } from "../src/components/compras/agrupadores/dialogo-movimiento";
 import { DialogoMoverPaquete } from "../src/components/compras/agrupadores/dialogo-mover-paquete";
 import { DialogoPasarPendientes } from "../src/components/compras/agrupadores/dialogo-pasar-pendientes";
@@ -79,7 +79,7 @@ describe("lista de embarques", () => {
 
   it("columnas de la ficha §4.1: embarque, tipo, viaje, puerto, responsable, fechas, estado, unidades, contenido, costo y avisos", () => {
     const h = html(createElement(ListaEmbarques, { embarques: [e], enlace: (x) => `/compras/agrupadores?embarque=${x.id}` }));
-    for (const t of ["Embarque 261101", "Nov-26 · Feria Sur", "Importación", "261001", "Puerto Sur", "Comprador C1", "Heredado del viaje", "Sale", "25/10/2026", "20/11/2026", "(est.)", "Planificado", "300 u", "recib. (est.)", "pend.", "1 compra · 2 paquetes", "1 proveedor", "US$ 11,400.00"]) expect(h, t).toContain(t);
+    for (const t of ["Embarque 261101", "Nov-26 · Feria Sur", "Importación", "261001", "Puerto Sur", "Comprador C1", "Heredado del viaje", "Origen", "Zarpe", "Arribo", "Ingreso CD", "Inicio operativo", "Ingreso al stock", "Próximo hito", "Reprogramado ×N", "25/10/2026", "20/11/2026", "(est.)", "Planificado", "300 u", "recib. (est.)", "pend.", "1 compra · 2 paquetes", "1 proveedor", "US$ 11,400.00"]) expect(h, t).toContain(t);
     expect(h).toContain("overflow-x-auto"); // dentro de DataTable
     expect(h).toContain(`href="/compras/agrupadores?embarque=${e.id}"`);
   });
@@ -109,7 +109,7 @@ describe("lista de embarques", () => {
 describe("filtros y barra del viaje activo", () => {
   it("filtros: Mis embarques / Todos, estado, atrasados, tipo y mes de llegada, con los grupos de chips rotulados", () => {
     const h = html(createElement(FiltrosEmbarques, { parametros: PARAMETROS_AGRUPADORES_VACIOS, mio: true, onCambiar: noop }));
-    for (const t of ["Mis embarques", "Todos", "Planificado", "En tránsito", "Recibido", "Cancelado", "Atrasados", "Llega desde", "Llega hasta", "Buscar", 'aria-label="Responsable"', 'aria-label="Estado"']) expect(h, t).toContain(t);
+    for (const t of ["Mis embarques", "Todos", "Planificado", "En tránsito", "Recibido", "Cancelado", "Atrasados", "Reprogramados", "Origen", "Ingreso al stock desde", "Ingreso al stock hasta", "Buscar", 'aria-label="Responsable"', 'aria-label="Estado"']) expect(h, t).toContain(t);
     expect(h).toMatch(/aria-pressed="true"[^>]*>Mis embarques/);
   });
 
@@ -129,7 +129,7 @@ describe("detalle del embarque", () => {
 
   it("cabecera, paquetes y «Sin paquete»: datos clave, acciones de los tres roles y el historial", () => {
     const h = html(createElement(DetalleEmbarque, { ...props, embarque: embarqueDetalleApi261101(), rol: "comprador" }));
-    for (const t of ["Embarque 261101 · Nov-26 · Feria Sur", "Puerto Sur", "Viaje 261001", "Comprador C1", "Heredado del viaje", "nov-2026", "Paquete 261101 · Paquete denim", "Paquete 261102 · Paquete resto", "Sin paquete", "C-000101", "DENIM", "300", "Editar", "Cambiar fecha de llegada", "Marcar en tránsito", "Nuevo paquete", "Agregar compras", "Pasar pendientes a…", "Historial del embarque y sus paquetes"]) expect(h, t).toContain(t);
+    for (const t of ["Embarque 261101 · Nov-26 · Feria Sur", "Puerto Sur", "Viaje 261001", "Comprador C1", "Heredado del viaje", "nov-2026", "Paquete 261101 · Paquete denim", "Paquete 261102 · Paquete resto", "Sin paquete", "C-000101", "DENIM", "300", "Editar", "Cambiar fechas", "Línea de tiempo", "Fijar ingreso…", "Ingreso al stock: ", "hereda del embarque", "Marcar en tránsito", "Nuevo paquete", "Agregar compras", "Pasar pendientes a…", "Historial del embarque y sus paquetes"]) expect(h, t).toContain(t);
   });
 
   it("el comprador NO ve cancelar el embarque ni los paquetes; admin y planner sí (la API responde 403 al comprador)", () => {
@@ -145,7 +145,7 @@ describe("detalle del embarque", () => {
   it("un embarque cancelado o recibido ya no se edita ni recibe mercadería: solo se puede quitar", () => {
     const cancelado = { ...embarqueDetalleApi261101(), estado: "cancelado" as const };
     const h = html(createElement(DetalleEmbarque, { ...props, embarque: cancelado, rol: "admin" }));
-    for (const t of ["Editar", "Cambiar fecha de llegada", "Nuevo paquete", "Agregar compras", "Marcar en tránsito", "Cancelar embarque"]) expect(h, t).not.toContain(t);
+    for (const t of ["Editar", "Cambiar fechas", "Fijar ingreso…", "Nuevo paquete", "Agregar compras", "Marcar en tránsito", "Cancelar embarque"]) expect(h, t).not.toContain(t);
   });
 
   it("una asignación histórica sale atenuada, marcada y sin casilla activa; una desalineada se rotula", () => {
@@ -170,16 +170,20 @@ describe("detalle del embarque", () => {
 describe("formularios", () => {
   it("embarque: crear propone el código, deja elegir tipo, viaje, responsable y puerto con sugerencias, y pide la llegada", () => {
     const h = html(createElement(ModalEmbarque, { embarque: null, viajes: opciones().viajes, asignables, puertos: ["Puerto Sur"], codigosExistentes: ["261101"], viajeInicial: VIAJE_AGR.v261001, onCerrar: noop, onGuardado: noop }));
-    for (const t of ["Nuevo embarque", "Código", "Nombre", "Tipo", "Importación", "Local", "Viaje", "Responsable", "Hereda del viaje", "Puerto de embarque", "Puerto Sur", "Referencia logística", "Fecha de salida estimada", "Fecha de llegada estimada", "Crear embarque", "Comprador C1", "Admin A (administrador)", "260901 · Taller Lima · sep-2026 (cerrado)"]) expect(h, t).toContain(t);
+    for (const t of ["Nuevo embarque", "Código", "Nombre", "Tipo", "Importación", "Local", "Viaje", "Responsable", "Hereda del viaje", "Origen", "Puerto de embarque", "Puerto Sur", "Referencia logística", "Fechas por hito", "Zarpe (salida)", "Arribo (puerto)", "Ingreso CD", "Inicio operativo", "Ingreso al stock", "Igualar al Ingreso CD", "¿Ya ocurrió?", "Ya zarpó (salió)", "Ya llegó a puerto", "Ya llegó al CD", "El Ingreso al stock decide el mes en que la mercadería cuenta en el flujo", "Si solo sabes el mes, pon el 15", "Crear embarque", "Comprador C1", "Admin A (administrador)", "260901 · Taller Lima · sep-2026 (cerrado)"]) expect(h, t).toContain(t);
     expect(h).toContain('list="puertos-embarque"');
+    expect(h).toContain('list="origenes-embarque"');
+    expect(h).toContain("California");
     expect(h).toContain("<dialog");
   });
 
-  it("embarque: editar no deja cambiar el código ni la llegada (esa va por «Cambiar fecha de llegada»)", () => {
-    const h = html(createElement(ModalEmbarque, { embarque: embarqueApi261101(), viajes: opciones().viajes, asignables, puertos: [], codigosExistentes: [], onCerrar: noop, onGuardado: noop }));
+  it("embarque: editar no tiene fechas editables: las muestra de solo lectura y las cambia «Cambiar fechas»", () => {
+    const h = html(createElement(ModalEmbarque, { embarque: embarqueApi261101(), viajes: opciones().viajes, asignables, puertos: [], codigosExistentes: [], onCerrar: noop, onGuardado: noop, onCambiarFechas: noop }));
     expect(h).toContain("Editar embarque 261101");
-    expect(h).toContain("Se cambia con «Cambiar fecha de llegada»");
+    expect(h).toContain("Fechas del embarque (solo lectura)");
+    expect(h).toContain("Cambiar fechas");
     expect(h).toContain("20/11/2026");
+    expect(h).not.toContain('type="date"');
     expect(h).not.toContain(">Código<");
     expect(h).toContain("Guardar cambios");
   });
@@ -198,11 +202,11 @@ describe("movimientos con vista previa", () => {
     for (const t of ["Mueve 1 línea de 1 compra de nov-26 a dic-26", "C-000101", "DENIM · ALFA", "nov-26 · Embarque 261101 · P 261101", "dic-26 · Embarque 261101 · P 261101", "En dic-26, C-000101 queda con una sola entrega de 500 u."]) expect(h, t).toContain(t);
   });
 
-  it("cambiar fecha: pide la nueva fecha y el motivo, y no deja aplicar sin vista previa", () => {
-    const h = html(createElement(DialogoFecha, { embarque: embarqueDetalleApi261101(), onAplicado: noop, onCerrar: noop }));
-    for (const t of ["Cambiar fecha de llegada · Embarque 261101", "Hoy llega el 20/11/2026", "Nueva fecha de llegada", "Motivo", "Ver vista previa", "Cambiar fecha", "Elige una fecha distinta de la actual."]) expect(h, t).toContain(t);
+  it("fechas del embarque: un bloque por hito, motivo y causa, y no deja aplicar sin vista previa", () => {
+    const h = html(createElement(DialogoFechas, { embarque: embarqueDetalleApi261101(), onAplicado: noop, onCerrar: noop }));
+    for (const t of ["Fechas del embarque 261101", "Zarpe", "Arribo", "Ingreso CD", "Inicio operativo", "Ingreso al stock", "¿Ya ocurrió?", "Ahora: ", "20/11/2026", "igual al Ingreso CD", "Fijar fecha", "Motivo y causa", "Causa", "Motivo", "Ver vista previa", "Guardar las fechas", "Cambia alguna fecha o marca un hito como ocurrido."]) expect(h, t).toContain(t);
     expect(h).toMatch(/<button[^>]*disabled=""[^>]*>Ver vista previa/);
-    expect(h).toMatch(/<button[^>]*disabled=""[^>]*>Cambiar fecha/);
+    expect(h).toMatch(/<button[^>]*disabled=""[^>]*>Guardar las fechas/);
   });
 
   it("agregar compras: filtros por viaje, proveedor, mes y texto; las candidatas llegan del servidor", () => {

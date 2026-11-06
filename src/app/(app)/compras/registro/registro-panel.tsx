@@ -194,6 +194,12 @@ export function RegistroPanel({ rol, perfilId, viajeActivoInicial }: { rol: Rol;
             compra={compraAbierta}
             puedeEscribir={puedeEscribir}
             ocupado={accion.ocupado}
+            hoy={hoyFecha}
+            onRecargar={recargarTodo}
+            onOcGuardada={async (texto, avisos) => {
+              setMensaje({ tono: avisos.length > 0 ? "info" : "exito", texto, avisos: avisos.map((a) => a.detalle) });
+              await recargarTodo();
+            }}
             onConfirmarIngreso={(linea, numero, entrega) => setDialogo({ tipo: "ingreso", linea, numero, entrega })}
             onQuitarIngreso={(linea, numero, r) => void quitar(compraAbierta, linea, numero, r)}
             onCancelar={() => setDialogo({ tipo: "cancelar" })}
@@ -320,7 +326,7 @@ export function RegistroPanel({ rol, perfilId, viajeActivoInicial }: { rol: Rol;
         </p>
       </div>
 
-      <ListaCompras compras={visibles} enlace={(c) => href({ compra: c.id })} cargando={(compras.cargando || !viajeActivoListo) && compras.datos.length === 0} vacio={textoVacio} />
+      <ListaCompras compras={visibles} enlace={(c) => href({ compra: c.id })} cargando={(compras.cargando || !viajeActivoListo) && compras.datos.length === 0} vacio={textoVacio} hoy={hoyFecha} />
     </div>
   );
 }

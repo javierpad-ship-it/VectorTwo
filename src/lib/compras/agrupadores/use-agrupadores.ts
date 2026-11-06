@@ -7,7 +7,6 @@ import type {
   CambiarEstado,
   AsignarEntregas,
   AsignarViaje,
-  CambiarFecha,
   MoverAPaquete,
   MoverPaquete,
   PasarPendientes,
@@ -18,10 +17,13 @@ import type {
   EmbarqueDetalleApi,
   EstadoEmbarque,
   EventoAgrupadorApi,
+  CambiarFechasCuerpo,
   GuardarEmbarqueCuerpo,
+  IngresoPaqueteCuerpo,
   GuardarPaqueteCuerpo,
   GuardarViajeCuerpo,
   OpcionesAgrupadoresApi,
+  PlanFechasApi,
   PlanMovimientoApi,
   ReporteImportacionAgrupadoresApi,
   RespuestaAsignarViajeApi,
@@ -71,7 +73,12 @@ export type FiltrosEmbarques = {
   viaje_id?: string;
   desde?: Mes;
   hasta?: Mes;
+  /** Algún hito `vencido` (un ingreso «por confirmar» no cuenta). */
   atrasados?: boolean;
+  /** Con alguna reprogramación. */
+  reprogramados?: boolean;
+  /** Origen exacto («California»). */
+  origen?: string;
 };
 export const urlEmbarques = (f: FiltrosEmbarques = {}): string => conQuery(URL_EMBARQUES, { ...f });
 
@@ -139,7 +146,7 @@ export const cancelarPaquete = (paqueteId: string, cuerpo: CambiarEstado) => api
 
 // ─── Movimientos (§3.3): con `previsualizar = true` devuelven el plan sin escribir ───
 
-export type ResultadoMovimiento = PlanMovimientoApi | RespuestaMovimientoApi;
+export type ResultadoMovimiento = PlanMovimientoApi | PlanFechasApi | RespuestaMovimientoApi;
 
 const ruta = (base: string, previsualizar: boolean) => (previsualizar ? `${base}?previsualizar=1` : base);
 
@@ -149,15 +156,19 @@ export const quitarAsignaciones = (embarqueId: string, cuerpo: QuitarAsignacione
   api.post<ResultadoMovimiento>(ruta(`${urlEmbarque(embarqueId)}/quitar`, previsualizar), cuerpo);
 export const moverAPaquete = (embarqueId: string, cuerpo: MoverAPaquete, previsualizar = false) =>
   api.post<ResultadoMovimiento>(ruta(`${urlEmbarque(embarqueId)}/paquete`, previsualizar), cuerpo);
-export const cambiarFechaLlegada = (embarqueId: string, cuerpo: CambiarFecha, previsualizar = false) =>
-  api.post<ResultadoMovimiento>(ruta(`${urlEmbarque(embarqueId)}/fecha`, previsualizar), cuerpo);
+/** Cambia cualquier hito del embarque y «ya ocurrió» (08b-1b §3.2). Con `previsualizar`, el `PlanFechasApi`. */
+export const cambiarFechasEmbarque = (embarqueId: string, cuerpo: CambiarFechasCuerpo, previsualizar = false) =>
+  api.post<ResultadoMovimiento>(ruta(`${urlEmbarque(embarqueId)}/fechas`, previsualizar), cuerpo);
+/** Fija o suelta (`fecha_ingreso_stock = null`) el ingreso al stock propio de un paquete (08b-1b §3.2). */
+export const fijarIngresoPaquete = (paqueteId: string, cuerpo: IngresoPaqueteCuerpo, previsualizar = false) =>
+  api.post<ResultadoMovimiento>(ruta(`${urlPaquete(paqueteId)}/ingreso`, previsualizar), cuerpo);
 export const pasarPendientes = (embarqueId: string, cuerpo: PasarPendientes, previsualizar = false) =>
   api.post<ResultadoMovimiento>(ruta(`${urlEmbarque(embarqueId)}/pasar-pendientes`, previsualizar), cuerpo);
 export const moverPaquete = (paqueteId: string, cuerpo: MoverPaquete, previsualizar = false) =>
   api.post<ResultadoMovimiento>(ruta(`${urlPaquete(paqueteId)}/mover`, previsualizar), cuerpo);
 
 /** `true` si la respuesta de un movimiento es una vista previa (trae `huella_plan`) y no el resultado de escribir. */
-export const esPlan = (r: ResultadoMovimiento): r is PlanMovimientoApi => "huella_plan" in r && "movimientos" in r;
+export const esPlan = (r: ResultadoMovimiento): r is PlanMovimientoApi | PlanFechasApi => "huella_plan" in r && "movimientos" in r;
 
 // ─── Viaje activo y importador ───
 

@@ -100,7 +100,12 @@ export type ParametrosAgrupadores = {
   estado: EstadoEmbarque | null;
   estadoViaje: EstadoViaje | null;
   tipo: TipoEmbarque | null;
+  /** Algún hito vencido (un ingreso «por confirmar» no cuenta). */
   atrasados: boolean;
+  /** Embarques con alguna reprogramación. */
+  reprogramados: boolean;
+  /** Origen exacto del embarque («California»); vacío = todos. */
+  origen: string;
   /** Mes de llegada (`aaaa-mm`), desde y hasta. En Sin agrupador, mes de la entrega. */
   desde: string | null;
   hasta: string | null;
@@ -117,6 +122,8 @@ export const PARAMETROS_AGRUPADORES_VACIOS: ParametrosAgrupadores = {
   estadoViaje: null,
   tipo: null,
   atrasados: false,
+  reprogramados: false,
+  origen: "",
   desde: null,
   hasta: null,
   proveedor: null,
@@ -146,6 +153,8 @@ export function leerParametrosAgrupadores(get: (clave: string) => string | null)
     estadoViaje: enLista(get("estado_viaje"), ESTADOS_VIAJE),
     tipo: enLista(get("tipo"), TIPOS_EMBARQUE),
     atrasados: get("atrasados") === "1",
+    reprogramados: get("reprogramados") === "1",
+    origen: (get("origen") ?? "").slice(0, 80),
     // Un rango al revés se ignora entero: la API lo rechazaría con 400.
     desde: rangoAlReves ? null : desde,
     hasta: rangoAlReves ? null : hasta,
@@ -164,6 +173,8 @@ export function consultaAgrupadores(p: ParametrosAgrupadores): string {
   if (p.estadoViaje) q.set("estado_viaje", p.estadoViaje);
   if (p.tipo) q.set("tipo", p.tipo);
   if (p.atrasados) q.set("atrasados", "1");
+  if (p.reprogramados) q.set("reprogramados", "1");
+  if (p.origen.trim() !== "") q.set("origen", p.origen.trim());
   if (p.desde) q.set("desde", p.desde);
   if (p.hasta) q.set("hasta", p.hasta);
   if (p.proveedor) q.set("proveedor", p.proveedor);
@@ -172,7 +183,7 @@ export function consultaAgrupadores(p: ParametrosAgrupadores): string {
 }
 
 export const hayFiltrosEmbarques = (p: ParametrosAgrupadores): boolean =>
-  p.mio === true || p.estado !== null || p.tipo !== null || p.atrasados || p.desde !== null || p.hasta !== null || p.q.trim() !== "";
+  p.mio === true || p.estado !== null || p.tipo !== null || p.atrasados || p.reprogramados || p.origen.trim() !== "" || p.desde !== null || p.hasta !== null || p.q.trim() !== "";
 
 // ─── Filtros de listas ───
 
@@ -192,7 +203,7 @@ export function filtrarEmbarques(lista: readonly EmbarqueApi[], p: ParametrosAgr
   return lista.filter((e) => {
     if (mio && !esMio(e.responsable_efectivo, perfilId)) return false;
     if (q === "") return true;
-    const texto = [e.codigo, e.nombre, e.viaje?.codigo ?? "", e.viaje?.nombre ?? "", e.puerto_embarque ?? "", e.referencia_logistica ?? "", ...e.proveedores.map((x) => x.nombre)].join(" ");
+    const texto = [e.codigo, e.nombre, e.viaje?.codigo ?? "", e.viaje?.nombre ?? "", e.puerto_embarque ?? "", e.origen ?? "", e.referencia_logistica ?? "", ...e.proveedores.map((x) => x.nombre)].join(" ");
     return sinAcentos(texto).includes(q);
   });
 }
@@ -260,7 +271,7 @@ export const nombreConTipo = (tipo: "Viaje" | "Embarque" | "Paquete", codigo: st
 export type TonoAviso = "alerta" | "neutro";
 
 /** Avisos que piden atención (rojo); el resto informa. */
-const AVISOS_DE_ATENCION: readonly AvisoAgrupador[] = ["atrasado", "sin_responsable", "desalineada", "en_embarque_cancelado", "llegada_antes_de_compra"];
+const AVISOS_DE_ATENCION: readonly AvisoAgrupador[] = ["atrasado", "hito_vencido", "sin_responsable", "desalineada", "en_embarque_cancelado", "llegada_antes_de_compra"];
 export const tonoAviso = (a: AvisoAgrupador): TonoAviso => (AVISOS_DE_ATENCION.includes(a) ? "alerta" : "neutro");
 
 /** Quién es el responsable y de dónde sale: el propio, o heredado del embarque o del viaje. */
@@ -294,7 +305,7 @@ export function resumenPlan(plan: PlanMovimientoApi): string {
   const deA = cambian.length > 0 ? ` de ${meses(cambian.map((m) => m.de.periodo))} a ${meses(cambian.map((m) => m.a.periodo))}` : "";
   switch (plan.operacion) {
     case "cambiar_fecha":
-      return cambian.length > 0 ? `Mueve ${lineas} de ${compras}${deA} (${u}).` : "El mes no cambia: solo cambia la fecha del embarque y no se toca ninguna compra.";
+      return cambian.length > 0 ? `Mueve ${lineas} de ${compras}${deA} (${u}).` : "Estas fechas no cambian el mes: el flujo no se mueve y no se toca ninguna compra.";
     case "asignar":
       return `Asigna ${u} de ${lineas} de ${compras} al embarque${deA}.`;
     case "quitar":

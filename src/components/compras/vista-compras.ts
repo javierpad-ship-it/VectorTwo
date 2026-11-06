@@ -37,6 +37,8 @@ export type ParametrosCompras = {
   /** Ficha 08b: compras con alguna entrega asignada a este embarque (el viaje lo filtra la barra del viaje activo, que no vive en la URL). */
   embarque: string | null;
   porConfirmar: boolean;
+  /** Ficha 08b-1b: solo compras con algún hito vencido (`proximo_hito=vencido` en la API; un ingreso «por confirmar» no cuenta). */
+  hitosVencidos: boolean;
   q: string;
   importar: boolean;
 };
@@ -54,6 +56,7 @@ export const PARAMETROS_COMPRAS_VACIOS: ParametrosCompras = {
   marca: null,
   embarque: null,
   porConfirmar: false,
+  hitosVencidos: false,
   q: "",
   importar: false,
 };
@@ -88,6 +91,7 @@ export function leerParametrosCompras(get: (clave: string) => string | null): Pa
     marca: uuidONulo("marca"),
     embarque: uuidONulo("embarque"),
     porConfirmar: get("por_confirmar") === "1",
+    hitosVencidos: get("hitos_vencidos") === "1",
     q: get("q") ?? "",
     importar: get("importar") === "1",
   };
@@ -107,6 +111,7 @@ export function consultaCompras(p: ParametrosCompras): string {
   if (p.marca) q.set("marca", p.marca);
   if (p.embarque) q.set("embarque", p.embarque);
   if (p.porConfirmar) q.set("por_confirmar", "1");
+  if (p.hitosVencidos) q.set("hitos_vencidos", "1");
   if (p.q.trim() !== "") q.set("q", p.q);
   if (p.importar) q.set("importar", "1");
   return q.toString();
@@ -126,6 +131,7 @@ export function filtrosCompras(p: ParametrosCompras): FiltrosCompras {
     marca_id: p.marca ?? undefined,
     embarque_id: p.embarque ?? undefined,
     por_confirmar: p.porConfirmar || undefined,
+    proximo_hito: p.hitosVencidos ? "vencido" : undefined,
   };
 }
 
@@ -141,9 +147,10 @@ export const hayFiltrosCompras = (p: ParametrosCompras): boolean =>
   p.marca !== null ||
   p.embarque !== null ||
   p.porConfirmar ||
+  p.hitosVencidos ||
   p.q.trim() !== "";
 
-/** Número, proveedor, referencia, nota y, desde la ficha 08b, viaje (código y nombre) y códigos de embarque; sin distinguir mayúsculas ni acentos. */
+/** Código X, número de OC, proveedor, referencia, nota y, desde la ficha 08b, viaje (código y nombre) y códigos de embarque; sin distinguir mayúsculas ni acentos. */
 export function filtrarCompras(compras: readonly CompraApi[], q: string): CompraApi[] {
   const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("es");
   const t = norm(q.trim());
@@ -152,7 +159,7 @@ export function filtrarCompras(compras: readonly CompraApi[], q: string): Compra
     const agrupadores = `${c.viaje?.codigo ?? ""} ${c.viaje?.nombre ?? ""} ${embarquesDeCompra(c)
       .map((e) => e.codigo)
       .join(" ")}`;
-    return norm(`${c.numero} ${c.proveedor.nombre} ${c.referencia ?? ""} ${c.nota ?? ""} ${agrupadores}`).includes(t);
+    return norm(`${c.numero} ${c.numero_oc ?? ""} ${c.proveedor.nombre} ${c.referencia ?? ""} ${c.nota ?? ""} ${agrupadores}`).includes(t);
   });
 }
 

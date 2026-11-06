@@ -7,12 +7,14 @@ import type { MarcaFila } from "@/lib/marcas/tipos-api";
 import type {
   CancelarCuerpo,
   CompraApi,
+  EditarOcCuerpo,
   EstadoCompra,
   EventoCompraApi,
   Mes,
   OrigenCompra,
   ProveedorApi,
   RecibirCuerpo,
+  RespuestaEditarOcApi,
   ReporteImportacionComprasApi,
 } from "./tipos-api";
 
@@ -41,6 +43,8 @@ export type FiltrosCompras = {
   marca_id?: string;
   mio?: boolean;
   por_confirmar?: boolean;
+  /** Ficha 08b-1b: solo compras con algún hito vencido (la API solo admite «vencido»). */
+  proximo_hito?: "vencido";
   /** Ficha 08b: un viaje concreto o `sin_viaje`. Nunca «todos» (eso es no mandarlo) y nunca se lee de la cookie: llega explícito (R22). */
   viaje_id?: string;
   /** Ficha 08b: compras con alguna entrega asignada a ese embarque. */
@@ -97,8 +101,14 @@ export const quitarIngreso = (compraId: string, recepcionId: string, revision: n
 /** Cancela la compra; con ingresos registrados cierra el saldo (§0.11). */
 export const cancelarCompra = (compraId: string, cuerpo: CancelarCuerpo) => api.post<CompraApi>(`${urlCompra(compraId)}/cancelar`, cuerpo);
 
+/**
+ * «Registrar OC» / «Cambiar OC» (`PUT …/oc`, ficha 08b-1b §2.11). `antes` es la OC que vio el formulario: si otra persona la cambió, la API
+ * responde `409 oc_cambio`. La revisión de la compra no sube.
+ */
+export const editarOc = (compraId: string, cuerpo: EditarOcCuerpo) => api.put<RespuestaEditarOcApi>(`${urlCompra(compraId)}/oc`, cuerpo);
+
 export const leerHistorial = (compraId: string) => api.get<EventoCompraApi[]>(`${urlCompra(compraId)}/historial`);
 
-/** `POST /api/compras/importar`: en `0.13.0` solo con `carga_inicial` (sin ella, `400 carga_inicial_requerida`). */
-export const importarCompras = (cuerpo: { modo: "previsualizar" | "aplicar"; carga_inicial: boolean; filas: Record<string, string>[] }) =>
+/** `POST /api/compras/importar` (`archivo_nombre` da el motivo «Importado de <archivo>» al cambio de OC, 08b-1b §3.7): en `0.13.0` solo con `carga_inicial` (sin ella, `400 carga_inicial_requerida`). */
+export const importarCompras = (cuerpo: { modo: "previsualizar" | "aplicar"; carga_inicial: boolean; filas: Record<string, string>[]; archivo_nombre?: string }) =>
   api.post<ReporteImportacionComprasApi>(URL_IMPORTAR_COMPRAS, cuerpo);

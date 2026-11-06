@@ -52,7 +52,7 @@ export function DialogoMoverPaquete({
             <option value="">Elige un embarque</option>
             {destinos.map((e) => (
               <option key={e.id} value={e.id}>
-                Embarque {e.codigo} · {mesCorto(e.periodo_llegada)} · {e.nombre}
+                Embarque {e.codigo} · {mesCorto(e.periodo_llegada)} · {e.nombre}{e.origen ? ` · ${e.origen}` : ""}
               </option>
             ))}
           </Select>

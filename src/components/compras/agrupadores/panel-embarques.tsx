@@ -31,6 +31,8 @@ export function PanelEmbarques({ ctx }: { ctx: ContextoAgrupadores }) {
     desde: parametros.desde ?? undefined,
     hasta: parametros.hasta ?? undefined,
     atrasados: parametros.atrasados || undefined,
+    reprogramados: parametros.reprogramados || undefined,
+    origen: parametros.origen.trim() || undefined,
   };
   const lista = useEmbarques(enLista && ctx.viajeActivoListo ? filtros : null);
   const detalle = useEmbarque(parametros.embarque);
@@ -57,9 +59,9 @@ export function PanelEmbarques({ ctx }: { ctx: ContextoAgrupadores }) {
     ctx.setMensaje(null);
     accion.limpiar();
     setExportando(true);
-    const r = await accion.ejecutar(() => descargarEmbarques({ embarques: visibles, viajes: ctx.viajes?.viajes ?? [], asignables }));
+    const r = await accion.ejecutar(() => descargarEmbarques({ embarques: visibles, viajes: ctx.viajes?.viajes ?? [], asignables, viajeId: viajeParaApi(ctx.viajeActivo) }));
     setExportando(false);
-    if (r.ok) ctx.setMensaje({ tono: "exito", texto: `Excel descargado: ${plural(visibles.length, "embarque", "embarques")} con sus paquetes y asignaciones.` });
+    if (r.ok) ctx.setMensaje({ tono: "exito", texto: `Excel descargado: ${plural(visibles.length, "embarque", "embarques")} con sus paquetes, asignaciones y línea de tiempo.` });
   }
 
   // ── Detalle ──
@@ -94,10 +96,10 @@ export function PanelEmbarques({ ctx }: { ctx: ContextoAgrupadores }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-3xl text-sm text-tinta-suave">
-          Qué llega junto, cuándo sale y cuándo llega al centro de distribución. La fecha de llegada alinea las entregas de cada embarque: cambiarla las mueve en bloque, con motivo.
+          Qué llega junto y en qué hito va: zarpe, arribo, ingreso al CD, inicio operativo e ingreso al stock. El ingreso al stock alinea las entregas de cada embarque: cambiarlo las mueve en bloque, con motivo y causa.
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variante="secundario" onClick={() => void exportar()} disabled={exportando || lista.cargando || visibles.length === 0} title="Descarga los embarques de la lista con sus paquetes y asignaciones en Excel">
+          <Button variante="secundario" onClick={() => void exportar()} disabled={exportando || lista.cargando || visibles.length === 0} title="Descarga los embarques de la lista con sus paquetes, asignaciones y línea de tiempo en Excel">
             {exportando ? "Preparando Excel…" : "Excel"}
           </Button>
           <Button onClick={() => setCreando(true)}>Nuevo embarque</Button>
@@ -108,7 +110,7 @@ export function PanelEmbarques({ ctx }: { ctx: ContextoAgrupadores }) {
       {accion.error && <Alert onCerrar={accion.limpiar}>{textoErrorAccion(accion.error)}</Alert>}
 
       <div className="space-y-3">
-        <FiltrosEmbarques parametros={parametros} mio={mio} onCambiar={ctx.cambiar} />
+        <FiltrosEmbarques parametros={parametros} mio={mio} onCambiar={ctx.cambiar} origenes={ctx.opciones?.origenes ?? []} />
         <p className="text-xs text-tinta-suave" aria-live="polite">
           {plural(visibles.length, "embarque", "embarques")}
           {visibles.length !== embarques.length ? ` de ${embarques.length}` : ""}
@@ -124,13 +126,14 @@ export function PanelEmbarques({ ctx }: { ctx: ContextoAgrupadores }) {
           viajes={ctx.opciones?.viajes ?? []}
           asignables={asignables}
           puertos={ctx.opciones?.puertos ?? []}
+          origenes={ctx.opciones?.origenes ?? []}
           codigosExistentes={(ctx.opciones?.embarques ?? []).map((e) => e.codigo)}
           viajeInicial={/^[0-9a-f-]{36}$/i.test(ctx.viajeActivo) ? ctx.viajeActivo : null}
           onCerrar={() => setCreando(false)}
           onRecargar={recargarTodo}
-          onGuardado={async (e) => {
+          onGuardado={async (e, _creado, aviso) => {
             setCreando(false);
-            ctx.setMensaje({ tono: "exito", texto: `Embarque ${e.codigo} creado. Agrega compras para asignarle mercadería.` });
+            ctx.setMensaje(aviso ? { tono: "alerta", texto: aviso } : { tono: "exito", texto: `Embarque ${e.codigo} creado. Agrega compras para asignarle mercadería.` });
             await recargarTodo();
             ctx.navegar({ embarque: e.id });
           }}

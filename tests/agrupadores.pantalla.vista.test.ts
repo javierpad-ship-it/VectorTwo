@@ -234,7 +234,7 @@ describe("textos", () => {
   });
 
   it("si el mes no cambia, la vista previa dice que solo cambia el embarque (R5)", () => {
-    expect(resumenPlan({ ...planCaso3(), movimientos: [], lineas: 0, compras_afectadas: 0, unidades_movidas: 0 })).toContain("El mes no cambia");
+    expect(resumenPlan({ ...planCaso3(), movimientos: [], lineas: 0, compras_afectadas: 0, unidades_movidas: 0 })).toContain("no cambian el mes");
   });
 
   it("asignar, quitar y pasar pendientes tienen su frase", () => {

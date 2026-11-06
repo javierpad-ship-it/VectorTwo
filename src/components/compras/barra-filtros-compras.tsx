@@ -10,7 +10,7 @@ import { ETIQUETA_FILTRO_ESTADO, hayFiltrosCompras, PARAMETROS_COMPRAS_VACIOS, t
 import type { OpcionId } from "./vista-flujo";
 
 /**
- * Filtros de la lista de compras (ficha 08 §4.4): estado, «Por confirmar», texto, proveedor, origen, mes de entrega (desde y hasta),
+ * Filtros de la lista de compras (ficha 08 §4.4): estado, «Por confirmar», «Con hitos vencidos», texto (código X, OC, proveedor, referencia), proveedor, origen, mes de entrega (desde y hasta),
  * género, mundo y línea (en cascada), marca y, desde la ficha 08b, embarque (el viaje lo filtra la barra del viaje activo). Todos viajan
  * al servidor salvo el texto, que se aplica en el navegador. Controlado desde fuera: el panel guarda todo en la URL.
  */
@@ -50,15 +50,18 @@ export function BarraFiltrosCompras({
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <Chips etiqueta="Estado" items={estadoItems} activo={parametros.estado ?? "todos"} onCambiar={(id) => onCambiar({ estado: id === "todos" ? null : (id as ParametrosCompras["estado"]) })} />
         <ChipsMultiples
-          etiqueta="Filtro por confirmar"
-          items={[{ id: "por_confirmar", label: "Por confirmar", title: "Compras con entregas vencidas sin confirmar" }]}
-          valor={parametros.porConfirmar ? ["por_confirmar"] : []}
-          onCambiar={(ids) => onCambiar({ porConfirmar: ids.includes("por_confirmar") })}
+          etiqueta="Filtros de seguimiento"
+          items={[
+            { id: "por_confirmar", label: "Por confirmar", title: "Compras con entregas vencidas sin confirmar" },
+            { id: "hitos_vencidos", label: "Con hitos vencidos", title: "Compras con algún hito (zarpe, arribo, ingreso…) que debía ocurrir y todavía no figura como ocurrido" },
+          ]}
+          valor={[...(parametros.porConfirmar ? ["por_confirmar"] : []), ...(parametros.hitosVencidos ? ["hitos_vencidos"] : [])]}
+          onCambiar={(ids) => onCambiar({ porConfirmar: ids.includes("por_confirmar"), hitosVencidos: ids.includes("hitos_vencidos") })}
         />
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
         <Field label="Buscar" className="col-span-2 md:col-span-1">
-          <Input value={parametros.q} onChange={(e) => onCambiar({ q: e.target.value })} placeholder="Número, proveedor o referencia" />
+          <Input value={parametros.q} onChange={(e) => onCambiar({ q: e.target.value })} placeholder="Compra, OC, referencia o proveedor" />
         </Field>
         <Field label="Proveedor">
           <Select value={parametros.proveedor ?? ""} onChange={(e) => onCambiar({ proveedor: e.target.value || null })}>

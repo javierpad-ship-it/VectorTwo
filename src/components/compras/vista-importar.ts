@@ -1,4 +1,4 @@
-import type { MotivoOmisionCompra } from "@/lib/compras/tipos-api";
+import type { AccionOcImportacion, MotivoOcImportacion, MotivoOmisionCompra } from "@/lib/compras/tipos-api";
 
 /**
  * Motivos por los que el importador de compras omite una fila (ficha 08 §4.7 y §0.13), en castellano llano. El tipo `Record` obliga a
@@ -64,3 +64,30 @@ export const ETIQUETA_MOTIVO_OMISION_COMPRA: Record<MotivoOmisionCompra, string>
   llegada_distinta_del_embarque: "La llegada cae en otro mes que el embarque",
   entregas_con_embarque: "Con embarque, la línea lleva una sola entrega",
 };
+
+/**
+ * Por qué la OC de una compra del archivo no se aplicó (columna `OC`, ficha 08b-1b §3.7). La compra y sus líneas siguen su regla: solo la
+ * OC queda fuera. El `Record` obliga a cubrir cada motivo del contrato.
+ */
+export const ETIQUETA_MOTIVO_OC: Record<MotivoOcImportacion, string> = {
+  oc_repetida: "Esa OC ya está en otra compra de este proveedor",
+  oc_distinta_en_compra: "Las filas de la compra traen OC distintas",
+  oc_no_editable: "La compra está cancelada o no es tuya: su OC no se edita desde el archivo",
+  oc_invalida: "La OC no tiene un formato válido",
+  oc_cambio: "Otra persona cambió la OC mientras importabas",
+  oc_no_aplicada: "La OC no se llegó a guardar: reimporta el archivo para completarla",
+};
+
+/** Qué pasó con la OC de una compra, antes y después de aplicar. */
+export const ETIQUETA_ACCION_OC: Record<AccionOcImportacion, { previsto: string; aplicado: string; tono: "exito" | "neutro" | "alerta" }> = {
+  registrada: { previsto: "Se registrará", aplicado: "Registrada", tono: "exito" },
+  cambiada: { previsto: "Se cambiará", aplicado: "Cambiada", tono: "exito" },
+  sin_cambio: { previsto: "Sin cambio", aplicado: "Sin cambio", tono: "neutro" },
+  omitida: { previsto: "No se aplica", aplicado: "No se aplicó", tono: "alerta" },
+};
+
+/** Cuántas OC del reporte se aplican (registradas o cambiadas), no cambian o se omiten. `aplicables` suma registradas y cambiadas. */
+export function totalesOc(filas: readonly { accion: AccionOcImportacion }[]): { registradas: number; cambiadas: number; sinCambio: number; omitidas: number; aplicables: number } {
+  const n = (a: AccionOcImportacion) => filas.filter((f) => f.accion === a).length;
+  return { registradas: n("registrada"), cambiadas: n("cambiada"), sinCambio: n("sin_cambio"), omitidas: n("omitida"), aplicables: n("registrada") + n("cambiada") };
+}

@@ -73,6 +73,26 @@ export function serieAFechaIso(serie: number): string | null {
   return `${d.getUTCFullYear()}-${dos(d.getUTCMonth() + 1)}-${dos(d.getUTCDate())}`;
 }
 
+/** ¿El formato numérico de la celda lleva hora (`h`, `hh:mm`)? Se ignoran textos entre comillas, bloques `[...]` y escapados. */
+export function esFormatoConHora(formato: string): boolean {
+  const limpio = formato.replace(/"[^"]*"/g, "").replace(/\[[^\]]*\]/g, "").replace(/\\./g, "");
+  return /h/i.test(limpio);
+}
+
+/** Serie de fecha y hora de Excel a `aaaa-mm-dd hh:mm` (hora de pared, sin zona), redondeando al minuto. */
+export function serieAFechaHoraIso(serie: number): string | null {
+  if (!Number.isFinite(serie) || serie < 1 || serie > 2_958_465) return null;
+  const minutos = Math.round(serie * 1440);
+  const fecha = serieAFechaIso(Math.floor(minutos / 1440));
+  if (fecha === null) return null;
+  const resto = minutos % 1440;
+  const dos = (n: number) => String(n).padStart(2, "0");
+  return `${fecha} ${dos(Math.floor(resto / 60))}:${dos(resto % 60)}`;
+}
+
+/** `conHora`: las celdas de fecha y hora salen como `aaaa-mm-dd hh:mm` (el importador de agrupadores, INICIO_OPERATIVO). Por defecto, solo la fecha. */
+export type OpcionesLecturaFechas = { conHora?: boolean };
+
 /**
  * Las celdas de fecha de Excel se leen como texto con el formato del libro,
  * que en SheetJS es mes primero (`3/15/19`). El importador lee las fechas con
@@ -81,14 +101,16 @@ export function serieAFechaIso(serie: number): string | null {
  * `aaaa-mm-dd`, que no admite dos lecturas. Requiere leer el libro con
  * `cellNF: true` para conservar el formato (`z`) de cada celda.
  */
-export function fechasExcelAIso(hoja: WorkSheet): void {
+export function fechasExcelAIso(hoja: WorkSheet, opciones: OpcionesLecturaFechas = {}): void {
   for (const ref of Object.keys(hoja)) {
     if (ref.startsWith("!")) continue;
     const celda = hoja[ref] as CellObject;
     if (celda.t === "d" && celda.v instanceof Date) {
       celda.w = celda.v.toISOString().slice(0, 10);
     } else if (celda.t === "n" && typeof celda.v === "number" && typeof celda.z === "string" && esFormatoFecha(celda.z)) {
-      const iso = serieAFechaIso(celda.v);
+      // Con `conHora`, una celda de fecha y hora conserva la hora (`aaaa-mm-dd hh:mm`); sin ella, o con hora 00:00, solo la fecha.
+      const conHora = opciones.conHora === true && esFormatoConHora(celda.z) && celda.v % 1 !== 0 ? serieAFechaHoraIso(celda.v) : null;
+      const iso = conHora && !conHora.endsWith(" 00:00") ? conHora : serieAFechaIso(celda.v);
       if (iso) celda.w = iso;
     }
   }
@@ -104,8 +126,8 @@ export function fechasExcelAIso(hoja: WorkSheet): void {
  * - Todo se devuelve como texto (`raw: false`), igual que un CSV.
  * - Las celdas con formato de fecha salen como `aaaa-mm-dd` (ver `fechasExcelAIso`).
  */
-export function hojaATabla(utils: typeof import("xlsx").utils, hoja: WorkSheet): Pick<TablaLeida, "columnas" | "filas"> {
-  fechasExcelAIso(hoja);
+export function hojaATabla(utils: typeof import("xlsx").utils, hoja: WorkSheet, opciones: OpcionesLecturaFechas = {}): Pick<TablaLeida, "columnas" | "filas"> {
+  fechasExcelAIso(hoja, opciones);
   const matriz = utils.sheet_to_json<unknown[]>(hoja, { header: 1, raw: false, defval: "" });
   const indiceCabecera = matriz.findIndex((fila) => fila.some((c) => String(c ?? "").trim() !== ""));
   if (indiceCabecera < 0) return { columnas: [], filas: [] };
@@ -129,24 +151,24 @@ export function hojaATabla(utils: typeof import("xlsx").utils, hoja: WorkSheet):
 }
 
 /** Lee un libro ya cargado y devuelve la tabla de la hoja pedida (o la primera). */
-export function libroATabla(utils: typeof import("xlsx").utils, libro: WorkBook, hoja?: string): TablaLeida {
+export function libroATabla(utils: typeof import("xlsx").utils, libro: WorkBook, hoja?: string, opciones: OpcionesLecturaFechas = {}): TablaLeida {
   const hojas = libro.SheetNames;
   const elegida = hoja && hojas.includes(hoja) ? hoja : hojas[0];
   if (!elegida) return { columnas: [], filas: [], hojas, hoja: null };
-  return { ...hojaATabla(utils, libro.Sheets[elegida]), hojas, hoja: elegida };
+  return { ...hojaATabla(utils, libro.Sheets[elegida], opciones), hojas, hoja: elegida };
 }
 
 /**
  * Lee el archivo en el navegador. La librería de Excel se carga bajo demanda
  * para no pesar en el resto de la aplicación.
  */
-export async function leerArchivoTabular(archivo: File, hoja?: string): Promise<TablaLeida> {
+export async function leerArchivoTabular(archivo: File, hoja?: string, opciones: OpcionesLecturaFechas = {}): Promise<TablaLeida> {
   if (esExcel(archivo.name)) {
     exigirExcelLiviano(archivo);
     const XLSX = await import("xlsx");
     const datos = await archivo.arrayBuffer();
     const libro = XLSX.read(datos, OPCIONES_LECTURA_EXCEL);
-    return libroATabla(XLSX.utils, libro, hoja);
+    return libroATabla(XLSX.utils, libro, hoja, opciones);
   }
 
   return new Promise((resolver, rechazar) => {
