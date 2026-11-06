@@ -29,7 +29,7 @@ const COLUMNAS_COMPRA = "id, numero, proveedor_id, origen, estado, fecha_compra,
 const COLUMNAS_LINEA =
   "id, compra_id, tipo, genero_mundo_linea_id, equivalencia_id, marca_id, agrupacion_marca_id, tallas, unidades, unidades_recibidas, unidades_canceladas, costo_unitario, destino, tienda_id, alcance, activo, clave_importacion" as const;
 const COLUMNAS_ENTREGA = "id, linea_id, periodo, unidades, origen" as const;
-const COLUMNAS_RECEPCION = "id, linea_id, recibida_periodo, unidades, fecha_recepcion, origen" as const;
+const COLUMNAS_RECEPCION = "id, linea_id, recibida_periodo, unidades, fecha_recepcion, origen, asignacion_id" as const;
 const COLUMNAS_PERFIL = "id, nombre, email, rol, activo" as const;
 
 export type CompraLigeraDb = Pick<Tables<"compras">, "id" | "numero" | "proveedor_id" | "origen" | "estado" | "fecha_compra" | "moneda" | "cancelada_at" | "revision" | "viaje_id" | "numero_oc">;
@@ -54,7 +54,7 @@ export type LineaLigeraDb = Pick<
   | "clave_importacion"
 >;
 export type EntregaLigeraDb = Pick<Tables<"compra_linea_entregas">, "id" | "linea_id" | "periodo" | "unidades" | "origen">;
-export type RecepcionLigeraDb = Pick<Tables<"compra_linea_recepciones">, "id" | "linea_id" | "recibida_periodo" | "unidades" | "fecha_recepcion" | "origen">;
+export type RecepcionLigeraDb = Pick<Tables<"compra_linea_recepciones">, "id" | "linea_id" | "recibida_periodo" | "unidades" | "fecha_recepcion" | "origen" | "asignacion_id">;
 export type PerfilDb = Pick<Tables<"perfiles">, "id" | "nombre" | "email" | "rol" | "activo">;
 export type ProveedorLigeroDb = Pick<Tables<"proveedores">, "id" | "nombre">;
 

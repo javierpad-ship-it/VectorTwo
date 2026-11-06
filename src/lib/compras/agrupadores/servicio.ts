@@ -135,6 +135,7 @@ import {
   HITOS_CONFIRMABLES,
   TIPOS_EMBARQUE,
   type ActorAgrupador,
+  type CausaFecha,
   type EmbarqueRegistro,
   type PaqueteRegistro,
   type RecepcionEmbarque,
@@ -255,6 +256,8 @@ type Mundo = {
   lineas: LineaRegistro[];
   entregas: EntregaRegistro[];
   recepciones: RecepcionRegistro[];
+  /** Unidades de recepciones vinculadas a cada asignación (`compra_linea_recepciones.asignacion_id`); solo las asignaciones con alguna. */
+  recepciones_vinculadas: ReadonlyMap<string, number>;
   perfiles: PerfilConCorreo[];
   /** `compras.viaje_id` por compra. */
   viaje_de_compra: Record<string, string | null>;
@@ -263,6 +266,13 @@ type Mundo = {
 };
 
 const numeroONulo = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+
+/** Suma las unidades recibidas vinculadas a cada asignación; la vista previa y el plan puro las usan para `*_con_recepciones` (como la función SQL al aplicar). */
+function vinculadasPorAsignacion(recepciones: readonly { asignacion_id: string | null; unidades: number }[]): ReadonlyMap<string, number> {
+  const m = new Map<string, number>();
+  for (const r of recepciones) if (r.asignacion_id) m.set(r.asignacion_id, (m.get(r.asignacion_id) ?? 0) + r.unidades);
+  return m;
+}
 
 function alcanceDe(v: unknown): LineaRegistro["alcance"] {
   const o = esRegistro(v) ? v : {};
@@ -348,6 +358,7 @@ function armarMundo(db: MundoDb): Mundo {
     })),
     entregas: db.entregas.map((e) => ({ id: e.id, linea_id: e.linea_id, periodo: mesDe(e.periodo), unidades: e.unidades, origen: elegir(ORIGENES_ENTREGA, e.origen, "manual") })),
     recepciones: db.recepciones.map((r) => ({ id: r.id, linea_id: r.linea_id, recibida_periodo: mesDe(r.recibida_periodo), unidades: r.unidades, fecha_recepcion: r.fecha_recepcion, origen: elegir(ORIGENES_RECEPCION, r.origen, "manual") })),
+    recepciones_vinculadas: vinculadasPorAsignacion(db.recepciones),
     perfiles: db.perfiles.map((p) => ({ id: p.id, nombre: p.nombre ?? p.email, rol: normalizarRol(p.rol), activo: p.activo, email: p.email })),
     viaje_de_compra: Object.fromEntries(db.compras.map((c) => [c.id, c.viaje_id])),
     viajeDb: new Map(db.viajes.map((v) => [v.id, v])),
@@ -915,6 +926,7 @@ export async function leerHistorial(d: Db, q: HistorialQuery): Promise<Salida<{ 
       antes: e.antes,
       despues: e.despues,
       motivo: e.motivo,
+      causa: (e.causa ?? null) as CausaFecha | null,
       resumen: e.resumen,
       compras: lista(e.compras),
       usuario_nombre: e.usuario_nombre,
@@ -1175,6 +1187,7 @@ async function contextoDe(d: Db, semillas: Semillas): Promise<Salida<ContextoLei
     entregas: ix.m.entregas,
     repartos,
     recepciones: ix.m.recepciones,
+    recepciones_vinculadas: ix.m.recepciones_vinculadas,
     viaje_de_compra: ix.m.viaje_de_compra,
     repartos_por_id: new Map(versiones.data.map((v) => [v.reparto_id, v])),
     nodos: n.nodos,
@@ -1219,7 +1232,7 @@ async function ejecutar(d: Db, usuario: UsuarioAgrupadores, planificar: Planific
   if (c1.respuesta) return falla(c1.respuesta);
   const plan1 = planificar(c1.data, false);
   if (opciones.previsualizar) return plan1.ok ? listo({ tipo: "vista" as const, vista: plan1.vista }) : fallaMotivo(plan1.motivo, plan1.detalle);
-  if (plan1.ok && huellaSiCambiaMes && cambiaAlgunMes(plan1.aplicable) && !puedeReintentar(opciones.huella_plan, plan1.vista.huella_plan)) return fallaMotivo("plan_cambio");
+  if (plan1.ok && huellaSiCambiaMes && cambiaAlgunMes(plan1.aplicable, c1.data.ctx.entregas) && !puedeReintentar(opciones.huella_plan, plan1.vista.huella_plan)) return fallaMotivo("plan_cambio");
 
   let obsoleto = !plan1.ok && plan1.motivo === "compra_cambio";
   if (plan1.ok) {
@@ -1259,7 +1272,7 @@ export async function moverEntregas(
   solicitud: SolicitudMovimiento,
   opciones: OpcionesMovimiento,
 ): Promise<Salida<PlanMovimientoApi | RespuestaMovimientoApi>> {
-  const r = await ejecutar(d, usuario, (c, vigentes) => planificarMovimiento(vigentes ? conRevisionesVigentes(solicitud, c.ix) : solicitud, c.ctx), semillasDe(solicitud), opciones);
+  const r = await ejecutar(d, usuario, (c, vigentes) => planificarMovimiento(vigentes ? conRevisionesVigentes(solicitud, c.ix) : solicitud, c.ctx), semillasDe(solicitud), opciones, solicitud.operacion === "mover_a_paquete");
   if (r.respuesta) return falla(r.respuesta);
   if (r.data.tipo === "vista") return listo(r.data.vista);
 

@@ -376,7 +376,7 @@ export type CambiarFechas = z.infer<typeof cambiarFechasSchema>;
 
 /**
  * `POST /api/compras/paquetes/[id]/ingreso` (§3.1): fija el ingreso al stock propio de un paquete (`null` = hereda el del embarque).
- * `revision_embarque` es la del embarque del paquete. Motivo y causa los exige el servidor si reprograma un ingreso que ya tenía valor.
+ * `revision_embarque` es la del embarque del paquete. Fijar, cambiar o soltar el ingreso propio exige SIEMPRE motivo y causa (también la primera vez); el servidor los pide (`motivo_requerido`, `causa_requerida`).
  */
 export const ingresoPaqueteSchema = z.strictObject(
   {

@@ -128,14 +128,16 @@ export type ProveedorCuerpo = z.infer<typeof proveedorSchema>;
 
 const MENSAJE_OC = `La OC admite letras, números, guiones, barras, puntos, guiones bajos y espacios (hasta ${MAX_NUMERO_OC} caracteres) y empieza con letra o número.`;
 
+const MENSAJE_ANTES_OC = `La OC anterior no puede superar ${MAX_NUMERO_OC} caracteres.`;
+
 /**
  * `PUT /api/compras/[id]/oc`. `antes` es la OC que vio el formulario (`null` = «sin registrar»): si otra persona la cambió entre medio,
- * `409 oc_cambio`. `numero_oc = null` la quita. El motivo es opcional en el esquema (en pantalla lo pide quien reemplaza una OC que
- * ya tenía). Una OC repetida en el mismo proveedor (`409 oc_repetida`) la decide la base, no este esquema.
+ * `409 oc_cambio`. `numero_oc = null` la quita. El motivo es opcional en el esquema, pero el servicio lo exige cuando `antes` no es `null` y la OC cambia o se
+ * quita (`409 motivo_requerido`, regla mínima de seguridad; el importador no pasa por aquí). Una OC repetida en el mismo proveedor (`409 oc_repetida`) la decide la base, no este esquema.
  */
 export const editarOcSchema = z.strictObject(
   {
-    antes: z.string("`antes` debe ser texto o null.").nullable(),
+    antes: z.string("`antes` debe ser texto o null.").max(MAX_NUMERO_OC, MENSAJE_ANTES_OC).nullable(),
     numero_oc: z.string("La OC debe ser texto.").trim().regex(PATRON_NUMERO_OC, MENSAJE_OC).nullable(),
     motivo: z
       .string("El motivo debe ser texto.")

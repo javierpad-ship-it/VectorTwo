@@ -1275,3 +1275,152 @@ describe("fechas logísticas (08b-1b §3.1 a §3.3): POST …/fechas, alias /fec
     expect(llamadasRpc("agrupador_hitos_resumen").length).toBeGreaterThan(0);
   });
 });
+
+// ─── Correcciones de QA y seguridad de 08b-1b (parte backend) ───
+
+describe("08b-1b, correcciones: POST …/paquete con motivo, causa, huella y unidades; historial con causa; código del paquete; alias /fecha; recepciones vinculadas", () => {
+  const T1 = "f5000000-0000-4000-8000-000000000001";
+  const T2 = "f5000000-0000-4000-8000-000000000002";
+  const A_MAR = "f9000000-0000-4000-8000-000000000003";
+  const aPaqueteDe = (embarque: string, cuerpo: Record<string, unknown>, consulta = "") => aPaquete(enviar("POST", `/compras/embarques/${embarque}/paquete${consulta}`, cuerpo), ctx(embarque));
+  const entregasL2 = () => Object.fromEntries(tablaDe("compra_linea_entregas").filter((e) => e.linea_id === LINEA_AGR.l2).map((e) => [String(e.periodo).slice(0, 7), e.unidades]));
+  const sumaL2 = () => Object.values(entregasL2()).reduce((a, b) => Number(a) + Number(b), 0);
+  const planEnviado = () => escriturasAgr().filter((l) => l.nombre === "aplicar_movimiento_agrupador").at(-1)?.args.p_plan as Record<string, unknown> | undefined;
+
+  /** F11: el lote BETA de C-000101 (mar 600) en 270301 con dos paquetes con ingreso propio: tanda 1 el 04-abr y tanda 2 el 10-may. */
+  function conTandas() {
+    iniciarAgrupadores();
+    tablaDe("compra_entrega_asignaciones").push({ id: A_MAR, entrega_id: ENTREGA_AGR.l2Mar, embarque_id: E.e270301, paquete_id: null, unidades: 600, activo: true });
+    const comunes = { embarque_id: E.e270301, responsable_id: null, estado: "abierto", nota: null, perfil_id: PERFIL_AGR.c1, usuario_nombre: "Comprador C1", updated_by_id: null, updated_by_nombre: null, activo: true, created_at: "2026-10-02T10:00:00.000Z", updated_at: "2026-10-02T10:00:00.000Z" };
+    tablaDe("compra_paquetes").push(
+      { ...comunes, id: T1, codigo: "270301", nombre: "Al barrer · tanda 1", fecha_ingreso_estimada: "2027-04-04", periodo_ingreso: "2027-04" },
+      { ...comunes, id: T2, codigo: "270302", nombre: "Al barrer · tanda 2", fecha_ingreso_estimada: "2027-05-10", periodo_ingreso: "2027-05" },
+    );
+  }
+  const asignacionSinPaquete = () => tablaDe("compra_entrega_asignaciones").find((a) => a.embarque_id === E.e270301 && a.paquete_id === null && Number(a.unidades) > 0)!;
+
+  it("F11: una tanda a un paquete con ingreso propio en otro mes pide motivo, causa y la huella de la vista previa; con todo, abr 700 / may 300, Σ = 1 000 y repartos con la v2", async () => {
+    conTandas();
+    const cuerpo = (paquete: string, id: unknown, unidades: number) => ({ revision: revisionEmbarque(E.e270301), paquete_id: paquete, asignaciones: [{ id, unidades }], motivo: "Programar la tanda", causa: "programacion" });
+
+    // sin motivo, sin causa y sin huella: cada cosa tiene su respuesta
+    const sinMotivo = await aPaqueteDe(E.e270301, { revision: 1, paquete_id: T1, asignaciones: [{ id: A_MAR, unidades: 300 }] });
+    expect(sinMotivo.status).toBe(409);
+    expect((await leer(sinMotivo)).codigo).toBe("motivo_requerido");
+    const sinCausa = await aPaqueteDe(E.e270301, { revision: 1, paquete_id: T1, asignaciones: [{ id: A_MAR, unidades: 300 }], motivo: "Programar la tanda" });
+    expect((await leer(sinCausa)).codigo).toBe("causa_requerida");
+    const sinHuella = await aPaqueteDe(E.e270301, cuerpo(T1, A_MAR, 300));
+    expect(sinHuella.status).toBe(409);
+    expect((await leer(sinHuella)).codigo).toBe("plan_cambio");
+    expect(escriturasAgr().filter((l) => l.nombre === "aplicar_movimiento_agrupador")).toHaveLength(0);
+
+    // tanda 1: vista previa, huella equivocada y escritura
+    const prev1 = (await leer<PlanMovimientoApi>(await aPaqueteDe(E.e270301, cuerpo(T1, A_MAR, 300), "?previsualizar=1"))).data;
+    expect(prev1.huella_plan).toHaveLength(64);
+    expect((await leer(await aPaqueteDe(E.e270301, { ...cuerpo(T1, A_MAR, 300), huella_plan: "0".repeat(64) }))).codigo).toBe("plan_cambio");
+    const m1 = await aPaqueteDe(E.e270301, { ...cuerpo(T1, A_MAR, 300), huella_plan: prev1.huella_plan });
+    expect(m1.status, JSON.stringify(await m1.clone().json())).toBe(200);
+    expect(planEnviado()).toMatchObject({ operacion: "mover_a_paquete", motivo: "Programar la tanda", causa: "programacion" });
+    expect(entregasL2()).toMatchObject({ "2027-03": 300, "2027-04": 700 });
+
+    // tanda 2: lo que queda de la asignación de marzo
+    const resto = asignacionSinPaquete();
+    const c2 = cuerpo(T2, resto.id, 300);
+    const prev2 = (await leer<PlanMovimientoApi>(await aPaqueteDe(E.e270301, c2, "?previsualizar=1"))).data;
+    const m2 = await aPaqueteDe(E.e270301, { ...c2, huella_plan: prev2.huella_plan });
+    expect(m2.status, JSON.stringify(await m2.clone().json())).toBe(200);
+    expect(entregasL2()).toEqual({ "2027-04": 700, "2027-05": 300 });
+    expect(sumaL2()).toBe(1000);
+    // los repartos guardados de cada entrega suman lo de la entrega, con la versión v2 de M12
+    for (const e of tablaDe("compra_linea_entregas").filter((x) => x.linea_id === LINEA_AGR.l2)) {
+      const filas = tablaDe("compra_linea_repartos").filter((r) => r.entrega_id === e.id);
+      expect(filas.length, String(e.periodo)).toBeGreaterThan(0);
+      expect(filas.reduce((a, r) => a + Number(r.unidades), 0)).toBe(Number(e.unidades));
+      expect(new Set(filas.map((r) => r.reparto_version))).toEqual(new Set([2]));
+      expect(new Set(filas.map((r) => r.temporada))).toEqual(new Set(["invierno"]));
+    }
+    // el historial del embarque guarda la causa de cada movimiento
+    const h = (await leer<{ eventos: { accion: string; causa: string | null; motivo: string | null }[] }>(await historial(get("/x", `?embarque_id=${E.e270301}`)))).data.eventos;
+    expect(h.filter((x) => x.accion === "mover_a_paquete").map((x) => [x.causa, x.motivo])).toEqual([["programacion", "Programar la tanda"], ["programacion", "Programar la tanda"]]);
+  });
+
+  it("un movimiento que NO cambia de mes sigue sin pedir motivo, causa ni huella (con unidades parciales)", async () => {
+    conTandas();
+    // la tanda 1 sin ingreso propio: hereda mar-27, el mismo mes de la asignación
+    Object.assign(fila("compra_paquetes", T1)!, { fecha_ingreso_estimada: null, periodo_ingreso: null });
+    const r = await aPaqueteDe(E.e270301, { revision: 1, paquete_id: T1, asignaciones: [{ id: A_MAR, unidades: 250 }] });
+    expect(r.status, JSON.stringify(await r.clone().json())).toBe(200);
+    expect(entregasL2()).toMatchObject({ "2027-03": 600, "2027-04": 400 });
+    expect(tablaDe("compra_entrega_asignaciones").filter((a) => a.paquete_id === T1).reduce((n, a) => n + Number(a.unidades), 0)).toBe(250);
+    expect(planEnviado()).not.toHaveProperty("causa");
+  });
+
+  it("sacar un lote de un paquete con ingreso propio (paquete_id nulo) cambia de mes: exige motivo, causa y huella igual que meterlo", async () => {
+    conTandas();
+    const prev = (await leer<PlanMovimientoApi>(await aPaqueteDe(E.e270301, { revision: 1, paquete_id: T1, asignaciones: [{ id: A_MAR, unidades: 600 }], motivo: "Programar", causa: "programacion" }, "?previsualizar=1"))).data;
+    expect((await aPaqueteDe(E.e270301, { revision: 1, paquete_id: T1, asignaciones: [{ id: A_MAR, unidades: 600 }], motivo: "Programar", causa: "programacion", huella_plan: prev.huella_plan })).status).toBe(200);
+    expect(entregasL2()).toEqual({ "2027-04": 1000 });
+    const sacar = tablaDe("compra_entrega_asignaciones").find((a) => a.paquete_id === T1)!;
+    const sinNada = await aPaqueteDe(E.e270301, { revision: revisionEmbarque(E.e270301), paquete_id: null, asignaciones: [sacar.id] });
+    expect((await leer(sinNada)).codigo).toBe("motivo_requerido");
+  });
+
+  it("F1: el historial devuelve `causa` en cada evento (nula si no reprograma)", async () => {
+    conCaso1();
+    expect((await fechasDe(E.e261101, { revision: 1, fecha_arribo: "2026-11-10" })).status).toBe(200);
+    expect((await fechaDe(E.e261101, { revision: 2, fecha_llegada_estimada: "2026-11-28", motivo: "Ajuste menor" })).status).toBe(200);
+    const eventos = (await leer<{ eventos: { accion: string; causa?: string | null }[] }>(await historial(get("/x", `?embarque_id=${E.e261101}`)))).data.eventos;
+    const cambios = eventos.filter((x) => x.accion === "cambiar_fecha");
+    expect(cambios).toHaveLength(2);
+    expect(cambios.every((x) => "causa" in x)).toBe(true);
+    expect(cambios.map((x) => x.causa)).toEqual([null, "otro"]);
+    expect(eventos.filter((x) => x.accion !== "cambiar_fecha").every((x) => x.causa === null)).toBe(true);
+  });
+
+  it("F23: el alias /fecha manda `causa = otro` en el plan y deja el evento con esa causa; sigue pidiendo motivo (400)", async () => {
+    conCaso1();
+    expect((await fechaDe(E.e261101, { revision: 1, fecha_llegada_estimada: "2026-11-28" })).status).toBe(400);
+    const r = await fechaDe(E.e261101, { revision: 1, fecha_llegada_estimada: "2026-11-28", motivo: "Ajuste menor" });
+    expect(r.status).toBe(200);
+    expect(planEnviado()).toMatchObject({ operacion: "cambiar_fecha", causa: "otro", motivo: "Ajuste menor" });
+    expect(tablaDe("compra_agrupador_eventos").filter((x) => x.accion === "cambiar_fecha").at(-1)).toMatchObject({ causa: "otro", motivo: "Ajuste menor" });
+  });
+
+  it("F46: el paquete nuevo toma el mes del Ingreso CD, no el del ingreso al stock: CD 15-nov e ingreso 02-dic dan 2611xx, por la ruta y por el importador", async () => {
+    const e = await crearEmbarque(enviar("POST", "/compras/embarques", { nombre: "F46", tipo: "importacion", viaje_id: null, responsable_id: null, fecha_llegada_estimada: "2026-11-15", fecha_ingreso_estimada: "2026-12-02" }));
+    expect(e.status).toBe(201);
+    const nuevo = (await leer<{ embarque: EmbarqueDetalleApi }>(e)).data.embarque;
+    expect(nuevo.codigo).toMatch(/^2611/);
+    expect(nuevo.periodo_llegada).toBe("2026-12");
+    const p = await crearPaquete(enviar("POST", `/compras/embarques/${nuevo.id}/paquetes`, { revision_embarque: nuevo.revision, nombre: "Paquete F46", responsable_id: null }), ctx(nuevo.id));
+    expect(p.status).toBe(201);
+    const creado = tablaDe("compra_paquetes").find((x) => x.nombre === "Paquete F46")!;
+    expect(String(creado.codigo)).toMatch(/^2611\d\d$/);
+    // importador: embarque nuevo (CD 20-nov, ingreso 05-dic) y un paquete sin código
+    const filas = [
+      { fila: 1, tipo: "EMBARQUE", codigo: "261150", nombre: "Embarque F46 importado", fecha_llegada: "2026-11-20", fecha_ingreso_stock: "2026-12-05" },
+      { fila: 2, tipo: "PAQUETE", codigo: "", nombre: "Paquete F46 importado", embarque: "261150" },
+    ];
+    const apl = await importarAgrupadores(enviar("POST", "/compras/agrupadores/importar", { modo: "aplicar", archivo_nombre: "f46.csv", filas: filas.map((f) => ({ ...archivoAgrupadores19b()[0], ...Object.fromEntries(Object.keys(archivoAgrupadores19b()[0]).map((k) => [k, ""])), ...f })) }));
+    expect(apl.status, JSON.stringify(await apl.clone().json())).toBe(200);
+    const imp = tablaDe("compra_paquetes").find((x) => x.nombre === "Paquete F46 importado");
+    expect(String(imp?.codigo)).toMatch(/^2611\d\d$/);
+  });
+
+  it("F13: una recepción vinculada a la asignación hace que la VISTA PREVIA de /fechas ya diga `embarque_con_recepciones` (no solo el apply)", async () => {
+    conCaso1();
+    tablaDe("compra_linea_recepciones").push({ id: "e0000000-0000-4000-8000-000000000001", linea_id: LINEA_AGR.l1, recibida_periodo: "2026-11-01", unidades: 100, fecha_recepcion: "2026-11-20", origen: "manual", asignacion_id: ASIGNACION_AGR.l1NovP261101, activo: true });
+    const cuerpo = { revision: 1, fecha_ingreso_cd: "2026-12-03", motivo: "Aduana", causa: "aduana" };
+    const prev = await fechasDe(E.e261101, cuerpo, "?previsualizar=1");
+    expect(prev.status).toBe(409);
+    expect((await leer(prev)).codigo).toBe("embarque_con_recepciones");
+    const apl = await fechasDe(E.e261101, { ...cuerpo, huella_plan: "0".repeat(64) });
+    expect((await leer(apl)).codigo).toBe("embarque_con_recepciones");
+    // un cambio que no mueve el mes del embarque con recepciones vinculadas sí se puede
+    expect((await fechasDe(E.e261101, { revision: 1, fecha_arribo: "2026-11-10" }, "?previsualizar=1")).status).toBe(200);
+    // y mover esa asignación de mes con /paquete: `asignacion_con_recepciones`
+    Object.assign(fila("compra_paquetes", PAQUETE_AGR.p261102)!, { fecha_ingreso_estimada: "2026-12-05", periodo_ingreso: "2026-12" });
+    const mover = await aPaqueteDe(E.e261101, { revision: 1, paquete_id: PAQUETE_AGR.p261102, asignaciones: [ASIGNACION_AGR.l1NovP261101], motivo: "Programar", causa: "programacion" }, "?previsualizar=1");
+    expect((await leer(mover)).codigo).toBe("asignacion_con_recepciones");
+  });
+});

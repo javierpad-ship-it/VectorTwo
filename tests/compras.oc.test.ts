@@ -129,7 +129,7 @@ describe("PUT /api/compras/[id]/oc: registrar, cambiar y quitar (F27)", () => {
 
   it("quitar la OC (null) deja el evento «OC: … → —» y la respuesta trae numero_oc nulo", async () => {
     await put(C12, { antes: null, numero_oc: OC });
-    const r = await put(C12, { antes: OC, numero_oc: null });
+    const r = await put(C12, { antes: OC, numero_oc: null, motivo: "Se anuló la orden" });
     expect(r.status).toBe(200);
     expect((await leer<RespuestaEditarOcApi>(r)).data.compra.numero_oc).toBeNull();
     expect(ocDe(C12)).toBeNull();
@@ -143,6 +143,54 @@ describe("PUT /api/compras/[id]/oc: registrar, cambiar y quitar (F27)", () => {
     expect(eventosOc(C12)[0].usuario_nombre).toBe("Comprador Dos");
     escenario.usuario = { rol: "admin" as never, perfil: PERFILES.planner };
     expect((await put(C09, { antes: null, numero_oc: "9900" })).status).toBe(200);
+  });
+});
+
+describe("PUT /api/compras/[id]/oc: regla mínima del servidor (seguridad F2 y F3)", () => {
+  it("F2: reemplazar o quitar una OC que ya tenía, sin motivo, es 409 motivo_requerido para los tres roles, y no llega a la base", async () => {
+    await put(C12, { antes: null, numero_oc: OC });
+    const roles = [
+      { rol: "comprador", perfil: PERFILES.comprador2 },
+      { rol: "planner", perfil: PERFILES.planner },
+      { rol: "admin", perfil: PERFILES.planner },
+    ] as const;
+    for (const quien of roles) {
+      escenario.usuario = { rol: quien.rol as never, perfil: quien.perfil };
+      const llamadas = llamadasOc().length;
+      for (const cuerpo of [{ antes: OC, numero_oc: "4500012300" }, { antes: OC, numero_oc: null }]) {
+        const r = await put(C12, cuerpo);
+        expect(r.status, quien.rol).toBe(409);
+        expect(await leer(r)).toMatchObject({ codigo: "motivo_requerido", error: "Escribe el motivo para cambiar o quitar la OC que ya tenía esta compra." });
+      }
+      expect(llamadasOc()).toHaveLength(llamadas);
+    }
+    expect((await put(C12, { antes: OC, numero_oc: "4500012300", motivo: "   " })).status).toBe(400);
+    expect(ocDe(C12)).toBe(OC);
+    expect(eventosOc(C12)).toHaveLength(1);
+  });
+
+  it("F2: no pide motivo para registrar donde no había OC (antes nulo o vacío) ni para el reintento con la misma OC (409 sin_cambios)", async () => {
+    expect((await put(C12, { antes: "  ", numero_oc: OC })).status).toBe(200);
+    const igual = await put(C12, { antes: OC, numero_oc: ` ${OC} ` });
+    expect(igual.status).toBe(409);
+    expect((await leer(igual)).codigo).toBe("sin_cambios");
+  });
+
+  it("F2: con motivo, reemplazar y quitar funcionan y el motivo queda en el evento", async () => {
+    await put(C12, { antes: null, numero_oc: OC });
+    expect((await put(C12, { antes: OC, numero_oc: "4500012300", motivo: "Error de tipeo" })).status).toBe(200);
+    expect(eventosOc(C12)[1]).toMatchObject({ motivo: "Error de tipeo" });
+    expect((await put(C12, { antes: "4500012300", numero_oc: null, motivo: "Se anuló" })).status).toBe(200);
+    expect(ocDe(C12)).toBeNull();
+  });
+
+  it("F3: `antes` más largo que una OC válida (40) es 400 y no escribe", async () => {
+    const r = await put(C12, { antes: "9".repeat(41), numero_oc: OC });
+    expect(r.status).toBe(400);
+    expect((await leer(r)).error).toMatch(/OC anterior no puede superar 40/);
+    expect(llamadasOc()).toHaveLength(0);
+    expect((await put(C12, { antes: null, numero_oc: OC })).status).toBe(200);
+    expect((await put(C12, { antes: OC, numero_oc: null, motivo: "x", extra: 1 })).status).toBe(400);
   });
 });
 

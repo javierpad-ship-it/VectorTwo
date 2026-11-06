@@ -22,6 +22,17 @@ export function argsEditarOc(a: { compra_id: string; antes: string | null; numer
   return { p_compra: a.compra_id, p_antes: normalizarOc(a.antes), p_numero_oc: normalizarOc(a.numero_oc), p_motivo: normalizarOc(a.motivo ?? null), p_actor: a.actor };
 }
 
+/**
+ * Regla mínima del servidor (seguridad F2): reemplazar o quitar una OC que la compra ya tenía exige motivo. Registrar una OC donde no había
+ * (`antes` nulo) y reintentar la misma (sin cambios) no lo piden. Sin restringir por rol (decisión 121). Compara valores ya normalizados.
+ */
+export function exigeMotivoOc(a: { antes: string | null; numero_oc: string | null; motivo?: string | null }): boolean {
+  const antes = normalizarOc(a.antes);
+  return antes !== null && normalizarOc(a.numero_oc) !== antes && normalizarOc(a.motivo ?? null) === null;
+}
+
+export const ERROR_MOTIVO_OC: ErrorDeOc = { status: 409, codigo: "motivo_requerido", mensaje: "Escribe el motivo para cambiar o quitar la OC que ya tenía esta compra." };
+
 const esMotivoOc = (m: unknown): m is MotivoFuncionOc => typeof m === "string" && (MOTIVOS_FUNCION_OC as readonly string[]).includes(m);
 
 /** Lo que devolvió la función; una forma que no se entiende es `null` (el servicio responde 500 genérico). */

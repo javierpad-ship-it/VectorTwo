@@ -307,10 +307,10 @@ describe("F22: el PATCH nunca cambia ni vacía fechas ni horas (`guardar_embarqu
 });
 
 describe("el plan «viejo» (alias de /fecha) se comporta como en 08b-1", () => {
-  it("planCambiarFecha: motivo siempre, sin clave `causa` ni `paquetes` y solo `fecha_llegada_estimada` en el embarque (la función lo reconoce como plan viejo)", () => {
+  it("planCambiarFecha: motivo siempre, `causa` fija `otro`, sin `paquetes` y solo `fecha_llegada_estimada` en el embarque", () => {
     const c = ctxF();
     const r = ok(planCambiarFecha({ embarque_id: EMBARQUE_F.e261101, revision: 1, fecha_llegada_estimada: "2026-12-03", motivo: "Retraso" }, c));
-    expect(r.aplicable).not.toHaveProperty("causa");
+    expect(r.aplicable.causa).toBe("otro");
     expect(r.aplicable).not.toHaveProperty("paquetes");
     expect(Object.keys(r.aplicable.embarques[0]).sort()).toEqual(["fecha_llegada_estimada", "id", "revision"]);
     expect(r.aplicable.motivo).toBe("Retraso");

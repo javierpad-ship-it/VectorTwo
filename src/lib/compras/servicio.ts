@@ -47,7 +47,7 @@ import type { AgrupadorImportacionCompraApi, ViajeResumenApi } from "./agrupador
 import type { MotivoOmisionCompraAgrupador } from "./agrupadores/tipos";
 import type { ImportarComprasConAgrupadores } from "./agrupadores/esquemas";
 import type { Cancelar, ComprasQuery, EditarOc, ImportarCompras, Recibir } from "./esquemas";
-import { argsEditarOc, avisosDeOc, errorDeOc, interpretarResultadoOc, normalizarOc } from "./oc";
+import { argsEditarOc, avisosDeOc, ERROR_MOTIVO_OC, errorDeOc, exigeMotivoOc, interpretarResultadoOc, normalizarOc } from "./oc";
 import { historial as ordenarHistorial } from "./eventos";
 import { embarquesDeEntregas, indexarLineaTiempo, tiempoDeCompra, type IndiceLineaTiempo } from "./linea-tiempo";
 import { leerResumenHitos } from "./agrupadores/consultas";
@@ -763,9 +763,12 @@ export async function cancelarCompra(d: Db, usuario: UsuarioCompras, id: string,
  * `PUT /api/compras/[id]/oc` (`editar_oc_compra`): registra, cambia o quita la OC de UNA compra no cancelada. `antes` (lo que vio el
  * formulario) y `numero_oc` viajan ya normalizados (`btrim`, vacío = `null`) como los compara la función. No sube `revision`: no se pide.
  * La función decide `no_encontrado` (404), `no_editable`, `sin_cambios`, `oc_cambio`, `oc_repetida` (409) y `oc_invalida` (400); esas
- * respuestas no escriben nada. Con éxito, el aviso `oc_de_otro_proveedor` (si lo hay) no impide guardar.
+ * respuestas no escriben nada. Con éxito, el aviso `oc_de_otro_proveedor` (si lo hay) no impide guardar. Antes de llamar a la función, `409
+ * motivo_requerido` si `antes` tenía valor y la OC cambia o se quita sin motivo (`exigeMotivoOc`; no depende del rol). El importador
+ * (`aplicarOcs`) llama a la función directo, con su motivo «Importado de …».
  */
 export async function editarOcCompra(d: Db, usuario: UsuarioCompras, id: string, cuerpo: EditarOc): Promise<Salida<RespuestaEditarOcApi>> {
+  if (exigeMotivoOc(cuerpo)) return respuestaDeError(ERROR_MOTIVO_OC);
   const args = argsEditarOc({ compra_id: id, antes: cuerpo.antes, numero_oc: cuerpo.numero_oc, motivo: cuerpo.motivo ?? null, actor: actorDe(usuario) });
   const rpc = await rpcEditarOcCompra(d, args);
   if (rpc.error) return fallaDb(rpc.error, "compras: editar la OC");

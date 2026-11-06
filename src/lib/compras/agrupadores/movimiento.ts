@@ -806,8 +806,8 @@ export function planCambiarFechas(entrada: EntradaCambiarFechas, ctx: ContextoMo
 
 /**
  * `cambiar_fecha` «viejo» de 08b-1 (`POST …/fecha`): solo la llegada al CD (= Ingreso CD) y el motivo. Es `planCambiarFechas` con solo
- * `fecha_ingreso_cd`, sin causa ni hito, y su plan NO lleva la clave `causa` (la función lo reconoce como plan viejo y pide motivo, no
- * causa). Se conserva por una versión (alias de `/fecha`; 08b-1b §3.2).
+ * `fecha_ingreso_cd` y sin hito, con `causa = 'otro'` fija (F23: el evento queda como el de `/fechas` con esa causa; el motivo sigue siendo
+ * obligatorio y no se pide causa a quien llama). Se conserva por una versión (alias de `/fecha`; 08b-1b §3.2).
  */
 export function planCambiarFecha(entrada: EntradaCambiarFecha, ctx: ContextoMovimiento): ResultadoPlanMovimiento {
   return construirCambioFechas({ embarque_id: entrada.embarque_id, revision: entrada.revision, fecha_ingreso_cd: entrada.fecha_llegada_estimada, motivo: entrada.motivo }, ctx, true);
@@ -999,7 +999,8 @@ function construirCambioFechas(
     operacion: "cambiar_fecha",
     accion: "cambiar_fecha",
     motivo: sinTexto(entrada.motivo) ? null : (entrada.motivo as string).trim(),
-    ...(legado || entrada.causa === undefined ? {} : { causa: entrada.causa }),
+    // El alias `/fecha` (legado) equivale a `/fechas` con `causa = 'otro'` (F23).
+    ...(legado ? { causa: "otro" as const } : entrada.causa === undefined ? {} : { causa: entrada.causa }),
     embarques: [e],
     destinoPeriodo: cambiaCd || cambiaIngreso ? eFinal.periodo_llegada : null,
     movimientos,
@@ -1029,9 +1030,15 @@ const NOMBRE_HITO: Record<CambioFechaApi["hito"], string> = {
 
 /**
  * El plan mueve entregas de mes. La `huella_plan` de la vista previa la exige el servidor SOLO si es cierto (08b-1b §2.10, MEDIO 7): si
- * ningún mes cambia (Zarpe, Arribo, Inicio operativo, confirmar un hito) se aplica sin vista previa.
+ * ningún mes cambia (Zarpe, Arribo, Inicio operativo, confirmar un hito) se aplica sin vista previa. Con `entregas` compara el mes de cada
+ * movimiento con el de su entrega (lo que necesita `mover_a_paquete`, cuyos movimientos incluyen los que no cambian de mes).
  */
-export const cambiaAlgunMes = (plan: Pick<PlanAplicable, "movimientos">): boolean => plan.movimientos.length > 0;
+export function cambiaAlgunMes(plan: Pick<PlanAplicable, "movimientos">, entregas?: readonly Pick<EntregaRegistro, "id" | "periodo">[]): boolean {
+  if (entregas === undefined) return plan.movimientos.length > 0;
+  // `mover_a_paquete` también lista los movimientos que solo cambian de paquete dentro del mismo mes: esos no cuentan.
+  const periodoDe = new Map(entregas.map((e) => [e.id, e.periodo]));
+  return plan.movimientos.some((m) => periodoDe.get(m.entrega_id) !== m.destino.periodo);
+}
 
 /**
  * `mover_paquete` (§3.5): el paquete pasa a otro embarque; solo sin recepciones vinculadas (R7). Conserva su ingreso propio (08b-1b §2.5);

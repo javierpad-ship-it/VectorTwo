@@ -141,7 +141,7 @@ const asignable = (id: unknown) => {
   return p !== undefined && p.activo === true && (p.rol === "comprador" || p.rol === "admin");
 };
 
-function evento(f: { viaje_id?: unknown; embarque_id?: unknown; paquete_id?: unknown; accion: string; antes?: unknown; despues?: unknown; motivo?: unknown; resumen?: string; compras?: unknown }, actor: { perfil_id: string | null; nombre: string }) {
+function evento(f: { viaje_id?: unknown; embarque_id?: unknown; paquete_id?: unknown; accion: string; antes?: unknown; despues?: unknown; motivo?: unknown; causa?: unknown; resumen?: string; compras?: unknown }, actor: { perfil_id: string | null; nombre: string }) {
   tabla("compra_agrupador_eventos").push({
     id: nuevoId(),
     viaje_id: f.viaje_id ?? null,
@@ -151,6 +151,7 @@ function evento(f: { viaje_id?: unknown; embarque_id?: unknown; paquete_id?: unk
     antes: f.antes ?? null,
     despues: f.despues ?? null,
     motivo: f.motivo ?? null,
+    causa: f.causa ?? null,
     resumen: f.resumen ?? null,
     compras: f.compras ?? [],
     perfil_id: actor.perfil_id,
@@ -265,7 +266,7 @@ function guardarPaquete(p: Fila, revisionEmbarque: number, actor: { perfil_id: s
   let fila = paq;
   if (!fila) {
     if (p.responsable_id && !asignable(p.responsable_id)) return no("responsable_no_asignable");
-    const codigo = codigoNuevo("compra_paquetes", String(p.codigo ?? ""), String(emb.periodo_llegada));
+    const codigo = codigoNuevo("compra_paquetes", String(p.codigo ?? ""), String(emb.fecha_llegada_estimada));
     if (typeof codigo !== "string") return no(codigo.motivo);
     fila = { id: nuevoId(), embarque_id: emb.id, codigo, nombre: p.nombre, responsable_id: p.responsable_id ?? null, estado: "abierto", nota: p.nota ?? null, perfil_id: actor.perfil_id, usuario_nombre: actor.nombre, updated_by_id: actor.perfil_id, updated_by_nombre: actor.nombre, activo: true, created_at: sello(), updated_at: sello() };
     tabla("compra_paquetes").push(fila);
@@ -462,7 +463,7 @@ function aplicarMovimiento(plan: PlanAplicable, actor: { perfil_id: string | nul
   const embarquesNuevos = plan.embarques.map((e) => {
     const fila = get("compra_embarques", e.id)!;
     fila.revision = (fila.revision as number) + 1;
-    evento({ embarque_id: e.id, viaje_id: fila.viaje_id, accion: plan.accion, motivo: plan.motivo, resumen: plan.resumen, compras: comprasNuevas.map((c) => ({ compra_id: c.id, revision_nueva: c.revision })) }, actor);
+    evento({ embarque_id: e.id, viaje_id: fila.viaje_id, accion: plan.accion, motivo: plan.motivo, causa: plan.causa ?? null, resumen: plan.resumen, compras: comprasNuevas.map((c) => ({ compra_id: c.id, revision_nueva: c.revision })) }, actor);
     return { id: e.id, revision: fila.revision as number };
   });
   return ok({ embarques: embarquesNuevos, compras: comprasNuevas });
@@ -518,7 +519,7 @@ function importarLote(lote: LoteFalso, actor: { perfil_id: string | null; nombre
   for (const p of ordenar(lote.paquetes)) {
     const emb = copia.e.find((x) => x.id === p.embarque_id || (p.embarque_codigo !== null && String(x.codigo).toUpperCase() === p.embarque_codigo.toUpperCase()));
     if (!emb) return fallo("no_encontrado", "paquete", p.fila);
-    const c = codigoDe(copia.p, p.codigo, String(emb.periodo_llegada));
+    const c = codigoDe(copia.p, p.codigo, String(emb.fecha_llegada_estimada));
     if (typeof c !== "string") return fallo(c.motivo, "paquete", p.fila);
     const fila: Fila = { id: nuevoId(), embarque_id: emb.id, codigo: c, nombre: p.nombre, responsable_id: p.responsable_id, estado: "abierto", nota: p.nota, perfil_id: actor.perfil_id, usuario_nombre: actor.nombre, updated_by_id: null, updated_by_nombre: null, activo: true, created_at: sello(), updated_at: sello() };
     copia.p.push(fila);

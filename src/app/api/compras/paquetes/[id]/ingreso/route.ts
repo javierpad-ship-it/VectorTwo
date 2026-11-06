@@ -10,7 +10,7 @@ import { ingresoDePaquete, usuarioDe } from "@/lib/compras/agrupadores/servicio"
  * `POST /api/compras/paquetes/[id]/ingreso` (`requireUser`): fija, cambia o suelta (`fecha_ingreso_stock = null`: hereda el del embarque) el
  * ingreso al stock propio de un paquete. `revision_embarque` es la del embarque del paquete. Si el mes cambia, mueve las entregas de sus
  * asignaciones activas (y reparte de nuevo los lotes si cambia la temporada): pide `huella_plan` de la vista previa (`409 plan_cambio`);
- * `motivo` y `causa` solo si reprograma un ingreso que ya tenía valor. Un ingreso anterior a la llegada del embarque se sube a ella y el
+ * `motivo` y `causa` SIEMPRE (fijar, cambiar o soltar el ingreso propio de un paquete cuenta como reprogramar, también la primera vez: `409 motivo_requerido`, `409 causa_requerida`). Un ingreso anterior a la llegada del embarque se sube a ella y el
  * aviso `ingreso_paquete_ajustado` lo dice. Respuesta como `/fechas`: `RespuestaMovimientoApi`, o `PlanFechasApi` con `?previsualizar=1`.
  * `409`: `agrupador_cambio` (también si el paquete ya no es del embarque), `no_editable` (paquete cancelado), `embarque_no_editable`,
  * `asignacion_con_recepciones`, `sin_cambios`, `motivo_requerido`, `causa_requerida`, `reparto_sin_vector`, `compra_cambio`, `conflicto_reintentar`.
