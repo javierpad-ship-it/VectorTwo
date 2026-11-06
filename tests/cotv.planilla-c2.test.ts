@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { filaImportacionCompraConAgrupadoresSchema } from "@/lib/compras/agrupadores/esquemas";
+import { MAX_NOTA_LINEA } from "@/lib/compras/tipos";
+import { detectarMapeo } from "@/components/importador/mapeo";
+import { CAMPOS_COMPRAS } from "@/components/compras/importar-compras";
 import { previsualizarImportacionCompras } from "@/lib/compras/importar";
 import { agruparItemsCotv, COLUMNAS_PLANILLA_C2, diaEnLima, ENCABEZADOS_GRUPOS, LLEGADA_INICIAL_COTV, MAX_NOTA_PLANILLA, referenciaCotv, type FilaPlanillaC2, type ItemCotv } from "../scripts/cotv/planilla-c2";
 import { PROVEEDOR } from "./compras.fixture";
@@ -179,9 +182,31 @@ describe("F42: el ensayo contra el importador real de compras (0 `cabecera_incon
     expect(r.reporte.compras_a_crear.map((c) => c.fecha_compra)).toEqual(["2026-07-08", "2026-07-06", "2026-07-06"]);
   });
 
+  it("la NOTA de la planilla llega íntegra a la línea (el importador guarda la nota por línea y la corta a 200: la planilla ya viene cortada con aviso)", () => {
+    const larga = agruparItemsCotv([item({ item_id: "a", created_at: "2026-07-06T15:00:00Z", nota: "n".repeat(600) })]);
+    expect(larga.filas[0].NOTA).toHaveLength(MAX_NOTA_LINEA);
+    const r = importar(larga.filas);
+    expect(r.reporte.omitidas).toEqual([]);
+    expect(r.compras[0].lineas[0].linea.nota).toBe(larga.filas[0].NOTA);
+    const corta = agruparItemsCotv([item({ item_id: "b", created_at: "2026-07-06T15:00:00Z", nota: "OC 1234" })]);
+    expect(importar(corta.filas).compras[0].lineas[0].linea.nota).toBe("Registrada en COTV por C1 · OC 1234");
+  });
+
   it("si Javier deja fechas distintas dentro de una misma referencia, lo ve en la previsualización: esa fila sale `cabecera_inconsistente`", () => {
     const mal = filas.map((f) => (f.ITEM_COTV === "i-x-2" ? { ...f, FECHA_COMPRA: "2026-07-20" } : f));
     expect(importar(mal).reporte.omitidas.map((o) => o.motivo)).toEqual(["cabecera_inconsistente"]);
+  });
+});
+
+describe("F42: la pantalla del importador reconoce las columnas de la planilla (ensayo C0 con datos reales: todas se mapean solas)", () => {
+  it("las 25 columnas del importador se detectan por su encabezado; DIA_REGISTRO e ITEM_COTV quedan sin mapear y no se confunden con ninguna", () => {
+    const mapeo = detectarMapeo([...COLUMNAS_PLANILLA_C2], CAMPOS_COMPRAS) as Record<string, string>;
+    const sinMapear = CAMPOS_COMPRAS.filter((c) => mapeo[c.campo] === "").map((c) => c.campo);
+    expect(sinMapear).toEqual([]);
+    const usadas = Object.values(mapeo);
+    expect(usadas).not.toContain("DIA_REGISTRO");
+    expect(usadas).not.toContain("ITEM_COTV");
+    expect(new Set(usadas).size).toBe(CAMPOS_COMPRAS.length);
   });
 });
 
@@ -212,7 +237,9 @@ describe("agruparItemsCotv: casos borde", () => {
     expect(r.avisos).toEqual([{ aviso: "genero_desconocido", referencia: referenciaCotv(V, ID_X), item: "c", detalle: expect.stringContaining("XX") }]);
   });
 
-  it("la nota se corta a 500 con aviso; las notas repetidas y los compradores repetidos no se repiten", () => {
+  it("la nota se corta al tope de la nota de UNA LÍNEA (200) con aviso; las notas repetidas y los compradores repetidos no se repiten", () => {
+    expect(MAX_NOTA_PLANILLA).toBe(MAX_NOTA_LINEA);
+    expect(MAX_NOTA_PLANILLA).toBe(200);
     const largo = "n".repeat(600);
     const r = agruparItemsCotv([item({ item_id: "a", created_at: "2026-07-06T15:00:00Z", nota: largo }), item({ item_id: "b", created_at: "2026-07-06T15:01:00Z", nota: largo })]);
     expect(r.filas[0].NOTA).toHaveLength(MAX_NOTA_PLANILLA);

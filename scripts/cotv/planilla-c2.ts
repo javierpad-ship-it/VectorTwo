@@ -15,12 +15,15 @@
  *    decidir dónde partir un grupo y para enlazar después descripción, modelo y fotos con su línea.
  *  - `LLEGADA = 2026-12` (un MES, como siempre en el importador) y `EMBARQUE`, `PAQUETE` y `OC` vacías: las compras entran en diciembre sin
  *    embarque; Javier las reparte por proveedor con «Asignar» y completa la OC después.
- *  - `NOTA`: una sola por grupo, igual en todas sus filas («Registrada en COTV por …» más las notas distintas de las cabeceras, ≤ 500).
+ *  - `NOTA`: una sola por grupo, igual en todas sus filas («Registrada en COTV por …» más las notas distintas de las cabeceras). El importador
+ *    guarda la nota en CADA LÍNEA (`compra_lineas.nota`, tope `MAX_NOTA_LINEA` = 200: `importar.ts` la corta con `slice` sin avisar y la nota de la
+ *    cabecera de la compra va nula), así que el tope de la planilla es el de la línea, no el de 500 de la cabecera: lo que se corta aquí se avisa.
  *  - Hoja `GRUPOS`: un grupo por fila con su primer y último día de registro y la marca «varios días» (los candidatos a partir). Hoja `LEEME`:
  *    cómo partir un grupo (cambiar la `REFERENCIA` de la segunda OC y poner una sola `FECHA_COMPRA` en cada parte).
  *
  * Se prueba en `tests/cotv.planilla-c2.test.ts` (F42) con datos sintéticos.
  */
+import { MAX_NOTA_LINEA } from "../../src/lib/compras/tipos";
 import type { Hoja } from "../../src/lib/proyeccion/excel";
 
 /** Un ítem de COTV (`purchase_items` con lo que le corresponde de su cabecera y de su necesidad), ya con el proveedor y el viaje de Vector2. */
@@ -55,8 +58,8 @@ export type ItemCotv = {
 
 /** Mes de llegada que se pone a todo (Javier: «inicialmente ponle a todo llegada en diciembre»). Es un mes, no un día. */
 export const LLEGADA_INICIAL_COTV = "2026-12";
-/** Tope de la `NOTA` de una compra en el importador. */
-export const MAX_NOTA_PLANILLA = 500;
+/** Tope de la `NOTA` en el importador: la nota se guarda por línea (`MAX_NOTA_LINEA`) y el importador la corta en silencio; aquí se corta avisando. */
+export const MAX_NOTA_PLANILLA = MAX_NOTA_LINEA;
 /** Moneda del FOB de COTV (decisión 102). */
 export const MONEDA_COTV = "USD";
 
@@ -151,7 +154,7 @@ export const referenciaCotv = (codigoViaje: string, supplierId: string): string 
 const comparar = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const porOrdenDeRegistro = (a: ItemCotv, b: ItemCotv) => comparar(a.created_at, b.created_at) || comparar(a.item_id, b.item_id);
 
-/** `NOTA` de un grupo: «Registrada en COTV por {compradores distintos}» y las notas distintas, separadas por « · », cortada a 500. */
+/** `NOTA` de un grupo: «Registrada en COTV por {compradores distintos}» y las notas distintas, separadas por « · », cortada al tope de la nota de una línea (200). */
 function notaDelGrupo(items: readonly ItemCotv[]): { nota: string; cortada: boolean } {
   const distintos = (valores: (string | null)[]) => {
     const vistos = new Set<string>();
@@ -200,7 +203,7 @@ export function agruparItemsCotv(items: readonly ItemCotv[]): ResultadoPlanillaC
     const dias = g.map((i) => diaEnLima(i.created_at));
     const fechaCompra = dias.reduce((m, d) => (d < m ? d : m), dias[0]);
     const { nota, cortada } = notaDelGrupo(g);
-    if (cortada) avisos.push({ aviso: "nota_cortada", referencia, detalle: `La nota del grupo supera ${MAX_NOTA_PLANILLA} caracteres y se cortó.` });
+    if (cortada) avisos.push({ aviso: "nota_cortada", referencia, detalle: `La nota del grupo supera ${MAX_NOTA_PLANILLA} caracteres (el tope de la nota de una línea) y se cortó.` });
     const ultimoDia = dias.reduce((m, d) => (d > m ? d : m), dias[0]);
 
     g.forEach((it, i) => {
