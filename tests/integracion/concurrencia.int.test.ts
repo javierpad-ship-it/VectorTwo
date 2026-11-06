@@ -579,6 +579,15 @@ describe.skipIf(!HAY_BASE)("concurrencia (Postgres real, dos conexiones)", () =>
         args: async () => [planQuitarEntrega(esc, await embarquesConRevision(S, [embarque]), await comprasDelPlan(S, [embarque])), act],
       },
       {
+        nombre: "aplicar_movimiento_agrupador (cambiar_fecha: Arribo, 0038)", fn: "aplicar_movimiento_agrupador", tipos: TIPOS_C, probes: [E],
+        args: async () => [plan("cambiar_fecha", [{ ...(await embarquesConRevision(S, [embarque]))[0], fecha_puerto_estimada: "2026-11-10" }], [], [], [], { causa: "naviera", paquetes: [] }), act],
+      },
+      {
+        nombre: "editar_oc_compra (0038: la compra con FOR NO KEY UPDATE, no es clave)", fn: "editar_oc_compra", tipos: ["uuid", "text", "text", "text", "jsonb"],
+        probes: [{ tabla: "compras", id: compra.compra, esperado: "no_key_update" }],
+        args: async () => [compra.compra, null, "OC-87", null, act],
+      },
+      {
         nombre: "importar_agrupadores (viaje_id y embarque_id existentes)", fn: "importar_agrupadores", tipos: TIPOS_C, probes: [V, E],
         args: async () => [
           {
@@ -666,6 +675,247 @@ describe.skipIf(!HAY_BASE)("concurrencia (Postgres real, dos conexiones)", () =>
     } finally {
       for (const x of extras) await x.end().catch(() => undefined);
     }
+  });
+
+  /**
+   * 08b-1b (migracion 0038): fechas logisticas, ingreso por paquete, `mover_a_paquete` por unidades y numero de OC. Casos (a) a (g) de la
+   * ficha 08b-fechas-logisticas.md (seccion Concurrencia). Ninguno debe dar 40P01. Los que dependen de TypeScript (las rutas) quedan para
+   * las pruebas de backend: aqui se llama a las funciones de la base con planes armados a mano, como los otros casos de este archivo.
+   */
+  const TIPOS_OC = ["uuid", "text", "text", "text", "jsonb"];
+
+  /** Plan de `cambiar_fecha` de la 0038 sobre un embarque: `cambios` son las claves del embarque que cambian (clave presente = valor nuevo). */
+  function planFechas(
+    embarque: string,
+    revision: number,
+    cambios: Record<string, unknown>,
+    o: { compras?: unknown[]; movimientos?: unknown[]; entregas?: unknown[]; paquetes?: unknown[]; causa?: string | null } = {}
+  ): Json {
+    return plan("cambiar_fecha", [{ id: embarque, revision, ...cambios }], o.compras ?? [], o.movimientos ?? [], o.entregas ?? [], {
+      causa: o.causa === undefined ? "naviera" : o.causa,
+      paquetes: o.paquetes ?? [],
+    });
+  }
+
+  async function numeroCompra(compra: string): Promise<string> {
+    return escalar<string>(S, "select numero from public.compras where id = $1", [compra]);
+  }
+
+  it("(a) cambiar_fecha que cambia el mes (embarque y compra) contra asignar_viaje_compras sobre la misma compra, con el embarque dentro de un viaje: SIN interbloqueo; gana el cambio de fechas y el segundo recibe compra_cambio", async () => {
+    const P = await abrir();
+    try {
+      const esc = await escenarioViajeEmbarque(91);
+      const { b, viaje, embarque, compra } = esc;
+      const revE = await revisionEmbarque(S, embarque);
+      const revCompra = await revisionCompra(S, compra.compra);
+      const planFecha = planFechas(embarque, revE, { fecha_llegada_estimada: "2026-12-03" }, {
+        causa: "aduana",
+        compras: await comprasDelPlan(S, [embarque]),
+        movimientos: [{ asignacion_id: esc.asignacion, entrega_id: compra.entrega, linea_id: compra.linea, compra_id: compra.compra, unidades: 100, destino: { periodo: "2026-12", embarque_id: embarque, paquete_id: null } }],
+        entregas: [
+          { linea_id: compra.linea, periodo: "2026-11", unidades: 0 },
+          { linea_id: compra.linea, periodo: "2026-12", unidades: 100 },
+        ],
+      });
+      const pidA = await pidDe(A);
+      const pidB = await pidDe(B);
+      await P.query("begin");
+      await P.query("select 1 from public.compra_entrega_asignaciones where id = $1 for update", [esc.asignacion]);
+      const pA = rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planFecha, actor(b.comprador1, "C1")], TIPOS_C);
+      await esperarBloqueo(M, pidA);
+      const pB = rpcEnTransaccion(B, "asignar_viaje_compras", [viaje, [{ id: compra.compra, revision: revCompra }], actor(b.comprador2, "C2")], T_VIAJE_COMPRAS);
+      await esperarBloqueo(M, pidB);
+      await P.query("rollback");
+      const [rA, rB]: ResultadoRpc[] = await Promise.all([pA, pB]);
+      expect(rA.error, `A: ${JSON.stringify(rA)}`).toBeNull();
+      expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+      expect(rA.data?.ok, JSON.stringify(rA)).toBe(true);
+      expect(rB.data).toEqual({ ok: false, motivo: "compra_cambio" });
+      expect(await revisionCompra(S, compra.compra)).toBe(revCompra + 1);
+      expect(await escalar<string>(S, "select to_char(periodo_llegada, 'YYYY-MM') from public.compra_embarques where id = $1", [embarque])).toBe("2026-12");
+      expect(await escalar<string | null>(S, "select viaje_id from public.compras where id = $1", [compra.compra])).toBeNull();
+      expect(await escalar<string>(S, "select count(*) from public.agrupadores_desalineados()")).toBe("0");
+    } finally {
+      await P.query("rollback").catch(() => undefined);
+      await P.end().catch(() => undefined);
+    }
+  });
+
+  it("(b) cambiar_fecha (sostiene el embarque y al final pide el KEY SHARE del viaje) contra guardar_embarque del mismo embarque (sostiene el viaje y espera el embarque): SIN interbloqueo; gana el cambio de fechas y el segundo recibe agrupador_cambio sin escribir", async () => {
+    const esc = await escenarioViajeEmbarque(92);
+    const { b, viaje, embarque } = esc;
+    const rev = await revisionEmbarque(S, embarque);
+    const P = await abrirCompuerta("compra_agrupador_eventos");
+    try {
+      const pidA = await pidDe(A);
+      const pidB = await pidDe(B);
+      const pA = rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planFechas(embarque, rev, { fecha_llegada_estimada: "2026-11-20" }), actor(b.comprador1, "C1")], TIPOS_C);
+      await esperarBloqueo(M, pidA);
+      const pB = rpcEnTransaccion(
+        B,
+        "guardar_embarque",
+        [{ id: embarque, nombre: "Embarque renombrado", tipo: "importacion", viaje_id: viaje }, rev, actor(b.comprador2, "C2")],
+        T_GUARDAR
+      );
+      await esperarBloqueo(M, pidB);
+      await cerrarCompuerta(P);
+      const [rA, rB] = await Promise.all([pA, pB]);
+      expect(rA.error, `A: ${JSON.stringify(rA)}`).toBeNull();
+      expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+      expect(rA.data?.ok, JSON.stringify(rA)).toBe(true);
+      expect(rB.data).toEqual({ ok: false, motivo: "agrupador_cambio" });
+      expect(await revisionEmbarque(S, embarque)).toBe(rev + 1);
+      expect(await escalar<string>(S, "select nombre from public.compra_embarques where id = $1", [embarque])).toBe("Embarque ns92");
+      expect(await escalar<string>(S, "select to_char(fecha_llegada_estimada, 'YYYY-MM-DD') from public.compra_embarques where id = $1", [embarque])).toBe("2026-11-20");
+    } finally {
+      await cerrarCompuerta(P);
+    }
+  });
+
+  it("(c) ingreso de un paquete (cambiar_fecha con paquetes) contra guardar_paquete sobre el mismo embarque: SIN interbloqueo; gana el ingreso y guardar_paquete recibe agrupador_cambio sin crear el paquete", async () => {
+    const esc = await escenarioViajeEmbarque(93);
+    const { b, embarque, paquete } = esc;
+    const rev = await revisionEmbarque(S, embarque);
+    const P = await abrirCompuerta("compra_agrupador_eventos");
+    try {
+      const pidA = await pidDe(A);
+      const pidB = await pidDe(B);
+      const pA = rpcEnTransaccion(
+        A,
+        "aplicar_movimiento_agrupador",
+        [planFechas(embarque, rev, {}, { causa: "programacion", paquetes: [{ id: paquete, embarque_id: embarque, fecha_ingreso_estimada: "2026-11-25", ajustado: false }] }), actor(b.comprador1, "C1")],
+        TIPOS_C
+      );
+      await esperarBloqueo(M, pidA);
+      const pB = rpcEnTransaccion(B, "guardar_paquete", [{ embarque_id: embarque, nombre: "Paquete nuevo ns93" }, rev, actor(b.comprador2, "C2")], T_GUARDAR);
+      await esperarBloqueo(M, pidB);
+      await cerrarCompuerta(P);
+      const [rA, rB] = await Promise.all([pA, pB]);
+      expect(rA.error, `A: ${JSON.stringify(rA)}`).toBeNull();
+      expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+      expect(rA.data?.ok, JSON.stringify(rA)).toBe(true);
+      expect(rB.data).toEqual({ ok: false, motivo: "agrupador_cambio" });
+      expect(await escalar<string>(S, "select to_char(fecha_ingreso_estimada, 'YYYY-MM-DD') from public.compra_paquetes where id = $1", [paquete])).toBe("2026-11-25");
+      expect(await contar(S, "compra_paquetes", "embarque_id = $1", [embarque])).toBe(1);
+    } finally {
+      await cerrarCompuerta(P);
+    }
+  });
+
+  it("(d) mover_a_paquete por unidades contra «Agregar compras» (asignar a otro embarque) sobre la misma compra: B espera la compra de A y recibe compra_cambio; sin interbloqueo y sin escribir lo de B", async () => {
+    const esc = await escenarioViajeEmbarque(94);
+    const { b, embarque, paquete } = esc;
+    const { c2, otro, asig2 } = await sembrar(async () => {
+      const c2 = await sembrarCompra(S, b, { n: 2, referencia: "LK-94-2", estado: "confirmada", perfil: b.comprador1, unidades: 300 });
+      return { c2, otro: await sembrarEmbarque(S, b, "Otro embarque ns94"), asig2: await asignarEntrega(S, c2.entrega, embarque, 200) };
+    });
+    const pidB = await pidDe(B);
+    const revC2 = await revisionCompra(S, c2.compra);
+    const planMover = plan(
+      "mover_a_paquete",
+      await embarquesConRevision(S, [embarque]),
+      await comprasDelPlan(S, [embarque]),
+      [{ asignacion_id: asig2, entrega_id: c2.entrega, linea_id: c2.linea, compra_id: c2.compra, unidades: 100, destino: { periodo: "2026-11", embarque_id: embarque, paquete_id: paquete } }],
+      [{ linea_id: c2.linea, periodo: "2026-11", unidades: 300 }]
+    );
+    const rA = await rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planMover, actor(b.comprador1, "C1")], TIPOS_C, false);
+    expect(rA.data?.ok, JSON.stringify(rA)).toBe(true);
+    const planAgregar = plan(
+      "asignar",
+      await embarquesConRevision(S, [otro]),
+      [{ id: c2.compra, revision: revC2 }],
+      [movimientoAsignar(c2, otro, 100)],
+      [{ linea_id: c2.linea, periodo: "2026-11", unidades: 300 }]
+    );
+    const pB = rpcEnTransaccion(B, "aplicar_movimiento_agrupador", [planAgregar, actor(b.comprador2, "C2")], TIPOS_C);
+    await esperarBloqueo(M, pidB);
+    await A.query("commit");
+    const rB = await pB;
+    expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+    expect(rB.data).toEqual({ ok: false, motivo: "compra_cambio" });
+    expect(await revisionCompra(S, c2.compra)).toBe(revC2 + 1);
+    expect(await escalar<string>(S, "select coalesce(sum(unidades), 0) from public.compra_entrega_asignaciones where entrega_id = $1 and paquete_id = $2", [c2.entrega, paquete])).toBe("100");
+    expect(await contar(S, "compra_entrega_asignaciones", "entrega_id = $1 and embarque_id = $2", [c2.entrega, otro])).toBe(0);
+    expect(await escalar<string>(S, "select count(*) from public.agrupadores_desalineados()")).toBe("0");
+  });
+
+  it("(e) editar_oc_compra contra aplicar_movimiento_agrupador sobre la misma compra, en los dos ordenes: los dos terminan y el movimiento NO recibe compra_cambio (la OC no sube la revision)", async () => {
+    const esc = await escenarioViajeEmbarque(95);
+    const { b, embarque, compra } = esc;
+    const act = actor(b.comprador1, "C1");
+    const pidB = await pidDe(B);
+    const rev0 = await revisionCompra(S, compra.compra);
+    // Ronda 1: A pone la OC y B quita la entrega con un plan armado ANTES (revision rev0): B espera la compra y, al confirmar A, se aplica.
+    const planQuitar = planQuitarEntrega(esc, await embarquesConRevision(S, [embarque]), await comprasDelPlan(S, [embarque]));
+    const rA = await rpcEnTransaccion(A, "editar_oc_compra", [compra.compra, null, "OC-95-1", null, act], TIPOS_OC, false);
+    expect(rA.data).toMatchObject({ ok: true, numero_oc: "OC-95-1" });
+    const pB = rpcEnTransaccion(B, "aplicar_movimiento_agrupador", [planQuitar, act], TIPOS_C);
+    await esperarBloqueo(M, pidB);
+    await A.query("commit");
+    const rB = await pB;
+    expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+    expect(rB.data?.ok, `el movimiento no debe recibir compra_cambio: ${JSON.stringify(rB)}`).toBe(true);
+    expect(await revisionCompra(S, compra.compra)).toBe(rev0 + 1);
+    expect(await escalar<string>(S, "select numero_oc from public.compras where id = $1", [compra.compra])).toBe("OC-95-1");
+    // Ronda 2: A asigna de nuevo (sostiene la compra) y B cambia la OC: B espera, al confirmar A se aplica (la OC no depende de la revision).
+    const planAsignar = plan(
+      "asignar",
+      await embarquesConRevision(S, [embarque]),
+      await comprasDelPlan(S, [embarque], [compra.compra]),
+      [movimientoAsignar(compra, embarque, 100)],
+      [{ linea_id: compra.linea, periodo: "2026-11", unidades: 100 }]
+    );
+    const rA2 = await rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planAsignar, act], TIPOS_C, false);
+    expect(rA2.data?.ok, JSON.stringify(rA2)).toBe(true);
+    const pB2 = rpcEnTransaccion(B, "editar_oc_compra", [compra.compra, "OC-95-1", "OC-95-2", "cambio de numero", actor(b.comprador2, "C2")], TIPOS_OC);
+    await esperarBloqueo(M, pidB);
+    await A.query("commit");
+    const rB2 = await pB2;
+    expect(rB2.error, `B2: ${JSON.stringify(rB2)}`).toBeNull();
+    expect(rB2.data).toMatchObject({ ok: true, numero_oc: "OC-95-2" });
+    expect(await revisionCompra(S, compra.compra)).toBe(rev0 + 2);
+    expect(await contar(S, "compra_eventos", "compra_id = $1 and accion = 'editar_oc'", [compra.compra])).toBe(2);
+  });
+
+  it("(f) dos editar_oc_compra a la vez con la misma OC sobre dos compras del mismo proveedor: la segunda espera al indice unico y, al confirmar la primera, recibe oc_repetida con el numero de la compra que ya la tiene", async () => {
+    const esc = await escenarioViajeEmbarque(96);
+    const { b, compra } = esc;
+    const c2 = await sembrar(() => sembrarCompra(S, b, { n: 2, referencia: "LK-96-2", estado: "confirmada", perfil: b.comprador1 }));
+    const pidB = await pidDe(B);
+    const rA = await rpcEnTransaccion(A, "editar_oc_compra", [compra.compra, null, "4500096096", null, actor(b.comprador1, "C1")], TIPOS_OC, false);
+    expect(rA.data).toMatchObject({ ok: true, numero_oc: "4500096096" });
+    const pB = rpcEnTransaccion(B, "editar_oc_compra", [c2.compra, null, "4500096096", null, actor(b.comprador2, "C2")], TIPOS_OC);
+    await esperarBloqueo(M, pidB);
+    await A.query("commit");
+    const rB = await pB;
+    expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+    expect(rB.data).toEqual({ ok: false, motivo: "oc_repetida", compra: await numeroCompra(compra.compra) });
+    expect(await escalar<string | null>(S, "select numero_oc from public.compras where id = $1", [c2.compra])).toBeNull();
+    expect(await contar(S, "compra_eventos", "compra_id = $1 and accion = 'editar_oc'", [c2.compra])).toBe(0);
+    expect(await contar(S, "compras", "upper(numero_oc) = '4500096096'")).toBe(1);
+  });
+
+  it("(g) ingreso de un paquete (cambiar_fecha con paquetes) contra mover_paquete del mismo paquete: el que llega segundo recibe agrupador_cambio y nunca queda un ingreso escrito en el embarque equivocado", async () => {
+    const esc = await escenarioViajeEmbarque(97);
+    const { b, viaje, embarque, paquete } = esc;
+    const destino = await sembrar(() => sembrarEmbarque(S, b, "Embarque destino ns97", "2026-11-18", { viaje_id: viaje }));
+    const pidB = await pidDe(B);
+    const revE = await revisionEmbarque(S, embarque);
+    const planMoverPaquete = plan("mover_paquete", await embarquesConRevision(S, [embarque, destino]), [], [], [], {
+      paquete_a_mover: { paquete_id: paquete, embarque_destino_id: destino },
+    });
+    const rA = await rpcEnTransaccion(A, "aplicar_movimiento_agrupador", [planMoverPaquete, actor(b.comprador1, "C1")], TIPOS_C, false);
+    expect(rA.data?.ok, JSON.stringify(rA)).toBe(true);
+    const planIngreso = planFechas(embarque, revE, {}, { causa: "programacion", paquetes: [{ id: paquete, embarque_id: embarque, fecha_ingreso_estimada: "2026-11-25", ajustado: false }] });
+    const pB = rpcEnTransaccion(B, "aplicar_movimiento_agrupador", [planIngreso, actor(b.comprador2, "C2")], TIPOS_C);
+    await esperarBloqueo(M, pidB);
+    await A.query("commit");
+    const rB = await pB;
+    expect(rB.error, `B: ${JSON.stringify(rB)}`).toBeNull();
+    expect(rB.data).toEqual({ ok: false, motivo: "agrupador_cambio" });
+    expect(await escalar<string | null>(S, "select fecha_ingreso_estimada::text from public.compra_paquetes where id = $1", [paquete])).toBeNull();
+    expect(await escalar<string>(S, "select embarque_id from public.compra_paquetes where id = $1", [paquete])).toBe(destino);
+    expect(await escalar<string>(S, "select count(*) from public.agrupadores_desalineados()")).toBe("0");
   });
 
   it("publicar_carga_venta_stock: dos publicaciones simultaneas de la misma carga se serializan: la segunda recibe no_en_curso y queda UNA publicada", async () => {

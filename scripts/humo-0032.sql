@@ -492,21 +492,21 @@ insert into r (caso, ok) values
 
 insert into res values
   ('e1_ed', pg_temp.r_ge(jsonb_build_object('id', pg_temp.kk('E1'), 'nombre', 'Embarque noviembre (editado)', 'tipo', 'importacion', 'viaje_id', pg_temp.kk('V1'),
-      'puerto_embarque', 'Puerto Norte', 'fecha_salida_estimada', '2026-10-28'), 0, 2)),
+      'puerto_embarque', 'Puerto Norte', 'fecha_salida_estimada', '2026-10-25'), 0, 2)),
   ('e1_fecha', pg_temp.r_ge(jsonb_build_object('id', pg_temp.kk('E1'), 'nombre', 'X', 'tipo', 'importacion', 'viaje_id', pg_temp.kk('V1'), 'fecha_llegada_estimada', '2026-12-30'), 1, 2)),
-  ('e1_misma', pg_temp.r_ge(jsonb_build_object('id', pg_temp.kk('E1'), 'nombre', 'Embarque noviembre (editado)', 'tipo', 'importacion', 'viaje_id', pg_temp.kk('V1'), 'puerto_embarque', 'Puerto Norte', 'fecha_salida_estimada', '2026-10-28', 'fecha_llegada_estimada', '2026-11-20'), 1, 2)),
+  ('e1_misma', pg_temp.r_ge(jsonb_build_object('id', pg_temp.kk('E1'), 'nombre', 'Embarque noviembre (editado)', 'tipo', 'importacion', 'viaje_id', pg_temp.kk('V1'), 'puerto_embarque', 'Puerto Norte', 'fecha_salida_estimada', '2026-10-25', 'fecha_llegada_estimada', '2026-11-20'), 1, 2)),
   ('e1_vieja', pg_temp.r_ge(jsonb_build_object('id', pg_temp.kk('E1'), 'nombre', 'X', 'tipo', 'importacion', 'viaje_id', pg_temp.kk('V1')), 0, 2)),
   ('e1_sal', pg_temp.r_ge(jsonb_build_object('id', pg_temp.kk('E1'), 'nombre', 'X', 'tipo', 'importacion', 'viaje_id', pg_temp.kk('V1'), 'fecha_salida_estimada', '2026-12-31'), 2, 2)),
   ('e1_loc', pg_temp.r_ge(jsonb_build_object('id', pg_temp.kk('E1'), 'nombre', 'X', 'tipo', 'local', 'viaje_id', pg_temp.kk('V1')), 2, 2));
 insert into r (caso, ok) values
-  ('editar el embarque: cambia nombre, puerto y salida (no mueve entregas), sube la revision y deja evento editar',
+  ('editar el embarque: cambia nombre y puerto (no mueve entregas), la salida reenviada igual se conserva, sube la revision y deja evento editar (0038: el PATCH ya no escribe fechas)',
     pg_temp.good('e1_ed') and (pg_temp.rk('e1_ed') ->> 'revision')::integer = 1
-    and (select nombre = 'Embarque noviembre (editado)' and puerto_embarque = 'Puerto Norte' and fecha_salida_estimada = date '2026-10-28' and fecha_llegada_estimada = date '2026-11-20' from compra_embarques where id = pg_temp.kk('E1'))
+    and (select nombre = 'Embarque noviembre (editado)' and puerto_embarque = 'Puerto Norte' and fecha_salida_estimada = date '2026-10-25' and fecha_llegada_estimada = date '2026-11-20' from compra_embarques where id = pg_temp.kk('E1'))
     and pg_temp.naev(pg_temp.kk('E1'), 'editar') >= 1),
   ('editar con otra fecha de llegada: fecha_por_movimiento; con la misma se ignora; revision vieja: agrupador_cambio',
     pg_temp.mot('e1_fecha') = 'fecha_por_movimiento' and pg_temp.good('e1_misma') and pg_temp.mot('e1_vieja') = 'agrupador_cambio'),
-  ('editar con salida posterior a la llegada vigente: salida_despues_de_llegada; volverlo local con viaje: local_con_viaje',
-    pg_temp.mot('e1_sal') = 'salida_despues_de_llegada' and pg_temp.mot('e1_loc') = 'local_con_viaje');
+  ('editar con otra salida (aunque sea posterior a la llegada): fecha_por_movimiento (0038: las fechas no se editan por PATCH); volverlo local con viaje: local_con_viaje',
+    pg_temp.mot('e1_sal') = 'fecha_por_movimiento' and pg_temp.mot('e1_loc') = 'local_con_viaje');
 
 -- Viaje cerrado (aviso) y cancelado (bloquea). Se prueban en la sección 5; aquí solo un embarque nuevo bajo un viaje que luego se cierra.
 

@@ -274,6 +274,7 @@ export type Database = {
       };
       compra_agrupador_eventos: {
         Row: {
+          causa: string | null;
           accion: string;
           antes: Json | null;
           compras: Json;
@@ -289,6 +290,7 @@ export type Database = {
           viaje_id: string | null;
         };
         Insert: {
+          causa?: string | null;
           accion: string;
           antes?: Json | null;
           compras?: Json;
@@ -304,6 +306,7 @@ export type Database = {
           viaje_id?: string | null;
         };
         Update: {
+          causa?: string | null;
           accion?: string;
           antes?: Json | null;
           compras?: Json;
@@ -351,6 +354,12 @@ export type Database = {
       };
       compra_embarques: {
         Row: {
+          fecha_ingreso_estimada: string | null;
+          fecha_inicio_operativo_estimada: string | null;
+          fecha_puerto_estimada: string | null;
+          hito_confirmado: string | null;
+          hora_inicio_operativo: string | null;
+          origen: string | null;
           activo: boolean;
           codigo: string;
           created_at: string;
@@ -375,6 +384,12 @@ export type Database = {
           viaje_id: string | null;
         };
         Insert: {
+          fecha_ingreso_estimada?: string | null;
+          fecha_inicio_operativo_estimada?: string | null;
+          fecha_puerto_estimada?: string | null;
+          hito_confirmado?: string | null;
+          hora_inicio_operativo?: string | null;
+          origen?: string | null;
           activo?: boolean;
           codigo: string;
           created_at?: string;
@@ -399,6 +414,12 @@ export type Database = {
           viaje_id?: string | null;
         };
         Update: {
+          fecha_ingreso_estimada?: string | null;
+          fecha_inicio_operativo_estimada?: string | null;
+          fecha_puerto_estimada?: string | null;
+          hito_confirmado?: string | null;
+          hora_inicio_operativo?: string | null;
+          origen?: string | null;
           activo?: boolean;
           codigo?: string;
           created_at?: string;
@@ -940,6 +961,8 @@ export type Database = {
       };
       compra_paquetes: {
         Row: {
+          fecha_ingreso_estimada: string | null;
+          periodo_ingreso: string | null;
           activo: boolean;
           codigo: string;
           created_at: string;
@@ -956,6 +979,8 @@ export type Database = {
           usuario_nombre: string | null;
         };
         Insert: {
+          fecha_ingreso_estimada?: string | null;
+          periodo_ingreso?: never;
           activo?: boolean;
           codigo: string;
           created_at?: string;
@@ -972,6 +997,8 @@ export type Database = {
           usuario_nombre?: string | null;
         };
         Update: {
+          fecha_ingreso_estimada?: string | null;
+          periodo_ingreso?: never;
           activo?: boolean;
           codigo?: string;
           created_at?: string;
@@ -1102,6 +1129,7 @@ export type Database = {
       };
       compras: {
         Row: {
+          numero_oc: string | null;
           activo: boolean;
           cancelada_at: string | null;
           cancelada_por_id: string | null;
@@ -1131,6 +1159,7 @@ export type Database = {
           viaje_id: string | null;
         };
         Insert: {
+          numero_oc?: string | null;
           activo?: boolean;
           cancelada_at?: string | null;
           cancelada_por_id?: string | null;
@@ -1160,6 +1189,7 @@ export type Database = {
           viaje_id?: string | null;
         };
         Update: {
+          numero_oc?: string | null;
           activo?: boolean;
           cancelada_at?: string | null;
           cancelada_por_id?: string | null;
@@ -4557,6 +4587,35 @@ export type Database = {
           p_tipo: string;
         };
         Returns: string;
+      };
+      agrupador_hito_violado: {
+        Args: {
+          p_embarque: string;
+        };
+        Returns: string;
+      };
+      agrupador_hitos_resumen: {
+        Args: {
+          p_embarques: string[];
+        };
+        Returns: {
+          embarque_id: string;
+          fecha_original: string;
+          hito: string;
+          paquete_id: string;
+          reprogramaciones: number;
+          ultima_causa: string;
+        }[];
+      };
+      editar_oc_compra: {
+        Args: {
+          p_actor: Json;
+          p_antes: string | null;
+          p_compra: string;
+          p_motivo: string | null;
+          p_numero_oc: string | null;
+        };
+        Returns: Json;
       };
       agrupador_foto_embarque: {
         Args: {
