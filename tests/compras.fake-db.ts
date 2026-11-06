@@ -116,6 +116,8 @@ type Escenario = {
   sinCerrada: boolean;
   /** `true`: `stock_flujo` devuelve stock y venta de tiendas desactivadas en `excluido` (lo que hace la base tras desactivar una tienda). */
   tiendasInactivas: boolean;
+  /** Filas que devuelve `agrupador_hitos_resumen` (embarque_id, paquete_id, hito, fecha_original, reprogramaciones, ultima_causa). */
+  resumenHitos: Fila[];
 };
 
 export const escenario: Escenario = {
@@ -134,6 +136,7 @@ export const escenario: Escenario = {
   publicados: [],
   sinCerrada: false,
   tiendasInactivas: false,
+  resumenHitos: [],
 };
 
 const mesesDe = (desde: string, hasta: string): string[] => {
@@ -247,6 +250,7 @@ export function reiniciarEscenario(opciones: { sembrar?: boolean } = {}): void {
   };
   escenario.betaMixta = false;
   escenario.tiendasInactivas = false;
+  escenario.resumenHitos = [];
   escenario.asignaciones = [{ genero_id: estadoImportacionBase().nodos[0].genero_id, mundo_id: estadoImportacionBase().nodos[0].mundo_id, perfil_id: PERFIL.comprador1, activo: true }];
   escenario.fallarImportacion = null;
   escenario.claveExistente = null;
@@ -462,7 +466,8 @@ class Consulta implements PromiseLike<Resultado> {
         return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1);
       });
     }
-    r = r.slice(this.desde, this.hasta === Infinity ? undefined : this.hasta + 1);
+    // PostgREST corta en 1 000 filas por petición (`max-rows`) aunque el rango pida más: así se prueba que nada lee sin paginar.
+    r = r.slice(this.desde, this.hasta === Infinity ? undefined : Math.min(this.hasta + 1, this.desde + 1000));
     if (this.una) return { data: r[0] ? { ...r[0] } : null, error: null };
     return { data: r.map((f) => ({ ...f })), error: null };
   }
@@ -592,6 +597,70 @@ function rpcCancelar(a: Record<string, unknown>): unknown {
   if (!r.ok) return { ok: false, motivo: r.motivo };
   aplicarEnTablas(t.compra, r.modelo, r.evento as unknown as Fila, actor, [], { cancelada_at: r.modelo.cancelada_at, cancelada_por_id: actor.perfil_id, cancelada_por_nombre: actor.nombre, motivo_cancelacion: String(a.p_motivo).trim() });
   return { ok: true, compra_id: t.compra.id, revision: r.modelo.revision, estado: r.modelo.estado };
+}
+
+/**
+ * `editar_oc_compra` (0038), espejo de la función SQL y en su mismo orden: `oc_invalida` (más de 40), `no_encontrado`, `no_editable`
+ * (cancelada), `sin_cambios` (ANTES de mirar `p_antes`), `oc_cambio`, `oc_repetida` (el índice `compras_proveedor_oc_uidx`: mismo proveedor,
+ * compra no cancelada, `upper(btrim)`; con el número de la compra que ya la tiene) y, al escribir, el evento `editar_oc` con antes y después
+ * y el aviso `oc_de_otro_proveedor`. NO sube `revision`.
+ */
+function rpcEditarOc(a: Record<string, unknown>): unknown {
+  const recortar = (v: unknown) => {
+    const t = typeof v === "string" ? v.trim() : "";
+    return t === "" ? null : t;
+  };
+  const nuevo = recortar(a.p_numero_oc);
+  const antes = recortar(a.p_antes);
+  const motivo = recortar(a.p_motivo);
+  const actor = a.p_actor as Actor;
+  if (nuevo !== null && nuevo.length > 40) return { ok: false, motivo: "oc_invalida" };
+  const compra = tabla("compras").find((c) => c.id === a.p_compra);
+  if (!compra) return { ok: false, motivo: "no_encontrado" };
+  if (compra.estado === "cancelada") return { ok: false, motivo: "no_editable" };
+  const guardada = (compra.numero_oc as string | null | undefined) ?? null;
+  if (guardada === nuevo) return { ok: false, motivo: "sin_cambios" };
+  if (guardada !== antes) return { ok: false, motivo: "oc_cambio" };
+  const clave = (v: unknown) => String(v).trim().toUpperCase();
+  if (nuevo !== null) {
+    const otra = tabla("compras")
+      .filter((c) => c.id !== compra.id && c.proveedor_id === compra.proveedor_id && c.estado !== "cancelada" && c.numero_oc != null && clave(c.numero_oc) === clave(nuevo))
+      .sort((x, y) => String(x.numero).localeCompare(String(y.numero)))[0];
+    if (otra) return { ok: false, motivo: "oc_repetida", compra: otra.numero };
+  }
+  compra.numero_oc = nuevo;
+  compra.updated_by_id = actor.perfil_id;
+  compra.updated_by_nombre = actor.nombre;
+  tabla("compra_eventos").push({
+    id: nuevoId(),
+    compra_id: compra.id,
+    linea_id: null,
+    accion: "editar_oc",
+    antes: { numero_oc: guardada },
+    despues: { numero_oc: nuevo },
+    motivo,
+    resumen: `OC: ${guardada ?? "—"} → ${nuevo ?? "—"}`,
+    perfil_id: actor.perfil_id,
+    usuario_nombre: actor.nombre,
+    created_at: sello(),
+  });
+  const avisos =
+    nuevo === null
+      ? []
+      : tabla("compras")
+          .filter((c) => c.proveedor_id !== compra.proveedor_id && c.estado !== "cancelada" && c.numero_oc != null && clave(c.numero_oc) === clave(nuevo))
+          .sort((x, y) => String(x.numero).localeCompare(String(y.numero)))
+          .map((c) => ({ codigo: "oc_de_otro_proveedor", compra: c.numero, proveedor: tabla("proveedores").find((p) => p.id === c.proveedor_id)?.nombre ?? "—" }));
+  return { ok: true, numero_oc: nuevo, avisos };
+}
+
+/**
+ * `agrupador_hitos_resumen` (0038): por embarque y hito, la fecha original y las reprogramaciones. Devuelve lo que la prueba deja en
+ * `escenario.resumenHitos` (por defecto nada) para los embarques pedidos; corta en 1 000 filas como PostgREST.
+ */
+function rpcResumenHitos(a: Record<string, unknown>): unknown {
+  const ids = (a.p_embarques as string[]) ?? [];
+  return escenario.resumenHitos.filter((f) => ids.includes(String(f.embarque_id))).slice(0, 1000);
 }
 
 type PayloadLinea = {
@@ -767,6 +836,10 @@ function resolverRpc(nombre: string, args: Record<string, unknown>): Promise<Res
       return respuesta(rpcCancelar(args));
     case "importar_compra":
       return Promise.resolve(rpcImportar(args));
+    case "editar_oc_compra":
+      return respuesta(rpcEditarOc(args));
+    case "agrupador_hitos_resumen":
+      return respuesta(rpcResumenHitos(args));
     default:
       return Promise.resolve({ data: null, error: err("42883", `función desconocida: ${nombre}`) });
   }

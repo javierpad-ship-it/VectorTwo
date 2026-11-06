@@ -1,3 +1,4 @@
+import { tiempoDeCompra } from "@/lib/compras/linea-tiempo";
 import { pendientesPorEntrega, esEntregaVencida } from "@/lib/compras/pendientes";
 import type {
   CompraApi,
@@ -433,6 +434,10 @@ export function compraApiDesdeRegistros(
     },
     historial: op.historial ?? [],
     avisos,
+    numero_oc: null,
+    // Sin embarques en el escenario: cada mes con entregas es un tramo «Sin embarque» (siempre pendiente; no depende de «hoy»).
+    ...tiempoDeCompra({ fecha_compra: c.fecha_compra, entregas: lineas.flatMap((l) => l.entregas) }, { embarques: new Map(), paquetes: new Map(), porEntrega: new Map() }, "2026-10-15"),
+    ...(c.estado === "cancelada" ? { proximo_hito: null } : {}),
   };
 }
 

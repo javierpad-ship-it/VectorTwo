@@ -132,7 +132,7 @@ const nombreDe = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}
 describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritura (el comprador recibe 403)", () => {
   const m8 = CASOS.filter((c) => /^(flujo|compras)\//.test(c.ruta) && !esDeAgrupadores(c.ruta));
 
-  it("están las seis escrituras de 0.13.0; todas exigen rol salvo importar, que decide el rol dentro (requireUser + puedeImportar)", () => {
+  it("están las siete escrituras de 0.13.0 y 08b-1b; todas exigen rol salvo importar (decide el rol dentro) y la OC (requireUser: decisión 121)", () => {
     const nombre = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}`;
     expect(m8.map(nombre).sort()).toEqual(
       [
@@ -141,10 +141,25 @@ describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritur
         "POST compras/[id]/recibir",
         "POST compras/importar",
         "POST flujo/conciliacion/aceptar",
+        "PUT compras/[id]/oc",
         "PUT flujo/parametros",
       ].sort()
     );
-    expect(m8.filter((c) => !c.exigeRol).map(nombre)).toEqual(["POST compras/importar"]);
+    expect(m8.filter((c) => !c.exigeRol).map(nombre).sort()).toEqual(["POST compras/importar", "PUT compras/[id]/oc"]);
+  });
+
+  it("PUT compras/[id]/oc (decisión 121): sin sesión 401; los tres roles pasan el guard (se frenan en el cuerpo, 400) y no tocan datos", async () => {
+    const caso = CASOS.find((c) => c.ruta === "compras/[id]/oc/route.ts" && c.metodo === "PUT");
+    expect(caso).toBeDefined();
+    if (!caso) return;
+    estado.user = null;
+    expect((await llamar(caso)).status).toBe(401);
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    for (const rol of ["comprador", "planner", "admin"]) {
+      estado.rol = rol;
+      expect((await llamar(caso)).status, rol).toBe(400);
+      expect(estado.tablasTocadas).toEqual([]);
+    }
   });
 
   it("POST compras/importar: el comprador pasa el guard (el rol lo decide puedeImportar con el cuerpo), sin sesión 401, y no toca datos antes de leer el cuerpo", async () => {

@@ -293,6 +293,7 @@ export const METODOS_DE_ESCRITURA = ["POST", "PUT", "PATCH", "DELETE"] as const;
  * `requirePlanner` y no figuran aquí.
  */
 export const ESCRITURAS_ABIERTAS_A_COMPRADOR: ReadonlySet<string> = new Set([
+  "src/app/api/compras/[id]/oc/route.ts#PUT", // decisión 121 (los tres roles editan la OC de una compra no cancelada, una a una; por archivo rige la 109)
   "src/app/api/compras/agrupadores/importar/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/[id]/route.ts#PATCH", // decisión 92

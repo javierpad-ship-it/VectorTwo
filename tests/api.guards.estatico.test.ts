@@ -81,10 +81,10 @@ describe("el comprador solo escribe lo decidido (requireUser en escrituras y lec
     expect(violaciones, `Aperturas al comprador sin registrar o listas obsoletas:\n${describirViolaciones(violaciones)}\n`).toEqual([]);
   });
 
-  it("las 19 escrituras abiertas (decisiones 92 y 108) son exactamente las de compras: viajes, embarques, paquetes, agrupadores, viaje activo e importar", () => {
-    expect(ESCRITURAS_ABIERTAS_A_COMPRADOR.size).toBe(19);
+  it("las 20 escrituras abiertas (decisiones 92, 108 y 121) son exactamente las de compras: viajes, embarques, paquetes, agrupadores, viaje activo, importar y la OC", () => {
+    expect(ESCRITURAS_ABIERTAS_A_COMPRADOR.size).toBe(20);
     for (const clave of ESCRITURAS_ABIERTAS_A_COMPRADOR) {
-      expect(clave, clave).toMatch(/^src\/app\/api\/compras\/(?:agrupadores|embarques|paquetes|viajes|viaje-activo|importar)(?:\/|\/route\.ts)/);
+      expect(clave, clave).toMatch(/^src\/app\/api\/compras\/(?:agrupadores|embarques|paquetes|viajes|viaje-activo|importar|\[id\]\/oc)(?:\/|\/route\.ts)/);
       expect(clave, clave).toMatch(/#(?:POST|PUT|PATCH|DELETE)$/);
     }
   });

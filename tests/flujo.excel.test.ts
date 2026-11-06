@@ -109,9 +109,9 @@ describe("hojasCompras", () => {
   it("COMPRAS: una fila por compra con sus totales, entregas y avisos", () => {
     expect(hojas.COMPRAS).toHaveLength(1 + compras.length);
     const c12 = hojas.COMPRAS.find((f) => f[0] === "C-000012")!;
-    expect(c12.slice(0, 5)).toEqual(["C-000012", "2026-10-14", "Proveedor Norte", "comprador", "confirmada"]);
-    expect(c12[9]).toBe(500);
-    expect(c12[10]).toBe(19000);
+    expect(c12.slice(0, 6)).toEqual(["C-000012", null, "2026-10-14", "Proveedor Norte", "comprador", "confirmada"]);
+    expect(c12[10]).toBe(500);
+    expect(c12[11]).toBe(19000);
   });
 
   it("ENTREGAS: una fila por entrega con lo asignado, lo cancelado y lo pendiente", () => {

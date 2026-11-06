@@ -220,7 +220,7 @@ describe("08b-1b §2.4 bis: una sola regla del mes de una asignación (`mesDeDes
     }
   });
 
-  it("`periodo_llegada` solo lo leen los archivos que lo definen, lo muestran o lo traducen: movimiento, tipos, tipos-api, avisos, hitos, importar y servicio", () => {
+  it("`periodo_llegada` solo lo leen los archivos que lo definen, lo muestran o lo traducen: movimiento, tipos, tipos-api, avisos, hitos, importar, servicio y la línea de tiempo de compras", () => {
     const leen = compras.filter((f) => /\bperiodo_llegada\b/.test(f.texto)).map((f) => f.ruta);
     expect(leen.sort()).toEqual(
       [
@@ -231,6 +231,7 @@ describe("08b-1b §2.4 bis: una sola regla del mes de una asignación (`mesDeDes
         "src/lib/compras/agrupadores/servicio.ts",
         "src/lib/compras/agrupadores/tipos-api.ts",
         "src/lib/compras/agrupadores/tipos.ts",
+        "src/lib/compras/linea-tiempo.ts", // traduce la fila de `compra_embarques` para `lineaDeTiempo` (08b-1b §3.4)
       ].sort(),
     );
   });

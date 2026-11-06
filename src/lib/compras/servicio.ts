@@ -17,6 +17,8 @@ import { argsCancelarCompra, validarCancelacion } from "./cancelar";
 import {
   leerAgrupadoresDeCompras,
   rpcCancelarCompra,
+  rpcEditarOcCompra,
+  leerOcDeCompra,
   rpcImportarCompra,
   rpcQuitarRecepcion,
   rpcRegistrarRecepciones,
@@ -43,8 +45,12 @@ import {
 import type { AgrupadorImportacionCompraApi, ViajeResumenApi } from "./agrupadores/tipos-api";
 import type { MotivoOmisionCompraAgrupador } from "./agrupadores/tipos";
 import type { ImportarComprasConAgrupadores } from "./agrupadores/esquemas";
-import type { Cancelar, ComprasQuery, ImportarCompras, Recibir } from "./esquemas";
+import type { Cancelar, ComprasQuery, EditarOc, ImportarCompras, Recibir } from "./esquemas";
+import { argsEditarOc, avisosDeOc, errorDeOc, interpretarResultadoOc, normalizarOc } from "./oc";
 import { historial as ordenarHistorial } from "./eventos";
+import { embarquesDeEntregas, indexarLineaTiempo, tiempoDeCompra, type IndiceLineaTiempo } from "./linea-tiempo";
+import { leerResumenHitos } from "./agrupadores/consultas";
+import { tramosConHitoVencido, type ResumenHito } from "./agrupadores/hitos";
 import {
   agregarAviso,
   argsImportarCompra,
@@ -98,6 +104,7 @@ import {
   type ProveedorApi,
   type RepartoLineaApi,
   type ReporteImportacionComprasApi,
+  type RespuestaEditarOcApi,
 } from "./tipos-api";
 
 /**
@@ -242,16 +249,21 @@ type ContextoLectura = {
 };
 
 type AgrupadoresIndexados = {
+  /** Embarques, paquetes y asignaciones para la línea de tiempo y el próximo hito (08b-1b §3.4). */
+  tiempo: IndiceLineaTiempo;
   viajes: ReadonlyMap<string, ViajeResumenApi>;
   embarques: ReadonlyMap<string, string>;
   paquetes: ReadonlyMap<string, string>;
   porEntrega: ReadonlyMap<string, DatosAgrupadoresCompras["asignaciones"]>;
 };
 
+const INDICE_VACIO: IndiceLineaTiempo = { embarques: new Map(), paquetes: new Map(), porEntrega: new Map() };
+
 function indexarAgrupadores(a: DatosAgrupadoresCompras): AgrupadoresIndexados {
   const porEntrega = new Map<string, DatosAgrupadoresCompras["asignaciones"]>();
   for (const x of a.asignaciones) porEntrega.set(x.entrega_id, [...(porEntrega.get(x.entrega_id) ?? []), x]);
   return {
+    tiempo: indexarLineaTiempo(a),
     viajes: new Map(a.viajes.map((v) => [v.id, { id: v.id, codigo: v.codigo, nombre: v.nombre, estado: elegir(["abierto", "cerrado", "cancelado"] as const, v.estado, "abierto") }])),
     embarques: new Map(a.embarques.map((e) => [e.id, e.codigo])),
     paquetes: new Map(a.paquetes.map((p) => [p.id, p.codigo])),
@@ -474,6 +486,9 @@ export function armarCompraApi(p: PartesCompra, ctx: ContextoLectura): CompraApi
     ctx.combinaciones,
     ctx.catalogo.nodoGeneroMundo
   );
+  // Una compra cancelada conserva su línea de tiempo pero ya no espera nada: sin próximo hito (y fuera de «Con hitos vencidos»).
+  const tiempo = tiempoDeCompra({ fecha_compra: compra.fecha_compra, entregas: lineas.flatMap((l) => l.entregas) }, ctx.agrupadores?.tiempo ?? INDICE_VACIO, ctx.hoy);
+  const tiempoCompra = estado === "cancelada" ? { ...tiempo, proximo_hito: null } : tiempo;
   return {
     id: compra.id,
     numero: compra.numero,
@@ -500,6 +515,8 @@ export function armarCompraApi(p: PartesCompra, ctx: ContextoLectura): CompraApi
     historial: eventos ?? [],
     avisos: [...new Set(lineas.flatMap((l) => l.avisos))],
     ...(ctx.agrupadores ? { viaje: compra.viaje_id ? (ctx.agrupadores.viajes.get(compra.viaje_id) ?? null) : null } : {}),
+    numero_oc: compra.numero_oc ?? null,
+    ...tiempoCompra,
   };
 }
 
@@ -576,9 +593,11 @@ function cumpleFiltros(api: CompraApi, datos: DatosCompras, q: ComprasQuery, ctx
   if (q.embarque_id !== undefined && !api.lineas.some((l) => l.entregas.some((e) => e.asignaciones?.some((a) => a.embarque.id === q.embarque_id)))) return false;
   if (q.mio && !api.mia) return false;
   if (q.por_confirmar && !api.lineas.some((l) => l.entregas.some((e) => e.vencida))) return false;
+  // 08b-1b: `vencido` = algún hito vencido; un ingreso «por confirmar» no cuenta (§3.2).
+  if (q.proximo_hito === "vencido" && (api.estado === "cancelada" || !tramosConHitoVencido(api.linea_de_tiempo))) return false;
   if (!sinFiltros(q)) {
     const t = (q.q as string).toLocaleLowerCase("es");
-    const texto = `${api.numero} ${api.proveedor.nombre} ${api.referencia ?? ""}`.toLocaleLowerCase("es");
+    const texto = `${api.numero} ${api.numero_oc ?? ""} ${api.proveedor.nombre} ${api.referencia ?? ""}`.toLocaleLowerCase("es");
     if (!texto.includes(t)) return false;
   }
   void datos;
@@ -599,6 +618,21 @@ async function armarDeDatos(d: Db, usuario: UsuarioCompras, datos: DatosDeCompra
   const marcasLote = datos.lineas.filter((l) => l.tipo !== "especifica" && l.marca_id !== null).map((l) => l.marca_id as string);
   const ctx = await armarContexto(d, usuario, await resolverFlujo(flujo), marcasLote);
   if (ctx.respuesta) return falla(ctx.respuesta);
+  // El detalle muestra fecha original y reprogramaciones de cada hito: el resumen se pide SOLO de los embarques de esta compra, en una llamada.
+  const agr = ctx.data.agrupadores;
+  if (agr) {
+    const ids = embarquesDeEntregas(agr.tiempo, datos.entregas.map((e) => e.id));
+    if (ids.length > 0) {
+      const r = await leerResumenHitos(d, ids);
+      if (r.error) return fallaDb(r.error, "compras: leer el resumen de hitos");
+      const resumenes = new Map<string, ResumenHito[]>();
+      for (const f of r.data) {
+        const fila: ResumenHito = { hito: f.hito as ResumenHito["hito"], paquete_id: f.paquete_id, fecha_original: f.fecha_original, reprogramaciones: Number(f.reprogramaciones), ultima_causa: f.ultima_causa };
+        resumenes.set(f.embarque_id, [...(resumenes.get(f.embarque_id) ?? []), fila]);
+      }
+      ctx.data.agrupadores = { ...agr, tiempo: { ...agr.tiempo, resumenes } };
+    }
+  }
   return listo(
     armarCompraApi(
       { compra: datos.compra, proveedor: datos.proveedor, lineas: datos.lineas, entregas: agrupar(datos.entregas, (e) => e.linea_id), recepciones: agrupar(datos.recepciones, (r) => r.linea_id), repartos: agrupar(datos.repartos, (r) => r.linea_id), eventos },
@@ -718,6 +752,25 @@ export async function cancelarCompra(d: Db, usuario: UsuarioCompras, id: string,
   const r = resultadoDeRpc(await rpcCancelarCompra(d, argsCancelarCompra({ compra_id: id, revision: cuerpo.revision, motivo: cuerpo.motivo, actor: actorDe(usuario) })), "compras: cancelar la compra");
   if (r.respuesta) return falla(r.respuesta);
   return leerCompra(d, usuario, id, flujo);
+}
+
+/**
+ * `PUT /api/compras/[id]/oc` (`editar_oc_compra`): registra, cambia o quita la OC de UNA compra no cancelada. `antes` (lo que vio el
+ * formulario) y `numero_oc` viajan ya normalizados (`btrim`, vacío = `null`) como los compara la función. No sube `revision`: no se pide.
+ * La función decide `no_encontrado` (404), `no_editable`, `sin_cambios`, `oc_cambio`, `oc_repetida` (409) y `oc_invalida` (400); esas
+ * respuestas no escriben nada. Con éxito, el aviso `oc_de_otro_proveedor` (si lo hay) no impide guardar.
+ */
+export async function editarOcCompra(d: Db, usuario: UsuarioCompras, id: string, cuerpo: EditarOc): Promise<Salida<RespuestaEditarOcApi>> {
+  const args = argsEditarOc({ compra_id: id, antes: cuerpo.antes, numero_oc: cuerpo.numero_oc, motivo: cuerpo.motivo ?? null, actor: actorDe(usuario) });
+  const rpc = await rpcEditarOcCompra(d, args);
+  if (rpc.error) return fallaDb(rpc.error, "compras: editar la OC");
+  const r = interpretarResultadoOc(rpc.data);
+  if (r === null) return respuestaDeError(errorDeMotivo("desconocido"));
+  if (!r.ok) return respuestaDeError(errorDeOc(r, normalizarOc(cuerpo.numero_oc)));
+  const compra = await leerOcDeCompra(d, id);
+  if (compra.error) return fallaDb(compra.error, "compras: leer la OC guardada");
+  if (!compra.data) return noEncontrada();
+  return listo({ compra: { id: compra.data.id, numero: compra.data.numero, numero_oc: compra.data.numero_oc }, avisos: avisosDeOc(r.numero_oc, r.avisos) });
 }
 
 // ─── «Aceptar sugerencia»: la parte de compras ───

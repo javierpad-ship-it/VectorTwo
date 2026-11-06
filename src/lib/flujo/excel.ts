@@ -1,3 +1,4 @@
+import { hojaLineaDeTiempo } from "@/lib/compras/agrupadores/excel";
 import type { CompraApi } from "@/lib/compras/tipos-api";
 import type { Hoja } from "@/lib/proyeccion/excel";
 import { ETIQUETA_SENAL, senalDeCaracter, type ConciliacionApi, type FlujoApi, type FiltrosFlujo } from "./tipos-api";
@@ -229,11 +230,12 @@ const sinCancelar = (c: CompraApi) => c.estado !== "cancelada";
 /** Hoja `COMPRAS`: una fila por compra, con sus totales y quién la creó y la modificó. */
 export function hojaCompras(compras: readonly CompraApi[]): Hoja {
   const hoja: Hoja = [
-    ["NÚMERO", "FECHA", "PROVEEDOR", "ORIGEN", "ESTADO", "SALDO CERRADO", "REFERENCIA", "MONEDA", "LÍNEAS", "UNIDADES", "COSTO", "RECIBIDAS", "PRIMERA ENTREGA", "ÚLTIMA ENTREGA", "CREADA POR", "ÚLTIMO CAMBIO", "AVISOS"],
+    ["NÚMERO", "OC", "FECHA", "PROVEEDOR", "ORIGEN", "ESTADO", "SALDO CERRADO", "REFERENCIA", "MONEDA", "LÍNEAS", "UNIDADES", "COSTO", "RECIBIDAS", "PRIMERA ENTREGA", "ÚLTIMA ENTREGA", "CREADA POR", "ÚLTIMO CAMBIO", "AVISOS"],
   ];
   for (const c of compras) {
     hoja.push([
       c.numero,
+      c.numero_oc,
       c.fecha_compra,
       c.proveedor.nombre,
       c.origen,
@@ -299,7 +301,23 @@ export function hojaCosto(compras: readonly CompraApi[]): Hoja {
   return hoja;
 }
 
+/**
+ * Hoja `LINEA_DE_TIEMPO` (08b-1b §3.8): una fila por compra y tramo (embarque y paquete, más «Sin embarque»). Es la misma de la pestaña
+ * Embarques (`hojaLineaDeTiempo`); aquí se arma con las compras de la lista. Una fila por compra y tramo, sin omitir las canceladas (como `COMPRAS` y
+ * `ENTREGAS`: «Excel = pantalla»). Las fechas van como `aaaa-mm-dd` (el inicio operativo, con hora si la tiene): quien escribe el libro convierte las columnas
+ * `COLUMNAS_FECHA_LINEA_DE_TIEMPO` a fecha de Excel.
+ */
+export function hojaLineaDeTiempoCompras(compras: readonly CompraApi[]): Hoja {
+  return hojaLineaDeTiempo(compras.map((c) => ({ numero: c.numero, numero_oc: c.numero_oc, proveedor: c.proveedor.nombre, viaje_codigo: c.viaje?.codigo ?? null, linea_de_tiempo: c.linea_de_tiempo })));
+}
+
 /** Las hojas de compras. */
-export function hojasCompras(compras: readonly CompraApi[]): { COMPRAS: Hoja; ENTREGAS: Hoja; POR_PROVEEDOR: Hoja; COSTO: Hoja } {
-  return { COMPRAS: hojaCompras(compras), ENTREGAS: hojaEntregas(compras), POR_PROVEEDOR: hojaPorProveedor(compras), COSTO: hojaCosto(compras) };
+export function hojasCompras(compras: readonly CompraApi[]): { COMPRAS: Hoja; ENTREGAS: Hoja; POR_PROVEEDOR: Hoja; COSTO: Hoja; LINEA_DE_TIEMPO: Hoja } {
+  return {
+    COMPRAS: hojaCompras(compras),
+    ENTREGAS: hojaEntregas(compras),
+    POR_PROVEEDOR: hojaPorProveedor(compras),
+    COSTO: hojaCosto(compras),
+    LINEA_DE_TIEMPO: hojaLineaDeTiempoCompras(compras),
+  };
 }

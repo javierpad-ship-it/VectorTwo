@@ -50,6 +50,7 @@ const ESPERADAS: Esperada[] = [
   { ruta: "compras/[id]/cancelar/route.ts", metodo: "POST", guard: "requirePlanner" },
   { ruta: "compras/proveedores/route.ts", metodo: "GET", guard: "requireUser" },
   { ruta: "compras/importar/route.ts", metodo: "POST", guard: "requireUser" }, // el rol lo decide `puedeImportar` (carga inicial: solo planner y admin)
+  { ruta: "compras/[id]/oc/route.ts", metodo: "PUT", guard: "requireUser" }, // 08b-1b, decisión 121: los tres roles editan la OC de una compra no cancelada
 ];
 const METODOS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 const API = path.join(RAIZ, "src", "app", "api");
@@ -59,7 +60,7 @@ const esDeAgrupadores = (ruta: string) => /\/api\/compras\/(viajes|embarques|paq
 const rutasM8 = [...rutasDeApi(path.join(API, "flujo")), ...rutasDeApi(path.join(API, "compras"))].filter((r) => !esDeAgrupadores(r));
 
 describe("rutas de M8: guards de la ficha (sección 7)", () => {
-  it("son exactamente las 15 de 0.13.0 (sin DELETE de compras: se cancelan; sin POST de compras ni de proveedores hasta 0.13.1 y M9a)", () => {
+  it("son exactamente las 16 de 0.13.0 y 08b-1b (sin DELETE de compras: se cancelan; sin POST de compras ni de proveedores hasta 0.13.1 y M9a)", () => {
     const encontradas: string[] = [];
     for (const r of rutasM8) {
       const limpio = limpiar(readFileSync(r, "utf8"));
@@ -76,8 +77,8 @@ describe("rutas de M8: guards de la ficha (sección 7)", () => {
     }
   });
 
-  it("en M8 ninguna escritura usa requireUser (la lista blanca de M9a no existe todavía; salvo importar, que decide el rol con `puedeImportar`) y las rutas no usan requireAdmin", () => {
-    for (const e of ESPERADAS.filter((x) => x.metodo !== "GET" && x.ruta !== "compras/importar/route.ts")) {
+  it("en M8 ninguna escritura usa requireUser (la lista blanca de M9a no existe todavía; salvo importar, que decide el rol con `puedeImportar`, y la OC, decisión 121) y las rutas no usan requireAdmin", () => {
+    for (const e of ESPERADAS.filter((x) => x.metodo !== "GET" && x.ruta !== "compras/importar/route.ts" && x.ruta !== "compras/[id]/oc/route.ts")) {
       const limpio = limpiar(readFileSync(path.join(API, e.ruta), "utf8"));
       const cuerpo = cuerpoDeFuncion(limpio, e.metodo) ?? "";
       expect(cuerpo, `${e.ruta} ${e.metodo}`).not.toMatch(/requireUser|requireAdmin/);
@@ -194,8 +195,8 @@ describe("la API nunca escribe las tablas de compras: solo .rpc( de las funcione
     expect(ficheros).toEqual(expect.arrayContaining(["src/lib/compras/consultas.ts", "src/lib/flujo/consultas.ts"]));
   });
 
-  it("las cuatro funciones de escritura se llaman con .rpc( y SOLO desde src/lib/compras/consultas.ts", () => {
-    const funciones = ["importar_compra", "registrar_recepciones", "quitar_recepcion", "cancelar_compra"];
+  it("las cinco funciones de escritura se llaman con .rpc( y SOLO desde src/lib/compras/consultas.ts", () => {
+    const funciones = ["importar_compra", "registrar_recepciones", "quitar_recepcion", "cancelar_compra", "editar_oc_compra"];
     const llamadas = src.filter((f) => new RegExp(`\\.rpc\\(\\s*["'\`](${funciones.join("|")})["'\`]`).test(sinComentarios(f.texto))).map((f) => f.ruta);
     expect(llamadas).toEqual(["src/lib/compras/consultas.ts"]);
     const texto = sinComentarios(archivo("src/lib/compras/consultas.ts").texto);
@@ -218,12 +219,12 @@ describe("independencia compras ↔ flujo (ficha 08, §0.8)", () => {
     expect(ofensores).toEqual([]);
   });
 
-  it("src/lib/flujo/** solo importa de src/lib/compras/ pendientes.ts y los tipos*.ts", () => {
+  it("src/lib/flujo/** solo importa de src/lib/compras/ pendientes.ts, los tipos*.ts y la hoja pura LINEA_DE_TIEMPO (agrupadores/excel.ts)", () => {
     const ofensores: string[] = [];
     for (const f of libFlujo) {
       for (const o of importaciones(f.texto)) {
         if (!/^@\/lib\/compras\//.test(o) && !/^\.\.\/compras\//.test(o)) continue;
-        if (!/^@\/lib\/compras\/(pendientes|tipos|tipos-api)$/.test(o)) ofensores.push(`${f.ruta} importa ${o}`);
+        if (!/^@\/lib\/compras\/(pendientes|tipos|tipos-api|agrupadores\/excel)$/.test(o)) ofensores.push(`${f.ruta} importa ${o}`);
       }
     }
     expect(ofensores).toEqual([]);

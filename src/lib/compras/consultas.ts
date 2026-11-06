@@ -7,14 +7,15 @@ import { cargarEstadoGml, type EstadoGmlCargado } from "@/lib/marcas/gml/estado"
 import { leerAsignaciones } from "@/lib/responsables/consultas";
 import { leerTiendas } from "@/lib/tiendas/consultas";
 import type { ArgsCancelarCompra } from "./cancelar";
+import type { ArgsEditarOc } from "./oc";
 import type { PayloadImportarCompra } from "./importar";
 import type { ArgsQuitarRecepcion, ArgsRegistrarRecepciones } from "./recepciones";
 import type { ActorImportarCompra } from "./tipos";
 
 /**
  * Acceso a datos de las compras de M8 (solo servidor). ÚNICO archivo de `src/lib/compras/` que habla con Supabase (ficha 08, regla 21).
- * LEE las tablas de compras (todas, con `leerTodo` y orden estable) y las ESCRIBE solo con las cuatro funciones `rpc` de `0025`
- * (`importar_compra`, `registrar_recepciones`, `quitar_recepcion`, `cancelar_compra`): una transacción por llamada, con candado por
+ * LEE las tablas de compras (todas, con `leerTodo` y orden estable) y las ESCRIBE solo con las cinco funciones `rpc` de `0025` y `0038`
+ * (`importar_compra`, `registrar_recepciones`, `quitar_recepcion`, `cancelar_compra`, `editar_oc_compra`): una transacción por llamada, con candado por
  * `revision`, pertenencia y evento. Aquí no hay `.insert(`, `.update(`, `.upsert(` ni `.delete(` sobre ninguna tabla de compras
  * (lo vigila la prueba estática): la API nunca las escribe directamente.
  */
@@ -92,6 +93,12 @@ export async function leerDatosDeCompra(db: Db, compraId: string): Promise<Resul
   return { data: { compra: compra.data, proveedor: proveedor.data ?? null, lineas: lineas.data, entregas, repartos, recepciones }, error: null };
 }
 
+/** Lo mínimo de una compra para responder tras editar la OC (`numero` es inmutable; `numero_oc` es lo que quedó guardado). */
+export async function leerOcDeCompra(db: Db, compraId: string): Promise<Resultado<Pick<CompraDb, "id" | "numero" | "numero_oc"> | null>> {
+  const r = await db.from("compras").select("id, numero, numero_oc").eq("id", compraId).maybeSingle();
+  return { data: r.data ?? null, error: r.error };
+}
+
 /** El historial de una compra, del más antiguo al más reciente (`created_at` y, a igual instante, `id`). */
 export function leerEventosDeCompra(db: Db, compraId: string): Promise<Resultado<EventoDb[]>> {
   return leerTodo<EventoDb>((d, h) => db.from("compra_eventos").select("*").eq("compra_id", compraId).order("created_at").order("id").range(d, h));
@@ -156,8 +163,9 @@ export async function leerCatalogo(db: Db): Promise<{ data: CatalogoLeido | null
 
 export type DatosAgrupadoresCompras = {
   viajes: Pick<Tables<"compra_viajes">, "id" | "codigo" | "nombre" | "estado">[];
-  embarques: Pick<Tables<"compra_embarques">, "id" | "codigo">[];
-  paquetes: Pick<Tables<"compra_paquetes">, "id" | "codigo">[];
+  /** Filas enteras: la línea de tiempo y el próximo hito necesitan las fechas y el estado (08b-1b §3.4). */
+  embarques: Tables<"compra_embarques">[];
+  paquetes: Tables<"compra_paquetes">[];
   asignaciones: Pick<Tables<"compra_entrega_asignaciones">, "id" | "entrega_id" | "embarque_id" | "paquete_id" | "unidades">[];
 };
 
@@ -168,8 +176,8 @@ export type DatosAgrupadoresCompras = {
 export async function leerAgrupadoresDeCompras(db: Db): Promise<Resultado<DatosAgrupadoresCompras>> {
   const [viajes, embarques, paquetes, asignaciones] = await Promise.all([
     leerTodo<DatosAgrupadoresCompras["viajes"][number]>((d, h) => db.from("compra_viajes").select("id, codigo, nombre, estado").order("id").range(d, h)),
-    leerTodo<DatosAgrupadoresCompras["embarques"][number]>((d, h) => db.from("compra_embarques").select("id, codigo").order("id").range(d, h)),
-    leerTodo<DatosAgrupadoresCompras["paquetes"][number]>((d, h) => db.from("compra_paquetes").select("id, codigo").order("id").range(d, h)),
+    leerTodo<DatosAgrupadoresCompras["embarques"][number]>((d, h) => db.from("compra_embarques").select("*").order("id").range(d, h)),
+    leerTodo<DatosAgrupadoresCompras["paquetes"][number]>((d, h) => db.from("compra_paquetes").select("*").order("id").range(d, h)),
     leerTodo<DatosAgrupadoresCompras["asignaciones"][number]>((d, h) => db.from("compra_entrega_asignaciones").select("id, entrega_id, embarque_id, paquete_id, unidades").order("id").range(d, h)),
   ]);
   const fallo = viajes.error ?? embarques.error ?? paquetes.error ?? asignaciones.error;
@@ -200,4 +208,9 @@ export function rpcCancelarCompra(db: Db, a: ArgsCancelarCompra): Promise<Respue
 /** `importar_compra`: UNA compra de la carga inicial (proveedor si falta, compra, líneas, entregas, repartos, recepciones y evento). */
 export function rpcImportarCompra(db: Db, a: { p_compra: PayloadImportarCompra; p_actor: ActorImportarCompra }): Promise<RespuestaRpc> {
   return Promise.resolve(db.rpc("importar_compra", { p_compra: a.p_compra as unknown as Json, p_actor: a.p_actor }));
+}
+
+/** `editar_oc_compra` (0038): registra, cambia o quita el número de OC; no sube `revision`. */
+export function rpcEditarOcCompra(db: Db, a: ArgsEditarOc): Promise<RespuestaRpc> {
+  return Promise.resolve(db.rpc("editar_oc_compra", { ...a }));
 }

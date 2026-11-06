@@ -264,15 +264,15 @@ export type CompraApi = {
   avisos: AvisoLineaCompra[];
   /** El viaje de la compra (ficha 08b; nulo si no tiene). Siempre presente en las respuestas de la API; opcional en el tipo por los fixtures de M8. */
   viaje?: ViajeResumenApi | null;
+  /** Número de la orden de compra real (08b-1b §2.11; el «código X» es `numero`). Nulo = «OC sin registrar». */
+  numero_oc: string | null;
   /**
-   * Número de la orden de compra real (08b-1b §2.11; el «código X» es `numero`). Nulo = «OC sin registrar». Opcional en el tipo solo hasta
-   * que T3a lo llene siempre (como `viaje`); entonces se vuelve obligatorio.
+   * Línea de tiempo de la compra: un tramo por (embarque, paquete) y uno «Sin embarque» por mes con unidades sin embarque, siempre
+   * Pendiente (§3.4). En el detalle trae también fecha original y reprogramaciones; en la lista (la que alimenta el Excel) van en 0.
    */
-  numero_oc?: string | null;
-  /** Línea de tiempo de la compra, un tramo por (embarque, paquete) y uno «Sin embarque» por mes (§3.4). Solo en `GET /api/compras/[id]`. */
-  linea_de_tiempo?: TramoLineaTiempoApi[];
-  /** El hito más urgente de la compra (solo en la lista de Compras; §3.3). */
-  proximo_hito?: ProximoHitoCompraApi | null;
+  linea_de_tiempo: TramoLineaTiempoApi[];
+  /** El hito más urgente de la compra (§3.3); nulo si todos sus tramos están completos. */
+  proximo_hito: ProximoHitoCompraApi | null;
 };
 
 /** `ProximoHitoApi` más el embarque del tramo y cuántos tramos más tiene la compra («+1 tramo»). */
