@@ -178,11 +178,13 @@ describe("datos, kit de UI y errores", () => {
   it("aplicar un movimiento exige una vista previa vigente y manda la huella del plan (R19)", () => {
     const c = fuente(`${DIR_COMPONENTES}/dialogo-movimiento.tsx`);
     expect(c).toContain("llamar(cuerpo, true)");
-    expect(c).toMatch(/llamar\(\{ \.\.\.cuerpo, huella_plan: planVigente\.huella_plan \}, false\)/);
-    expect(c).toContain("disabled={accion.ocupado || planVigente === null}");
+    // «Aplicar» manda la huella de lo que se vio; sin vista previa solo vale si el diálogo la declara opcional (movimiento que no cambia de mes).
+    expect(c).toMatch(/llamar\(planVigente === null \? cuerpo : \{ \.\.\.cuerpo, huella_plan: planVigente\.huella_plan \}, false\)/);
+    expect(c).toMatch(/\(planVigente === null && !previaOpcional\)\) return/);
+    expect(c).toContain("disabled={accion.ocupado || cuerpo === null || (planVigente === null && !previaOpcional)}");
     expect(c).toMatch(/pideRelectura\(r\.error\.codigo\)/);
     // Los cuatro movimientos con vista previa pasan por el cascarón.
-    for (const f of ["dialogo-fechas", "dialogo-ingreso-paquete", "dialogo-asignar", "dialogo-quitar", "dialogo-pasar-pendientes", "dialogo-mover-paquete"]) expect(fuente(`${DIR_COMPONENTES}/${f}.tsx`), f).toContain("<DialogoMovimiento");
+    for (const f of ["dialogo-fechas", "dialogo-ingreso-paquete", "dialogo-asignar", "dialogo-quitar", "dialogo-pasar-pendientes", "dialogo-mover-paquete", "dialogo-a-paquete"]) expect(fuente(`${DIR_COMPONENTES}/${f}.tsx`), f).toContain("<DialogoMovimiento");
   });
 
   it("los formularios se deshabilitan mientras envían, no se cierran enviando y los errores de la API se muestran con Alert", () => {
@@ -193,7 +195,7 @@ describe("datos, kit de UI y errores", () => {
     const mov = fuente(`${DIR_COMPONENTES}/dialogo-movimiento.tsx`);
     expect(mov).toContain("cerrable={!accion.ocupado}");
     expect(mov).toContain("<Alert");
-    for (const f of ["modal-embarque", "modal-viaje", "modal-paquete", "dialogo-cancelar", "dialogo-compras-viaje", "dialogo-a-paquete"]) {
+    for (const f of ["modal-embarque", "modal-viaje", "modal-paquete", "dialogo-cancelar", "dialogo-compras-viaje"]) {
       const c = fuente(`${DIR_COMPONENTES}/${f}.tsx`);
       expect(c, f).toContain("textoErrorAccion(accion.error)");
       expect(c, f).toContain("accion.ejecutar");

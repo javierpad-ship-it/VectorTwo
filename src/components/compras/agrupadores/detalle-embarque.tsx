@@ -26,6 +26,7 @@ import { DialogoCancelarAgrupador } from "./dialogo-cancelar";
 import { DialogoFechas } from "./dialogo-fechas";
 import { DialogoIngresoPaquete } from "./dialogo-ingreso-paquete";
 import { DialogoMoverPaquete } from "./dialogo-mover-paquete";
+import { DialogoProgramarBarrer } from "./dialogo-programar-barrer";
 import { DialogoPasarPendientes } from "./dialogo-pasar-pendientes";
 import { DialogoQuitar } from "./dialogo-quitar";
 import { HistorialAgrupador } from "./historial";
@@ -35,6 +36,7 @@ import { ModalEmbarque } from "./modal-embarque";
 import { ModalPaquete } from "./modal-paquete";
 import { TablaAsignaciones } from "./tabla-asignaciones";
 import { textoAvisoDetalle, puedeCerrarOCancelar, textoCostoMonedas, textoFecha, textoUnidadesEmbarque } from "./vista-agrupadores";
+import { lotesAlBarrer } from "./vista-barrer";
 import { fechaCorta } from "./vista-fechas";
 import { pideRelectura, textoErrorAccion } from "./vista-errores";
 
@@ -47,6 +49,7 @@ type Dialogo =
   | { tipo: "agregar" }
   | { tipo: "quitar"; asignaciones: AsignacionApi[] }
   | { tipo: "a-paquete"; asignaciones: AsignacionApi[] }
+  | { tipo: "programar-barrer" }
   | { tipo: "pendientes"; asignaciones: AsignacionApi[] }
   | { tipo: "mover-paquete"; paquete: PaqueteApi }
   | { tipo: "cancelar-embarque" }
@@ -73,7 +76,7 @@ export function mensajeDeMovimiento(texto: string, r: RespuestaMovimientoApi): M
 /**
  * Detalle de un embarque (ficha 08b §4.2): cabecera con sus datos, avisos y acciones; los paquetes y «Sin paquete», cada uno con su tabla de
  * asignaciones (las históricas, atenuadas); la línea de tiempo con sus cinco hitos; y el historial. Acciones de los tres roles: Editar, Cambiar fechas, Fijar ingreso de un paquete, marcar en tránsito
- * o volver a planificado, Nuevo paquete, Agregar compras, Quitar del embarque, Mover a paquete y Pasar pendientes. Solo admin y planner
+ * o volver a planificado, Nuevo paquete, Agregar compras, Programar lo al barrer (si hay lotes al barrer), Quitar del embarque, Mover a paquete (con unidades) y Pasar pendientes. Solo admin y planner
  * cancelan el embarque o un paquete; los botones se ocultan por rol y la API decide. En un embarque cancelado o recibido solo queda
  * «Quitar del embarque». Recibir un embarque es de la siguiente entrega (08b-2).
  */
@@ -140,6 +143,7 @@ export function DetalleEmbarque({
     await onRecargar();
   }
 
+  const hayLotesAlBarrer = lotesAlBarrer(embarque).length > 0;
   const sinPaquete = embarque.asignaciones.filter((a) => a.paquete_id === null);
   const asignacionesDe = (p: PaqueteApi) => embarque.asignaciones.filter((a) => a.paquete_id === p.id);
   const r = embarque.responsable_efectivo;
@@ -255,6 +259,11 @@ export function DetalleEmbarque({
         {enCurso && (
           <Button variante="secundario" onClick={() => setDialogo({ tipo: "agregar" })}>
             Agregar compras
+          </Button>
+        )}
+        {enCurso && hayLotesAlBarrer && (
+          <Button variante="secundario" onClick={() => setDialogo({ tipo: "programar-barrer" })}>
+            Programar lo al barrer
           </Button>
         )}
         {enCurso && (
@@ -400,6 +409,9 @@ export function DetalleEmbarque({
         <DialogoQuitar embarque={embarque} asignaciones={dialogo.asignaciones} onCerrar={cerrar} onRecargar={onRecargar} onAplicado={movimiento(`Mercadería quitada del embarque ${embarque.codigo}: quedó sin embarque.`)} />
       )}
       {dialogo?.tipo === "a-paquete" && <DialogoAPaquete embarque={embarque} asignaciones={dialogo.asignaciones} onCerrar={cerrar} onRecargar={onRecargar} onAplicado={movimiento("Mercadería movida de paquete.")} />}
+      {dialogo?.tipo === "programar-barrer" && (
+        <DialogoProgramarBarrer embarque={embarque} onCerrar={cerrar} onRecargar={onRecargar} onAplicado={movimiento("Lo al barrer quedó programado en sus paquetes.")} />
+      )}
       {dialogo?.tipo === "pendientes" && (
         <DialogoPasarPendientes embarque={embarque} seleccionadas={dialogo.asignaciones} opciones={opciones} onCerrar={cerrar} onRecargar={onRecargar} onAplicado={movimiento("Pendientes pasados a otro embarque.")} />
       )}

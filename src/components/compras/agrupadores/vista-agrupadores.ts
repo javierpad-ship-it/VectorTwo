@@ -315,7 +315,7 @@ export function resumenPlan(plan: PlanMovimientoApi): string {
     case "mover_paquete":
       return `Mueve el paquete a otro embarque: ${u} de ${lineas} de ${compras}${deA}.`;
     case "mover_a_paquete":
-      return `Cambia de paquete ${u} de ${lineas} de ${compras}; no cambia ningún mes.`;
+      return cambian.length > 0 ? `Cambia de paquete ${u} de ${lineas} de ${compras} y las mueve${deA}.` : `Cambia de paquete ${u} de ${lineas} de ${compras}; no cambia ningún mes.`;
     default:
       return `Mueve ${u} de ${lineas} de ${compras}${deA}.`;
   }

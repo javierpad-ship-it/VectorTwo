@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/form";
 import type { AvisoOcApi, CompraApi } from "@/lib/compras/tipos-api";
 import { editarOc, useAccion } from "@/lib/compras/use-compras";
-import { CODIGOS_OC_QUE_RELEEN, textoBotonOc, textoConfirmarQuitarOc, textoConflictoOc, textoOcGuardada, validarEdicionOc } from "./vista-oc";
+import { CODIGOS_OC_QUE_RELEEN, accionDeOc, exigeMotivoEnPantalla, textoBotonOc, textoConfirmarQuitarOc, textoConflictoOc, textoErrorOc, textoOcGuardada, textoPistaMotivoOc, validarEdicionOc } from "./vista-oc";
 
 /**
  * Edición en línea del número de OC de la compra (ficha 08b-1b §2.11). El encabezado del detalle muestra «Compra C-000123 · OC 4500012345»
@@ -21,6 +21,7 @@ export function EditorOc({
   onGuardada,
   onRecargar,
   ocupadoFuera = false,
+  onLimpiarMensaje,
 }: {
   compra: Pick<CompraApi, "id" | "numero" | "numero_oc" | "estado">;
   /** Se llama tras guardar, con el texto de lo hecho y los avisos de la API (ninguno bloquea). Debe recargar la compra. */
@@ -29,6 +30,8 @@ export function EditorOc({
   onRecargar?: () => void | Promise<void>;
   /** Otra acción de la pantalla está en curso. */
   ocupadoFuera?: boolean;
+  /** Se llama al abrir el formulario y cuando llega un conflicto: la pantalla borra el mensaje de éxito anterior, que ya no vale. */
+  onLimpiarMensaje?: () => void;
 }) {
   const accion = useAccion();
   const idOc = useId();
@@ -39,8 +42,13 @@ export function EditorOc({
   const [motivo, setMotivo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [conflicto, setConflicto] = useState<string | null>(null);
+  // El servidor pidió motivo (`motivo_requerido`) aunque el formulario no lo esperaba: el campo se muestra y es obligatorio.
+  const [motivoPedido, setMotivoPedido] = useState(false);
+  const [faltaMotivo, setFaltaMotivo] = useState(false);
   const editable = compra.estado !== "cancelada";
-  const necesitaMotivo = antesVisto !== null;
+  const accionActual = accionDeOc(antesVisto, valor);
+  const necesitaMotivo = exigeMotivoEnPantalla(antesVisto) || motivoPedido;
+  const motivoObligatorio = necesitaMotivo && accionActual !== "registrar";
 
   function abrir() {
     setAntesVisto(compra.numero_oc);
@@ -48,7 +56,10 @@ export function EditorOc({
     setMotivo("");
     setError(null);
     setConflicto(null);
+    setMotivoPedido(false);
+    setFaltaMotivo(false);
     accion.limpiar();
+    onLimpiarMensaje?.();
     setEditando(true);
   }
 
@@ -61,14 +72,23 @@ export function EditorOc({
   async function guardar() {
     setError(null);
     setConflicto(null);
+    setFaltaMotivo(false);
     const v = validarEdicionOc(antesVisto, valor, motivo);
-    if (!v.ok) return setError(v.error);
+    if (!v.ok) {
+      setFaltaMotivo(motivoObligatorio && motivo.trim() === "");
+      return setError(v.error);
+    }
     if (v.accion === "quitar" && !confirm(textoConfirmarQuitarOc(compra.numero, antesVisto))) return;
     const r = await accion.ejecutar(() => editarOc(compra.id, v.cuerpo));
     if (!r.ok) {
       const codigo = r.error.codigo;
+      if (codigo === "motivo_requerido") {
+        setMotivoPedido(true);
+        setFaltaMotivo(true);
+      }
       if (codigo !== null && CODIGOS_OC_QUE_RELEEN.includes(codigo)) {
-        // Otra persona tocó la OC (o la compra se canceló): se muestra lo vigente y se pide repetir el cambio.
+        // Otra persona tocó la OC (o la compra se canceló): se muestra lo vigente y se pide repetir el cambio. El «guardado» anterior ya no vale.
+        onLimpiarMensaje?.();
         setEditando(false);
         setConflicto(textoConflictoOc(codigo, r.error.mensaje));
         accion.limpiar();
@@ -81,7 +101,8 @@ export function EditorOc({
     await onGuardada(textoOcGuardada(numero, v.accion, numero_oc), r.valor.avisos);
   }
 
-  const errorMostrado = error ?? (accion.error ? accion.error.mensaje : null);
+  const errorMostrado = error ?? (accion.error ? textoErrorOc(accion.error.codigo, accion.error.mensaje) : null);
+  const errorDeMotivo = errorMostrado !== null && faltaMotivo;
 
   return (
     <div className="min-w-0">
@@ -128,9 +149,23 @@ export function EditorOc({
           {necesitaMotivo && (
             <div>
               <label htmlFor={idMotivo} className="mb-1 block text-sm font-medium">
-                Motivo del cambio
+                {accionActual === "quitar" ? "Motivo para quitar la OC" : "Motivo del cambio"}
+                {motivoObligatorio ? " *" : ""}
               </label>
-              <Textarea id={idMotivo} rows={2} value={motivo} onChange={(e) => setMotivo(e.target.value)} disabled={accion.ocupado} placeholder="Ej. La OC original estaba mal digitada" />
+              <Textarea
+                id={idMotivo}
+                rows={2}
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+                disabled={accion.ocupado}
+                placeholder="Ej. La OC original estaba mal digitada"
+                aria-required={motivoObligatorio}
+                aria-invalid={errorDeMotivo}
+                aria-describedby={`${idMotivo}-ayuda`}
+              />
+              <p id={`${idMotivo}-ayuda`} className="mt-1 text-xs text-tinta-suave">
+                {textoPistaMotivoOc(accionActual)}
+              </p>
             </div>
           )}
           {errorMostrado && (

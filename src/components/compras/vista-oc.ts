@@ -68,3 +68,19 @@ export function textoConflictoOc(codigo: string | null, mensajeApi: string): str
       return mensajeApi;
   }
 }
+
+/** El formulario muestra el campo de motivo cuando la compra ya tenía una OC (cambiarla o quitarla lo exige el servidor: `409 motivo_requerido`). */
+export const exigeMotivoEnPantalla = (antesVisto: string | null): boolean => normalizarOc(antesVisto) !== null;
+
+/** La pista bajo el campo de motivo según lo que está haciendo la persona. */
+export function textoPistaMotivoOc(accion: AccionOc | null): string {
+  if (accion === "quitar") return "Obligatorio: quitar una OC que ya tenía la compra queda en el historial con este motivo.";
+  if (accion === "cambiar") return "Obligatorio: cambiar una OC que ya tenía la compra queda en el historial con este motivo.";
+  return "Obligatorio si cambias o quitas la OC que ya tiene la compra.";
+}
+
+/** El texto de un error de la API al guardar la OC: el mensaje del servidor; `motivo_requerido` siempre con su texto llano. */
+export function textoErrorOc(codigo: string | null, mensajeApi: string): string {
+  if (codigo === "motivo_requerido") return "Escribe el motivo para cambiar o quitar la OC que ya tenía esta compra.";
+  return mensajeApi;
+}

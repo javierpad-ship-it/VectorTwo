@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -18,7 +19,7 @@ import {
 } from "../src/components/compras/vista-compras";
 import { ETIQUETA_ACCION_OC, ETIQUETA_MOTIVO_OC, totalesOc } from "../src/components/compras/vista-importar";
 import { detalleTramo, notasDeHito, textoCambiosHito, textoProximoHito, TEXTO_ESTADO_HITO, tituloTramo } from "../src/components/compras/vista-linea-tiempo";
-import { accionDeOc, textoBotonOc, textoConflictoOc, textoOc, textoOcGuardada, validarEdicionOc } from "../src/components/compras/vista-oc";
+import { accionDeOc, exigeMotivoEnPantalla, textoBotonOc, textoConflictoOc, textoErrorOc, textoOc, textoOcGuardada, textoPistaMotivoOc, validarEdicionOc } from "../src/components/compras/vista-oc";
 import { COLUMNA_FECHA_HORA_LINEA_DE_TIEMPO, COLUMNAS_FECHA_LINEA_DE_TIEMPO } from "../src/lib/compras/agrupadores/excel";
 import type { HitoApi, TramoLineaTiempoApi } from "../src/lib/compras/agrupadores/tipos-api";
 import type { CompraApi, MotivoOcImportacion, OcImportacionApi } from "../src/lib/compras/tipos-api";
@@ -378,5 +379,40 @@ describe("Excel de Compras: fechas de Excel en LINEA_DE_TIEMPO", () => {
     expect(formatoDeColumnaLineaDeTiempo(COLUMNA_FECHA_HORA_LINEA_DE_TIEMPO)).toBe("dd/mm/yyyy hh:mm");
     expect(formatoDeColumnaLineaDeTiempo(COLUMNAS_FECHA_LINEA_DE_TIEMPO[0])).toBe("dd/mm/yyyy");
     expect(formatoDeColumnaLineaDeTiempo(0)).toBeNull();
+  });
+});
+
+describe("OC: el motivo se pide al cambiar y al quitar (409 motivo_requerido) y el éxito viejo se limpia", () => {
+  it("el campo de motivo aparece cuando la compra ya tenía OC, y es obligatorio al cambiarla o quitarla (no al registrarla)", () => {
+    expect(exigeMotivoEnPantalla(null)).toBe(false);
+    expect(exigeMotivoEnPantalla("  ")).toBe(false);
+    expect(exigeMotivoEnPantalla("4500012300")).toBe(true);
+    expect(validarEdicionOc("4500012300", "4500012345", "  ")).toMatchObject({ ok: false });
+    expect(validarEdicionOc("4500012300", "", "  ")).toMatchObject({ ok: false });
+    expect(validarEdicionOc(null, "4500012345", "")).toMatchObject({ ok: true, accion: "registrar" });
+    expect(textoPistaMotivoOc("quitar")).toContain("quitar");
+    expect(textoPistaMotivoOc("cambiar")).toContain("cambiar");
+    expect(textoPistaMotivoOc(null)).toContain("Obligatorio si");
+  });
+
+  it("el error del servidor `motivo_requerido` sale con su texto llano; los demás, con el mensaje de la API", () => {
+    expect(textoErrorOc("motivo_requerido", "Error 409")).toBe("Escribe el motivo para cambiar o quitar la OC que ya tenía esta compra.");
+    expect(textoErrorOc("oc_repetida", "La OC 45 ya está en C-000201 de este proveedor.")).toBe("La OC 45 ya está en C-000201 de este proveedor.");
+  });
+
+  it("el editor limpia el mensaje de éxito al abrirse y ante un conflicto, marca el motivo como obligatorio y la pantalla lo conecta", () => {
+    const editor = readFileSync(new URL("../src/components/compras/editor-oc.tsx", import.meta.url), "utf8");
+    expect(editor).toContain("onLimpiarMensaje?.()");
+    // Antes de recargar por un conflicto (`oc_cambio`), se borra el éxito anterior.
+    expect(editor).toMatch(/onLimpiarMensaje\?\.\(\);\s*setEditando\(false\);\s*setConflicto\(/);
+    expect(editor).toContain("aria-required={motivoObligatorio}");
+    expect(editor).toContain('codigo === "motivo_requerido"');
+    expect(readFileSync(new URL("../src/components/compras/detalle-compra.tsx", import.meta.url), "utf8")).toContain("onLimpiarMensaje={onOcLimpiarMensaje}");
+    expect(readFileSync(new URL("../src/app/(app)/compras/registro/registro-panel.tsx", import.meta.url), "utf8")).toContain("onOcLimpiarMensaje={() => setMensaje(null)}");
+  });
+
+  it("render: con OC el formulario del detalle ofrece «Cambiar OC»", () => {
+    const h = html(createElement(DetalleCompra, { compra: { ...compraApiC12(), numero_oc: "4500012300" }, puedeEscribir: true, onOcGuardada: noop, onConfirmarIngreso: noop, onQuitarIngreso: noop, onCancelar: noop }));
+    expect(h).toContain("Cambiar OC");
   });
 });

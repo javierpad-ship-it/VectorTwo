@@ -11,6 +11,7 @@ import { plural } from "@/lib/formato";
 import { mesCorto, unidades } from "../formato";
 import { pideRelectura, textoErrorAccion } from "./vista-errores";
 import { resumenPlan, textoAvisoDetalle } from "./vista-agrupadores";
+import { frasesDelPlan } from "./vista-barrer";
 
 const MAX_FILAS_VISTA = 50;
 
@@ -51,6 +52,24 @@ export function VistaPreviaPlan({ plan, extra }: { plan: PlanMovimientoApi; extr
 }
 
 /**
+ * Lo que dice la vista previa de un movimiento entre paquetes además de su frase (ficha 08b-1b §4.5): los meses que se mueven, o que no se
+ * mueve ninguno, y, si algún lote cambia de temporada, que se vuelve a repartir con la temporada del mes nuevo.
+ */
+export function ExtraMesesPlan({ plan }: { plan: PlanMovimientoApi }) {
+  const f = frasesDelPlan(plan);
+  return (
+    <div className="space-y-1 text-sm">
+      {f.sinCambioDeMes ? <p className="text-xs text-tinta-suave">No cambia el mes: el flujo no se mueve.</p> : <p className="font-medium">Cambia el mes: {f.meses.join("; ")}.</p>}
+      {f.temporada.map((x) => (
+        <p key={x} className="text-xs text-alerta">
+          ⚠ {x}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/**
  * Cascarón de todo movimiento con vista previa (cambiar la fecha de llegada, asignar, quitar, pasar pendientes, mover un paquete):
  *
  *  1. La persona completa el formulario (`children`); cuando `cuerpo` es válido puede pulsar «Ver vista previa».
@@ -70,6 +89,8 @@ export function DialogoMovimiento<C extends { huella_plan?: string }>({
   onRecargar,
   textoAplicar = "Aplicar",
   confirmar,
+  previaOpcional = false,
+  textoError = textoErrorAccion,
   pista,
   ancho = "max-w-3xl",
   vistaExtra,
@@ -87,6 +108,10 @@ export function DialogoMovimiento<C extends { huella_plan?: string }>({
   textoAplicar?: string;
   /** Texto de un `confirm` antes de escribir (acciones que conviene reconfirmar). */
   confirmar?: (plan: PlanMovimientoApi) => string;
+  /** `true` = «Aplicar» también vale sin vista previa (el movimiento no cambia de mes; con ella, igual se manda su huella). */
+  previaOpcional?: boolean;
+  /** El texto de un error de la API (por defecto, el mensaje del servidor o el de su código). */
+  textoError?: (e: { mensaje: string; codigo: string | null }) => string;
   /** Qué falta para poder previsualizar, mientras `cuerpo` es nulo. */
   pista?: string;
   ancho?: string;
@@ -110,9 +135,9 @@ export function DialogoMovimiento<C extends { huella_plan?: string }>({
   }
 
   async function aplicar() {
-    if (cuerpo === null || planVigente === null) return;
-    if (confirmar && !confirm(confirmar(planVigente))) return;
-    const r = await accion.ejecutar(() => llamar({ ...cuerpo, huella_plan: planVigente.huella_plan }, false));
+    if (cuerpo === null || (planVigente === null && !previaOpcional)) return;
+    if (confirmar && planVigente !== null && !confirm(confirmar(planVigente))) return;
+    const r = await accion.ejecutar(() => llamar(planVigente === null ? cuerpo : { ...cuerpo, huella_plan: planVigente.huella_plan }, false));
     if (!r.ok) {
       if (pideRelectura(r.error.codigo)) {
         setGuardado(null);
@@ -138,14 +163,14 @@ export function DialogoMovimiento<C extends { huella_plan?: string }>({
           <Button variante="secundario" onClick={() => void previsualizar()} disabled={accion.ocupado || cuerpo === null}>
             {accion.ocupado && planVigente === null ? "Calculando…" : "Ver vista previa"}
           </Button>
-          <Button onClick={() => void aplicar()} disabled={accion.ocupado || planVigente === null} title={planVigente === null ? "Primero mira la vista previa." : undefined}>
-            {accion.ocupado && planVigente !== null ? "Aplicando…" : textoAplicar}
+          <Button onClick={() => void aplicar()} disabled={accion.ocupado || cuerpo === null || (planVigente === null && !previaOpcional)} title={planVigente === null && !previaOpcional ? "Primero mira la vista previa." : undefined}>
+            {accion.ocupado && (planVigente !== null || previaOpcional) ? "Aplicando…" : textoAplicar}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        {accion.error && <Alert onCerrar={accion.limpiar}>{textoErrorAccion(accion.error)}</Alert>}
+        {accion.error && <Alert onCerrar={accion.limpiar}>{textoError(accion.error)}</Alert>}
         {children}
         {cuerpo === null && pista && <p className="text-xs text-tinta-suave">{pista}</p>}
         {guardado !== null && planVigente === null && cuerpo !== null && <Alert tono="info">Cambiaste algo: vuelve a mirar la vista previa antes de aplicar.</Alert>}

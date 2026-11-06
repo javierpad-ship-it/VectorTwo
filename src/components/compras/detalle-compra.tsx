@@ -56,6 +56,7 @@ export function DetalleCompra({
   onCambiarViaje,
   onAsignarEmbarque,
   onOcGuardada,
+  onOcLimpiarMensaje,
   onRecargar,
   hoy,
 }: {
@@ -64,6 +65,8 @@ export function DetalleCompra({
   ocupado?: boolean;
   /** Ficha 08b-1b: se llama tras guardar la OC (los tres roles pueden). Sin él no hay botón «Registrar OC» / «Cambiar OC». */
   onOcGuardada?: (texto: string, avisos: AvisoOcApi[]) => void | Promise<void>;
+  /** Borra el mensaje de éxito anterior de la pantalla (al abrir el editor de la OC y cuando llega un conflicto `oc_cambio`). */
+  onOcLimpiarMensaje?: () => void;
   /** Relee la compra cuando la OC cambió por fuera (`oc_cambio`). */
   onRecargar?: () => void | Promise<void>;
   /** Hoy en Lima (`aaaa-mm-dd`) para el «Debía ocurrir hace N días» de la línea de tiempo; sin él se omite. */
@@ -91,7 +94,7 @@ export function DetalleCompra({
             </h2>
             {onOcGuardada && (
               <div className="mt-1.5">
-                <EditorOc compra={compra} onGuardada={onOcGuardada} onRecargar={onRecargar} ocupadoFuera={ocupado} />
+                <EditorOc compra={compra} onGuardada={onOcGuardada} onRecargar={onRecargar} ocupadoFuera={ocupado} onLimpiarMensaje={onOcLimpiarMensaje} />
               </div>
             )}
             <p className="mt-1 text-sm text-tinta-suave">

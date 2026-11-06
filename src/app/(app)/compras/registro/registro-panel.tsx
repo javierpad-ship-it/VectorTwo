@@ -196,6 +196,7 @@ export function RegistroPanel({ rol, perfilId, viajeActivoInicial }: { rol: Rol;
             ocupado={accion.ocupado}
             hoy={hoyFecha}
             onRecargar={recargarTodo}
+            onOcLimpiarMensaje={() => setMensaje(null)}
             onOcGuardada={async (texto, avisos) => {
               setMensaje({ tono: avisos.length > 0 ? "info" : "exito", texto, avisos: avisos.map((a) => a.detalle) });
               await recargarTodo();
