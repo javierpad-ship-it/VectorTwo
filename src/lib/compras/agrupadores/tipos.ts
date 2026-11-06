@@ -32,6 +32,38 @@ export type EstadoPaquete = (typeof ESTADOS_PAQUETE)[number];
 export const TIPOS_EMBARQUE = ["importacion", "local"] as const;
 export type TipoEmbarque = (typeof TIPOS_EMBARQUE)[number];
 
+/**
+ * Los seis hitos de la línea de tiempo de una compra (ficha 08b-1b, §2.1, decisión 120): la orden de compra (de la compra) y los cinco
+ * del embarque. El orden es el de la línea de tiempo.
+ */
+export const HITOS = ["orden_compra", "zarpe", "arribo", "ingreso_cd", "inicio_operativo", "ingreso_stock"] as const;
+export type Hito = (typeof HITOS)[number];
+
+/** Los cinco hitos logísticos, del embarque (sin la orden de compra). */
+export const HITOS_LOGISTICOS = ["zarpe", "arribo", "ingreso_cd", "inicio_operativo", "ingreso_stock"] as const;
+export type HitoLogistico = (typeof HITOS_LOGISTICOS)[number];
+
+/**
+ * Hitos que se pueden marcar «ya ocurrió» (`compra_embarques.hito_confirmado`, en este orden). El ingreso al stock se confirma al
+ * recibir (08b-2). Catálogo en zod y en la base (`check`).
+ */
+export const HITOS_CONFIRMABLES = ["zarpe", "arribo", "ingreso_cd", "inicio_operativo"] as const;
+export type HitoConfirmable = (typeof HITOS_CONFIRMABLES)[number];
+
+/** Estados de un hito en la línea de tiempo (§2.2). En pantalla siempre en texto, nunca solo color. */
+export const ESTADOS_HITO = ["real", "sin_registrar", "vencido", "por_confirmar", "previsto", "pendiente", "no_aplica"] as const;
+export type EstadoHito = (typeof ESTADOS_HITO)[number];
+
+/**
+ * Causas de una reprogramación (§2.6; `compra_agrupador_eventos.causa`, catálogo también en la base con `check`). `correccion` y
+ * `programacion` no cuentan como atraso.
+ */
+export const CAUSAS_FECHA = ["pago", "produccion", "naviera", "aduana", "transporte", "cola_conteo", "programacion", "correccion", "otro"] as const;
+export type CausaFecha = (typeof CAUSAS_FECHA)[number];
+
+/** Causas que quedan en el historial pero no suman al contador de reprogramaciones ni al retraso (F-R9). */
+export const CAUSAS_SIN_ATRASO: readonly CausaFecha[] = ["correccion", "programacion"];
+
 /** `compra_agrupador_eventos.accion` (§2.9). `recibir`, `otra_llegada` y `revertir_recepcion` los escribe 08b-2. */
 export const ACCIONES_AGRUPADOR_EVENTO = [
   "crear",
@@ -105,6 +137,11 @@ export const AVISOS_AGRUPADOR = [
   "en_embarque_cancelado",
   "pendientes_tras_recibir",
   "borradores_excluidos",
+  // 08b-1b (§3.5): fechas logísticas.
+  "ingreso_paquete_ajustado",
+  "orden_de_fechas",
+  "hito_vencido",
+  "pasa_a_en_transito",
 ] as const;
 export type AvisoAgrupador = (typeof AVISOS_AGRUPADOR)[number];
 
@@ -142,6 +179,14 @@ export const MOTIVOS_FUNCION_AGRUPADOR = [
   "paquete_de_otro_embarque",
   "reparto_sin_vector",
   "clave_existente",
+  // 08b-1b (§3.2): fechas logísticas, hitos confirmados y causa de la reprogramación.
+  "sin_cambios",
+  "causa_requerida",
+  "fecha_requerida",
+  "fecha_futura",
+  "puerto_en_local",
+  "hora_sin_fecha",
+  "hito_confirmado",
   // 08b-2 (`recibir_embarque`, `revertir_recepcion_embarque`)
   "no_confirmada",
   "excede_pendiente",
@@ -179,6 +224,8 @@ export const MAX_NOTA_EMBARQUE = 500;
 export const MAX_NOTA_PAQUETE = 300;
 export const MAX_REFERENCIA_LOGISTICA = 80;
 export const MAX_PUERTO_EMBARQUE = 80;
+/** Almacén o ciudad de origen del embarque («California», «Nueva York»; 08b-1b §2.1). */
+export const MAX_ORIGEN_EMBARQUE = 80;
 export const MAX_MOTIVO_ESTADO = 200;
 export const MAX_MOTIVO_MOVIMIENTO = 300;
 export const MAX_NOTA_RECEPCION_EMBARQUE = 200;
@@ -201,7 +248,12 @@ export const VALORES_TIPO_IMPORTADOR: Record<TipoAgrupador, string> = { viaje: "
 /** Valores de `TIPO_EMBARQUE` en la hoja del importador. */
 export const VALORES_TIPO_EMBARQUE_IMPORTADOR: Record<TipoEmbarque, string> = { importacion: "IMPORTACION", local: "LOCAL" };
 
-/** Encabezados de la hoja única de §3.11 (orden de la plantilla) y su clave en `filaAgrupadorSchema`. */
+/**
+ * Encabezados de la hoja única de §3.11 (orden de la plantilla) y su clave en `filaAgrupadorSchema`. Desde 08b-1b (§3.6) la plantilla usa
+ * los nombres de los hitos: `FECHA_ZARPE`, `FECHA_ARRIBO`, `FECHA_INGRESO_CD`, `INICIO_OPERATIVO` (fecha y hora opcional),
+ * `FECHA_INGRESO_STOCK` y `ORIGEN`. Los nombres viejos `FECHA_SALIDA` y `FECHA_LLEGADA` se siguen leyendo como sinónimos
+ * (`COLUMNAS_SINONIMAS_AGRUPADORES`).
+ */
 export const COLUMNAS_IMPORTAR_AGRUPADORES = [
   { clave: "tipo", encabezado: "TIPO" },
   { clave: "codigo", encabezado: "CODIGO" },
@@ -212,14 +264,30 @@ export const COLUMNAS_IMPORTAR_AGRUPADORES = [
   { clave: "destino", encabezado: "DESTINO" },
   { clave: "fecha_inicio", encabezado: "FECHA_INICIO" },
   { clave: "fecha_fin", encabezado: "FECHA_FIN" },
-  { clave: "fecha_salida", encabezado: "FECHA_SALIDA" },
-  { clave: "fecha_llegada", encabezado: "FECHA_LLEGADA" },
+  { clave: "fecha_zarpe", encabezado: "FECHA_ZARPE" },
+  { clave: "fecha_arribo", encabezado: "FECHA_ARRIBO" },
+  { clave: "fecha_ingreso_cd", encabezado: "FECHA_INGRESO_CD" },
+  { clave: "inicio_operativo", encabezado: "INICIO_OPERATIVO" },
+  { clave: "fecha_ingreso_stock", encabezado: "FECHA_INGRESO_STOCK" },
+  { clave: "origen", encabezado: "ORIGEN" },
   { clave: "puerto", encabezado: "PUERTO" },
   { clave: "referencia_logistica", encabezado: "REFERENCIA_LOGISTICA" },
   { clave: "responsable", encabezado: "RESPONSABLE" },
   { clave: "nota", encabezado: "NOTA" },
 ] as const;
-export type ClaveColumnaAgrupador = (typeof COLUMNAS_IMPORTAR_AGRUPADORES)[number]["clave"];
+
+/**
+ * Sinónimos que se siguen aceptando (archivos y plantillas viejos): `FECHA_SALIDA` = `FECHA_ZARPE` y `FECHA_LLEGADA` =
+ * `FECHA_INGRESO_CD` (lo que ya significaba). Son claves propias de la fila para detectar `fechas_en_conflicto` si una fila trae las dos
+ * con valores distintos.
+ */
+export const COLUMNAS_SINONIMAS_AGRUPADORES = [
+  { clave: "fecha_salida", encabezado: "FECHA_SALIDA", de: "fecha_zarpe" },
+  { clave: "fecha_llegada", encabezado: "FECHA_LLEGADA", de: "fecha_ingreso_cd" },
+] as const;
+export type ClaveColumnaAgrupador =
+  | (typeof COLUMNAS_IMPORTAR_AGRUPADORES)[number]["clave"]
+  | (typeof COLUMNAS_SINONIMAS_AGRUPADORES)[number]["clave"];
 
 /** Columnas nuevas del importador de compras (§3.9): código de un viaje, un embarque y un paquete existentes. */
 export const COLUMNAS_COMPRAS_AGRUPADOR = [
@@ -259,11 +327,14 @@ export const MOTIVOS_OMISION_AGRUPADOR = [
   "cambiada_requiere_edicion",
   "correlativo_agotado",
   "campo_largo",
+  // 08b-1b (§3.6)
+  "hora_invalida",
+  "fechas_en_conflicto",
 ] as const;
 export type MotivoOmisionAgrupador = (typeof MOTIVOS_OMISION_AGRUPADOR)[number];
 
 /** Avisos del importador de agrupadores (§3.11). `puerto_distinto_del_habitual` solo si existe la 08c. */
-export const AVISOS_IMPORTACION_AGRUPADOR = ["viaje_cerrado", "sin_responsable", "puerto_distinto_del_habitual"] as const;
+export const AVISOS_IMPORTACION_AGRUPADOR = ["viaje_cerrado", "sin_responsable", "puerto_distinto_del_habitual", "arribo_ignorado_en_local"] as const;
 export type AvisoImportacionAgrupador = (typeof AVISOS_IMPORTACION_AGRUPADOR)[number];
 
 /** Omisiones nuevas del importador de compras por las columnas `VIAJE`, `EMBARQUE` y `PAQUETE` (§3.9, punto 3). */
@@ -312,11 +383,27 @@ export type EmbarqueRegistro = {
   responsable_id: string | null;
   referencia_logistica: string | null;
   puerto_embarque: string | null;
+  /** Zarpe. */
   fecha_salida_estimada: string | null;
+  /** Arribo a puerto (08b-1b); no aplica a un embarque `local`. */
+  fecha_puerto_estimada: string | null;
+  /** Ingreso CD: la mercadería llega al CD. Obligatoria; conserva el significado de «llegada al CD» de 08b. */
   fecha_llegada_estimada: string;
+  /** Inicio operativo, fecha y hora opcional (hora de Lima, `hh:mm`). La hora exige la fecha. */
+  fecha_inicio_operativo_estimada: string | null;
+  hora_inicio_operativo: string | null;
+  /** Ingreso al stock fijado por una persona (nulo = el día del Ingreso CD). Manda el mes del flujo (§2.4). */
+  fecha_ingreso_estimada: string | null;
   fecha_llegada_real: string | null;
-  /** Mes de `coalesce(fecha_llegada_real, fecha_llegada_estimada)`: la columna generada `periodo_llegada`. */
+  /**
+   * Mes de `coalesce(fecha_llegada_real, fecha_ingreso_estimada, fecha_llegada_estimada)`: la columna generada `periodo_llegada` desde la
+   * 0038 (ya no es el mes de la llegada al CD sino el del ingreso al stock). Para el mes de una ASIGNACIÓN usa `mesDeDestino`.
+   */
   periodo_llegada: Mes;
+  /** Último hito que ya ocurrió (`zarpe`, `arribo`, `ingreso_cd` o `inicio_operativo`); nulo = ninguno. */
+  hito_confirmado: HitoConfirmable | null;
+  /** Almacén o ciudad de origen («California»). */
+  origen: string | null;
   estado: EstadoEmbarque;
   nota: string | null;
   revision: number;
@@ -330,6 +417,10 @@ export type PaqueteRegistro = {
   responsable_id: string | null;
   estado: EstadoPaquete;
   nota: string | null;
+  /** Ingreso al stock propio del paquete (08b-1b §2.5). Nulo = hereda el del embarque. Nunca anterior a la llegada del embarque (I9). */
+  fecha_ingreso_estimada: string | null;
+  /** Primer día del mes de `fecha_ingreso_estimada` (columna generada); nulo si ella es nula. */
+  periodo_ingreso: Mes | null;
 };
 
 /** `compra_entrega_asignaciones`: reparte las unidades de una entrega entre embarques y paquetes (§2.6). */

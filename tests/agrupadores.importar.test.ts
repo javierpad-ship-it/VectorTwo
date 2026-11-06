@@ -388,7 +388,8 @@ describe("R25: omisiones del importador de agrupadores", () => {
   });
 
   it("todas las columnas de la plantilla las lee el importador (nada queda sin leer)", () => {
-    expect(COLUMNAS_IMPORTAR_AGRUPADORES.map((c) => c.clave).sort()).toEqual(["codigo", "destino", "embarque", "fecha_fin", "fecha_inicio", "fecha_llegada", "fecha_salida", "nombre", "nota", "puerto", "referencia_logistica", "responsable", "tipo", "tipo_embarque", "viaje"].sort());
+    // 08b-1b (§3.6): los hitos con sus nombres; `fecha_salida` y `fecha_llegada` son los sinónimos viejos y siguen leyéndose (F18).
+    expect(COLUMNAS_IMPORTAR_AGRUPADORES.map((c) => c.clave).sort()).toEqual(["codigo", "destino", "embarque", "fecha_arribo", "fecha_fin", "fecha_ingreso_cd", "fecha_ingreso_stock", "fecha_inicio", "fecha_zarpe", "inicio_operativo", "nombre", "nota", "origen", "puerto", "referencia_logistica", "responsable", "tipo", "tipo_embarque", "viaje"].sort());
   });
 });
 
@@ -397,12 +398,12 @@ describe("R25: omisiones del importador de agrupadores", () => {
 describe("plantilla del importador de agrupadores", () => {
   it("encabezado de §3.11 y una fila de ejemplo de cada tipo", () => {
     const p = plantillaAgrupadores();
-    expect(p.encabezados).toEqual(["TIPO", "CODIGO", "NOMBRE", "VIAJE", "EMBARQUE", "TIPO_EMBARQUE", "DESTINO", "FECHA_INICIO", "FECHA_FIN", "FECHA_SALIDA", "FECHA_LLEGADA", "PUERTO", "REFERENCIA_LOGISTICA", "RESPONSABLE", "NOTA"]);
+    expect(p.encabezados).toEqual(["TIPO", "CODIGO", "NOMBRE", "VIAJE", "EMBARQUE", "TIPO_EMBARQUE", "DESTINO", "FECHA_INICIO", "FECHA_FIN", "FECHA_ZARPE", "FECHA_ARRIBO", "FECHA_INGRESO_CD", "INICIO_OPERATIVO", "FECHA_INGRESO_STOCK", "ORIGEN", "PUERTO", "REFERENCIA_LOGISTICA", "RESPONSABLE", "NOTA"]);
     expect(p.filas.map((f) => f[0])).toEqual(["VIAJE", "EMBARQUE", "PAQUETE"]);
     expect(p.filas.every((f) => f.length === p.encabezados.length)).toBe(true);
     expect(p.hoja).toEqual([p.encabezados, ...p.filas]);
     expect(ENCABEZADOS_AGRUPADORES).toBe(p.encabezados);
-    expect(filaDeAgrupador({ tipo: "VIAJE", nombre: "X" })).toEqual(["VIAJE", "", "X", "", "", "", "", "", "", "", "", "", "", "", ""]);
+    expect(filaDeAgrupador({ tipo: "VIAJE", nombre: "X" })).toEqual(["VIAJE", "", "X", ...Array(16).fill("")]);
   });
 
   it("las filas de ejemplo, leídas como archivo, se importan sin omisiones (con un comprador de ese correo)", () => {
@@ -600,5 +601,148 @@ describe("R21: columnas VIAJE, EMBARQUE y PAQUETE del importador de compras (§3
     const r = evaluar({ clasificacion: "igual", viaje: "261001", embarque: "261101", embarques_asignados: [EMBARQUE_AGR.e261101] });
     expect(r?.aplicar).toEqual({ viaje_id: VIAJE_AGR.v261001, embarque_id: null, paquete_id: null });
     expect(r?.api.resultado).toBe("asignado");
+  });
+});
+
+// ─── 08b-1b (§3.6): columnas de los hitos, sinónimos y reglas de mes ───
+
+describe("08b-1b · importador de agrupadores: FECHA_ZARPE, FECHA_ARRIBO, FECHA_INGRESO_CD, INICIO_OPERATIVO, FECHA_INGRESO_STOCK y ORIGEN", () => {
+  const nuevo = (n: number, p: Partial<FilaAgrupador> = {}) => embarqueOk(n, { codigo: "270150", nombre: "Embarque de hitos", fecha_llegada: undefined, fecha_ingreso_cd: "2027-01-20", ...p });
+  const lote = (f: FilaAgrupador) => previsualizar([f]).lote.embarques[0];
+
+  it("F18: un archivo viejo (FECHA_SALIDA y FECHA_LLEGADA) se lee como Zarpe e Ingreso CD, con el ingreso al stock nulo; reimportar da `igual`", () => {
+    const viejo = embarqueOk(1, { codigo: "270150", nombre: "Embarque viejo", fecha_salida: "2027-01-05", fecha_llegada: "2027-01-20" });
+    const r = previsualizar([viejo]);
+    expect(r.lote.embarques[0]).toMatchObject({ fecha_salida_estimada: "2027-01-05", fecha_llegada_estimada: "2027-01-20", fecha_ingreso_estimada: null, fecha_puerto_estimada: null, fecha_inicio_operativo_estimada: null, hora_inicio_operativo: null, origen: null });
+    const despues = simularAplicacionLote(r.lote, estado(), r.codigos_simulados);
+    expect(previsualizar([viejo], despues).reporte.filas[0].clasificacion).toBe("igual");
+  });
+
+  it("los nombres nuevos y los viejos dicen lo mismo; con valores distintos en la misma fila es `fechas_en_conflicto`", () => {
+    expect(lote(nuevo(1, { fecha_zarpe: "2027-01-05" }))).toMatchObject({ fecha_salida_estimada: "2027-01-05", fecha_llegada_estimada: "2027-01-20" });
+    expect(lote(nuevo(1, { fecha_ingreso_cd: "2027-01-20", fecha_llegada: "2027-01-20" })).fecha_llegada_estimada).toBe("2027-01-20");
+    const conflicto = previsualizar([nuevo(1, { fecha_ingreso_cd: "2027-01-20", fecha_llegada: "2027-01-22" })]);
+    expect(motivos(conflicto)).toEqual([[1, "omitida", "fechas_en_conflicto"]]);
+    expect(motivos(previsualizar([nuevo(1, { fecha_zarpe: "2027-01-05", fecha_salida: "2027-01-06" })]))).toEqual([[1, "omitida", "fechas_en_conflicto"]]);
+  });
+
+  it("F18: INICIO_OPERATIVO con hora, solo con fecha, con hora fuera de rango y en formato de día primero", () => {
+    expect(lote(nuevo(1, { inicio_operativo: "2026-11-05 09:22" }))).toMatchObject({ fecha_inicio_operativo_estimada: "2026-11-05", hora_inicio_operativo: "09:22" });
+    expect(lote(nuevo(1, { inicio_operativo: "2026-11-05" }))).toMatchObject({ fecha_inicio_operativo_estimada: "2026-11-05", hora_inicio_operativo: null });
+    expect(motivos(previsualizar([nuevo(1, { inicio_operativo: "2026-11-05 25:10" })]))).toEqual([[1, "omitida", "hora_invalida"]]);
+    expect(motivos(previsualizar([nuevo(1, { inicio_operativo: "2026-11-05 09:61" })]))).toEqual([[1, "omitida", "hora_invalida"]]);
+    expect(lote(nuevo(1, { inicio_operativo: "05/11/2026 9:05" }))).toMatchObject({ fecha_inicio_operativo_estimada: "2026-11-05", hora_inicio_operativo: "09:05" });
+    expect(motivos(previsualizar([nuevo(1, { inicio_operativo: "mañana" })]))).toEqual([[1, "omitida", "fecha_invalida"]]);
+    // Celda de fecha y hora de Excel sin convertir: serie con fracción (0,5 = 12:00).
+    expect(lote(nuevo(1, { inicio_operativo: "46345.5" }))).toMatchObject({ fecha_inicio_operativo_estimada: "2026-11-19", hora_inicio_operativo: "12:00" });
+  });
+
+  it("FECHA_INGRESO_STOCK vacía = igual al Ingreso CD (nulo); con valor, se fija; ORIGEN es texto de hasta 80", () => {
+    expect(lote(nuevo(1, { fecha_ingreso_stock: "" })).fecha_ingreso_estimada).toBeNull();
+    expect(lote(nuevo(1, { fecha_ingreso_stock: "2027-02-02", origen: "California" }))).toMatchObject({ fecha_ingreso_estimada: "2027-02-02", origen: "California" });
+    expect(motivos(previsualizar([nuevo(1, { fecha_ingreso_stock: "2027-13-01" })]))).toEqual([[1, "omitida", "fecha_invalida"]]);
+    expect(motivos(previsualizar([nuevo(1, { origen: "o".repeat(81) })]))).toEqual([[1, "omitida", "campo_largo"]]);
+  });
+
+  it("el Ingreso CD sigue siendo obligatorio (con cualquiera de los dos nombres); FECHA_ARRIBO inválida se omite", () => {
+    expect(motivos(previsualizar([nuevo(1, { fecha_ingreso_cd: "" })]))).toEqual([[1, "omitida", "fecha_requerida"]]);
+    expect(motivos(previsualizar([nuevo(1, { fecha_arribo: "2027-02-30" })]))).toEqual([[1, "omitida", "fecha_invalida"]]);
+    expect(motivos(previsualizar([nuevo(1, { fecha_zarpe: "2027-01-25" })]))).toEqual([[1, "omitida", "salida_despues_de_llegada"]]);
+  });
+
+  it("el Arribo de un `LOCAL` se ignora con aviso (no se escribe)", () => {
+    const r = previsualizar([nuevo(1, { tipo_embarque: "LOCAL", fecha_arribo: "2027-01-10" })]);
+    expect(r.reporte.filas[0].avisos).toContain("arribo_ignorado_en_local");
+    expect(previsualizar([nuevo(1, { tipo_embarque: "IMPORTACION", fecha_arribo: "2027-01-10" })]).reporte.filas[0].avisos).not.toContain("arribo_ignorado_en_local");
+    expect(r.lote.embarques[0].fecha_puerto_estimada).toBeNull();
+    expect(previsualizar([nuevo(1, { tipo_embarque: "IMPORTACION", fecha_arribo: "2027-01-10" })]).lote.embarques[0].fecha_puerto_estimada).toBe("2027-01-10");
+  });
+
+  it("`igual` compara también las columnas nuevas: una ausente «no dice nada» y una distinta es `cambiada`, con la diferencia", () => {
+    const completo = nuevo(1, { fecha_zarpe: "2027-01-05", fecha_arribo: "2027-01-12", inicio_operativo: "2027-01-21 08:30", fecha_ingreso_stock: "2027-01-25", origen: "California" });
+    const r = previsualizar([completo]);
+    const despues = simularAplicacionLote(r.lote, estado(), r.codigos_simulados);
+    expect(previsualizar([completo], despues).reporte.filas[0].clasificacion).toBe("igual");
+    // El mismo embarque, pero el archivo no trae las columnas nuevas: no dice nada, sigue `igual`.
+    expect(previsualizar([nuevo(1, { fecha_zarpe: "2027-01-05" })], despues).reporte.filas[0].clasificacion).toBe("igual");
+    const otro = previsualizar([{ ...completo, fecha_arribo: "2027-01-14", origen: "Nueva York" }], despues);
+    expect(otro.reporte.filas[0]).toMatchObject({ clasificacion: "cambiada", motivo: "cambiada_requiere_edicion", detalle: "fecha_arribo 2027-01-12 → 2027-01-14; origen California → Nueva York" });
+    expect(loteVacio(otro.lote)).toBe(true);
+    const hora = previsualizar([{ ...completo, inicio_operativo: "2027-01-21 09:00" }], despues);
+    expect(hora.reporte.filas[0].detalle).toBe("inicio_operativo 2027-01-21 08:30 → 2027-01-21 09:00");
+  });
+
+  it("la plantilla de ejemplo ya usa los nombres de los hitos y lleva zarpe, arribo, ingreso CD, inicio con hora, ingreso al stock y origen", () => {
+    const p = plantillaAgrupadores();
+    const columna = (n: string) => p.encabezados.indexOf(n);
+    const embarque = p.filas.find((f) => f[0] === "EMBARQUE") as string[];
+    expect(embarque[columna("FECHA_INGRESO_CD")]).toBe("2026-12-15");
+    expect(embarque[columna("INICIO_OPERATIVO")]).toBe("2026-12-16 09:00");
+    expect(embarque[columna("ORIGEN")]).toBe("California");
+    expect(p.encabezados).not.toContain("FECHA_LLEGADA");
+    expect(p.encabezados).not.toContain("FECHA_SALIDA");
+  });
+
+  it("la hoja AGRUPADORES del Excel escribe el inicio con su hora y el ingreso al stock solo si está fijado; subirla otra vez da `igual`", () => {
+    const e = {
+      ...embarqueDetalleApi261101(),
+      fecha_puerto_estimada: "2026-11-10",
+      fecha_inicio_operativo_estimada: "2026-11-21",
+      hora_inicio_operativo: "08:30:00",
+      fecha_ingreso_estimada: null,
+      origen: "California",
+    };
+    const hoja = hojaAgrupadores({ viajes: [viajeApi261001()], embarques: [e], correoDe: (id) => (perfiles.find((p) => p.id === id)?.email ?? null) });
+    const col = (n: string) => hoja[0].indexOf(n);
+    expect(hoja[2][col("FECHA_ARRIBO")]).toBe("2026-11-10");
+    expect(hoja[2][col("INICIO_OPERATIVO")]).toBe("2026-11-21 08:30");
+    expect(hoja[2][col("FECHA_INGRESO_STOCK")]).toBe("");
+    expect(hoja[2][col("ORIGEN")]).toBe("California");
+    expect(hoja[2][col("FECHA_ZARPE")]).toBe("2026-10-25");
+    expect(hoja[2][col("FECHA_INGRESO_CD")]).toBe("2026-11-20");
+  });
+});
+
+describe("08b-1b · F46 y la simulación: el mes del embarque nuevo y el código del paquete", () => {
+  it("embarque con Ingreso CD 15-nov e ingreso al stock 02-dic: cuenta en dic y su código es `2611##`; su paquete también `2611##` (el mes del Ingreso CD)", () => {
+    const r = previsualizar([
+      embarqueOk(1, { codigo: "", nombre: "Embarque dic", fecha_llegada: undefined, fecha_ingreso_cd: "2026-11-15", fecha_ingreso_stock: "2026-12-02" }),
+      paqueteOk(2, { codigo: "", nombre: "Paquete dic", embarque: "Embarque dic" }),
+    ]);
+    // El paquete apunta por código: sin código del embarque no se puede referir (`referencia_sin_codigo`); con código sí.
+    expect(motivos(r)[1]).toEqual([2, "omitida", "referencia_sin_codigo"]);
+    const ok = previsualizar([
+      embarqueOk(1, { codigo: "261177", nombre: "Embarque dic", fecha_llegada: undefined, fecha_ingreso_cd: "2026-11-15", fecha_ingreso_stock: "2026-12-02" }),
+      paqueteOk(2, { codigo: "", nombre: "Paquete dic", embarque: "261177" }),
+    ]);
+    expect(ok.codigos_simulados.get(2)).toBe("261103");
+    expect(ok.codigos_simulados.get(2)?.slice(0, 4)).toBe("2611");
+    const sim = simularAplicacionLote(ok.lote, estado(), ok.codigos_simulados);
+    const embarque = sim.embarques.find((e) => e.codigo === "261177");
+    expect(embarque).toMatchObject({ periodo_llegada: "2026-12", fecha_llegada_estimada: "2026-11-15", fecha_ingreso_estimada: "2026-12-02" });
+    const paquete = sim.paquetes.find((p) => p.nombre === "Paquete dic");
+    expect(paquete).toMatchObject({ fecha_ingreso_estimada: null, periodo_ingreso: null });
+  });
+
+  it("un embarque nuevo sin código toma el `aamm` de su Ingreso CD, no el del ingreso al stock", () => {
+    const r = previsualizar([embarqueOk(1, { codigo: "", nombre: "Embarque dic", fecha_llegada: undefined, fecha_ingreso_cd: "2026-11-15", fecha_ingreso_stock: "2026-12-02" })]);
+    expect(r.codigos_simulados.get(1)?.slice(0, 4)).toBe("2611");
+  });
+});
+
+describe("08b-1b · F17: la regla 3 del importador de compras con embarques de dos meses", () => {
+  const catalogo: CatalogoAgrupadoresCompra = {
+    viajes: [],
+    embarques: [
+      { id: "ny", codigo: "270101", estado: "planificado", viaje_id: null, periodo_llegada: "2027-01" },
+      { id: "ca", codigo: "261201", estado: "planificado", viaje_id: null, periodo_llegada: "2026-12" },
+    ],
+    paquetes: [],
+  };
+  const entrada = (embarque: string, mes: string): EntradaAgrupadoresFilaCompra => ({ fila: 1, viaje: "", embarque, paquete: "", clasificacion: "nueva", entregas: [{ periodo: mes, unidades: 10 }], compra_viaje_id: null, embarques_asignados: [] });
+  it("Nueva York (ene-27) con `LLEGADA = 2026-12` es `llegada_distinta_del_embarque`; con `2027-01`, entra", () => {
+    expect(evaluarAgrupadoresDeFilaCompra(entrada("270101", "2026-12"), catalogo)?.api.motivo).toBe("llegada_distinta_del_embarque");
+    expect(evaluarAgrupadoresDeFilaCompra(entrada("270101", "2027-01"), catalogo)?.omite_fila).toBe(false);
+    expect(evaluarAgrupadoresDeFilaCompra(entrada("261201", "2026-12"), catalogo)?.omite_fila).toBe(false);
   });
 });

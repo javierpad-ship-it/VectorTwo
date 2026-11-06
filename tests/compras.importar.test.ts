@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { FilaImportacionCompra } from "@/lib/compras/esquemas";
+import { filaImportacionCompraSchema, type FilaImportacionCompra } from "@/lib/compras/esquemas";
 import {
   agregarAviso,
+  argsEditarOcCompra,
   argsImportarCompra,
   claveCompraImportacion,
   claveImportacion,
@@ -700,5 +701,213 @@ describe("columnas VIAJE, EMBARQUE y PAQUETE (ficha 08b, §3.9, R21): las filas 
     omitirFilasDelPlan(nuevas, [{ fila: 1, motivo: "embarque_desconocido" }]);
     expect(nuevas.reporte.totales).toEqual({ recibidas: 6, procesadas: 3, omitidas: 3, nuevas: 3, iguales: 0, cambiadas: 0 });
     expect(nuevas.compras[0].lineas).toHaveLength(2);
+  });
+});
+
+// ─── 08b-1b: compras de COTV agrupadas (F14, F16) y número de OC (F31, F32) ───
+
+describe("08b-1b · F14 y F16: una compra por proveedor y viaje, llegada en diciembre, sin embarque", () => {
+  const cotv = (p: Partial<FilaImportacionCompra>): FilaImportacionCompra => fila({ moneda: "USD", llegada: "2026-12", tallas: "", destino: "", ...p });
+  const norte = (ordinal: string, unidades: string, extra: Partial<FilaImportacionCompra> = {}) => cotv({ referencia: "COTV-261001-1", fecha_compra: "2026-07-06", linea_ordinal: ordinal, unidades, ...extra });
+  const feria = cotv({ proveedor: "Feria Sur", referencia: "COTV-261001-2", fecha_compra: "2026-07-10", linea_ordinal: "1", unidades: "500" });
+  const estadoDosProveedores = (): EstadoImportacionCompras => ({ ...estadoImportacionBase(), proveedores: [{ id: PROVEEDOR.norte, nombre: "Proveedor Norte", codigo: "PN", activo: true, es_intercompany: false }, { id: PROVEEDOR.feria, nombre: "Feria Sur", activo: true, es_intercompany: false }] });
+
+  it("F14: dos filas de Proveedor Norte con la misma REFERENCIA y una de Feria Sur dan DOS compras, con entregas dic-26 sin embarque", () => {
+    const r = previsualizar([norte("1", "300"), norte("2", "200"), feria], estadoDosProveedores());
+    expect(r.reporte.omitidas).toEqual([]);
+    expect(r.reporte.compras_a_crear.map((c) => [c.proveedor, c.referencia, c.lineas, c.fecha_compra])).toEqual([
+      ["Proveedor Norte", "COTV-261001-1", 2, "2026-07-06"],
+      ["Feria Sur", "COTV-261001-2", 1, "2026-07-10"],
+    ]);
+    expect(r.reporte.lineas.map((l) => [l.unidades, l.entregas])).toEqual([[300, [{ periodo: "2026-12", unidades: 300 }]], [200, [{ periodo: "2026-12", unidades: 200 }]], [500, [{ periodo: "2026-12", unidades: 500 }]]]);
+    expect(r.compras.map((c) => c.lineas.reduce((s, l) => s + l.linea.unidades, 0))).toEqual([500, 500]);
+    expect(r.compras.every((c) => c.origen === "carga_inicial" && c.estado === "confirmada")).toBe(true);
+  });
+
+  it("F14: con la segunda fila de Norte en FECHA_COMPRA 07-jul, esa fila sale `cabecera_inconsistente` y no entra", () => {
+    const r = previsualizar([norte("1", "300"), norte("2", "200", { fecha_compra: "2026-07-07" }), feria], estadoDosProveedores());
+    expect(r.reporte.omitidas.map((o) => [o.fila, o.motivo])).toEqual([[2, "cabecera_inconsistente"]]);
+    expect(r.compras[0].lineas).toHaveLength(1);
+  });
+
+  it("las columnas informativas (DIA_REGISTRO, ITEM_COTV) y las de agrupador las ignora el esquema de la fila: no cambian nada", () => {
+    const conExtras = { ...norte("1", "300"), DIA_REGISTRO: "2026-07-06", ITEM_COTV: "abc" } as unknown as FilaImportacionCompra;
+    expect(previsualizar([conExtras], estadoDosProveedores()).reporte.omitidas).toEqual([]);
+    expect(filaImportacionCompraSchema.parse({ ...conExtras })).not.toHaveProperty("DIA_REGISTRO");
+  });
+
+  it("F16: reimportar el mismo archivo da 3 `igual` y no crea nada", () => {
+    const filas = [norte("1", "300"), norte("2", "200"), feria];
+    const primera = previsualizar(filas, estadoDosProveedores());
+    const existentes = primera.compras.flatMap((c, i) => c.lineas.map((l) => ({ clave: l.clave, huella: l.linea.huella_importacion, compra_id: i === 0 ? COMPRA.c12 : COMPRA.c15, compra_numero: i === 0 ? "C-000201" : "C-000202", compra_estado: "confirmada" as const })));
+    const otra = previsualizar(filas, { ...estadoDosProveedores(), lineas_existentes: existentes });
+    expect(otra.reporte.totales).toMatchObject({ iguales: 3, nuevas: 0, cambiadas: 0, omitidas: 0 });
+    expect(otra.compras).toEqual([]);
+  });
+});
+
+describe("08b-1b · F31 y F32: la columna OC del importador de compras", () => {
+  const ID = { norte1: "c0000000-0000-4000-8000-000000000201", norte2: "c0000000-0000-4000-8000-000000000203", feria: "c0000000-0000-4000-8000-000000000202" };
+  const cotv = (p: Partial<FilaImportacionCompra>): FilaImportacionCompra => fila({ moneda: "USD", llegada: "2026-12", tallas: "", destino: "", ...p });
+  const n1 = (ordinal: string, oc?: string) => cotv({ referencia: "COTV-261001-1", fecha_compra: "2026-07-06", linea_ordinal: ordinal, unidades: "100", ...(oc === undefined ? {} : { oc }) });
+  const n2 = (ordinal: string, oc?: string) => cotv({ referencia: "COTV-261001-1-2", fecha_compra: "2026-07-06", linea_ordinal: ordinal, unidades: "100", ...(oc === undefined ? {} : { oc }) });
+  const fs = (ordinal: string, oc?: string) => cotv({ proveedor: "Feria Sur", referencia: "COTV-261001-2", fecha_compra: "2026-07-10", linea_ordinal: ordinal, unidades: "100", ...(oc === undefined ? {} : { oc }) });
+  const proveedores = [{ id: PROVEEDOR.norte, nombre: "Proveedor Norte", codigo: "PN", activo: true, es_intercompany: false }, { id: PROVEEDOR.feria, nombre: "Feria Sur", activo: true, es_intercompany: false }];
+
+  /** El estado después de haber importado `filas` una vez: sus compras ya existen (con el número de OC que se diga). */
+  function existente(filas: FilaImportacionCompra[], compras: { clave: string; id: string; numero: string; proveedor_id: string; referencia: string; numero_oc?: string | null; estado?: "borrador" | "confirmada"; perfil_id?: string | null }[]): EstadoImportacionCompras {
+    const r = previsualizar(filas, { ...estadoImportacionBase(), proveedores });
+    return {
+      ...estadoImportacionBase(),
+      proveedores,
+      compras: compras.map((c) => ({ id: c.id, numero: c.numero, proveedor_id: c.proveedor_id, referencia: c.referencia, estado: c.estado ?? "confirmada", cancelada_at: null, perfil_id: c.perfil_id ?? null, fecha_compra: "2026-07-06", moneda: "USD" as const, numero_oc: c.numero_oc ?? null })),
+      lineas_existentes: r.compras.flatMap((pc) => {
+        const c = compras.find((x) => x.clave === pc.clave) ?? compras[0];
+        return pc.lineas.map((l) => ({ clave: l.clave, huella: l.linea.huella_importacion, compra_id: c.id, compra_numero: c.numero, compra_estado: c.estado ?? ("confirmada" as const) }));
+      }),
+    };
+  }
+  const CLAVE_N1 = claveCompraImportacion({ proveedor: "Proveedor Norte", referencia: "COTV-261001-1" });
+  const CLAVE_N2 = claveCompraImportacion({ proveedor: "Proveedor Norte", referencia: "COTV-261001-1-2" });
+  const CLAVE_FS = claveCompraImportacion({ proveedor: "Feria Sur", referencia: "COTV-261001-2" });
+  const ambas = [n1("1"), n1("2"), fs("1")];
+  const estadoBase = (extra: Partial<EstadoImportacionCompras> = {}) => ({
+    ...existente(ambas, [
+      { clave: CLAVE_N1, id: ID.norte1, numero: "C-000201", proveedor_id: PROVEEDOR.norte, referencia: "COTV-261001-1" },
+      { clave: CLAVE_FS, id: ID.feria, numero: "C-000202", proveedor_id: PROVEEDOR.feria, referencia: "COTV-261001-2" },
+    ]),
+    ...extra,
+  });
+  const reimportar = (filas: FilaImportacionCompra[], estado = estadoBase(), opciones: OpcionesImportacion = { ...OPC, archivo_nombre: "planilla-c2.csv" }) => previsualizarImportacionCompras(filas, [], estado, opciones);
+
+  it("F31: reimportar con la OC en las dos filas de C-000201 (y C-000202 vacía): las 3 líneas son `igual`, C-000201 queda con OC (registrada) y C-000202 sin cambio", () => {
+    const r = reimportar([n1("1", "4500012345"), n1("2", "4500012345"), fs("1")]);
+    expect(r.reporte.totales).toMatchObject({ iguales: 3, nuevas: 0, cambiadas: 0, omitidas: 0 });
+    expect(r.compras).toEqual([]);
+    expect(r.reporte.oc).toEqual([
+      { compra_clave: CLAVE_N1, proveedor: "Proveedor Norte", referencia: "COTV-261001-1", compra: { id: ID.norte1, numero: "C-000201" }, numero_oc: "4500012345", antes: null, accion: "registrada", avisos: [] },
+    ]);
+    expect(r.ocs).toEqual([{ compra_clave: CLAVE_N1, compra_id: ID.norte1, numero_oc: "4500012345", antes: null, motivo: "Importado de planilla-c2.csv" }]);
+    expect(argsEditarOcCompra(r.ocs[0], ID.norte1, ACTOR)).toEqual({ p_compra: ID.norte1, p_antes: null, p_numero_oc: "4500012345", p_motivo: "Importado de planilla-c2.csv", p_actor: ACTOR });
+  });
+
+  it("la OC NO entra en la huella ni en la clave: con o sin ella, la misma huella y la misma clasificación (nunca `cambiada` ni `nueva`)", () => {
+    const sin = previsualizar([n1("1")], { ...estadoImportacionBase(), proveedores });
+    const con = previsualizar([n1("1", "4500012345")], { ...estadoImportacionBase(), proveedores });
+    expect(con.compras[0].lineas[0].clave).toBe(sin.compras[0].lineas[0].clave);
+    expect(con.compras[0].lineas[0].linea.huella_importacion).toBe(sin.compras[0].lineas[0].linea.huella_importacion);
+    // Y sobre una compra ya importada sin OC: `igual`.
+    expect(reimportar([n1("1", "4500012345"), n1("2")]).reporte.lineas.map((l) => l.clasificacion)).toEqual(["igual", "igual"]);
+  });
+
+  it("vacía no dice nada: nunca borra una OC; reimportar otra vez la misma no cambia nada (`sin_cambio`)", () => {
+    const conOc = estadoBase({ compras: estadoBase().compras.map((c) => (c.id === ID.norte1 ? { ...c, numero_oc: "4500012345" } : c)) });
+    const vacia = reimportar([n1("1"), n1("2"), fs("1")], conOc);
+    expect(vacia.reporte.oc).toEqual([]);
+    expect(vacia.ocs).toEqual([]);
+    const igual = reimportar([n1("1", "4500012345"), n1("2", "4500012345")], conOc);
+    expect(igual.reporte.oc?.map((o) => o.accion)).toEqual(["sin_cambio"]);
+    expect(igual.ocs).toEqual([]);
+    // La comparación no distingue mayúsculas (`upper(btrim)`).
+    expect(reimportar([n1("1", "4500ab"), n1("2", "4500ab")], estadoBase({ compras: estadoBase().compras.map((c) => (c.id === ID.norte1 ? { ...c, numero_oc: "4500AB" } : c)) })).ocs).toEqual([]);
+  });
+
+  it("una OC distinta de la guardada se cambia (`cambiada`), con `p_antes` = la guardada", () => {
+    const conOc = estadoBase({ compras: estadoBase().compras.map((c) => (c.id === ID.norte1 ? { ...c, numero_oc: "4500012300" } : c)) });
+    const r = reimportar([n1("1", "4500012345"), n1("2", "4500012345")], conOc);
+    expect(r.reporte.oc?.[0]).toMatchObject({ accion: "cambiada", antes: "4500012300", numero_oc: "4500012345" });
+    expect(r.ocs[0]).toMatchObject({ antes: "4500012300", numero_oc: "4500012345" });
+  });
+
+  it("dos filas de una compra con OC distintas: `oc_distinta_en_compra` y la OC no se aplica (las líneas siguen su regla)", () => {
+    const r = reimportar([n1("1", "4500012345"), n1("2", "4500012399")]);
+    expect(r.reporte.oc?.[0]).toMatchObject({ accion: "omitida", motivo: "oc_distinta_en_compra", numero_oc: null });
+    expect(r.ocs).toEqual([]);
+    expect(r.reporte.totales.iguales).toBe(2);
+  });
+
+  it("OC repetida en el mismo proveedor: en la base, `oc_repetida` con el número de la otra compra; el aviso en otro proveedor no bloquea", () => {
+    const vivas = [
+      { compra_id: ID.norte2, compra_numero: "C-000203", proveedor_id: PROVEEDOR.norte, proveedor_nombre: "Proveedor Norte", numero_oc: "4500012345" },
+      { compra_id: ID.feria, compra_numero: "C-000202", proveedor_id: PROVEEDOR.feria, proveedor_nombre: "Feria Sur", numero_oc: "4500777777" },
+    ];
+    const repetida = reimportar([n1("1", "4500012345"), n1("2", "4500012345")], estadoBase({ ocs_vivas: vivas }));
+    expect(repetida.reporte.oc?.[0]).toMatchObject({ accion: "omitida", motivo: "oc_repetida" });
+    expect(repetida.reporte.oc?.[0].detalle).toContain("C-000203");
+    expect(repetida.ocs).toEqual([]);
+    expect(repetida.reporte.totales.iguales).toBe(2);
+    // En otro proveedor solo avisa y se aplica.
+    const otroProveedor = reimportar([n1("1", "4500777777"), n1("2", "4500777777")], estadoBase({ ocs_vivas: vivas }));
+    expect(otroProveedor.reporte.oc?.[0]).toMatchObject({ accion: "registrada" });
+    expect(otroProveedor.reporte.oc?.[0].avisos).toEqual([{ aviso: "oc_de_otro_proveedor", detalle: "La OC 4500777777 también está en C-000202 de Feria Sur: ¿es otra orden?" }]);
+    expect(otroProveedor.ocs).toHaveLength(1);
+  });
+
+  it("OC repetida en el mismo archivo y proveedor: la segunda compra, en el orden del archivo, sale `oc_repetida`; sus líneas sí siguen su regla", () => {
+    const filas = [n1("1", "4500012345"), n2("1", "4500012345")];
+    const estado = existente(
+      [n1("1"), n2("1")],
+      [
+        { clave: CLAVE_N1, id: ID.norte1, numero: "C-000201", proveedor_id: PROVEEDOR.norte, referencia: "COTV-261001-1" },
+        { clave: CLAVE_N2, id: ID.norte2, numero: "C-000203", proveedor_id: PROVEEDOR.norte, referencia: "COTV-261001-1-2" },
+      ],
+    );
+    const r = reimportar(filas, estado);
+    expect(r.reporte.oc?.map((o) => [o.compra?.numero, o.accion, o.motivo ?? null])).toEqual([["C-000201", "registrada", null], ["C-000203", "omitida", "oc_repetida"]]);
+    expect(r.ocs.map((o) => o.compra_id)).toEqual([ID.norte1]);
+    expect(r.reporte.totales.iguales).toBe(2);
+  });
+
+  it("una OC con caracteres que no admite es `oc_invalida` y no se aplica", () => {
+    const r = reimportar([n1("1", "45000/12#345"), n1("2", "45000/12#345")]);
+    expect(r.reporte.oc?.[0]).toMatchObject({ accion: "omitida", motivo: "oc_invalida" });
+    expect(r.ocs).toEqual([]);
+    expect(reimportar([n1("1", "o".repeat(41)), n1("2", "o".repeat(41))]).reporte.oc?.[0].motivo).toBe("oc_invalida");
+    expect(reimportar([n1("1", "  4500012345  "), n1("2", "4500012345")]).reporte.oc?.[0]).toMatchObject({ accion: "registrada", numero_oc: "4500012345" });
+  });
+
+  it("una compra nueva trae su OC en el plan, con `compra_id` nulo (se toma de `importar_compra`)", () => {
+    const r = previsualizar([n1("1", "4500012345")], { ...estadoImportacionBase(), proveedores });
+    expect(r.compras).toHaveLength(1);
+    expect(r.ocs).toEqual([{ compra_clave: CLAVE_N1, compra_id: null, numero_oc: "4500012345", antes: null, motivo: "Importado de archivo" }]);
+    expect(r.reporte.oc?.[0]).toMatchObject({ compra: null, accion: "registrada" });
+  });
+
+  it("si una columna de agrupador omite la fila de una compra nueva, su OC desaparece con ella", () => {
+    const r = previsualizar([n1("1", "4500012345")], { ...estadoImportacionBase(), proveedores });
+    const sin = omitirFilasDelPlan(r, [{ fila: 1, motivo: "embarque_desconocido" }]);
+    expect(sin.compras).toEqual([]);
+    expect(sin.ocs).toEqual([]);
+    expect(sin.reporte.oc).toEqual([]);
+  });
+
+  const COMPRADOR = { perfil_id: "11111111-1111-4111-8111-111111111111" };
+  const OTRO = "22222222-2222-4222-8222-222222222222";
+  const comoComprador: OpcionesImportacion = { carga_inicial: false, k_prima: "2026-09", comprador: COMPRADOR, archivo_nombre: "mis-compras.csv" };
+
+  it("F32: un comprador sobre una compra confirmada ajena: las líneas siguen la decisión 109 y la OC se omite con `oc_no_editable`", () => {
+    const r = reimportar([n1("1", "4500012345"), n1("2", "4500012345")], estadoBase(), comoComprador);
+    expect(r.reporte.oc?.[0]).toMatchObject({ accion: "omitida", motivo: "oc_no_editable" });
+    expect(r.reporte.oc?.[0].detalle).toContain("C-000201");
+    expect(r.ocs).toEqual([]);
+    expect(r.reporte.totales.iguales).toBe(2);
+    // Una línea nueva sobre esa compra ajena la omite la regla de la 109 (`compra_no_borrador`), sin tocar la OC.
+    const nueva = reimportar([n1("1", "4500012345"), n1("2", "4500012345"), n1("3", "4500012345")], estadoBase(), comoComprador);
+    expect(nueva.reporte.omitidas.map((o) => o.motivo)).toEqual(["compra_no_borrador"]);
+    expect(nueva.reporte.oc?.[0].motivo).toBe("oc_no_editable");
+  });
+
+  it("F32: en su propio borrador y en una compra nueva suya, el comprador sí pone la OC; en un borrador ajeno, no", () => {
+    const propio = estadoBase({ compras: estadoBase().compras.map((c) => (c.id === ID.norte1 ? { ...c, estado: "borrador" as const, perfil_id: COMPRADOR.perfil_id } : c)) });
+    expect(reimportar([n1("1", "4500012345"), n1("2", "4500012345")], propio, comoComprador).reporte.oc?.[0]).toMatchObject({ accion: "registrada" });
+    const ajeno = estadoBase({ compras: estadoBase().compras.map((c) => (c.id === ID.norte1 ? { ...c, estado: "borrador" as const, perfil_id: OTRO } : c)) });
+    expect(reimportar([n1("1", "4500012345"), n1("2", "4500012345")], ajeno, comoComprador).reporte.oc?.[0].motivo).toBe("oc_no_editable");
+    const nueva = previsualizarImportacionCompras([n1("1", "4500012345")], [], { ...estadoImportacionBase(), proveedores }, comoComprador);
+    expect(nueva.reporte.oc?.[0]).toMatchObject({ accion: "registrada", compra: null });
+    expect(nueva.ocs[0]).toMatchObject({ compra_id: null, motivo: "Importado de mis-compras.csv" });
+  });
+
+  it("admin y planner (sin `comprador`) aplican la OC en cualquier compra no cancelada, también confirmada y ajena", () => {
+    expect(reimportar([n1("1", "4500012345"), n1("2", "4500012345")]).reporte.oc?.[0].accion).toBe("registrada");
   });
 });

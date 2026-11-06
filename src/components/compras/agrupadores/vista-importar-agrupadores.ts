@@ -23,8 +23,15 @@ export const CAMPOS_AGRUPADORES: CampoImportador<CampoAgrupador>[] = [
   { campo: "destino", etiqueta: "Destino", alias: ["DESTINO"], opcional: true, hint: "Solo en viajes." },
   { campo: "fecha_inicio", etiqueta: "Fecha de inicio", alias: ["FECHA_INICIO", "INICIO"], opcional: true, hint: "Obligatoria en viajes." },
   { campo: "fecha_fin", etiqueta: "Fecha de fin", alias: ["FECHA_FIN", "FIN"], opcional: true },
-  { campo: "fecha_salida", etiqueta: "Fecha de salida", alias: ["FECHA_SALIDA", "SALIDA"], opcional: true },
-  { campo: "fecha_llegada", etiqueta: "Fecha de llegada", alias: ["FECHA_LLEGADA", "LLEGADA"], opcional: true, hint: "Obligatoria en embarques." },
+  { campo: "fecha_zarpe", etiqueta: "Zarpe", alias: ["FECHA_ZARPE", "ZARPE"], opcional: true },
+  { campo: "fecha_arribo", etiqueta: "Arribo (puerto)", alias: ["FECHA_ARRIBO", "ARRIBO"], opcional: true, hint: "No aplica a un embarque local." },
+  { campo: "fecha_ingreso_cd", etiqueta: "Ingreso CD", alias: ["FECHA_INGRESO_CD", "INGRESO_CD"], opcional: true, hint: "Obligatoria en embarques (o la columna vieja FECHA_LLEGADA)." },
+  { campo: "inicio_operativo", etiqueta: "Inicio operativo", alias: ["INICIO_OPERATIVO"], opcional: true, hint: "Fecha, o fecha y hora (aaaa-mm-dd hh:mm)." },
+  { campo: "fecha_ingreso_stock", etiqueta: "Ingreso al stock", alias: ["FECHA_INGRESO_STOCK", "INGRESO_STOCK"], opcional: true, hint: "Vacío = el mismo día del Ingreso CD." },
+  { campo: "origen", etiqueta: "Origen", alias: ["ORIGEN"], opcional: true, hint: "Almacén o ciudad de origen (California, Nueva York)." },
+  // Nombres viejos: se siguen leyendo como Zarpe e Ingreso CD (archivos y plantillas anteriores a 08b-1b).
+  { campo: "fecha_salida", etiqueta: "Fecha de salida (columna vieja)", alias: ["FECHA_SALIDA", "SALIDA"], opcional: true },
+  { campo: "fecha_llegada", etiqueta: "Fecha de llegada (columna vieja)", alias: ["FECHA_LLEGADA", "LLEGADA"], opcional: true },
   { campo: "puerto", etiqueta: "Puerto", alias: ["PUERTO", "PUERTO_EMBARQUE"], opcional: true },
   { campo: "referencia_logistica", etiqueta: "Referencia logística", alias: ["REFERENCIA_LOGISTICA", "REFERENCIA", "BL"], opcional: true },
   { campo: "responsable", etiqueta: "Responsable (correo)", alias: ["RESPONSABLE", "CORREO_RESPONSABLE"], opcional: true, hint: "Obligatorio en viajes: correo de un comprador o administrador activo." },
@@ -65,12 +72,15 @@ export const ETIQUETA_MOTIVO_OMISION_AGRUPADOR: Record<MotivoOmisionAgrupador, s
   cambiada_requiere_edicion: "Ya existe con otros datos: corrígelo en pantalla",
   correlativo_agotado: "Se agotaron los 99 códigos del mes: escribe el código",
   campo_largo: "Un campo supera su largo máximo",
+  hora_invalida: "Hora inválida (usa hh:mm, de 00:00 a 23:59)",
+  fechas_en_conflicto: "Una columna y su nombre viejo traen fechas distintas",
 };
 
 export const ETIQUETA_AVISO_IMPORTACION_AGRUPADOR: Record<AvisoImportacionAgrupador, string> = {
   viaje_cerrado: "El viaje está cerrado: igual se registra",
   sin_responsable: "Sin responsable propio ni heredable",
   puerto_distinto_del_habitual: "Puerto distinto del habitual del proveedor",
+  arribo_ignorado_en_local: "El arribo se ignoró: un embarque local no pasa por puerto",
 };
 
 export const ETIQUETA_TIPO_PLURAL: Record<TipoAgrupador, [string, string]> = { viaje: ["viaje", "viajes"], embarque: ["embarque", "embarques"], paquete: ["paquete", "paquetes"] };

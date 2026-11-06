@@ -6,12 +6,15 @@ import {
   MAX_FILAS_IMPORTACION,
   MAX_FILAS_MEZCLA,
   MAX_MOTIVO_CANCELACION,
+  MAX_MOTIVO_OC,
+  MAX_NUMERO_OC,
   MAX_NOMBRE_PROVEEDOR,
   MAX_NOTA_PROVEEDOR,
   MAX_NOTA_RECEPCION,
   MAX_RECEPCIONES_POR_LLAMADA,
   MAX_UNIDADES_LINEA,
   ORIGENES_COMPRA,
+  PATRON_NUMERO_OC,
 } from "./tipos";
 
 /**
@@ -121,6 +124,30 @@ export const proveedorSchema = z.strictObject(
 );
 export type ProveedorCuerpo = z.infer<typeof proveedorSchema>;
 
+// ─── Número de OC (08b-1b §2.11, decisión 121) ───
+
+const MENSAJE_OC = `La OC admite letras, números, guiones, barras, puntos, guiones bajos y espacios (hasta ${MAX_NUMERO_OC} caracteres) y empieza con letra o número.`;
+
+/**
+ * `PUT /api/compras/[id]/oc`. `antes` es la OC que vio el formulario (`null` = «sin registrar»): si otra persona la cambió entre medio,
+ * `409 oc_cambio`. `numero_oc = null` la quita. El motivo es opcional en el esquema (en pantalla lo pide quien reemplaza una OC que
+ * ya tenía). Una OC repetida en el mismo proveedor (`409 oc_repetida`) la decide la base, no este esquema.
+ */
+export const editarOcSchema = z.strictObject(
+  {
+    antes: z.string("`antes` debe ser texto o null.").nullable(),
+    numero_oc: z.string("La OC debe ser texto.").trim().regex(PATRON_NUMERO_OC, MENSAJE_OC).nullable(),
+    motivo: z
+      .string("El motivo debe ser texto.")
+      .trim()
+      .min(1, "Escribe el motivo.")
+      .max(MAX_MOTIVO_OC, `El motivo no puede superar ${MAX_MOTIVO_OC} caracteres.`)
+      .optional(),
+  },
+  { error: (iss) => (iss.code === "unrecognized_keys" ? `Dato desconocido: la petición lleva un campo que no existe. (${(iss as { keys?: string[] }).keys?.join(", ") ?? ""})` : undefined) },
+);
+export type EditarOc = z.infer<typeof editarOcSchema>;
+
 // ─── Importador de carga inicial (§0.13, 4.7) ───
 
 const celda = (campo: string) => celdaTexto(campo).default("");
@@ -154,6 +181,11 @@ export const filaImportacionCompraSchema = z.object({
   destino: celda("destino"),
   alcance: celdaTexto("alcance", 500).default(""),
   nota: celdaTexto("nota", MAX_CELDA_NOTA).default(""),
+  /**
+   * Número de OC de la compra (08b-1b §3.7). Opcional y SIN valor por defecto: así los archivos y los fixtures de M8 que no la traen
+   * siguen siendo válidos; ausente o vacía = «no dice nada» (nunca borra una OC). NO entra en la huella ni en la clave de importación.
+   */
+  oc: celdaTexto("oc").optional(),
 });
 export type FilaImportacionCompra = z.infer<typeof filaImportacionCompraSchema>;
 
@@ -219,6 +251,9 @@ export const comprasQuerySchema = z
     embarque_id: uuid("El embarque").optional(),
     mio: bandera("mio"),
     por_confirmar: bandera("por_confirmar"),
+    /** `vencido`: solo las compras con algún hito `vencido`; un ingreso «por confirmar» no entra (08b-1b §3.2). */
+    proximo_hito: z.literal("vencido", "proximo_hito solo admite «vencido».").optional(),
+    /** Busca en código X (`numero`), `numero_oc` y `referencia` (08b-1b). */
     q: z.string().trim().max(100, "La búsqueda no puede superar 100 caracteres.").optional(),
   })
   .refine((v) => v.llegada_desde === undefined || v.llegada_hasta === undefined || v.llegada_desde <= v.llegada_hasta, {

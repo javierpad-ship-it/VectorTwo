@@ -79,6 +79,7 @@ import {
 import {
   clasificarAsignacion,
   estimarPendientesAsignaciones,
+  mesDeDestino,
   periodoLlegada,
   planificarMovimiento,
   puedeReintentar,
@@ -118,6 +119,7 @@ import {
   ESTADOS_EMBARQUE,
   ESTADOS_PAQUETE,
   ESTADOS_VIAJE,
+  HITOS_CONFIRMABLES,
   TIPOS_EMBARQUE,
   type ActorAgrupador,
   type EmbarqueRegistro,
@@ -275,15 +277,21 @@ function armarMundo(db: MundoDb): Mundo {
       referencia_logistica: e.referencia_logistica,
       puerto_embarque: e.puerto_embarque,
       fecha_salida_estimada: e.fecha_salida_estimada,
+      fecha_puerto_estimada: e.fecha_puerto_estimada ?? null,
       fecha_llegada_estimada: e.fecha_llegada_estimada,
+      fecha_inicio_operativo_estimada: e.fecha_inicio_operativo_estimada ?? null,
+      hora_inicio_operativo: e.hora_inicio_operativo?.slice(0, 5) ?? null,
+      fecha_ingreso_estimada: e.fecha_ingreso_estimada ?? null,
       fecha_llegada_real: e.fecha_llegada_real,
-      // La misma regla que la columna generada `periodo_llegada` (revisión B2).
-      periodo_llegada: periodoLlegada(e.fecha_llegada_real, e.fecha_llegada_estimada),
+      // La misma regla que la columna generada `periodo_llegada` (revisión B2; desde la 0038 lee el ingreso al stock).
+      periodo_llegada: periodoLlegada(e.fecha_llegada_real, e.fecha_ingreso_estimada, e.fecha_llegada_estimada),
+      hito_confirmado: HITOS_CONFIRMABLES.find((h) => h === e.hito_confirmado) ?? null,
+      origen: e.origen ?? null,
       estado: elegir(ESTADOS_EMBARQUE, e.estado, "planificado"),
       nota: e.nota,
       revision: e.revision,
     })),
-    paquetes: db.paquetes.map((p) => ({ id: p.id, embarque_id: p.embarque_id, codigo: p.codigo, nombre: p.nombre, responsable_id: p.responsable_id, estado: elegir(ESTADOS_PAQUETE, p.estado, "abierto"), nota: p.nota })),
+    paquetes: db.paquetes.map((p) => ({ id: p.id, embarque_id: p.embarque_id, codigo: p.codigo, nombre: p.nombre, responsable_id: p.responsable_id, estado: elegir(ESTADOS_PAQUETE, p.estado, "abierto"), nota: p.nota, fecha_ingreso_estimada: p.fecha_ingreso_estimada ?? null, periodo_ingreso: p.periodo_ingreso ? mesDe(p.periodo_ingreso) : null })),
     asignaciones: db.asignaciones.map((a) => ({ id: a.id, entrega_id: a.entrega_id, embarque_id: a.embarque_id, paquete_id: a.paquete_id, unidades: a.unidades })),
     compras: db.compras.map((c) => ({
       id: c.id,
@@ -492,7 +500,15 @@ function paraAviso(ix: Ix, asignaciones: readonly AsignacionRegistro[]): Asignac
     const compra = linea ? ix.compra.get(linea.compra_id) : undefined;
     if (!entrega || !linea || !compra) continue;
     const clase = clasificarAsignacion(compra, linea);
-    salida.push({ periodo: entrega.periodo, historica: clase.historica, linea_recibida: clase.linea_recibida, paquete_id: a.paquete_id });
+    const e = ix.embarque.get(a.embarque_id);
+    salida.push({
+      periodo: entrega.periodo,
+      historica: clase.historica,
+      linea_recibida: clase.linea_recibida,
+      paquete_id: a.paquete_id,
+      // 08b-1b §2.4 bis: el mes de destino de la asignación (el de su paquete si tiene ingreso propio; si no, el del embarque).
+      ...(e ? { periodo_destino: mesDeDestino(e, a.paquete_id ? ix.paquete.get(a.paquete_id) : null) } : {}),
+    });
   }
   return salida;
 }
@@ -1357,7 +1373,8 @@ export function ganchosAgrupadoresCompras(d: Db, usuario: UsuarioAgrupadores): G
             ({ ix }) => {
               const e = ix.embarque.get(embarqueId as string);
               const items = entregas.data
-                .filter((x) => e !== undefined && mesDe(x.periodo) === e.periodo_llegada)
+                // 08b-1b §2.4 bis: la entrega debe estar en el MES DE DESTINO (el del ingreso propio del paquete de la fila, si lo tiene).
+                .filter((x) => e !== undefined && mesDe(x.periodo) === mesDeDestino(e, paqueteId ? ix.paquete.get(paqueteId) : null))
                 .map((x) => {
                   const libre = x.unidades - (ix.asigDeEntrega.get(x.id) ?? []).reduce((s, a) => s + a.unidades, 0);
                   const compra = ix.compra.get(ix.linea.get(x.linea_id)?.compra_id ?? "");

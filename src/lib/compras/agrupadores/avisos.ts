@@ -1,4 +1,5 @@
 import type { Mes } from "@/lib/compras/tipos";
+import { estadoHito } from "./hitos";
 import { estaDesalineada } from "./movimiento";
 import type { ResponsableCalculado } from "./responsable";
 import type { AvisoDetalleApi } from "./tipos-api";
@@ -20,12 +21,39 @@ export type AsignacionParaAviso = {
   linea_recibida: boolean;
   /** Paquete de la asignación (nulo = sin paquete). */
   paquete_id?: string | null;
+  /**
+   * Mes de destino de la asignación: `mesDeDestino(embarque, paquete de la asignación)` (08b-1b §2.4 bis), que calcula `consultas.ts`. Sin
+   * él (quien no lo conozca) se compara contra el mes del embarque, como en 08b-1.
+   */
+  periodo_destino?: Mes;
 };
 
 const enOrden = (avisos: Iterable<AvisoAgrupador>): AvisoAgrupador[] => {
   const s = new Set(avisos);
   return AVISOS_AGRUPADOR.filter((a) => s.has(a));
 };
+
+/** El ingreso al stock del embarque está `vencido` (no `por_confirmar`); con los campos nuevos ausentes se comporta como 08b-1 (la llegada al CD ya pasó). */
+function ingresoVencido(e: Pick<EmbarqueRegistro, "estado" | "fecha_llegada_estimada"> & Partial<Pick<EmbarqueRegistro, "tipo" | "fecha_salida_estimada" | "fecha_puerto_estimada" | "fecha_inicio_operativo_estimada" | "hora_inicio_operativo" | "fecha_ingreso_estimada" | "fecha_llegada_real" | "hito_confirmado">>, hoy: string): boolean {
+  return (
+    estadoHito(
+      "ingreso_stock",
+      {
+        tipo: e.tipo ?? "importacion",
+        estado: e.estado,
+        fecha_salida_estimada: e.fecha_salida_estimada ?? null,
+        fecha_puerto_estimada: e.fecha_puerto_estimada ?? null,
+        fecha_llegada_estimada: e.fecha_llegada_estimada,
+        fecha_inicio_operativo_estimada: e.fecha_inicio_operativo_estimada ?? null,
+        hora_inicio_operativo: e.hora_inicio_operativo ?? null,
+        fecha_ingreso_estimada: e.fecha_ingreso_estimada ?? null,
+        fecha_llegada_real: e.fecha_llegada_real ?? null,
+        hito_confirmado: e.hito_confirmado ?? null,
+      },
+      hoy,
+    ) === "vencido"
+  );
+}
 
 /** `sin_responsable` del viaje: el propio no es asignable, o falta (solo si se borró el perfil). */
 export function avisosViaje(responsable: ResponsableCalculado): AvisoAgrupador[] {
@@ -34,11 +62,14 @@ export function avisosViaje(responsable: ResponsableCalculado): AvisoAgrupador[]
 
 /**
  * Avisos de un embarque. `asignaciones` son las suyas (activas e históricas). `atrasado`: sigue sin recibirse (`planificado` o
- * `en_transito`) y su llegada estimada ya pasó; `en_embarque_cancelado`: cancelado con asignaciones activas (se ofrece «Quitar del
- * embarque»); `desalineada`: alguna asignación activa no está en el mes de llegada (se ofrece «Realinear»).
+ * `en_transito`) y su INGRESO AL STOCK está `vencido` (fecha efectiva anterior a hoy, sin ingreso real y sin que la mercadería figure ya
+ * en el CD: un ingreso `por_confirmar` no es atraso; 08b-1b §2.2); `en_embarque_cancelado`: cancelado con asignaciones activas (se ofrece
+ * «Quitar del embarque»); `desalineada`: alguna asignación activa no está en su mes de destino (se ofrece «Realinear»). Los avisos de los
+ * demás hitos (`hito_vencido`) los da `avisosDeHitos` de `hitos.ts`.
  */
 export function avisosEmbarque(entrada: {
-  embarque: Pick<EmbarqueRegistro, "estado" | "fecha_llegada_estimada" | "periodo_llegada">;
+  embarque: Pick<EmbarqueRegistro, "estado" | "fecha_llegada_estimada" | "periodo_llegada"> &
+    Partial<Pick<EmbarqueRegistro, "tipo" | "fecha_salida_estimada" | "fecha_puerto_estimada" | "fecha_inicio_operativo_estimada" | "hora_inicio_operativo" | "fecha_ingreso_estimada" | "fecha_llegada_real" | "hito_confirmado">>;
   viaje: Pick<ViajeRegistro, "estado"> | null;
   responsable: ResponsableCalculado;
   asignaciones: readonly AsignacionParaAviso[];
@@ -48,10 +79,10 @@ export function avisosEmbarque(entrada: {
   const avisos: AvisoAgrupador[] = [];
   const activas = asignaciones.filter((a) => !a.historica);
   if (responsable.faltante) avisos.push("sin_responsable");
-  if ((embarque.estado === "planificado" || embarque.estado === "en_transito") && embarque.fecha_llegada_estimada < hoy) avisos.push("atrasado");
+  if ((embarque.estado === "planificado" || embarque.estado === "en_transito") && ingresoVencido(embarque, hoy)) avisos.push("atrasado");
   if (viaje?.estado === "cerrado") avisos.push("viaje_cerrado");
   if (embarque.estado === "cancelado" && activas.length > 0) avisos.push("en_embarque_cancelado");
-  if (activas.some((a) => estaDesalineada(a.periodo, embarque.periodo_llegada))) avisos.push("desalineada");
+  if (activas.some((a) => estaDesalineada(a.periodo, a.periodo_destino ?? embarque.periodo_llegada))) avisos.push("desalineada");
   if (asignaciones.some((a) => a.historica)) avisos.push("asignaciones_historicas");
   if (asignaciones.some((a) => a.linea_recibida)) avisos.push("linea_recibida");
   return enOrden(avisos);
@@ -67,7 +98,7 @@ export function avisosPaquete(entrada: {
   const { responsable, asignaciones, embarque } = entrada;
   const avisos: AvisoAgrupador[] = [];
   if (responsable.faltante) avisos.push("sin_responsable");
-  if (asignaciones.filter((a) => !a.historica).some((a) => estaDesalineada(a.periodo, embarque.periodo_llegada))) avisos.push("desalineada");
+  if (asignaciones.filter((a) => !a.historica).some((a) => estaDesalineada(a.periodo, a.periodo_destino ?? embarque.periodo_llegada))) avisos.push("desalineada");
   if (asignaciones.some((a) => a.historica)) avisos.push("asignaciones_historicas");
   return enOrden(avisos);
 }

@@ -193,3 +193,48 @@ describe("cambios aditivos de M8 (§3.3, §3.9)", () => {
     expect(sinComentarios(archivo("src/app/api/compras/route.ts").texto)).not.toMatch(/cookies/);
   });
 });
+
+describe("08b-1b §2.4 bis: una sola regla del mes de una asignación (`mesDeDestino`)", () => {
+  const compras = enDir("src/lib/compras/").map((f) => ({ ruta: f.ruta, texto: sinComentarios(f.texto) }));
+
+  it("`mesDeDestino` y `periodoLlegada` se definen una sola vez, en movimiento.ts", () => {
+    for (const nombre of ["mesDeDestino", "periodoLlegada"]) {
+      const definen = src.filter((f) => !f.ruta.startsWith("tests/") && new RegExp(`export (function|const) ${nombre}\\b`).test(sinComentarios(f.texto)));
+      expect(definen.map((f) => f.ruta), nombre).toEqual(["src/lib/compras/agrupadores/movimiento.ts"]);
+    }
+  });
+
+  it("ninguna entrega se compara contra `periodo_llegada` (ni al revés) fuera de `mesDeDestino` y `periodoLlegada`", () => {
+    const comparaEntregaConEmbarque = [/\bperiodo\w*\s*(===|!==|<=|>=|<|>)\s*[\w.?()]*\.periodo_llegada\b/, /\.periodo_llegada\s*(===|!==|<=|>=|<|>)\s*[\w.?()]*\bperiodo\b/];
+    for (const f of compras) for (const patron of comparaEntregaConEmbarque) expect(f.texto, `${f.ruta} ${patron}`).not.toMatch(patron);
+  });
+
+  it("`estaDesalineada` se llama siempre con el mes de destino de la asignación (`periodo_destino` o `mesDeDestino`), nunca con el mes del embarque a secas", () => {
+    for (const f of compras) {
+      for (const m of f.texto.matchAll(/estaDesalineada\(([^)]*\))/g)) {
+        if (f.ruta === "src/lib/compras/agrupadores/movimiento.ts") continue; // su definición
+        expect(m[1], `${f.ruta}: estaDesalineada(${m[1]}`).toMatch(/periodo_destino|mesDeDestino/);
+      }
+    }
+  });
+
+  it("`periodo_llegada` solo lo leen los archivos que lo definen, lo muestran o lo traducen: movimiento, tipos, tipos-api, avisos, hitos, importar y servicio", () => {
+    const leen = compras.filter((f) => /\bperiodo_llegada\b/.test(f.texto)).map((f) => f.ruta);
+    expect(leen.sort()).toEqual(
+      [
+        "src/lib/compras/agrupadores/avisos.ts",
+        "src/lib/compras/agrupadores/hitos.ts",
+        "src/lib/compras/agrupadores/importar.ts",
+        "src/lib/compras/agrupadores/movimiento.ts",
+        "src/lib/compras/agrupadores/servicio.ts",
+        "src/lib/compras/agrupadores/tipos-api.ts",
+        "src/lib/compras/agrupadores/tipos.ts",
+      ].sort(),
+    );
+  });
+
+  it("el Excel y el flujo no leen el mes de un embarque por su cuenta: `excel.ts` no usa `periodo_llegada` y `src/lib/flujo` tampoco", () => {
+    expect(compras.find((f) => f.ruta === "src/lib/compras/agrupadores/excel.ts")?.texto).not.toMatch(/periodo_llegada/);
+    for (const f of enDir("src/lib/flujo/")) expect(sinComentarios(f.texto), f.ruta).not.toMatch(/periodo_llegada/);
+  });
+});

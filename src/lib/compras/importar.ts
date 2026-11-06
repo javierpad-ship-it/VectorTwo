@@ -35,6 +35,7 @@ import {
   MAX_NOTA_LINEA,
   MAX_REFERENCIA,
   MAX_UNIDADES_LINEA,
+  PATRON_NUMERO_OC,
   TALLAS_COMPRA,
   TIPOS_LINEA_DISPONIBLES,
   type ActorImportarCompra,
@@ -56,8 +57,10 @@ import type {
   LineaImportacionApi,
   MotivoOmisionCompra,
   NoAplicadaImportacionApi,
+  OcImportacionApi,
   ReporteImportacionComprasApi,
 } from "./tipos-api";
+import { mensajeOcDeOtroProveedor, mensajeOcRepetida } from "./tipos-api";
 
 /**
  * Importador de la carga inicial de compras (ficha 08, §0.13, 4.7 y regla 18). Funciones puras: leen las celdas (todo texto),
@@ -125,7 +128,12 @@ export type CompraExistente = {
    */
   fecha_compra?: string;
   moneda?: Moneda;
+  /** Número de OC guardado (08b-1b §3.7): el `antes` de `editar_oc_compra`. Ausente = sin OC. */
+  numero_oc?: string | null;
 };
+
+/** Una compra viva (no cancelada) que tiene una OC igual a alguna del archivo: para `oc_repetida` (mismo proveedor) y `oc_de_otro_proveedor`. */
+export type OcViva = { compra_id: string; compra_numero: string; proveedor_id: string; proveedor_nombre: string; numero_oc: string };
 
 export type RepartoVigenteParaImportar = RepartoParaLinea & { marca_id: string };
 
@@ -148,6 +156,11 @@ export type EstadoImportacionCompras = {
   repartos: RepartoVigenteParaImportar[];
   /** Reglas intercompany (cualquier vigencia): para `directo_con_regla` / `directo_sin_regla`. */
   reglas: ReglaBase[];
+  /**
+   * Compras vivas cuya OC es igual (`upper(btrim)`) a alguna del archivo, de cualquier proveedor (se leen con `compras_numero_oc_idx`). Sin
+   * ellas no se detecta `oc_repetida` contra la base ni el aviso `oc_de_otro_proveedor` (08b-1b §3.7).
+   */
+  ocs_vivas?: OcViva[];
 };
 
 export type OpcionesImportacion = {
@@ -161,6 +174,8 @@ export type OpcionesImportacion = {
    * (`perfil_id` = este). Con otra compra existente la fila nueva se omite con `compra_no_borrador`. Admin y planner no lo pasan.
    */
   comprador?: { perfil_id: string } | null;
+  /** Nombre del archivo, para el motivo «Importado de <archivo>» del cambio de OC. */
+  archivo_nombre?: string;
 };
 
 /** Una línea de `p_compra.lineas` de `importar_compra`. */
@@ -216,11 +231,37 @@ export type PlanCompraImportar = {
   lineas: LineaPlanImportar[];
 };
 
+/**
+ * Una OC a registrar o cambiar (08b-1b §3.7): UNA llamada más por compra, a `editar_oc_compra`, en su propia transacción, DESPUÉS de
+ * `importar_compra` y antes de las llamadas de agrupador. `compra_id` nulo = la compra la crea este archivo: el servicio toma su id del
+ * resultado de `importar_compra` por `compra_clave`. Un corte deja la compra sin OC; reimportar el archivo la completa.
+ */
+export type PlanOcImportar = {
+  compra_clave: string;
+  compra_id: string | null;
+  numero_oc: string;
+  /** `p_antes`: la OC que leyó la previsualización (nulo = sin OC). */
+  antes: string | null;
+  /** `p_motivo`: «Importado de <archivo>». */
+  motivo: string;
+};
+
 export type ResultadoPrevisualizacion = {
   reporte: ReporteImportacionComprasApi;
   /** Compras con líneas nuevas, en el orden de su primera aparición en el archivo. */
   compras: PlanCompraImportar[];
+  /** OC a aplicar con `editar_oc_compra`, en el orden de su primera aparición en el archivo (también de compras que ya existían). */
+  ocs: PlanOcImportar[];
 };
+
+/** `p_*` de `editar_oc_compra(p_compra, p_antes, p_numero_oc, p_motivo, p_actor)`. */
+export const argsEditarOcCompra = (plan: PlanOcImportar, compraId: string, actor: ActorImportarCompra): { p_compra: string; p_antes: string | null; p_numero_oc: string; p_motivo: string; p_actor: ActorImportarCompra } => ({
+  p_compra: compraId,
+  p_antes: plan.antes,
+  p_numero_oc: plan.numero_oc,
+  p_motivo: plan.motivo,
+  p_actor: actor,
+});
 
 // ─── Clave natural y huella ───
 
@@ -404,6 +445,8 @@ type DatosFila = {
   avisos: { aviso: AvisoImportacionCompra; detalle?: string }[];
   proveedor: ProveedorRegistro | null;
   nota: string | null;
+  /** Columna `OC` de la fila, sin espacios al borde; `""` si no viene (no entra en la huella ni en la clave). */
+  oc: string;
 };
 
 /** `true` si la compra es un borrador cuyo dueño es `perfilId`: lo único a lo que el comprador puede agregar líneas. */
@@ -510,6 +553,8 @@ export function previsualizarImportacionCompras(
   const grupos = new Map<string, GrupoCompra>();
   const vistos = new Map<string, number>();
   const cabeceras = new Map<string, { fila: number; fecha: string; moneda: Moneda }>();
+  /** Columna `OC` por compra: las filas `nueva` o `igual` que la traen (vacía = «no dice nada»). Una `cambiada` se omite y no cuenta. */
+  const ocsDelArchivo = new Map<string, { valores: { fila: number; oc: string }[] }>();
   let nuevas = 0;
   let iguales = 0;
   let cambiadas = 0;
@@ -628,6 +673,11 @@ export function previsualizarImportacionCompras(
       grupos.set(d.compra_clave, grupo);
     }
     grupo.validas += 1;
+    if (clasificacion !== "cambiada" && d.oc !== "") {
+      const previas = ocsDelArchivo.get(d.compra_clave);
+      if (previas) previas.valores.push({ fila, oc: d.oc });
+      else ocsDelArchivo.set(d.compra_clave, { valores: [{ fila, oc: d.oc }] });
+    }
 
     let cambios: string[] = [];
     if (clasificacion === "igual") iguales += 1;
@@ -702,8 +752,12 @@ export function previsualizarImportacionCompras(
     });
   }
 
+  // Número de OC por compra (08b-1b §3.7): no entra en la huella ni cambia la clasificación de las líneas.
+  const { ocsApi, ocsPlan } = evaluarOcs(ocsDelArchivo, [...grupos.values()], estado, opciones);
+
   return {
     compras,
+    ocs: ocsPlan,
     reporte: {
       modo: "previsualizar",
       carga_inicial: opciones.carga_inicial,
@@ -716,8 +770,90 @@ export function previsualizarImportacionCompras(
       avisos: avisosPlanos,
       aplicadas: [],
       no_aplicadas: [],
+      oc: ocsApi,
     },
   };
+}
+
+/**
+ * Qué hace la columna `OC` con cada compra del archivo (§3.7). La OC nunca sirve para encontrar ni crear una compra. Por compra:
+ *  - Varias OC distintas en sus filas: `oc_distinta_en_compra`, no se aplica (una OC equivocada es peor que ninguna).
+ *  - Formato inválido (más de 40, o caracteres que no admite): `oc_invalida`, no se aplica.
+ *  - Compra cancelada, o un COMPRADOR sobre una compra que no es su borrador (decisión 109): `oc_no_editable`; las compras NUEVAS siempre.
+ *  - Igual a la guardada: `sin_cambio`. Otra compra viva del mismo proveedor ya la tiene (en la base o antes en el archivo): `oc_repetida`.
+ *  - Si no: `registrada` (no tenía) o `cambiada`, con el aviso `oc_de_otro_proveedor` por cada compra viva de otro proveedor con la misma OC.
+ * Vacía no cuenta (no borra nunca una OC: para quitarla, la pantalla).
+ */
+function evaluarOcs(
+  ocsDelArchivo: ReadonlyMap<string, { valores: { fila: number; oc: string }[] }>,
+  grupos: readonly GrupoCompra[],
+  estado: EstadoImportacionCompras,
+  opciones: OpcionesImportacion,
+): { ocsApi: OcImportacionApi[]; ocsPlan: PlanOcImportar[] } {
+  const ocsApi: OcImportacionApi[] = [];
+  const ocsPlan: PlanOcImportar[] = [];
+  const clave = (oc: string) => oc.trim().toUpperCase();
+  const vivas = estado.ocs_vivas ?? [];
+  /** OC (por proveedor) que una compra del archivo ya se quedó: la segunda compra del mismo proveedor con la misma OC es `oc_repetida`. */
+  const tomadasEnArchivo = new Map<string, string>();
+  const motivoCambio = `Importado de ${opciones.archivo_nombre && opciones.archivo_nombre.trim() !== "" ? opciones.archivo_nombre.trim() : "archivo"}`;
+
+  for (const g of grupos) {
+    const info = ocsDelArchivo.get(g.clave);
+    if (!info) continue;
+    if (g.existente === null && g.nuevas.length === 0) continue; // no hay compra donde ponerla
+    const existente = g.existente;
+    const antes = existente?.numero_oc ?? null;
+    const base = { compra_clave: g.clave, proveedor: g.proveedor_txt, referencia: g.referencia_txt, compra: existente ? { id: existente.id, numero: existente.numero } : null, antes, avisos: [] as OcImportacionApi["avisos"] };
+    const distintas = new Set(info.valores.map((v) => clave(v.oc)));
+    const oc = info.valores[0].oc;
+    if (distintas.size > 1) {
+      ocsApi.push({ ...base, numero_oc: null, accion: "omitida", motivo: "oc_distinta_en_compra", detalle: `Las filas de esta compra traen OC distintas (${info.valores.map((v) => `fila ${v.fila}: ${v.oc}`).join("; ")}): no se aplica ninguna.` });
+      continue;
+    }
+    if (!PATRON_NUMERO_OC.test(oc)) {
+      ocsApi.push({ ...base, numero_oc: oc, accion: "omitida", motivo: "oc_invalida", detalle: `«${oc}» no es una OC válida (letras, números, guiones, barras, puntos y espacios; hasta 40 caracteres).` });
+      continue;
+    }
+    const noEditable =
+      (existente !== null && (existente.estado === "cancelada" || (opciones.comprador != null && !esBorradorPropio(existente, opciones.comprador.perfil_id)))) ||
+      false;
+    if (noEditable && existente) {
+      ocsApi.push({
+        ...base,
+        numero_oc: oc,
+        accion: "omitida",
+        motivo: "oc_no_editable",
+        detalle: existente.estado === "cancelada" ? `La compra ${existente.numero} está cancelada: su OC no se edita.` : `Pide a quien registró ${existente.numero} o a un planner que ponga la OC, o hazlo desde la compra.`,
+      });
+      continue;
+    }
+    if (antes !== null && clave(antes) === clave(oc)) {
+      ocsApi.push({ ...base, numero_oc: oc, accion: "sin_cambio" });
+      tomadasEnArchivo.set(`${g.proveedor?.id ?? claveProveedor(g.proveedor_txt)}|${clave(oc)}`, g.clave);
+      continue;
+    }
+    const llaveProveedor = `${g.proveedor?.id ?? claveProveedor(g.proveedor_txt)}|${clave(oc)}`;
+    const enBase = g.proveedor ? vivas.find((v) => v.proveedor_id === g.proveedor?.id && clave(v.numero_oc) === clave(oc) && v.compra_id !== existente?.id) : undefined;
+    if (enBase) {
+      ocsApi.push({ ...base, numero_oc: oc, accion: "omitida", motivo: "oc_repetida", detalle: mensajeOcRepetida(oc, enBase.compra_numero) });
+      continue;
+    }
+    if (tomadasEnArchivo.has(llaveProveedor)) {
+      ocsApi.push({ ...base, numero_oc: oc, accion: "omitida", motivo: "oc_repetida", detalle: `La OC ${oc} ya está en otra compra de este proveedor en este mismo archivo. Una OC es de una sola compra.` });
+      continue;
+    }
+    tomadasEnArchivo.set(llaveProveedor, g.clave);
+    const otros = vivas.filter((v) => clave(v.numero_oc) === clave(oc) && v.proveedor_id !== g.proveedor?.id);
+    ocsApi.push({
+      ...base,
+      numero_oc: oc,
+      accion: antes === null ? "registrada" : "cambiada",
+      avisos: otros.map((v) => ({ aviso: "oc_de_otro_proveedor" as const, detalle: mensajeOcDeOtroProveedor(oc, v.compra_numero, v.proveedor_nombre) })),
+    });
+    ocsPlan.push({ compra_clave: g.clave, compra_id: existente?.id ?? null, numero_oc: oc, antes, motivo: motivoCambio });
+  }
+  return { ocsApi, ocsPlan };
 }
 
 type Ayudas = {
@@ -990,6 +1126,7 @@ function procesarFila(
       avisos,
       proveedor,
       nota,
+      oc: (cruda.oc ?? "").trim(),
     },
   };
 }
@@ -1106,6 +1243,7 @@ export function agregarAviso(
   const lineas = resultado.reporte.lineas.map((l) => (l.fila === fila && !l.avisos.includes(aviso) ? { ...l, avisos: [...l.avisos, aviso] } : l));
   return {
     compras,
+    ocs: resultado.ocs,
     reporte: { ...resultado.reporte, lineas, avisos: [...resultado.reporte.avisos, { fila, aviso, ...(detalle === undefined ? {} : { detalle }) }] },
   };
 }
@@ -1169,10 +1307,14 @@ export function omitirFilasDelPlan(resultado: ResultadoPrevisualizacion, omision
   }
 
   const n = quitadasNuevas.size;
+  // Una compra que este archivo iba a crear y que se quedó sin líneas nuevas no existe: su OC tampoco se aplica ni se reporta.
+  const existeLaCompra = (o: { compra_id?: string | null; compra?: { id: string } | null; compra_clave: string }) => (o.compra_id ?? o.compra?.id ?? null) !== null || quedan.has(o.compra_clave);
   return {
     compras,
+    ocs: resultado.ocs.filter(existeLaCompra),
     reporte: {
       ...rep,
+      ...(rep.oc === undefined ? {} : { oc: rep.oc.filter(existeLaCompra) }),
       totales: { ...rep.totales, omitidas: rep.totales.omitidas + omitidas.length, nuevas: rep.totales.nuevas - n, procesadas: rep.totales.procesadas - n },
       compras_a_crear: comprasApi,
       proveedores_a_crear: proveedoresNuevos,

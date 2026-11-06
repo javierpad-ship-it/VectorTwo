@@ -1,6 +1,9 @@
 import { FECHA_INVALIDA, aIso, esDiaReal, leerFecha } from "@/lib/tiendas/fechas";
 import type { Mes } from "@/lib/compras/tipos";
 import { aammDe, normalizarCodigo, siguienteCodigo } from "./codigos";
+import { sumarDias } from "./fechas";
+import { mesDeDestino, periodoLlegada } from "./movimiento";
+import { mesDe } from "@/lib/compras/reglas";
 import type { FilaAgrupador } from "./esquemas";
 import { esAsignable, responsableEfectivo } from "./responsable";
 import type { AgrupadorImportacionCompraApi, FilaImportacionAgrupadorApi, ReporteImportacionAgrupadoresApi, ResumenClasificacionApi } from "./tipos-api";
@@ -10,6 +13,7 @@ import {
   MAX_NOTA_EMBARQUE,
   MAX_NOTA_PAQUETE,
   MAX_NOTA_VIAJE,
+  MAX_ORIGEN_EMBARQUE,
   MAX_PUERTO_EMBARQUE,
   MAX_REFERENCIA_LOGISTICA,
   PATRON_CODIGO_AGRUPADOR,
@@ -40,7 +44,7 @@ import {
  *    y un paquete a un embarque del mismo archivo, pero solo POR CÓDIGO: la fila referida debe traer `CODIGO` (si no,
  *    `referencia_sin_codigo`); si apunta a una fila que se omitió, `referencia_omitida`. Un código que existe en la base manda sobre el archivo.
  *  - Clave: con `CODIGO`, (tipo, código). Sin él, la natural: viaje (NOMBRE en mayúsculas, FECHA_INICIO); embarque (NOMBRE en mayúsculas,
- *    FECHA_LLEGADA); paquete (EMBARQUE, NOMBRE en mayúsculas). Contra la base cada fila es `nueva`, `igual` (mismo contenido normalizado: no
+ *    FECHA_INGRESO_CD, o su sinónimo FECHA_LLEGADA); paquete (EMBARQUE, NOMBRE en mayúsculas). Contra la base cada fila es `nueva`, `igual` (mismo contenido normalizado: no
  *    hace nada) o `cambiada` (otro contenido: no se aplica, `cambiada_requiere_edicion` con la diferencia). Reimportar no duplica nada.
  *  - Los códigos sin escribir se numeran al aplicar: primero quedan reservados los escritos (ocupan su correlativo) y después se
  *    autonumera en orden de fila (el máximo más uno por mes, `correlativo_agotado` con 99). En `previsualizar` quedan nulos («se numera
@@ -80,6 +84,34 @@ export function leerFechaAgrupador(valor: string): string | null | "invalida" {
   return a >= 2000 && a <= 2100 && esDiaReal(a, m, d) ? f : "invalida";
 }
 
+/**
+ * `INICIO_OPERATIVO` (08b-1b §3.6): `aaaa-mm-dd` (solo fecha), `aaaa-mm-dd hh:mm`, `dd/mm/aaaa hh:mm` o una celda de fecha y hora de Excel
+ * (número de serie con fracción; el lector del navegador ya suele pasarla a texto). Devuelve `{ fecha, hora }` (la hora `hh:mm` o `null` si
+ * solo vino la fecha), `null` si está vacío, `"invalida"` si la fecha no es válida y `"hora_invalida"` si la hora está fuera de rango.
+ */
+export function leerInicioOperativo(valor: string): { fecha: string; hora: string | null } | null | "invalida" | "hora_invalida" {
+  const t = valor.trim();
+  if (t === "") return null;
+  const serie = /^(\d{5})(\.\d+)?$/.exec(t);
+  if (serie) {
+    const fecha = leerFechaAgrupador(serie[1]);
+    if (fecha === "invalida" || fecha === null) return "invalida";
+    if (serie[2] === undefined) return { fecha, hora: null };
+    const minutos = Math.round(Number(serie[2]) * 1440);
+    if (minutos >= 1440) return { fecha: sumarDias(fecha, 1), hora: "00:00" };
+    return { fecha, hora: `${String(Math.floor(minutos / 60)).padStart(2, "0")}:${String(minutos % 60).padStart(2, "0")}` };
+  }
+  const partes = /^(\S+?)(?:[ T]+(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?)?$/.exec(t);
+  if (!partes) return "invalida";
+  const fecha = leerFechaAgrupador(partes[1]);
+  if (fecha === "invalida" || fecha === null) return "invalida";
+  if (partes[2] === undefined) return { fecha, hora: null };
+  const h = Number(partes[2]);
+  const m = Number(partes[3]);
+  if (h > 23 || m > 59) return "hora_invalida";
+  return { fecha, hora: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` };
+}
+
 // ─── Estado y resultados ───
 
 export type PerfilConCorreo = PerfilRegistro & { email: string };
@@ -106,7 +138,7 @@ export type LoteViaje = {
 
 export type LoteEmbarque = {
   fila: number;
-  /** Nulo = se numera al aplicar (`aamm` de `fecha_llegada_estimada`). */
+  /** Nulo = se numera al aplicar (`aamm` del Ingreso CD, `fecha_llegada_estimada`). */
   codigo: string | null;
   nombre: string;
   tipo: TipoEmbarque;
@@ -117,14 +149,23 @@ export type LoteEmbarque = {
   responsable_id: string | null;
   referencia_logistica: string | null;
   puerto_embarque: string | null;
+  /** Zarpe. */
   fecha_salida_estimada: string | null;
+  /** Arribo; nulo en un `LOCAL` (se ignora con aviso). */
+  fecha_puerto_estimada: string | null;
+  /** Ingreso CD (obligatoria). */
   fecha_llegada_estimada: string;
+  fecha_inicio_operativo_estimada: string | null;
+  hora_inicio_operativo: string | null;
+  /** Ingreso al stock fijado; nulo = el día del Ingreso CD. */
+  fecha_ingreso_estimada: string | null;
+  origen: string | null;
   nota: string | null;
 };
 
 export type LotePaquete = {
   fila: number;
-  /** Nulo = se numera al aplicar (`aamm` del mes de llegada de su embarque). */
+  /** Nulo = se numera al aplicar (`aamm` del Ingreso CD de su embarque; 08b-1b §2.4). */
   codigo: string | null;
   nombre: string;
   /** Un embarque que ya existe. */
@@ -163,13 +204,22 @@ type DatosFila = {
   fecha_fin: string | null;
   viaje_ref: string | null;
   tipo_embarque: TipoEmbarque;
+  /** Zarpe (`FECHA_ZARPE` o su sinónimo `FECHA_SALIDA`). */
   fecha_salida: string | null;
+  fecha_arribo: string | null;
+  /** Ingreso CD (`FECHA_INGRESO_CD` o su sinónimo `FECHA_LLEGADA`). */
   fecha_llegada: string | null;
+  inicio_fecha: string | null;
+  inicio_hora: string | null;
+  fecha_ingreso_stock: string | null;
+  origen: string | null;
   puerto: string | null;
   referencia_logistica: string | null;
   embarque_ref: string | null;
   responsable: PerfilConCorreo | null;
   nota: string | null;
+  /** Avisos de la lectura de la fila (`arribo_ignorado_en_local`). */
+  avisos: AvisoImportacionAgrupador[];
 };
 
 type Omision = { motivo: MotivoOmisionAgrupador; detalle?: string };
@@ -189,7 +239,7 @@ function leerTipoEmbarque(valor: string): TipoEmbarque | null {
 }
 
 function leerFilaAgrupador(f: FilaAgrupador, perfiles: readonly PerfilConCorreo[]): Lectura {
-  const todoVacio = [f.tipo, f.codigo, f.nombre, f.viaje, f.embarque, f.tipo_embarque, f.destino, f.fecha_inicio, f.fecha_fin, f.fecha_salida, f.fecha_llegada, f.puerto, f.referencia_logistica, f.responsable, f.nota].every((v) => texto(v) === "");
+  const todoVacio = [f.tipo, f.codigo, f.nombre, f.viaje, f.embarque, f.tipo_embarque, f.destino, f.fecha_inicio, f.fecha_fin, f.fecha_salida, f.fecha_llegada, f.fecha_zarpe, f.fecha_arribo, f.fecha_ingreso_cd, f.inicio_operativo, f.fecha_ingreso_stock, f.origen, f.puerto, f.referencia_logistica, f.responsable, f.nota].every((v) => texto(v) === "");
   if (todoVacio) return falla(null, "tipo_invalido", "La fila está vacía.");
   const tipo = leerTipoAgrupador(f.tipo);
   if (tipo === null) return falla(null, "tipo_invalido", `«${texto(f.tipo)}» no es un tipo válido (VIAJE, EMBARQUE o PAQUETE).`);
@@ -205,7 +255,7 @@ function leerFilaAgrupador(f: FilaAgrupador, perfiles: readonly PerfilConCorreo[
   const notaMax = tipo === "viaje" ? MAX_NOTA_VIAJE : tipo === "embarque" ? MAX_NOTA_EMBARQUE : MAX_NOTA_PAQUETE;
   const largos: [string, string, number][] = [["La nota", texto(f.nota), notaMax]];
   if (tipo === "viaje") largos.push(["El destino", texto(f.destino), MAX_DESTINO_VIAJE]);
-  if (tipo === "embarque") largos.push(["El puerto", texto(f.puerto), MAX_PUERTO_EMBARQUE], ["La referencia logística", texto(f.referencia_logistica), MAX_REFERENCIA_LOGISTICA]);
+  if (tipo === "embarque") largos.push(["El puerto", texto(f.puerto), MAX_PUERTO_EMBARQUE], ["La referencia logística", texto(f.referencia_logistica), MAX_REFERENCIA_LOGISTICA], ["El origen", texto(f.origen), MAX_ORIGEN_EMBARQUE]);
   for (const [campo, valor, max] of largos) if (valor.length > max) return falla(tipo, "campo_largo", `${campo} no puede superar ${max} caracteres.`);
 
   const vacioANulo = (v: string | undefined) => (texto(v) === "" ? null : texto(v));
@@ -220,12 +270,18 @@ function leerFilaAgrupador(f: FilaAgrupador, perfiles: readonly PerfilConCorreo[
     viaje_ref: null,
     tipo_embarque: "importacion" as TipoEmbarque,
     fecha_salida: null,
+    fecha_arribo: null,
     fecha_llegada: null,
+    inicio_fecha: null,
+    inicio_hora: null,
+    fecha_ingreso_stock: null,
+    origen: null,
     puerto: null,
     referencia_logistica: null,
     embarque_ref: null,
     responsable: null,
     nota: vacioANulo(f.nota),
+    avisos: [],
   } satisfies Omit<DatosFila, "fila"> & { fila: number };
   const datos: DatosFila = { ...base };
 
@@ -243,16 +299,41 @@ function leerFilaAgrupador(f: FilaAgrupador, perfiles: readonly PerfilConCorreo[
   } else if (tipo === "embarque") {
     const tipoEmb = leerTipoEmbarque(texto(f.tipo_embarque));
     if (tipoEmb === null) return falla(tipo, "tipo_invalido", `«${texto(f.tipo_embarque)}» no es un tipo de embarque válido (IMPORTACION o LOCAL).`);
-    const llegada = leerFechaAgrupador(texto(f.fecha_llegada));
-    if (llegada === null) return falla(tipo, "fecha_requerida", "Indica FECHA_LLEGADA (aaaa-mm-dd).");
-    if (llegada === "invalida") return falla(tipo, "fecha_invalida", `«${texto(f.fecha_llegada)}» no es una fecha válida (aaaa-mm-dd).`);
-    const salida = leerFechaAgrupador(texto(f.fecha_salida));
-    if (salida === "invalida") return falla(tipo, "fecha_invalida", `«${texto(f.fecha_salida)}» no es una fecha válida (aaaa-mm-dd).`);
-    if (salida !== null && salida > llegada) return falla(tipo, "salida_despues_de_llegada", "La salida no puede ser posterior a la llegada.");
+    // Cada hito y su sinónimo viejo (`FECHA_SALIDA` = Zarpe, `FECHA_LLEGADA` = Ingreso CD): si traen valores distintos, la fila se omite.
+    const parSinonimo = (nuevo: string | undefined, viejo: string | undefined, nombreNuevo: string, nombreViejo: string): { ok: true; valor: string | null } | { ok: false; falla: Lectura } => {
+      const a = leerFechaAgrupador(texto(nuevo));
+      const b = leerFechaAgrupador(texto(viejo));
+      if (a === "invalida") return { ok: false, falla: falla(tipo, "fecha_invalida", `«${texto(nuevo)}» no es una fecha válida (aaaa-mm-dd) en ${nombreNuevo}.`) };
+      if (b === "invalida") return { ok: false, falla: falla(tipo, "fecha_invalida", `«${texto(viejo)}» no es una fecha válida (aaaa-mm-dd) en ${nombreViejo}.`) };
+      if (a !== null && b !== null && a !== b) return { ok: false, falla: falla(tipo, "fechas_en_conflicto", `${nombreNuevo} (${a}) y ${nombreViejo} (${b}) traen fechas distintas: deja solo una.`) };
+      return { ok: true, valor: a ?? b };
+    };
+    const ingresoCd = parSinonimo(f.fecha_ingreso_cd, f.fecha_llegada, "FECHA_INGRESO_CD", "FECHA_LLEGADA");
+    if (!ingresoCd.ok) return ingresoCd.falla;
+    const llegada = ingresoCd.valor;
+    if (llegada === null) return falla(tipo, "fecha_requerida", "Indica FECHA_INGRESO_CD (aaaa-mm-dd; el nombre viejo FECHA_LLEGADA también vale).");
+    const zarpe = parSinonimo(f.fecha_zarpe, f.fecha_salida, "FECHA_ZARPE", "FECHA_SALIDA");
+    if (!zarpe.ok) return zarpe.falla;
+    const salida = zarpe.valor;
+    if (salida !== null && salida > llegada) return falla(tipo, "salida_despues_de_llegada", "El zarpe no puede ser posterior al ingreso al CD.");
+    const arribo = leerFechaAgrupador(texto(f.fecha_arribo));
+    if (arribo === "invalida") return falla(tipo, "fecha_invalida", `«${texto(f.fecha_arribo)}» no es una fecha válida (aaaa-mm-dd) en FECHA_ARRIBO.`);
+    const inicio = leerInicioOperativo(texto(f.inicio_operativo));
+    if (inicio === "invalida") return falla(tipo, "fecha_invalida", `«${texto(f.inicio_operativo)}» no es una fecha válida en INICIO_OPERATIVO (aaaa-mm-dd o aaaa-mm-dd hh:mm).`);
+    if (inicio === "hora_invalida") return falla(tipo, "hora_invalida", `La hora de «${texto(f.inicio_operativo)}» no es válida: usa hh:mm de 00:00 a 23:59.`);
+    const ingresoStock = leerFechaAgrupador(texto(f.fecha_ingreso_stock));
+    if (ingresoStock === "invalida") return falla(tipo, "fecha_invalida", `«${texto(f.fecha_ingreso_stock)}» no es una fecha válida (aaaa-mm-dd) en FECHA_INGRESO_STOCK.`);
     if (tipoEmb === "local" && texto(f.viaje) !== "") return falla(tipo, "local_con_viaje", "Un embarque local no lleva viaje.");
+    // Un `LOCAL` no pasa por puerto: el arribo se ignora con aviso (la base lo rechazaría con `puerto_en_local`).
+    if (tipoEmb === "local" && arribo !== null) datos.avisos.push("arribo_ignorado_en_local");
     datos.tipo_embarque = tipoEmb;
     datos.fecha_llegada = llegada;
     datos.fecha_salida = salida;
+    datos.fecha_arribo = tipoEmb === "local" ? null : arribo;
+    datos.inicio_fecha = inicio === null ? null : inicio.fecha;
+    datos.inicio_hora = inicio === null ? null : inicio.hora;
+    datos.fecha_ingreso_stock = ingresoStock;
+    datos.origen = vacioANulo(f.origen);
     datos.viaje_ref = texto(f.viaje) === "" ? null : mayusculas(f.viaje ?? "");
     datos.puerto = vacioANulo(f.puerto);
     datos.referencia_logistica = vacioANulo(f.referencia_logistica);
@@ -345,7 +426,7 @@ export function previsualizarImportacionAgrupadores(
       continue;
     }
     const datos = { ...lectura.datos, fila: f.fila };
-    estados.set(f.fila, { fila: f.fila, tipo: datos.tipo, clave: claveDeFila(datos), datos, codigo_texto: datos.codigo, nombre_texto: mayusculas(datos.nombre), clasificacion: "nueva", avisos: [], codigo_final: datos.codigo });
+    estados.set(f.fila, { fila: f.fila, tipo: datos.tipo, clave: claveDeFila(datos), datos, codigo_texto: datos.codigo, nombre_texto: mayusculas(datos.nombre), clasificacion: "nueva", avisos: [...datos.avisos], codigo_final: datos.codigo });
   }
 
   const omitir = (e: EstadoFila, motivo: MotivoOmisionAgrupador, detalle?: string) => {
@@ -396,6 +477,8 @@ export function previsualizarImportacionAgrupadores(
   const diferencias = (pares: [string, string | null, string | null][]): string[] =>
     pares.filter(([campo, a, b]) => (campo === "nombre" ? !igualNombre(a, b) : (a ?? null) !== (b ?? null))).map(([campo, a, b]) => `${campo} ${textoCmp(a)} → ${textoCmp(b)}`);
   const correoDe = (id: string | null) => (id === null ? null : (perfilPorId.get(id)?.email ?? id));
+  /** «2026-11-05 09:22» o solo «2026-11-05»; con `conHora` falso se compara solo el día (el archivo no dijo hora). */
+  const textoInicio = (fecha: string | null, hora: string | null, conHora: boolean): string | null => (fecha === null ? null : conHora && hora ? `${fecha} ${hora.slice(0, 5)}` : fecha);
 
   // Pasada 1: viajes.
   for (const e of delArchivo("viaje")) {
@@ -460,6 +543,12 @@ export function previsualizarImportacionAgrupadores(
         ["referencia_logistica", existente.referencia_logistica, d.referencia_logistica],
         ["responsable", correoDe(existente.responsable_id), d.responsable?.email ?? null],
         ["nota", existente.nota, d.nota],
+        // 08b-1b (§3.6): las columnas nuevas solo se comparan si el archivo las dice; una ausente «no dice nada» (así reimportar un archivo
+        // viejo sobre un embarque al que después se le cargaron arribo, inicio operativo, ingreso al stock u origen sigue dando `igual`).
+        ...(d.fecha_arribo === null ? [] : ([["fecha_arribo", existente.fecha_puerto_estimada, d.fecha_arribo]] as [string, string | null, string | null][])),
+        ...(d.inicio_fecha === null ? [] : ([["inicio_operativo", textoInicio(existente.fecha_inicio_operativo_estimada, existente.hora_inicio_operativo, d.inicio_hora !== null), textoInicio(d.inicio_fecha, d.inicio_hora, d.inicio_hora !== null)]] as [string, string | null, string | null][])),
+        ...(d.fecha_ingreso_stock === null ? [] : ([["fecha_ingreso_stock", existente.fecha_ingreso_estimada, d.fecha_ingreso_stock]] as [string, string | null, string | null][])),
+        ...(d.origen === null ? [] : ([["origen", existente.origen, d.origen]] as [string, string | null, string | null][])),
       ]);
       e.existente = { id: existente.id, codigo: existente.codigo };
       e.codigo_final = existente.codigo;
@@ -543,8 +632,13 @@ export function previsualizarImportacionAgrupadores(
   };
   const nuevas = (tipo: TipoAgrupador) => delArchivo(tipo).filter((e) => e.clasificacion === "nueva");
   for (const tipo of TIPOS_AGRUPADOR) for (const e of nuevas(tipo)) if (e.datos?.codigo) reservados[tipo].push(e.datos.codigo);
+  // El código de un paquete nuevo toma el mes del INGRESO CD de su embarque (no el del ingreso al stock): así embarque y paquetes comparten
+  // prefijo aunque el ingreso se fije en otro mes (08b-1b §2.4, MEDIO 1).
   const mesPaquete = (e: EstadoFila): Mes | null => {
-    if (e.embarque_id) return embarquePorId.get(e.embarque_id)?.periodo_llegada ?? null;
+    if (e.embarque_id) {
+      const eb = embarquePorId.get(e.embarque_id);
+      return eb ? mesDe(eb.fecha_llegada_estimada) : null;
+    }
     const llegada = porCodigoArchivo("embarque", e.embarque_codigo ?? "")?.datos?.fecha_llegada;
     return llegada ? llegada.slice(0, 7) : null;
   };
@@ -601,7 +695,12 @@ export function previsualizarImportacionAgrupadores(
         referencia_logistica: d.referencia_logistica,
         puerto_embarque: d.puerto,
         fecha_salida_estimada: d.fecha_salida,
+        fecha_puerto_estimada: d.fecha_arribo,
         fecha_llegada_estimada: d.fecha_llegada as string,
+        fecha_inicio_operativo_estimada: d.inicio_fecha,
+        hora_inicio_operativo: d.inicio_fecha === null ? null : d.inicio_hora,
+        fecha_ingreso_estimada: d.fecha_ingreso_stock,
+        origen: d.origen,
         nota: d.nota,
       });
     } else {
@@ -650,15 +749,22 @@ export function simularAplicacionLote(lote: LoteImportarAgrupadores, estado: Est
     referencia_logistica: e.referencia_logistica,
     puerto_embarque: e.puerto_embarque,
     fecha_salida_estimada: e.fecha_salida_estimada,
+    fecha_puerto_estimada: e.fecha_puerto_estimada,
     fecha_llegada_estimada: e.fecha_llegada_estimada,
+    fecha_inicio_operativo_estimada: e.fecha_inicio_operativo_estimada,
+    hora_inicio_operativo: e.hora_inicio_operativo,
+    fecha_ingreso_estimada: e.fecha_ingreso_estimada,
     fecha_llegada_real: null,
-    periodo_llegada: e.fecha_llegada_estimada.slice(0, 7),
+    // 08b-1b §2.4 bis: al crear no hay ingreso real, así que el mes es el de `coalesce(FECHA_INGRESO_STOCK, FECHA_INGRESO_CD)`.
+    periodo_llegada: periodoLlegada(null, e.fecha_ingreso_estimada, e.fecha_llegada_estimada),
+    hito_confirmado: null,
+    origen: e.origen,
     estado: "planificado",
     nota: e.nota,
     revision: 0,
   }));
   const idEmbarque = (codigo: string | null) => embarques.find((e) => e.codigo === codigo)?.id ?? null;
-  const paquetes: PaqueteRegistro[] = lote.paquetes.map((p) => ({ id: `sim-paquete-${p.fila}`, embarque_id: (p.embarque_id ?? idEmbarque(p.embarque_codigo)) as string, codigo: codigoDe(p.fila, p.codigo), nombre: p.nombre, responsable_id: p.responsable_id, estado: "abierto", nota: p.nota }));
+  const paquetes: PaqueteRegistro[] = lote.paquetes.map((p) => ({ id: `sim-paquete-${p.fila}`, embarque_id: (p.embarque_id ?? idEmbarque(p.embarque_codigo)) as string, codigo: codigoDe(p.fila, p.codigo), nombre: p.nombre, responsable_id: p.responsable_id, estado: "abierto", nota: p.nota, fecha_ingreso_estimada: null, periodo_ingreso: null }));
   return { viajes: [...estado.viajes, ...viajes], embarques: [...estado.embarques, ...embarques], paquetes: [...estado.paquetes, ...paquetes], perfiles: estado.perfiles };
 }
 
@@ -667,7 +773,8 @@ export function simularAplicacionLote(lote: LoteImportarAgrupadores, estado: Est
 export type CatalogoAgrupadoresCompra = {
   viajes: readonly Pick<ViajeRegistro, "id" | "codigo" | "estado">[];
   embarques: readonly Pick<EmbarqueRegistro, "id" | "codigo" | "estado" | "viaje_id" | "periodo_llegada">[];
-  paquetes: readonly Pick<PaqueteRegistro, "id" | "codigo" | "embarque_id" | "estado">[];
+  /** `periodo_ingreso`: el mes del ingreso propio del paquete (08b-1b); ausente o nulo = hereda el del embarque. */
+  paquetes: readonly (Pick<PaqueteRegistro, "id" | "codigo" | "embarque_id" | "estado"> & Partial<Pick<PaqueteRegistro, "periodo_ingreso">>)[];
 };
 
 export type EntradaAgrupadoresFilaCompra = {
@@ -706,8 +813,8 @@ const buscarCodigo = <T extends { codigo: string }>(lista: readonly T[], ref: st
  * `agrupador_distinto` y no se toca; una `cambiada` sigue su regla de M8 (nada de agrupador). Las filas sin las tres columnas
  * devuelven `null`.
  *
- * Con `EMBARQUE`: la fila no puede traer más de una entrega (`entregas_con_embarque`) y su mes debe ser el de llegada del embarque
- * (`llegada_distinta_del_embarque`; `LLEGADA` sigue siendo obligatoria). `PAQUETE` sin `EMBARQUE`: `paquete_sin_embarque`. Códigos
+ * Con `EMBARQUE`: la fila no puede traer más de una entrega (`entregas_con_embarque`) y su mes debe ser el MES DE DESTINO de la asignación:
+ * `mesDeDestino(embarque, paquete de la fila)` (`llegada_distinta_del_embarque`; `LLEGADA` sigue siendo obligatoria). `PAQUETE` sin `EMBARQUE`: `paquete_sin_embarque`. Códigos
  * desconocidos: `viaje_desconocido`, `embarque_desconocido`, `paquete_desconocido` (el importador no crea agrupadores). `VIAJE` cerrado
  * se acepta con el aviso `viaje_cerrado`; cancelado, `viaje_cancelado`. Un embarque cancelado o recibido, `embarque_no_editable`.
  * Avisos que no bloquean: `viaje_distinto` (el viaje de la columna no es el del embarque).
@@ -764,8 +871,10 @@ export function evaluarAgrupadoresDeFilaCompra(entrada: EntradaAgrupadoresFilaCo
       if (!paquete || paquete.embarque_id !== embarque.id || paquete.estado !== "abierto") return omitir("paquete_desconocido");
     }
     if (entrada.entregas.length > 1) return omitir("entregas_con_embarque");
+    // Regla 3 (08b-1b §2.4 bis): `LLEGADA` debe caer en el MES DE DESTINO: el del ingreso propio del paquete de la fila (si lo tiene) y, si no,
+    // el del ingreso al stock del embarque.
     const mes = entrada.entregas[0]?.periodo;
-    if (mes === undefined || mes !== embarque.periodo_llegada) return omitir("llegada_distinta_del_embarque");
+    if (mes === undefined || mes !== mesDeDestino(embarque, paquete ? { periodo_ingreso: paquete.periodo_ingreso ?? null } : null)) return omitir("llegada_distinta_del_embarque");
   }
 
   const avisos: AvisoImportacionCompraAgrupador[] = [];

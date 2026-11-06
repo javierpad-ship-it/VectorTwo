@@ -21,6 +21,9 @@
  *   POST   /api/compras/paquetes/[id]/estado                → { embarque: EmbarqueDetalleApi }
  *   POST   /api/compras/paquetes/[id]/mover · /api/compras/embarques/[id]/{asignar,quitar,paquete,fecha,pasar-pendientes,recibir,
  *          revertir-recepcion}                              → RespuestaMovimientoApi, o PlanMovimientoApi con `?previsualizar=1`
+ *   POST   /api/compras/embarques/[id]/fechas               → RespuestaMovimientoApi, o PlanFechasApi con `?previsualizar=1` (08b-1b §3.2)
+ *   POST   /api/compras/paquetes/[id]/ingreso               → RespuestaMovimientoApi, o PlanFechasApi con `?previsualizar=1` (08b-1b §3.2)
+ *   PUT    /api/compras/[id]/oc                             → RespuestaEditarOcApi (en `src/lib/compras/tipos-api.ts`; 08b-1b §3.2)
  *   GET    /api/compras/agrupadores/sin-asignar             → SinAgrupadorApi
  *   GET    /api/compras/agrupadores/opciones                → OpcionesAgrupadoresApi
  *   GET    /api/compras/agrupadores/historial               → { eventos: EventoAgrupadorApi[] }
@@ -35,8 +38,12 @@ import type {
   AvisoAgrupador,
   AvisoImportacionAgrupador,
   AvisoImportacionCompraAgrupador,
+  CausaFecha,
   ClasificacionAgrupadorImportado,
   EstadoEmbarque,
+  EstadoHito,
+  Hito,
+  HitoConfirmable,
   EstadoPaquete,
   EstadoViaje,
   MotivoFuncionAgrupador,
@@ -48,6 +55,7 @@ import type {
   TipoAgrupador,
   TipoEmbarque,
 } from "./tipos";
+import { CAUSAS_FECHA, ESTADOS_HITO, HITOS } from "./tipos";
 import type { EstadoCompra, Mes, Moneda, TallasCompra, TipoLinea } from "@/lib/compras/tipos";
 
 export type {
@@ -55,8 +63,12 @@ export type {
   AvisoAgrupador,
   AvisoImportacionAgrupador,
   AvisoImportacionCompraAgrupador,
+  CausaFecha,
   ClasificacionAgrupadorImportado,
   EstadoEmbarque,
+  EstadoHito,
+  Hito,
+  HitoConfirmable,
   EstadoPaquete,
   EstadoViaje,
   MotivoOmisionAgrupador,
@@ -106,6 +118,13 @@ export const ESTADO_HTTP_ERROR_AGRUPADOR: Record<CodigoErrorAgrupador, number> =
   sin_pendientes: 409,
   paquete_de_otro_embarque: 409,
   reparto_sin_vector: 409,
+  sin_cambios: 409,
+  causa_requerida: 409,
+  fecha_requerida: 409,
+  fecha_futura: 409,
+  puerto_en_local: 409,
+  hora_sin_fecha: 409,
+  hito_confirmado: 409,
   no_confirmada: 409,
   excede_pendiente: 409,
   recepcion_antes_de_compra: 409,
@@ -125,8 +144,8 @@ export const MENSAJE_ERROR_AGRUPADOR: Record<CodigoErrorAgrupador, string> = {
   no_encontrado: "No encontramos eso.",
   no_editable: "Está cancelado y ya no se puede modificar.",
   responsable_no_asignable: "Ese responsable no está disponible: elige un comprador o un administrador activo.",
-  fecha_por_movimiento: "La fecha de llegada se cambia con «Cambiar fecha de llegada», porque mueve las entregas.",
-  salida_despues_de_llegada: "La salida no puede ser posterior a la llegada.",
+  fecha_por_movimiento: "Las fechas del embarque se cambian con «Cambiar fechas», porque pueden mover las entregas.",
+  salida_despues_de_llegada: "El zarpe no puede ser posterior al ingreso al CD.",
   local_con_viaje: "Un embarque local no lleva viaje.",
   viaje_cancelado: "El viaje está cancelado: no admite cambios.",
   embarque_no_editable: "El embarque está cancelado o recibido: solo se puede quitar mercadería de él.",
@@ -146,6 +165,13 @@ export const MENSAJE_ERROR_AGRUPADOR: Record<CodigoErrorAgrupador, string> = {
   sin_pendientes: "No hay unidades pendientes que pasar.",
   paquete_de_otro_embarque: "Ese paquete es de otro embarque.",
   reparto_sin_vector: "El reparto de esa marca no tiene vector para la temporada del mes nuevo: pide a Planificación que lo complete.",
+  sin_cambios: "No hay nada que cambiar: las fechas ya son esas.",
+  causa_requerida: "Elige la causa de la reprogramación.",
+  fecha_requerida: "Falta la fecha de un hito que ya figura como ocurrido, o el ingreso al CD.",
+  fecha_futura: "Este hito ya figura como ocurrido: no puede tener una fecha futura. Para moverlo a una fecha futura, desmarca «¿Ya ocurrió?».",
+  puerto_en_local: "Un embarque local no pasa por puerto: quita el arribo.",
+  hora_sin_fecha: "Pon la fecha del inicio operativo antes que la hora.",
+  hito_confirmado: "Este embarque ya tiene hitos marcados como ocurridos: no puede volver a planificado.",
   no_confirmada: "Una de las compras sigue en borrador: confírmala antes de recibirla.",
   excede_pendiente: "Las unidades superan lo que falta recibir.",
   recepcion_antes_de_compra: "El ingreso no puede ser de un mes anterior a la fecha de la compra.",
@@ -261,7 +287,7 @@ export type PaqueteApi = {
     historicas: number;
   };
   avisos: AvisoAgrupador[];
-};
+} & IngresoPaqueteApi;
 
 // ─── Embarque (§2.4) ───
 
@@ -277,11 +303,16 @@ export type EmbarqueApi = {
   puerto_embarque: string | null;
   /** Puertos habituales de los proveedores del embarque, como sugerencia (08c; `[]` si aún no existe). */
   puertos_habituales: string[];
+  /** Zarpe. */
   fecha_salida_estimada: string | null;
+  /** Ingreso CD: la mercadería llega al CD (08b §2.4). Es la fecha obligatoria; no es la del ingreso al stock. */
   fecha_llegada_estimada: string;
   /** Solo la escriben las funciones de 08b-2. */
   fecha_llegada_real: string | null;
-  /** Mes de `coalesce(fecha_llegada_real, fecha_llegada_estimada)`: el mes al que se alinean las entregas. */
+  /**
+   * Mes de `coalesce(fecha_llegada_real, fecha_ingreso_estimada, fecha_llegada_estimada)`: el mes del ingreso al stock (desde 08b-1b). El
+   * mes al que se alinean las asignaciones sin ingreso propio de paquete (con él, `mesDeDestino`).
+   */
   periodo_llegada: Mes;
   estado: EstadoEmbarque;
   recepcion: RecepcionEmbarque;
@@ -307,7 +338,7 @@ export type EmbarqueApi = {
   avisos: AvisoAgrupador[];
   creado_por: PersonaFechaApi;
   modificado_por: PersonaFechaApi | null;
-};
+} & FechasLogisticasEmbarqueApi;
 
 /** Una asignación: unidades de una entrega que viajan en un embarque (y paquete). */
 export type AsignacionApi = {
@@ -326,6 +357,8 @@ export type AsignacionApi = {
   compra: {
     id: string;
     numero: string;
+    /** Número de OC de la compra (08b-1b; nulo = sin registrar). Opcional en el tipo hasta que T3a lo llene siempre. */
+    numero_oc?: string | null;
     /** Revisión vigente de la compra: la piden asignar, quitar y pasar pendientes (`compra_revision`). */
     revision: number;
     estado: EstadoCompra;
@@ -347,6 +380,116 @@ export type AsignacionApi = {
 };
 
 export type EmbarqueDetalleApi = EmbarqueApi & { paquetes: PaqueteApi[]; asignaciones: AsignacionApi[] };
+
+// ─── Fechas logísticas, línea de tiempo y número de OC (ficha 08b-1b, §2, §3.2 y §3.3) ───
+
+/**
+ * Un hito de la línea de tiempo (§3.3). `fecha` y `hora` son lo vigente (en el ingreso al stock sin fijar, la del Ingreso CD con
+ * `igual_a_ingreso_cd`); `hora` solo existe en `inicio_operativo`. `fecha_original` es la primera fecha que tuvo (de los eventos) y
+ * `retraso_dias` los días entre ella y la vigente (nulo si no hay o no cambió); `reprogramaciones` no cuenta las causas `correccion` ni
+ * `programacion`. `manda_el_mes` marca el hito que decide el mes del flujo (el ingreso al stock).
+ */
+export type HitoApi = {
+  hito: Hito;
+  fecha: string | null;
+  hora: string | null;
+  estado: EstadoHito;
+  /** Solo `ingreso_stock` sin fijar: muestra la fecha del Ingreso CD con la nota «igual al Ingreso CD». */
+  igual_a_ingreso_cd?: boolean;
+  /** Solo `ingreso_stock` de un tramo en un paquete con ingreso propio: la nota «del paquete Al barrer». */
+  del_paquete?: { codigo: string; nombre: string };
+  fecha_original: string | null;
+  retraso_dias: number | null;
+  reprogramaciones: number;
+  manda_el_mes: boolean;
+};
+
+/** El hito más urgente de un embarque o de una compra (lista de Embarques y de Compras). */
+export type ProximoHitoApi = { hito: Hito; fecha: string | null; hora: string | null; estado: EstadoHito };
+
+/**
+ * Lo que 08b-1b suma a `EmbarqueApi` (§3.3). OPCIONAL en el tipo solo mientras T3a no lo llena; `servicio.ts` lo entrega siempre desde
+ * T3a y entonces se vuelve obligatorio (como se hizo con `asignaciones` en `EntregaLineaApi`).
+ */
+export type FechasLogisticasEmbarqueApi = {
+  /** Arribo a puerto; no aplica a un `local`. */
+  fecha_puerto_estimada?: string | null;
+  fecha_inicio_operativo_estimada?: string | null;
+  /** `hh:mm`, hora de Lima. */
+  hora_inicio_operativo?: string | null;
+  /** Ingreso al stock fijado; nulo = el día del Ingreso CD. */
+  fecha_ingreso_estimada?: string | null;
+  /** Último hito que ya ocurrió. */
+  hito_confirmado?: HitoConfirmable | null;
+  /** Almacén o ciudad de origen («California»). */
+  origen?: string | null;
+  /** Los cinco hitos logísticos (zarpe, arribo, ingreso_cd, inicio_operativo, ingreso_stock), en ese orden. */
+  hitos?: HitoApi[];
+  /** Suma de las reprogramaciones de los cinco hitos y de los ingresos de paquete. */
+  reprogramaciones_total?: number;
+  proximo_hito?: ProximoHitoApi | null;
+};
+
+/** Lo que 08b-1b suma a `PaqueteApi` (§3.3), opcional por la misma razón que `FechasLogisticasEmbarqueApi`. */
+export type IngresoPaqueteApi = {
+  /** Ingreso al stock propio; nulo = hereda el del embarque. */
+  fecha_ingreso?: string | null;
+  periodo_ingreso?: Mes | null;
+  ingreso_propio?: boolean;
+  /** Lotes al barrer (`barrer_marca` y `barrer_mezcla`) con asignaciones activas en el paquete. */
+  lotes_al_barrer?: number;
+  /** Subido a la llegada del embarque por el piso de §2.5: la fecha que tenía antes. */
+  ajustado_desde?: string | null;
+};
+
+/** Un tramo de la línea de tiempo de una compra: (embarque, paquete) con sus unidades, o «Sin embarque» (`embarque = null`). */
+export type TramoLineaTiempoApi = {
+  embarque: { id: string; codigo: string; nombre: string; origen: string | null } | null;
+  paquete: { id: string; codigo: string; nombre: string } | null;
+  unidades: number;
+  /** Mes del tramo: `mesDeDestino` (en «Sin embarque», el mes de su entrega). */
+  mes: Mes;
+  /** Los seis hitos, con la orden de compra primero. */
+  hitos: HitoApi[];
+};
+
+/** Un cambio de la vista previa de fechas (§3.3): qué hito (o el ingreso de qué paquete) pasa de qué a qué, y cuántos días. */
+export type CambioFechaApi = {
+  hito: Hito | "ingreso_paquete" | "hito_confirmado";
+  paquete?: { id: string; codigo: string };
+  antes: string | null;
+  despues: string | null;
+  /** Días entre las dos fechas (positivo = se atrasa); nulo si falta alguna. */
+  dias: number | null;
+};
+
+/**
+ * Vista previa de `POST …/fechas`, `POST …/ingreso` y `POST …/paquete`: el plan de movimiento más lo que cambia en las fechas. `meses`
+ * lista el traslado de unidades entre meses; `reprograma` dice si pedirá motivo y causa (§2.10, paso 3). Con `reprograma = false` y sin
+ * meses que cambien, se aplica sin vista previa (sin `huella_plan`).
+ */
+export type PlanFechasApi = PlanMovimientoApi & {
+  cambios: CambioFechaApi[];
+  meses: { de: Mes; a: Mes; unidades: number }[];
+  reprograma: boolean;
+};
+
+/** Cuerpo de `POST /api/compras/embarques/[id]/fechas` tal como lo arma la pantalla (el esquema es `cambiarFechasSchema`). */
+export type CambiarFechasCuerpo = {
+  revision: number;
+  fecha_zarpe?: string | null;
+  fecha_arribo?: string | null;
+  fecha_ingreso_cd?: string;
+  inicio_operativo?: { fecha: string; hora: string | null } | null;
+  fecha_ingreso_stock?: string | null;
+  hito_confirmado?: HitoConfirmable | null;
+  motivo?: string;
+  causa?: CausaFecha;
+  huella_plan?: string;
+};
+
+/** Cuerpo de `POST /api/compras/paquetes/[id]/ingreso`. `fecha_ingreso_stock = null` = el paquete hereda el del embarque. */
+export type IngresoPaqueteCuerpo = { revision_embarque: number; fecha_ingreso_stock: string | null; motivo?: string; causa?: CausaFecha; huella_plan?: string };
 
 // ─── Movimientos (vista previa y resultado; §3, §3.4, §3.5) ───
 
@@ -420,6 +563,8 @@ export type OpcionEmbarqueApi = {
   periodo_llegada: Mes;
   viaje_id: string | null;
   revision: number;
+  /** Origen del embarque, para el selector («Embarque 261201 · California»; 08b-1b §4.6). */
+  origen?: string | null;
 };
 export type OpcionPaqueteApi = { id: string; embarque_id: string; codigo: string; nombre: string; estado: EstadoPaquete };
 
@@ -431,6 +576,8 @@ export type OpcionesAgrupadoresApi = {
   asignables: AsignableApi[];
   /** Puertos ya usados en embarques, para la sugerencia del campo Puerto. */
   puertos: string[];
+  /** Orígenes ya usados en embarques, para la sugerencia del campo Origen (08b-1b). */
+  origenes?: string[];
 };
 
 export type EventoAgrupadorApi = {
@@ -442,6 +589,8 @@ export type EventoAgrupadorApi = {
   antes: unknown | null;
   despues: unknown | null;
   motivo: string | null;
+  /** Causa de una reprogramación (08b-1b); nula en los eventos que no reprograman. */
+  causa?: CausaFecha | null;
   resumen: string | null;
   /** `[{ compra_id, revision_nueva }]`. */
   compras: { compra_id: string; revision_nueva: number }[];
@@ -526,9 +675,17 @@ export type GuardarEmbarqueCuerpo = {
   responsable_id: string | null;
   referencia_logistica?: string | null;
   puerto_embarque?: string | null;
+  /** Zarpe. Al crear; al editar no se manda (va por `/fechas`). */
   fecha_salida_estimada?: string | null;
-  /** Obligatoria al crear; al editar, no se manda (va por `/fecha`). */
+  /** Ingreso CD. Obligatoria al crear; al editar, no se manda (va por `/fechas`). */
   fecha_llegada_estimada?: string;
+  /** Arribo, inicio operativo (fecha y hora) e ingreso al stock: solo al crear (08b-1b §3.1). */
+  fecha_puerto_estimada?: string | null;
+  fecha_inicio_operativo_estimada?: string | null;
+  hora_inicio_operativo?: string | null;
+  fecha_ingreso_estimada?: string | null;
+  /** Almacén o ciudad de origen; sí se edita con PATCH. */
+  origen?: string | null;
   nota?: string | null;
 };
 
@@ -566,7 +723,7 @@ export const ETIQUETA_ACCION_AGRUPADOR_EVENTO: Record<AccionAgrupadorEvento, str
   asignar: "Asignó mercadería",
   quitar: "Quitó mercadería",
   mover_a_paquete: "Movió mercadería de paquete",
-  cambiar_fecha: "Cambió la fecha de llegada",
+  cambiar_fecha: "Cambió las fechas",
   pasar_pendientes: "Pasó pendientes a otro embarque",
   mover_paquete: "Movió el paquete a otro embarque",
   recibir: "Recibió el embarque",
@@ -581,12 +738,69 @@ export const ETIQUETA_AVISO_AGRUPADOR: Record<AvisoAgrupador, string> = {
   viaje_distinto: "El viaje de la compra es otro",
   cambia_temporada: "Un lote cambia de temporada",
   fecha_en_mes_cerrado: "La fecha cae en un mes ya cerrado",
-  llegada_antes_de_compra: "La llegada es anterior a la compra: el ingreso se rechazará",
+  llegada_antes_de_compra: "El ingreso al stock es anterior a la orden de compra: el ingreso se rechazará",
   entregas_fusionadas: "Se fundieron entregas del mismo mes",
-  desalineada: "La entrega no está en el mes de llegada del embarque",
+  desalineada: "La entrega no está en el mes de ingreso al stock de su embarque o paquete",
   asignaciones_historicas: "Hay mercadería histórica que no se mueve",
   linea_recibida: "La línea ya está recibida al 100 %",
   en_embarque_cancelado: "Mercadería activa en un embarque cancelado",
   pendientes_tras_recibir: "Quedan pendientes tras recibir",
   borradores_excluidos: "Se excluyeron compras en borrador",
+  ingreso_paquete_ajustado: "Un paquete se subió a la llegada del embarque",
+  orden_de_fechas: "Hay fechas fuera de orden",
+  hito_vencido: "Un hito debía ocurrir y todavía no figura como ocurrido",
+  pasa_a_en_transito: "El embarque pasa a En tránsito",
 };
+
+/** Nombre de cada hito en pantalla (los de Javier; §4). */
+export const ETIQUETA_HITO: Record<Hito, string> = {
+  orden_compra: "Orden de compra",
+  zarpe: "Zarpe",
+  arribo: "Arribo",
+  ingreso_cd: "Ingreso CD",
+  inicio_operativo: "Inicio operativo",
+  ingreso_stock: "Ingreso al stock",
+};
+
+/**
+ * Marcador de cada hito (los del reporte de Javier: blanco, azul, rojo, negro, cohete y verde). Se dibuja como punto o ícono de color
+ * `aria-hidden` y SIEMPRE junto al nombre del hito y al estado en texto: el color nunca es la única señal. Escapes Unicode, no emojis
+ * literales en el código.
+ */
+export const MARCADOR_HITO: Record<Hito, string> = {
+  orden_compra: "\u26AA",
+  zarpe: "\u{1F535}",
+  arribo: "\u{1F534}",
+  ingreso_cd: "\u26AB",
+  inicio_operativo: "\u{1F680}",
+  ingreso_stock: "\u{1F7E2}",
+};
+
+/** Texto del estado de un hito, sin fecha («Ocurrió ✓»); el texto con fecha lo arma `textoEstadoHito` en `hitos.ts`. */
+export const ETIQUETA_ESTADO_HITO: Record<EstadoHito, string> = {
+  real: "Ocurrió ✓",
+  sin_registrar: "Ocurrió · sin fecha",
+  vencido: "Vencido",
+  por_confirmar: "Llegó, falta confirmar el ingreso",
+  previsto: "Previsto",
+  pendiente: "Pendiente",
+  no_aplica: "No aplica",
+};
+
+/** Causa de una reprogramación en pantalla (§2.6). */
+export const ETIQUETA_CAUSA_FECHA: Record<CausaFecha, string> = {
+  pago: "Demora en el pago al proveedor",
+  produccion: "El proveedor no terminó a tiempo",
+  naviera: "Naviera, zarpe o transbordo",
+  aduana: "Aduana",
+  transporte: "Transporte local (puerto → CD)",
+  cola_conteo: "Cola o capacidad en el CD (conteo, proceso)",
+  programacion: "Programación del ingreso",
+  correccion: "Corrección de un dato mal puesto",
+  otro: "Otra (el motivo lo explica)",
+};
+
+/** Los catálogos como listas para selectores y validaciones de pantalla. */
+export const LISTA_CAUSAS_FECHA: readonly CausaFecha[] = CAUSAS_FECHA;
+export const LISTA_ESTADOS_HITO: readonly EstadoHito[] = ESTADOS_HITO;
+export const LISTA_HITOS: readonly Hito[] = HITOS;

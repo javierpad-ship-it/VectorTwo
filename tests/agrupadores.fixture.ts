@@ -115,8 +115,14 @@ const embarqueBase = (p: Partial<EmbarqueRegistro> & Pick<EmbarqueRegistro, "id"
   referencia_logistica: null,
   puerto_embarque: null,
   fecha_salida_estimada: null,
+  fecha_puerto_estimada: null,
+  fecha_inicio_operativo_estimada: null,
+  hora_inicio_operativo: null,
+  fecha_ingreso_estimada: null,
   fecha_llegada_real: null,
-  periodo_llegada: mesDe(p.fecha_llegada_real ?? p.fecha_llegada_estimada),
+  periodo_llegada: mesDe(p.fecha_llegada_real ?? p.fecha_ingreso_estimada ?? p.fecha_llegada_estimada),
+  hito_confirmado: null,
+  origen: null,
   estado: "planificado",
   nota: null,
   revision: 1,
@@ -133,8 +139,8 @@ export const embarquesAgrupadores = (): EmbarqueRegistro[] => [
 
 /** Paquetes 261101 (C2) y 261102 (sin responsable: hereda), ambos del embarque 261101. */
 export const paquetesAgrupadores = (): PaqueteRegistro[] => [
-  { id: PAQUETE_AGR.p261101, embarque_id: EMBARQUE_AGR.e261101, codigo: "261101", nombre: "Paquete denim", responsable_id: PERFIL_AGR.c2, estado: "abierto", nota: null },
-  { id: PAQUETE_AGR.p261102, embarque_id: EMBARQUE_AGR.e261101, codigo: "261102", nombre: "Paquete resto", responsable_id: null, estado: "abierto", nota: null },
+  { id: PAQUETE_AGR.p261101, embarque_id: EMBARQUE_AGR.e261101, codigo: "261101", nombre: "Paquete denim", responsable_id: PERFIL_AGR.c2, estado: "abierto", nota: null, fecha_ingreso_estimada: null, periodo_ingreso: null },
+  { id: PAQUETE_AGR.p261102, embarque_id: EMBARQUE_AGR.e261101, codigo: "261102", nombre: "Paquete resto", responsable_id: null, estado: "abierto", nota: null, fecha_ingreso_estimada: null, periodo_ingreso: null },
 ];
 
 // ─── Compras (caso: C-000101, C-000102 y C-000103) ───
@@ -465,3 +471,70 @@ export const reporteCaso19bPrevisualizar = (): ReporteImportacionAgrupadoresApi 
     })),
   };
 };
+
+// ─── Fixture de 08b-1b (casos F1 a F46; hoy = 2026-11-12, Lima, 10:00) ───
+
+/** «Hoy» de la ficha 08b-1b: 12-nov-2026 a las 10:00 en Lima. */
+export const HOY_F = "2026-11-12";
+export const AHORA_F = { fecha: "2026-11-12", hora: "10:00" };
+
+export const EMBARQUE_F = {
+  /** Importación, viaje 261001, en tránsito con `hito_confirmado = zarpe`. Zarpe 05-oct, Arribo 08-nov, Ingreso CD 15-nov, ingreso nulo → nov-26. */
+  e261101: uuid("f4", 1),
+  /** Planificado, Ingreso CD 05-mar-27 → mar-27. Contiene el lote BETA de C-000101 (mar 600). */
+  e270301: uuid("f4", 2),
+  /** Planificado y vacío, Ingreso CD 20-abr-27 (F36). */
+  e270401: uuid("f4", 3),
+  /** Planificado y vacío, Ingreso CD 15-jun-27 (F36). */
+  e270601: uuid("f4", 4),
+  /** Planificado, sin asignaciones: el embarque de Javier (F21): Ingreso CD 02-nov-26, sin zarpe ni arribo. */
+  eJavier: uuid("f4", 5),
+};
+export const PAQUETE_F = { tanda1: uuid("f5", 1), tanda2: uuid("f5", 2) };
+export const ASIGNACION_F = { l1Nov: uuid("f9", 1), c102Nov: uuid("f9", 2), l2Mar: uuid("f9", 3) };
+
+const fEmbarque = (p: Partial<EmbarqueRegistro> & Pick<EmbarqueRegistro, "id" | "codigo" | "nombre" | "fecha_llegada_estimada">): EmbarqueRegistro => embarqueBase({ viaje_id: null, revision: 1, ...p });
+
+/** Los cinco embarques de F (sin asignaciones ni paquetes). */
+export const embarquesFechas = (): EmbarqueRegistro[] => [
+  fEmbarque({
+    id: EMBARQUE_F.e261101,
+    codigo: "261101",
+    nombre: "Nov-26 · Feria Sur",
+    viaje_id: VIAJE_AGR.v261001,
+    estado: "en_transito",
+    fecha_salida_estimada: "2026-10-05",
+    fecha_puerto_estimada: "2026-11-08",
+    fecha_llegada_estimada: "2026-11-15",
+    hito_confirmado: "zarpe",
+  }),
+  fEmbarque({ id: EMBARQUE_F.e270301, codigo: "270301", nombre: "Mar-27 · lote BETA", fecha_llegada_estimada: "2027-03-05" }),
+  fEmbarque({ id: EMBARQUE_F.e270401, codigo: "270401", nombre: "Abr-27", fecha_llegada_estimada: "2027-04-20" }),
+  fEmbarque({ id: EMBARQUE_F.e270601, codigo: "270601", nombre: "Jun-27", fecha_llegada_estimada: "2027-06-15" }),
+  fEmbarque({ id: EMBARQUE_F.eJavier, codigo: "261102", nombre: "Embarque de Javier", fecha_llegada_estimada: "2026-11-02" }),
+];
+
+/** Dos paquetes «al barrer» del embarque 270301, sin ingreso propio (los casos F10 y F11 los programan). */
+export const paquetesTandas = (): PaqueteRegistro[] => [
+  { id: PAQUETE_F.tanda1, embarque_id: EMBARQUE_F.e270301, codigo: "270301", nombre: "Al barrer · tanda 1", responsable_id: null, estado: "abierto", nota: null, fecha_ingreso_estimada: null, periodo_ingreso: null },
+  { id: PAQUETE_F.tanda2, embarque_id: EMBARQUE_F.e270301, codigo: "270302", nombre: "Al barrer · tanda 2", responsable_id: null, estado: "abierto", nota: null, fecha_ingreso_estimada: null, periodo_ingreso: null },
+];
+
+/** Asignaciones de partida de F: l1 nov 300 y POLO nov 400 en 261101; el lote BETA mar 600 en 270301. */
+export const asignacionesFechas = (): AsignacionRegistro[] => [
+  { id: ASIGNACION_F.l1Nov, entrega_id: ENTREGA_AGR.l1Nov, embarque_id: EMBARQUE_F.e261101, paquete_id: null, unidades: 300 },
+  { id: ASIGNACION_F.c102Nov, entrega_id: ENTREGA_AGR.c102Nov, embarque_id: EMBARQUE_F.e261101, paquete_id: null, unidades: 400 },
+  { id: ASIGNACION_F.l2Mar, entrega_id: ENTREGA_AGR.l2Mar, embarque_id: EMBARQUE_F.e270301, paquete_id: null, unidades: 600 },
+];
+
+/** Compras de F: C-000101 con fecha de compra 06-jul-26 (la orden de compra de la línea de tiempo) y C-000102 POLO. */
+export function registrosFechas(): ReturnType<typeof registrosAgrupadores> {
+  const base = registrosAgrupadores();
+  return {
+    ...base,
+    compras: base.compras.map((c) => (c.id === COMPRA_AGR.c101 ? { ...c, fecha_compra: "2026-07-06" } : c)),
+    embarques: embarquesFechas(),
+    paquetes: [],
+    asignaciones: asignacionesFechas(),
+  };
+}

@@ -1,6 +1,20 @@
 import type { Hoja } from "@/lib/proyeccion/excel";
+import { TEXTO_ESTADO_HITO_EXCEL } from "./hitos";
 import { ENCABEZADOS_AGRUPADORES, filaDeAgrupador } from "./plantilla";
-import { ETIQUETA_ESTADO_EMBARQUE, ETIQUETA_ESTADO_PAQUETE, ETIQUETA_ESTADO_VIAJE, ETIQUETA_RECEPCION_EMBARQUE, ETIQUETA_TIPO_EMBARQUE, type EmbarqueApi, type EmbarqueDetalleApi, type ViajeApi } from "./tipos-api";
+import {
+  ETIQUETA_CAUSA_FECHA,
+  ETIQUETA_ESTADO_EMBARQUE,
+  ETIQUETA_ESTADO_PAQUETE,
+  ETIQUETA_ESTADO_VIAJE,
+  ETIQUETA_RECEPCION_EMBARQUE,
+  ETIQUETA_TIPO_EMBARQUE,
+  type EmbarqueApi,
+  type EmbarqueDetalleApi,
+  type HitoApi,
+  type TramoLineaTiempoApi,
+  type ViajeApi,
+} from "./tipos-api";
+import type { CausaFecha, Hito } from "./tipos";
 import { VALORES_TIPO_EMBARQUE_IMPORTADOR } from "./tipos";
 
 /**
@@ -93,7 +107,7 @@ export function hojaPaquetes(embarques: readonly EmbarqueDetalleApi[]): Hoja {
 
 /** Hoja `ASIGNACIONES`: una fila por asignación (embarque, paquete, compra, línea, mes y unidades). */
 export function hojaAsignaciones(embarques: readonly EmbarqueDetalleApi[]): Hoja {
-  const hoja: Hoja = [["EMBARQUE", "PAQUETE", "COMPRA", "PROVEEDOR", "LÍNEA", "TIPO", "MARCA / AGRUPACIÓN", "MES", "UNIDADES", "RECIBIDAS (EST.)", "PENDIENTE (EST.)", "HISTÓRICA", "COSTO UNITARIO", "MONEDA"]];
+  const hoja: Hoja = [["EMBARQUE", "PAQUETE", "COMPRA", "OC", "PROVEEDOR", "LÍNEA", "TIPO", "MARCA / AGRUPACIÓN", "MES", "UNIDADES", "RECIBIDAS (EST.)", "PENDIENTE (EST.)", "HISTÓRICA", "COSTO UNITARIO", "MONEDA"]];
   for (const e of embarques) {
     const codigoPaquete = new Map(e.paquetes.map((p) => [p.id, p.codigo]));
     for (const a of e.asignaciones) {
@@ -101,6 +115,7 @@ export function hojaAsignaciones(embarques: readonly EmbarqueDetalleApi[]): Hoja
         e.codigo,
         a.paquete_id ? (codigoPaquete.get(a.paquete_id) ?? null) : null,
         a.compra.numero,
+        a.compra.numero_oc ?? null,
         a.compra.proveedor.nombre,
         a.linea.gml,
         a.linea.tipo,
@@ -152,8 +167,13 @@ export function hojaAgrupadores(entrada: { viajes: readonly ViajeApi[]; embarque
         nombre: e.nombre,
         viaje: e.viaje?.codigo ?? "",
         tipo_embarque: VALORES_TIPO_EMBARQUE_IMPORTADOR[e.tipo],
-        fecha_salida: e.fecha_salida_estimada,
-        fecha_llegada: e.fecha_llegada_estimada,
+        fecha_zarpe: e.fecha_salida_estimada,
+        fecha_arribo: e.fecha_puerto_estimada ?? null,
+        fecha_ingreso_cd: e.fecha_llegada_estimada,
+        inicio_operativo: e.fecha_inicio_operativo_estimada ? `${e.fecha_inicio_operativo_estimada}${e.hora_inicio_operativo ? ` ${e.hora_inicio_operativo.slice(0, 5)}` : ""}` : "",
+        // Solo el ingreso FIJADO: sin fijar sigue al Ingreso CD y sale vacío (como se importó).
+        fecha_ingreso_stock: e.fecha_ingreso_estimada ?? null,
+        origen: e.origen ?? null,
         puerto: e.puerto_embarque,
         referencia_logistica: e.referencia_logistica,
         responsable: correoPropio(e.responsable_efectivo),
@@ -165,6 +185,100 @@ export function hojaAgrupadores(entrada: { viajes: readonly ViajeApi[]; embarque
     for (const p of e.paquetes) {
       if (p.estado === "cancelado") continue;
       hoja.push(filaDeAgrupador({ tipo: "PAQUETE", codigo: p.codigo, nombre: p.nombre, embarque: e.codigo, responsable: correoPropio(p.responsable_efectivo), nota: p.nota }));
+    }
+  }
+  return hoja;
+}
+
+// ─── Hoja LINEA_DE_TIEMPO (08b-1b §3.8) ───
+
+/** Una compra con su línea de tiempo (la de `GET /api/compras/[id]` y los tramos «Sin embarque» de `/agrupadores/sin-asignar`). */
+export type CompraParaHojaLineaDeTiempo = {
+  numero: string;
+  numero_oc: string | null;
+  proveedor: string;
+  viaje_codigo: string | null;
+  linea_de_tiempo: readonly TramoLineaTiempoApi[];
+};
+
+export const ENCABEZADOS_LINEA_DE_TIEMPO = [
+  "PROVEEDOR",
+  "COMPRA",
+  "OC",
+  "VIAJE",
+  "EMBARQUE",
+  "ORIGEN",
+  "PAQUETE",
+  "UNIDADES",
+  "ORDEN DE COMPRA",
+  "ZARPE",
+  "ESTADO ZARPE",
+  "ARRIBO",
+  "ESTADO ARRIBO",
+  "INGRESO CD",
+  "ESTADO INGRESO CD",
+  "INICIO OPERATIVO",
+  "ESTADO INICIO OPERATIVO",
+  "INGRESO AL STOCK",
+  "ESTADO INGRESO AL STOCK",
+  "MES DEL FLUJO",
+  "REPROGRAMACIONES",
+  "ÚLTIMA CAUSA",
+] as const;
+
+/** Columnas (base 0) que son fecha (`aaaa-mm-dd`): quien escribe el libro las convierte a fecha de Excel. */
+export const COLUMNAS_FECHA_LINEA_DE_TIEMPO: readonly number[] = [8, 9, 11, 13, 17];
+/** Columna del inicio operativo, que es fecha y hora (`aaaa-mm-dd hh:mm`, o solo la fecha si no hay hora). */
+export const COLUMNA_FECHA_HORA_LINEA_DE_TIEMPO = 15;
+
+const comparar = (a: string, b: string) => a.localeCompare(b, "es");
+
+/**
+ * Hoja `LINEA_DE_TIEMPO` (§3.8): una fila por compra y tramo, ordenada por proveedor y compra. Las fechas van como `aaaa-mm-dd` (el inicio
+ * operativo, `aaaa-mm-dd hh:mm` si tiene hora) para convertirlas a fecha de Excel al escribir el libro (`COLUMNAS_FECHA_LINEA_DE_TIEMPO`); el
+ * estado, en texto («Pendiente», «Previsto», «Ocurrió», «Vencido», «Por confirmar», «Ocurrió sin fecha», «No aplica»). `ultimaCausaDe` da la
+ * causa del último cambio de fechas de un embarque (de `agrupador_hitos_resumen`).
+ */
+export function hojaLineaDeTiempo(compras: readonly CompraParaHojaLineaDeTiempo[], ultimaCausaDe: (embarqueId: string) => CausaFecha | null = () => null): Hoja {
+  const hoja: Hoja = [[...ENCABEZADOS_LINEA_DE_TIEMPO]];
+  const ordenadas = [...compras].sort((a, b) => comparar(a.proveedor, b.proveedor) || comparar(a.numero, b.numero));
+  for (const c of ordenadas) {
+    for (const t of c.linea_de_tiempo) {
+      const h = (hito: Hito): HitoApi | undefined => t.hitos.find((x) => x.hito === hito);
+      const fecha = (hito: Hito): string | null => {
+        const x = h(hito);
+        if (!x || x.fecha === null) return null;
+        return hito === "inicio_operativo" && x.hora ? `${x.fecha} ${x.hora}` : x.fecha;
+      };
+      const estado = (hito: Hito): string | null => {
+        const x = h(hito);
+        return x ? TEXTO_ESTADO_HITO_EXCEL[x.estado] : null;
+      };
+      const causa = t.embarque ? ultimaCausaDe(t.embarque.id) : null;
+      hoja.push([
+        c.proveedor,
+        c.numero,
+        c.numero_oc,
+        c.viaje_codigo,
+        t.embarque ? t.embarque.codigo : "Sin embarque",
+        t.embarque?.origen ?? null,
+        t.paquete?.codigo ?? null,
+        t.unidades,
+        fecha("orden_compra"),
+        fecha("zarpe"),
+        estado("zarpe"),
+        fecha("arribo"),
+        estado("arribo"),
+        fecha("ingreso_cd"),
+        estado("ingreso_cd"),
+        fecha("inicio_operativo"),
+        estado("inicio_operativo"),
+        fecha("ingreso_stock"),
+        estado("ingreso_stock"),
+        t.mes,
+        t.hitos.reduce((s, x) => s + x.reprogramaciones, 0),
+        causa === null ? null : ETIQUETA_CAUSA_FECHA[causa],
+      ]);
     }
   }
   return hoja;

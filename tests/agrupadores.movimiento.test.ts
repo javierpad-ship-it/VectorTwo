@@ -28,6 +28,7 @@ import {
   type ResultadoPlanMovimiento,
 } from "@/lib/compras/agrupadores/movimiento";
 import type { AsignacionRegistro } from "@/lib/compras/agrupadores/tipos";
+import { lineaDeTiempo } from "@/lib/compras/agrupadores/hitos";
 import { MARCA_M8, NODO_M8, REPARTO_BETA_V2 } from "./compras.fixture";
 import {
   ASIGNACION_AGR,
@@ -145,7 +146,7 @@ function siguiente(c: ContextoMovimiento, plan: PlanAplicable): ContextoMovimien
       const p = plan.embarques.find((x) => x.id === e.id);
       if (!p) return e;
       const fecha = p.fecha_llegada_estimada ?? e.fecha_llegada_estimada;
-      return { ...e, revision: e.revision + 1, fecha_llegada_estimada: fecha, periodo_llegada: periodoLlegada(e.fecha_llegada_real, fecha) };
+      return { ...e, revision: e.revision + 1, fecha_llegada_estimada: fecha, periodo_llegada: periodoLlegada(e.fecha_llegada_real, e.fecha_ingreso_estimada, fecha) };
     }),
   };
 }
@@ -189,9 +190,9 @@ const asignarL1 = (c: ContextoMovimiento) =>
 
 describe("periodoLlegada: la misma regla que la columna generada", () => {
   it("es el mes de coalesce(fecha real, fecha estimada)", () => {
-    expect(periodoLlegada(null, "2026-11-20")).toBe("2026-11");
-    expect(periodoLlegada(undefined, "2026-12-31")).toBe("2026-12");
-    expect(periodoLlegada("2026-12-02", "2026-11-20")).toBe("2026-12");
+    expect(periodoLlegada(null, null, "2026-11-20")).toBe("2026-11");
+    expect(periodoLlegada(undefined, undefined, "2026-12-31")).toBe("2026-12");
+    expect(periodoLlegada("2026-12-02", null, "2026-11-20")).toBe("2026-12");
   });
   it("mesSiguiente cruza el año", () => {
     expect(mesSiguiente("2026-09")).toBe("2026-10");
@@ -1040,5 +1041,120 @@ describe("la lógica de agrupadores es pura", () => {
     const cuerpo = consultas.slice(consultas.indexOf("export async function leerVersionesPorId"), consultas.indexOf("export async function leerVersionesDeMarca"));
     expect(cuerpo).toMatch(/\.in\("id"/);
     expect(cuerpo).not.toMatch(/vigente|activo/);
+  });
+});
+
+// ─── 08b-1b · F15: repartir las compras de COTV entre los embarques reales (sin doble conteo) ───
+
+describe("08b-1b · F15: asignar por proveedor lo que entró en diciembre sin embarque", () => {
+  const E_CA = "c1000000-0000-4000-8000-000000000001";
+  const E_NY = "c1000000-0000-4000-8000-000000000002";
+  const C201 = "c2000000-0000-4000-8000-000000000201";
+  const C202 = "c2000000-0000-4000-8000-000000000202";
+  const L = { a: "c3000000-0000-4000-8000-000000000001", b: "c3000000-0000-4000-8000-000000000002", c: "c3000000-0000-4000-8000-000000000003" };
+  const EN = { a: "c4000000-0000-4000-8000-000000000001", b: "c4000000-0000-4000-8000-000000000002", c: "c4000000-0000-4000-8000-000000000003" };
+  const linea = (id: string, compra: string, unidades: number) => ({
+    id,
+    compra_id: compra,
+    tipo: "especifica" as const,
+    genero_mundo_linea_id: null,
+    equivalencia_id: null,
+    marca_id: null,
+    agrupacion_marca_id: null,
+    tallas: "ambas" as const,
+    unidades,
+    unidades_recibidas: 0,
+    unidades_canceladas: 0,
+    costo_unitario: null,
+    destino: "cd" as const,
+    tienda_id: null,
+    alcance: {},
+    activo: true,
+  });
+  const compra = (id: string, numero: string, proveedor: string) => ({ id, numero, proveedor_id: id, proveedor_nombre: proveedor, origen: "carga_inicial" as const, estado: "confirmada" as const, fecha_compra: "2026-07-06", moneda: "USD" as const, cancelada_at: null, revision: 1 });
+  const embarque = (id: string, codigo: string, nombre: string, llegada: string, origen: string) => ({
+    ...registrosAgrupadores().embarques[0],
+    id,
+    codigo,
+    nombre,
+    origen,
+    viaje_id: null,
+    estado: "planificado" as const,
+    revision: 1,
+    fecha_salida_estimada: null,
+    fecha_llegada_estimada: llegada,
+    periodo_llegada: llegada.slice(0, 7),
+    fecha_ingreso_estimada: null,
+    hito_confirmado: null,
+  });
+  const inicial = (): ContextoMovimiento => ({
+    k_prima: K_PRIMA_AGRUPADORES,
+    viajes: [],
+    embarques: [embarque(E_CA, "261201", "California", "2026-12-15", "California"), embarque(E_NY, "270101", "Nueva York", "2027-01-15", "Nueva York")],
+    paquetes: [],
+    asignaciones: [],
+    compras: [compra(C201, "C-000201", "Proveedor Norte"), compra(C202, "C-000202", "Feria Sur")],
+    lineas: [linea(L.a, C201, 300), linea(L.b, C201, 200), linea(L.c, C202, 500)],
+    entregas: [
+      { id: EN.a, linea_id: L.a, periodo: "2026-12", unidades: 300, origen: "importada" },
+      { id: EN.b, linea_id: L.b, periodo: "2026-12", unidades: 200, origen: "importada" },
+      { id: EN.c, linea_id: L.c, periodo: "2026-12", unidades: 500, origen: "importada" },
+    ],
+    repartos: [],
+    recepciones: [],
+    viaje_de_compra: {},
+    repartos_por_id: new Map(),
+    nodos: NODOS,
+  });
+  const totalPorMes = (c: ContextoMovimiento) => {
+    const t: Record<string, number> = {};
+    for (const e of c.entregas) t[e.periodo] = (t[e.periodo] ?? 0) + e.unidades;
+    return t;
+  };
+
+  it("Proveedor Norte (500 u) → California; Feria Sur 250 → California y 250 → Nueva York: dic-26 750 y ene-27 250, Σ 1 000, nada sin embarque", () => {
+    let c = inicial();
+    expect(totalPorMes(c)).toEqual({ "2026-12": 1000 });
+    // 1. «Agregar compras» a California: las dos líneas de Proveedor Norte y 250 u de la línea de Feria Sur (mismo mes: no mueve entregas).
+    const r1 = ok(
+      planAsignar(
+        {
+          embarque_id: E_CA,
+          revision: 1,
+          paquete_id: null,
+          items: [
+            { entrega_id: EN.a, unidades: 300, compra_revision: 1 },
+            { entrega_id: EN.b, unidades: 200, compra_revision: 1 },
+            { entrega_id: EN.c, unidades: 250, compra_revision: 1 },
+          ],
+        },
+        c,
+      ),
+    );
+    expect(r1.aplicable.entregas).toEqual([]); // el embarque también es de dic: solo se crean asignaciones
+    c = siguiente(c, r1.aplicable);
+    // 2. Las otras 250 u de Feria Sur a Nueva York (ene-27): pasan a la entrega de enero de LA MISMA línea.
+    const r2 = ok(planAsignar({ embarque_id: E_NY, revision: 1, paquete_id: null, items: [{ entrega_id: EN.c, unidades: 250, compra_revision: c.compras.find((x) => x.id === C202)?.revision as number }] }, c));
+    expect(r2.aplicable.movimientos[0]).toMatchObject({ unidades: 250, destino: { periodo: "2027-01", embarque_id: E_NY } });
+    c = siguiente(c, r2.aplicable);
+
+    expect(totalPorMes(c)).toEqual({ "2026-12": 750, "2027-01": 250 });
+    expect(Object.values(totalPorMes(c)).reduce((s, n) => s + n, 0)).toBe(1000);
+    expect(c.entregas.filter((e) => e.linea_id === L.c).map((e) => [e.periodo, e.unidades]).sort()).toEqual([["2026-12", 250], ["2027-01", 250]]);
+    // Nada queda sin embarque: en cada entrega Σ asignaciones = unidades.
+    for (const e of c.entregas) expect(c.asignaciones.filter((a) => a.entrega_id === e.id).reduce((s, a) => s + a.unidades, 0), e.id).toBe(e.unidades);
+    // Σ por línea no cambia (I3).
+    expect(c.entregas.filter((e) => e.linea_id === L.a).reduce((s, e) => s + e.unidades, 0)).toBe(300);
+    expect(c.entregas.filter((e) => e.linea_id === L.c).reduce((s, e) => s + e.unidades, 0)).toBe(500);
+    // C-000202 queda con dos tramos en su línea de tiempo: California 250 y Nueva York 250.
+    const tramos = lineaDeTiempo({ fecha_compra: "2026-07-10", entregas: c.entregas.filter((e) => e.linea_id === L.c) }, c.asignaciones, c.embarques, c.paquetes, "2026-11-12");
+    expect(tramos.map((t) => [t.embarque?.codigo, t.embarque?.origen, t.unidades])).toEqual([["261201", "California", 250], ["270101", "Nueva York", 250]]);
+  });
+
+  it("repartir una línea partida entre dos embarques del mismo mes solo crea asignaciones: no mueve entregas ni cambia Σ", () => {
+    let c = inicial();
+    c = siguiente(c, ok(planAsignar({ embarque_id: E_CA, revision: 1, paquete_id: null, items: [{ entrega_id: EN.c, unidades: 100, compra_revision: 1 }] }, c)).aplicable);
+    expect(totalPorMes(c)).toEqual({ "2026-12": 1000 });
+    expect(c.asignaciones).toHaveLength(1);
   });
 });

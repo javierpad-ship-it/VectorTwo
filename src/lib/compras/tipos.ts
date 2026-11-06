@@ -56,6 +56,8 @@ export const ACCIONES_EVENTO = [
   "cancelar",
   "aplicar_reparto",
   "importar",
+  // Ficha 08b-1b (§2.11): registrar, cambiar o quitar el número de OC de una compra (`editar_oc_compra`).
+  "editar_oc",
   // Ficha 08b (§2.7): asignar viaje, asignar o mover entregas de un embarque y (08b-2) recibir un embarque.
   ...ACCIONES_EVENTO_COMPRA_AGRUPADORES,
 ] as const;
@@ -204,6 +206,33 @@ export const MOTIVOS_FUNCION_COMPRA = [
   "proveedor_inactivo",
 ] as const;
 export type MotivoFuncionCompra = (typeof MOTIVOS_FUNCION_COMPRA)[number];
+
+// ─── Número de OC (ficha 08b-1b §2.11, decisión 121) ───
+
+/** Largo máximo de `compras.numero_oc` (también el `check` de la base). */
+export const MAX_NUMERO_OC = 40;
+/** `^[A-Za-z0-9][A-Za-z0-9\-/_. ]{0,39}$`: lo que admite el esquema de `PUT /api/compras/[id]/oc` y la columna `OC` del importador. */
+export const PATRON_NUMERO_OC = /^[A-Za-z0-9][A-Za-z0-9\-/_. ]{0,39}$/;
+/** Motivo máximo del evento `editar_oc`. */
+export const MAX_MOTIVO_OC = 300;
+
+/**
+ * Motivos con los que `editar_oc_compra` rechaza sin escribir (`{ ok: false, motivo }`; en `oc_repetida` además `compra`, el número de la
+ * compra del mismo proveedor que ya tiene la OC). La API los traduce a `404` (`no_encontrado`), `400` (`oc_invalida`: más de 40
+ * caracteres, que el esquema ya impide) o `409`.
+ */
+export const MOTIVOS_FUNCION_OC = ["no_encontrado", "no_editable", "sin_cambios", "oc_cambio", "oc_repetida", "oc_invalida"] as const;
+export type MotivoFuncionOc = (typeof MOTIVOS_FUNCION_OC)[number];
+
+/** Aviso de `PUT …/oc` y de la previsualización del importador: la misma OC está en una compra viva de OTRO proveedor. */
+export const AVISOS_OC = ["oc_de_otro_proveedor"] as const;
+export type AvisoOc = (typeof AVISOS_OC)[number];
+
+/** Lo que devuelve `editar_oc_compra` (0038): `avisos` trae `{ codigo: 'oc_de_otro_proveedor', compra, proveedor }` por cada compra viva de OTRO proveedor con la misma OC. */
+export type ResultadoEditarOc =
+  | { ok: true; numero_oc: string | null; avisos: { codigo: AvisoOc; compra: string; proveedor: string }[] }
+  | { ok: false; motivo: Exclude<MotivoFuncionOc, "oc_repetida"> }
+  | { ok: false; motivo: "oc_repetida"; compra: string | null };
 
 export type ResultadoFuncionCompra =
   | { ok: true; compra_id: string; revision: number }

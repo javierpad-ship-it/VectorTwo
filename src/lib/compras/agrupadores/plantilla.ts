@@ -7,7 +7,9 @@ import { COLUMNAS_IMPORTAR_AGRUPADORES, type ClaveColumnaAgrupador } from "./tip
  * (con código la clave es el código y reimportar no duplica; sin código la clave es natural y el código se numera al aplicar).
  *
  * El encabezado y el orden son los de `COLUMNAS_IMPORTAR_AGRUPADORES` y de la hoja `AGRUPADORES` de la exportación a Excel, así que lo que
- * se baja de Viajes y embarques se puede completar y volver a subir.
+ * se baja de Viajes y embarques se puede completar y volver a subir. Desde 08b-1b (§3.6) los hitos llevan sus nombres (`FECHA_ZARPE`,
+ * `FECHA_ARRIBO`, `FECHA_INGRESO_CD`, `INICIO_OPERATIVO` con hora opcional, `FECHA_INGRESO_STOCK`, `ORIGEN`); los archivos viejos con
+ * `FECHA_SALIDA` y `FECHA_LLEGADA` se siguen leyendo (son sinónimos de Zarpe e Ingreso CD).
  */
 
 export const NOMBRE_ARCHIVO_PLANTILLA_AGRUPADORES_XLSX = "plantilla-agrupadores.xlsx";
@@ -37,8 +39,12 @@ export const FILAS_EJEMPLO_AGRUPADORES: string[][] = [
     nombre: "Dic-26 · Feria Sur",
     viaje: "261101",
     tipo_embarque: "IMPORTACION",
-    fecha_salida: "2026-11-20",
-    fecha_llegada: "2026-12-15",
+    fecha_zarpe: "2026-11-20",
+    fecha_arribo: "2026-12-10",
+    fecha_ingreso_cd: "2026-12-15",
+    inicio_operativo: "2026-12-16 09:00",
+    fecha_ingreso_stock: "2026-12-18",
+    origen: "California",
     puerto: "Puerto Sur",
     referencia_logistica: "BL-0001",
     responsable: "",

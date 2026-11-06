@@ -5,8 +5,10 @@ import { MAX_FILAS_IMPORTACION, MAX_UNIDADES_LINEA } from "@/lib/compras/tipos";
 import { mesSchema as mesIso } from "@/lib/intercompany/esquemas";
 import {
   ACCIONES_ESTADO,
+  CAUSAS_FECHA,
   ESTADOS_EMBARQUE,
   ESTADOS_VIAJE,
+  HITOS_CONFIRMABLES,
   MAX_ARCHIVO_NOMBRE,
   MAX_ASIGNACIONES_RECIBIR,
   MAX_COMPRAS_ASIGNAR_VIAJE,
@@ -20,6 +22,7 @@ import {
   MAX_NOTA_PAQUETE,
   MAX_NOTA_RECEPCION_EMBARQUE,
   MAX_NOTA_VIAJE,
+  MAX_ORIGEN_EMBARQUE,
   MAX_PUERTO_EMBARQUE,
   MAX_REFERENCIA_LOGISTICA,
   TIPOS_EMBARQUE,
@@ -100,6 +103,21 @@ const motivoObligatorio = z
 /** SHA-256 en hex del resumen del plan que el cliente vio en la vista previa (R19); sin ella no hay reintento. */
 const huellaPlan = z.string("La huella del plan debe ser texto.").length(64, "La huella del plan no es válida.").optional();
 
+/** Hora de Lima (`hh:mm`, sin zona): la del inicio operativo (08b-1b §2.3). */
+const MENSAJE_HORA = "La hora debe tener la forma hh:mm (por ejemplo 09:22).";
+export const horaSchema = z.string(MENSAJE_HORA).regex(/^([01]\d|2[0-3]):[0-5]\d$/, MENSAJE_HORA);
+
+/** Causa de una reprogramación (§2.6): la exige el servidor solo si el cambio reprograma. */
+const causaFecha = z.enum(CAUSAS_FECHA, "La causa no es válida: elige una de la lista.");
+
+/** Motivo de un cambio de fechas: opcional en el esquema (solo reprogramar lo exige, y eso lo decide el servidor: `409 motivo_requerido`). */
+const motivoOpcional = z
+  .string("El motivo debe ser texto.")
+  .trim()
+  .min(1, "Escribe el motivo.")
+  .max(MAX_MOTIVO_MOVIMIENTO, `El motivo no puede superar ${MAX_MOTIVO_MOVIMIENTO} caracteres.`)
+  .optional();
+
 // ─── Viajes (§2.3) ───
 
 const viajeBase = z.strictObject(
@@ -145,23 +163,35 @@ const embarqueBase = z.strictObject(
     referencia_logistica: textoOpcional("La referencia logística", MAX_REFERENCIA_LOGISTICA),
     /** Puerto real de este envío (decisión 96); texto libre, con sugerencias en pantalla. */
     puerto_embarque: textoOpcional("El puerto", MAX_PUERTO_EMBARQUE),
-    /** La editan planner y comprador y NO mueve entregas (R5). */
+    /**
+     * Zarpe, Arribo, Ingreso CD, Inicio operativo (fecha y hora) e Ingreso al stock: se ESCRIBEN solo al crear. Al editar (`PATCH`) una
+     * clave de fecha u hora presente y distinta de lo guardado (`null` incluido) da `409 fecha_por_movimiento` y una ausente conserva lo
+     * guardado (08b-1b §2.9); las fechas cambian por `POST …/fechas`, con motivo y causa si reprograma.
+     */
     fecha_salida_estimada: fechaOpcional(),
-    /** Obligatoria al crear; al editar se rechaza con `409 fecha_por_movimiento` (cambia por `/fecha`, con motivo). */
+    fecha_puerto_estimada: fechaOpcional(),
+    /** Ingreso CD: obligatoria al crear (es la llegada al CD de siempre). */
     fecha_llegada_estimada: fechaIso.optional(),
+    fecha_inicio_operativo_estimada: fechaOpcional(),
+    /** La hora exige la fecha del inicio operativo (`409 hora_sin_fecha`: lo comprueba la función). */
+    hora_inicio_operativo: horaSchema.nullable().optional(),
+    /** Ingreso al stock fijado al crear; vacío = el mismo día del Ingreso CD. */
+    fecha_ingreso_estimada: fechaOpcional(),
+    /** Almacén o ciudad de origen («California»): sí se edita. */
+    origen: textoOpcional("El origen", MAX_ORIGEN_EMBARQUE),
     nota: textoOpcional("La nota", MAX_NOTA_EMBARQUE),
   },
   estricto,
 );
 
-/** `POST /api/compras/embarques`: sin `revision`, la fecha de llegada es obligatoria. */
+/** `POST /api/compras/embarques`: sin `revision`, la fecha de ingreso al CD es obligatoria. */
 export const guardarEmbarqueSchema = embarqueBase.refine((v) => v.revision !== undefined || v.fecha_llegada_estimada !== undefined, {
-  message: "Indica la fecha de llegada estimada.",
+  message: "Indica la fecha de ingreso al CD.",
   path: ["fecha_llegada_estimada"],
 });
 export type GuardarEmbarque = z.infer<typeof guardarEmbarqueSchema>;
 
-/** `PATCH /api/compras/embarques/[id]`: la `revision` es obligatoria; la fecha de llegada, si viene, da `409 fecha_por_movimiento`. */
+/** `PATCH /api/compras/embarques/[id]`: la `revision` es obligatoria; una fecha presente y distinta de la guardada da `409 fecha_por_movimiento`. */
 export const editarEmbarqueSchema = embarqueBase.refine((v) => v.revision !== undefined, { message: "Falta la revisión del embarque.", path: ["revision"] });
 export type EditarEmbarque = z.infer<typeof editarEmbarqueSchema>;
 
@@ -277,18 +307,34 @@ export const quitarAsignacionesSchema = z.strictObject(
 );
 export type QuitarAsignaciones = z.infer<typeof quitarAsignacionesSchema>;
 
-/** `POST /api/compras/embarques/[id]/paquete`: mismo embarque (no mueve meses). `paquete_id` nulo = sacarlas del paquete. */
+/**
+ * `POST /api/compras/embarques/[id]/paquete`: mismo embarque. `paquete_id` nulo = sacarlas del paquete. Desde 08b-1b cada asignación puede
+ * ir como `id` (entera) o como `{ id, unidades }` (solo esas unidades), y el movimiento puede cambiar de mes (el paquete tiene ingreso
+ * propio, §2.5): en ese caso el servidor exige `motivo` y `causa` y la `huella_plan` de la vista previa (`?previsualizar=1`).
+ */
 export const moverAPaqueteSchema = z.strictObject(
   {
     revision: revision("La revisión del embarque"),
     paquete_id: uuid("El paquete").nullable(),
-    asignaciones: z.array(uuid("La asignación"), "Indica qué mover.").min(1, "Indica al menos una asignación.").max(MAX_ITEMS_MOVIMIENTO, itemsMax("asignaciones")),
+    asignaciones: z
+      .array(
+        z.union([uuid("La asignación"), z.strictObject({ id: uuid("La asignación"), unidades: unidadesTope().positive("Las unidades deben ser mayores que cero.") }, estricto)]),
+        "Indica qué mover.",
+      )
+      .min(1, "Indica al menos una asignación.")
+      .max(MAX_ITEMS_MOVIMIENTO, itemsMax("asignaciones")),
+    motivo: motivoOpcional,
+    causa: causaFecha.optional(),
+    huella_plan: huellaPlan,
   },
   estricto,
 );
 export type MoverAPaquete = z.infer<typeof moverAPaqueteSchema>;
 
-/** `POST /api/compras/embarques/[id]/fecha` (R5, decisión 83). El motivo es obligatorio; mismo mes = solo cambia el embarque. */
+/**
+ * `POST /api/compras/embarques/[id]/fecha` (R5, decisión 83): ALIAS por una sola versión (`0.17.x`) de `/fechas`, solo para pestañas
+ * abiertas durante el despliegue; equivale a `/fechas` con `fecha_ingreso_cd` y `causa = 'otro'` (08b-1b §3.2). El motivo es obligatorio.
+ */
 export const cambiarFechaSchema = z.strictObject(
   {
     revision: revision("La revisión del embarque"),
@@ -299,6 +345,50 @@ export const cambiarFechaSchema = z.strictObject(
   estricto,
 );
 export type CambiarFecha = z.infer<typeof cambiarFechaSchema>;
+
+const CLAVES_FECHAS = ["fecha_zarpe", "fecha_arribo", "fecha_ingreso_cd", "inicio_operativo", "fecha_ingreso_stock", "hito_confirmado"] as const;
+
+/**
+ * `POST /api/compras/embarques/[id]/fechas` (08b-1b §3.1; decisiones 115 y 116). La API habla con nombres de hito; `consultas.ts` los
+ * traduce a columnas. CLAVE AUSENTE = no cambia; clave presente = valor nuevo, `null` incluido (vaciar; en `fecha_ingreso_stock`,
+ * «igualar al Ingreso CD»; en `inicio_operativo`, vaciar la fecha y la hora). `fecha_ingreso_cd` nunca es nula. `motivo` y `causa` los
+ * exige el servidor solo si el cambio reprograma (`409 motivo_requerido`, `409 causa_requerida`); `huella_plan`, solo si cambia algún
+ * mes (`409 plan_cambio`). Se acepta además sin ninguna clave de fecha si se manda `hito_confirmado`.
+ */
+export const cambiarFechasSchema = z
+  .strictObject(
+    {
+      revision: revision("La revisión del embarque"),
+      fecha_zarpe: fechaOpcional(),
+      fecha_arribo: fechaOpcional(),
+      fecha_ingreso_cd: fechaIso.optional(),
+      inicio_operativo: z.strictObject({ fecha: fechaIso, hora: horaSchema.nullable().default(null) }, estricto).nullable().optional(),
+      fecha_ingreso_stock: fechaOpcional(),
+      hito_confirmado: z.enum(HITOS_CONFIRMABLES, "El hito debe ser zarpe, arribo, ingreso_cd o inicio_operativo.").nullable().optional(),
+      motivo: motivoOpcional,
+      causa: causaFecha.optional(),
+      huella_plan: huellaPlan,
+    },
+    estricto,
+  )
+  .refine((v) => CLAVES_FECHAS.some((k) => k in v), { message: "No indicaste ninguna fecha que cambiar." });
+export type CambiarFechas = z.infer<typeof cambiarFechasSchema>;
+
+/**
+ * `POST /api/compras/paquetes/[id]/ingreso` (§3.1): fija el ingreso al stock propio de un paquete (`null` = hereda el del embarque).
+ * `revision_embarque` es la del embarque del paquete. Motivo y causa los exige el servidor si reprograma un ingreso que ya tenía valor.
+ */
+export const ingresoPaqueteSchema = z.strictObject(
+  {
+    revision_embarque: revision("La revisión del embarque"),
+    fecha_ingreso_stock: fechaIso.nullable(),
+    motivo: motivoOpcional,
+    causa: causaFecha.optional(),
+    huella_plan: huellaPlan,
+  },
+  estricto,
+);
+export type IngresoPaquete = z.infer<typeof ingresoPaqueteSchema>;
 
 /** `POST /api/compras/paquetes/[id]/mover` (§3.5): `revision` es la del embarque de origen; `revision_destino`, la del destino. */
 export const moverPaqueteSchema = z.strictObject(
@@ -395,7 +485,8 @@ const celda = (campo: string, max?: number) => celdaTexto(campo, max).optional()
 
 /**
  * Una fila de la hoja única de §3.11 tal como la lee el navegador: todo texto. Columnas → claves: `TIPO`, `CODIGO`, `NOMBRE`,
- * `VIAJE`, `EMBARQUE`, `TIPO_EMBARQUE` → `tipo_embarque`, `DESTINO`, `FECHA_INICIO`, `FECHA_FIN`, `FECHA_SALIDA`, `FECHA_LLEGADA`,
+ * `VIAJE`, `EMBARQUE`, `TIPO_EMBARQUE` → `tipo_embarque`, `DESTINO`, `FECHA_INICIO`, `FECHA_FIN`, `FECHA_ZARPE`, `FECHA_ARRIBO`,
+ * `FECHA_INGRESO_CD`, `INICIO_OPERATIVO`, `FECHA_INGRESO_STOCK`, `ORIGEN` (más los sinónimos viejos `FECHA_SALIDA` y `FECHA_LLEGADA`),
  * `PUERTO`, `REFERENCIA_LOGISTICA`, `RESPONSABLE`, `NOTA`; `fila` es el número de fila del archivo (1-based). La validación fina
  * (tipo, longitudes, fechas, referencias) es del importador y omite la fila con su motivo en vez de dar `400`.
  */
@@ -411,6 +502,14 @@ export const filaAgrupadorSchema = z.strictObject(
     destino: celda("destino"),
     fecha_inicio: celda("fecha_inicio"),
     fecha_fin: celda("fecha_fin"),
+    // 08b-1b (§3.6): nombres de hito; `fecha_salida` y `fecha_llegada` son los sinónimos viejos de `fecha_zarpe` y `fecha_ingreso_cd`.
+    fecha_zarpe: celda("fecha_zarpe"),
+    fecha_arribo: celda("fecha_arribo"),
+    fecha_ingreso_cd: celda("fecha_ingreso_cd"),
+    /** `aaaa-mm-dd`, `aaaa-mm-dd hh:mm`, `dd/mm/aaaa hh:mm` o fecha y hora de Excel ya pasada a texto. */
+    inicio_operativo: celda("inicio_operativo"),
+    fecha_ingreso_stock: celda("fecha_ingreso_stock"),
+    origen: celda("origen"),
     fecha_salida: celda("fecha_salida"),
     fecha_llegada: celda("fecha_llegada"),
     puerto: celda("puerto"),
@@ -502,7 +601,12 @@ export const embarquesQuerySchema = z
     hasta: mesIso.optional(),
     responsable_id: uuid("El responsable").optional(),
     mio: bandera("mio"),
+    /** Algún hito `vencido` (08b-1b): un ingreso `por_confirmar` no cuenta. */
     atrasados: bandera("atrasados"),
+    /** Embarques con alguna reprogramación (08b-1b). */
+    reprogramados: bandera("reprogramados"),
+    /** Origen exacto (sin distinguir mayúsculas). */
+    origen: z.string().trim().max(MAX_ORIGEN_EMBARQUE, `El origen no puede superar ${MAX_ORIGEN_EMBARQUE} caracteres.`).optional(),
     q: textoBusqueda,
   })
   .refine((v) => v.desde === undefined || v.hasta === undefined || v.desde <= v.hasta, {
@@ -543,3 +647,4 @@ export const comprasAgrupadorQueryShape = {
   viaje_id: viajeOSinViaje,
   embarque_id: uuid("El embarque").optional(),
 };
+

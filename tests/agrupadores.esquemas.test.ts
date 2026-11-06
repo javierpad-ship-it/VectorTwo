@@ -4,6 +4,7 @@ import {
   asignarViajeSchema,
   cambiarEstadoSchema,
   cambiarFechaSchema,
+  cambiarFechasSchema,
   codigoSchema,
   deduplicarComprasViaje,
   comprasAgrupadorQueryShape,
@@ -18,6 +19,7 @@ import {
   historialQuerySchema,
   importarAgrupadoresSchema,
   importarComprasConAgrupadoresSchema,
+  ingresoPaqueteSchema,
   moverAPaqueteSchema,
   moverPaqueteSchema,
   pasarPendientesSchema,
@@ -33,7 +35,13 @@ import {
   ACCIONES_AGRUPADOR_EVENTO,
   ACCIONES_ESTADO,
   ACCIONES_ESTADO_POR_TIPO,
+  CAUSAS_FECHA,
+  CAUSAS_SIN_ATRASO,
   COLUMNAS_IMPORTAR_AGRUPADORES,
+  COLUMNAS_SINONIMAS_AGRUPADORES,
+  ESTADOS_HITO,
+  HITOS,
+  HITOS_CONFIRMABLES,
   MAX_ASIGNACIONES_RECIBIR,
   MAX_FILAS_IMPORTAR_AGRUPADORES,
   MOTIVOS_FUNCION_AGRUPADOR,
@@ -46,10 +54,14 @@ import {
   ESTADO_HTTP_ERROR_AGRUPADOR,
   ETIQUETA_ACCION_AGRUPADOR_EVENTO,
   ETIQUETA_AVISO_AGRUPADOR,
+  ETIQUETA_CAUSA_FECHA,
   MENSAJE_ERROR_AGRUPADOR,
+  type EventoAgrupadorApi,
 } from "@/lib/compras/agrupadores/tipos-api";
+import { ACCIONES_EVENTO, MAX_NUMERO_OC, MOTIVOS_FUNCION_OC } from "@/lib/compras/tipos";
+import { CODIGO_DE_MOTIVO_OC, ESTADO_HTTP_ERROR_COMPRA, ETIQUETA_ACCION_EVENTO, MENSAJE_ERROR_COMPRA, mensajeOcDeOtroProveedor, mensajeOcRepetida } from "@/lib/compras/tipos-api";
 import { AVISOS_AGRUPADOR } from "@/lib/compras/agrupadores/tipos";
-import { filaImportacionCompraSchema } from "@/lib/compras/esquemas";
+import { comprasQuerySchema, editarOcSchema, filaImportacionCompraSchema } from "@/lib/compras/esquemas";
 import {
   archivoAgrupadores19b,
   archivoAgrupadores19c,
@@ -404,12 +416,14 @@ describe("importador de agrupadores (§3.11, R25)", () => {
   });
   it("las columnas de la plantilla coinciden con las claves del esquema, una a una", () => {
     const claves = COLUMNAS_IMPORTAR_AGRUPADORES.map((c) => c.clave);
-    expect(claves).toHaveLength(15);
-    const fila = Object.fromEntries(claves.map((c) => [c, "x"]));
+    // 08b-1b (§3.6): 19 columnas con los nombres de los hitos; FECHA_SALIDA y FECHA_LLEGADA siguen como sinónimos (claves propias de la fila).
+    expect(claves).toHaveLength(19);
+    const fila = Object.fromEntries([...claves, ...COLUMNAS_SINONIMAS_AGRUPADORES.map((c) => c.clave)].map((c) => [c, "x"]));
     expect(filaAgrupadorSchema.safeParse({ fila: 1, ...fila }).success).toBe(true);
     expect(COLUMNAS_IMPORTAR_AGRUPADORES.map((c) => c.encabezado)).toEqual([
-      "TIPO", "CODIGO", "NOMBRE", "VIAJE", "EMBARQUE", "TIPO_EMBARQUE", "DESTINO", "FECHA_INICIO", "FECHA_FIN", "FECHA_SALIDA", "FECHA_LLEGADA", "PUERTO", "REFERENCIA_LOGISTICA", "RESPONSABLE", "NOTA",
+      "TIPO", "CODIGO", "NOMBRE", "VIAJE", "EMBARQUE", "TIPO_EMBARQUE", "DESTINO", "FECHA_INICIO", "FECHA_FIN", "FECHA_ZARPE", "FECHA_ARRIBO", "FECHA_INGRESO_CD", "INICIO_OPERATIVO", "FECHA_INGRESO_STOCK", "ORIGEN", "PUERTO", "REFERENCIA_LOGISTICA", "RESPONSABLE", "NOTA",
     ]);
+    expect(COLUMNAS_SINONIMAS_AGRUPADORES.map((c) => [c.encabezado, c.de])).toEqual([["FECHA_SALIDA", "fecha_zarpe"], ["FECHA_LLEGADA", "fecha_ingreso_cd"]]);
   });
 });
 
@@ -484,8 +498,9 @@ describe("catálogos y contrato de errores", () => {
     for (const a of AVISOS_AGRUPADOR) expect(ETIQUETA_AVISO_AGRUPADOR[a]).toBeTruthy();
     expect(ACCIONES_AGRUPADOR_EVENTO).toHaveLength(13);
   });
-  it("las 24 omisiones de §3.11", () => {
-    expect(MOTIVOS_OMISION_AGRUPADOR).toHaveLength(24);
+  it("las 24 omisiones de §3.11 y las 2 de 08b-1b (`hora_invalida`, `fechas_en_conflicto`)", () => {
+    expect(MOTIVOS_OMISION_AGRUPADOR).toHaveLength(26);
+    expect(MOTIVOS_OMISION_AGRUPADOR).toEqual(expect.arrayContaining(["hora_invalida", "fechas_en_conflicto"]));
   });
   it("responsables asignables: comprador y admin, no el planner (R26)", () => {
     expect([...ROLES_RESPONSABLE_ASIGNABLE].sort()).toEqual(["admin", "comprador"]);
@@ -626,5 +641,207 @@ describe("fixture de los casos de la ficha (§5)", () => {
     const sinCodigo = a.find((f) => f.tipo === "EMBARQUE" && !f.codigo);
     expect(sinCodigo).toBeDefined();
     expect(a.find((f) => f.tipo === "PAQUETE" && f.embarque === sinCodigo?.nombre)).toBeDefined();
+  });
+});
+
+// ─── 08b-1b: contratos de fechas logísticas, ingreso por paquete y número de OC ───
+
+describe("08b-1b · cambiarFechasSchema (POST …/fechas)", () => {
+  const ok = { revision: 1 };
+  const r = (cuerpo: Record<string, unknown>) => cambiarFechasSchema.safeParse({ ...ok, ...cuerpo });
+
+  it("clave ausente no cambia; presente es el valor nuevo (null incluido) y la clave se conserva en la salida", () => {
+    const zarpe = r({ fecha_zarpe: null });
+    expect(zarpe.success).toBe(true);
+    if (zarpe.success) expect(zarpe.data).toMatchObject({ fecha_zarpe: null });
+    const sola = r({ fecha_arribo: "2026-11-18" });
+    expect(sola.success && Object.keys(sola.data).sort()).toEqual(["fecha_arribo", "revision"]);
+    expect(r({ fecha_ingreso_stock: null }).success).toBe(true);
+    expect(r({ hito_confirmado: null }).success).toBe(true);
+    expect(r({ inicio_operativo: null }).success).toBe(true);
+  });
+
+  it("sin ninguna clave de fecha (solo la revisión o solo el motivo) se rechaza con un texto llano", () => {
+    expect(r({}).success).toBe(false);
+    expect(r({ motivo: "x", causa: "otro" }).success).toBe(false);
+    const malo = r({});
+    expect(!malo.success && malo.error.issues[0].message).toBe("No indicaste ninguna fecha que cambiar.");
+  });
+
+  it("el Ingreso CD nunca es null; las fechas deben ser aaaa-mm-dd de un día real", () => {
+    expect(r({ fecha_ingreso_cd: null }).success).toBe(false);
+    expect(r({ fecha_ingreso_cd: "2026-12-03" }).success).toBe(true);
+    expect(r({ fecha_zarpe: "2026-02-30" }).success).toBe(false);
+    expect(r({ fecha_arribo: "18/11/2026" }).success).toBe(false);
+  });
+
+  it("inicio_operativo: fecha y hora hh:mm de Lima; la hora puede ser null (la fecha sola)", () => {
+    const solo = r({ inicio_operativo: { fecha: "2026-11-05", hora: "09:22" } });
+    expect(solo.success).toBe(true);
+    const sinHora = r({ inicio_operativo: { fecha: "2026-11-05", hora: null } });
+    expect(sinHora.success && sinHora.data.inicio_operativo).toEqual({ fecha: "2026-11-05", hora: null });
+    const omitida = r({ inicio_operativo: { fecha: "2026-11-05" } });
+    expect(omitida.success && omitida.data.inicio_operativo).toEqual({ fecha: "2026-11-05", hora: null });
+    for (const hora of ["25:10", "9:22", "09:60", "24:00", "09:22:10", "nueve"]) expect(r({ inicio_operativo: { fecha: "2026-11-05", hora } }).success, hora).toBe(false);
+    for (const hora of ["00:00", "23:59", "09:22"]) expect(r({ inicio_operativo: { fecha: "2026-11-05", hora } }).success, hora).toBe(true);
+    expect(r({ inicio_operativo: { hora: "09:22" } }).success).toBe(false);
+    expect(r({ inicio_operativo: { fecha: "2026-11-05", hora: null, extra: 1 } }).success).toBe(false);
+  });
+
+  it("hito_confirmado y causa: solo los catálogos de la ficha", () => {
+    for (const h of ["zarpe", "arribo", "ingreso_cd", "inicio_operativo"]) expect(r({ hito_confirmado: h }).success, h).toBe(true);
+    for (const h of ["llegada", "ingreso_stock", "orden_compra", ""]) expect(r({ hito_confirmado: h }).success, h).toBe(false);
+    for (const c of CAUSAS_FECHA) expect(r({ fecha_arribo: "2026-11-18", motivo: "x", causa: c }).success, c).toBe(true);
+    expect(CAUSAS_FECHA).toEqual(["pago", "produccion", "naviera", "aduana", "transporte", "cola_conteo", "programacion", "correccion", "otro"]);
+    expect(r({ fecha_arribo: "2026-11-18", causa: "clima" }).success).toBe(false);
+    expect(HITOS_CONFIRMABLES).toEqual(["zarpe", "arribo", "ingreso_cd", "inicio_operativo"]);
+  });
+
+  it("motivo y huella_plan son opcionales (los exige el servidor solo si reprograma o cambia un mes); motivo ≤ 300; clave desconocida da 400", () => {
+    expect(r({ fecha_arribo: "2026-11-18", motivo: "x", causa: "naviera", huella_plan: HUELLA }).success).toBe(true);
+    expect(r({ fecha_arribo: "2026-11-18", motivo: "m".repeat(301) }).success).toBe(false);
+    expect(r({ fecha_arribo: "2026-11-18", motivo: "   " }).success).toBe(false);
+    expect(r({ fecha_arribo: "2026-11-18", huella_plan: "corta" }).success).toBe(false);
+    expect(r({ fecha_arribo: "2026-11-18", fecha_llegada_estimada: "2026-11-20" }).success).toBe(false);
+    expect(cambiarFechasSchema.safeParse({ fecha_arribo: "2026-11-18" }).success).toBe(false); // sin revisión
+  });
+});
+
+describe("08b-1b · ingresoPaqueteSchema (POST …/paquetes/[id]/ingreso)", () => {
+  it("revisión del embarque, fecha (null = hereda), motivo, causa y huella opcionales; strict", () => {
+    expect(ingresoPaqueteSchema.safeParse({ revision_embarque: 2, fecha_ingreso_stock: "2027-04-04" }).success).toBe(true);
+    expect(ingresoPaqueteSchema.safeParse({ revision_embarque: 2, fecha_ingreso_stock: null, motivo: "Hereda", causa: "programacion", huella_plan: HUELLA }).success).toBe(true);
+    expect(ingresoPaqueteSchema.safeParse({ revision_embarque: 2 }).success).toBe(false);
+    expect(ingresoPaqueteSchema.safeParse({ fecha_ingreso_stock: "2027-04-04" }).success).toBe(false);
+    expect(ingresoPaqueteSchema.safeParse({ revision_embarque: 2, fecha_ingreso_stock: "2027-04-04", causa: "clima" }).success).toBe(false);
+    expect(ingresoPaqueteSchema.safeParse({ revision_embarque: 2, fecha_ingreso_stock: "2027-04-04", revision: 1 }).success).toBe(false);
+  });
+});
+
+describe("08b-1b · moverAPaqueteSchema por unidades", () => {
+  const base = { revision: 1, paquete_id: U1 };
+  it("acepta ids enteros, `{ id, unidades }` y mezclas; las unidades son enteros positivos", () => {
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [U1, U2] }).success).toBe(true);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [{ id: U1, unidades: 300 }, U2] }).success).toBe(true);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [{ id: U1, unidades: 0 }] }).success).toBe(false);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [{ id: U1, unidades: 1.5 }] }).success).toBe(false);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [{ id: U1, unidades: MAX_UNIDADES_LINEA + 1 }] }).success).toBe(false);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [{ id: "x", unidades: 5 }] }).success).toBe(false);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [{ id: U1, unidades: 5, extra: 1 }] }).success).toBe(false);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [] }).success).toBe(false);
+  });
+  it("suma motivo, causa y huella_plan opcionales", () => {
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [U1], motivo: "Programar", causa: "programacion", huella_plan: HUELLA }).success).toBe(true);
+    expect(moverAPaqueteSchema.safeParse({ ...base, asignaciones: [U1], causa: "clima" }).success).toBe(false);
+  });
+});
+
+describe("08b-1b · guardarEmbarqueSchema y editarEmbarqueSchema con los hitos y el origen", () => {
+  const crear = { nombre: "Embarque", tipo: "importacion", viaje_id: null, responsable_id: null, fecha_llegada_estimada: "2026-11-15" };
+  it("al crear acepta los cinco hitos, la hora y el origen; el Ingreso CD sigue obligatorio", () => {
+    expect(guardarEmbarqueSchema.safeParse({ ...crear, fecha_salida_estimada: "2026-10-05", fecha_puerto_estimada: "2026-11-08", fecha_inicio_operativo_estimada: "2026-11-16", hora_inicio_operativo: "09:22", fecha_ingreso_estimada: "2026-12-02", origen: "California" }).success).toBe(true);
+    const sinCd = guardarEmbarqueSchema.safeParse({ nombre: "E", tipo: "importacion", viaje_id: null, responsable_id: null });
+    expect(!sinCd.success && sinCd.error.issues[0].message).toBe("Indica la fecha de ingreso al CD.");
+  });
+  it("la hora tiene la forma hh:mm; origen ≤ 80 y vacío = null", () => {
+    expect(guardarEmbarqueSchema.safeParse({ ...crear, hora_inicio_operativo: "9:22" }).success).toBe(false);
+    expect(guardarEmbarqueSchema.safeParse({ ...crear, origen: "o".repeat(81) }).success).toBe(false);
+    const vacio = guardarEmbarqueSchema.safeParse({ ...crear, origen: "  " });
+    expect(vacio.success && vacio.data.origen).toBeNull();
+  });
+  it("el PATCH acepta el origen (y las fechas como claves, que la función rechaza con fecha_por_movimiento si cambian); exige la revisión", () => {
+    expect(editarEmbarqueSchema.safeParse({ ...crear, revision: 1, origen: "Nueva York" }).success).toBe(true);
+    expect(editarEmbarqueSchema.safeParse({ ...crear, origen: "Nueva York" }).success).toBe(false);
+    const sinSalida = editarEmbarqueSchema.safeParse({ ...crear, revision: 1 });
+    expect(sinSalida.success && "fecha_salida_estimada" in sinSalida.data).toBe(false);
+  });
+});
+
+describe("08b-1b · filtros de la lista y columnas nuevas", () => {
+  it("embarquesQuerySchema: reprogramados y origen", () => {
+    const q = embarquesQuerySchema.parse({ reprogramados: "1", origen: "California", atrasados: "1" });
+    expect(q).toMatchObject({ reprogramados: true, origen: "California", atrasados: true });
+    expect(embarquesQuerySchema.parse({}).reprogramados).toBe(false);
+    expect(embarquesQuerySchema.safeParse({ reprogramados: "si" }).success).toBe(false);
+  });
+  it("comprasQuerySchema: proximo_hito solo admite «vencido»; q busca también por OC", () => {
+    expect(comprasQuerySchema.parse({ proximo_hito: "vencido" }).proximo_hito).toBe("vencido");
+    expect(comprasQuerySchema.safeParse({ proximo_hito: "previsto" }).success).toBe(false);
+    expect(comprasQuerySchema.parse({ q: "4500012345" }).q).toBe("4500012345");
+  });
+  it("la fila de agrupadores acepta los hitos nuevos y sus sinónimos viejos; el importador de compras, la columna OC (opcional)", () => {
+    const fila = Object.fromEntries([...COLUMNAS_IMPORTAR_AGRUPADORES, ...COLUMNAS_SINONIMAS_AGRUPADORES].map((c) => [c.clave, "x"]));
+    expect(filaAgrupadorSchema.safeParse({ fila: 1, ...fila }).success).toBe(true);
+    expect(filaAgrupadorSchema.safeParse({ fila: 1, tipo: "EMBARQUE", fecha_zarpe: "2026-11-05", inicio_operativo: "2026-11-05 09:22" }).success).toBe(true);
+    expect(filaImportacionCompraSchema.safeParse({}).data).not.toHaveProperty("oc");
+    expect(filaImportacionCompraSchema.parse({ oc: "4500012345" }).oc).toBe("4500012345");
+    expect(filaImportacionCompraSchema.safeParse({ oc: "x".repeat(301) }).success).toBe(false);
+    expect(filaImportacionCompraConAgrupadoresSchema.parse({ oc: "4500012345" }).oc).toBe("4500012345");
+  });
+});
+
+describe("08b-1b · editarOcSchema (PUT /api/compras/[id]/oc)", () => {
+  it("antes (la OC que vio el formulario o null) y numero_oc (null = quitar); el motivo es opcional", () => {
+    expect(editarOcSchema.safeParse({ antes: null, numero_oc: "4500012345" }).success).toBe(true);
+    expect(editarOcSchema.safeParse({ antes: "4500012300", numero_oc: "4500012345", motivo: "Error de tipeo" }).success).toBe(true);
+    expect(editarOcSchema.safeParse({ antes: "4500012300", numero_oc: null }).success).toBe(true);
+    expect(editarOcSchema.safeParse({ numero_oc: "4500012345" }).success).toBe(false);
+    expect(editarOcSchema.safeParse({ antes: null }).success).toBe(false);
+  });
+  it("el formato de la OC: empieza con letra o número; letras, números, `- / _ .` y espacios; hasta 40; sin espacios al borde (se recortan)", () => {
+    for (const oc of ["4500012345", "PO-2026/11_a.b", "AB 12", "a", "A".repeat(40)]) expect(editarOcSchema.safeParse({ antes: null, numero_oc: oc }).success, oc).toBe(true);
+    for (const oc of ["-123", "45000#1", "", "   ", "A".repeat(41), "ñandú"]) expect(editarOcSchema.safeParse({ antes: null, numero_oc: oc }).success, oc).toBe(false);
+    const recortada = editarOcSchema.safeParse({ antes: null, numero_oc: "  4500012345  " });
+    expect(recortada.success && recortada.data.numero_oc).toBe("4500012345");
+  });
+  it("motivo ≤ 300 y no vacío; clave desconocida da 400", () => {
+    expect(editarOcSchema.safeParse({ antes: null, numero_oc: "1", motivo: "m".repeat(301) }).success).toBe(false);
+    expect(editarOcSchema.safeParse({ antes: null, numero_oc: "1", motivo: "  " }).success).toBe(false);
+    expect(editarOcSchema.safeParse({ antes: null, numero_oc: "1", referencia: "X" }).success).toBe(false);
+  });
+});
+
+describe("08b-1b · catálogos, códigos de error y avisos nuevos", () => {
+  it("los motivos nuevos de las funciones de agrupador tienen estado HTTP 409 y un mensaje en castellano", () => {
+    for (const m of ["sin_cambios", "causa_requerida", "fecha_requerida", "fecha_futura", "puerto_en_local", "hora_sin_fecha", "hito_confirmado"] as const) {
+      expect(MOTIVOS_FUNCION_AGRUPADOR).toContain(m);
+      expect(ESTADO_HTTP_ERROR_AGRUPADOR[m]).toBe(409);
+      expect(MENSAJE_ERROR_AGRUPADOR[m].length).toBeGreaterThan(10);
+    }
+    expect(MENSAJE_ERROR_AGRUPADOR.fecha_futura).toContain("desmarca");
+    expect(MENSAJE_ERROR_AGRUPADOR.hora_sin_fecha).toBe("Pon la fecha del inicio operativo antes que la hora.");
+  });
+  it("los avisos nuevos están en el catálogo y tienen etiqueta", () => {
+    for (const a of ["ingreso_paquete_ajustado", "orden_de_fechas", "hito_vencido", "pasa_a_en_transito"] as const) {
+      expect(AVISOS_AGRUPADOR).toContain(a);
+      expect(ETIQUETA_AVISO_AGRUPADOR[a]).toBeTruthy();
+    }
+  });
+  it("la OC: motivos de la función, códigos de la API y mensajes", () => {
+    for (const m of MOTIVOS_FUNCION_OC) {
+      const codigo = CODIGO_DE_MOTIVO_OC[m];
+      expect(ESTADO_HTTP_ERROR_COMPRA[codigo]).toBeGreaterThanOrEqual(400);
+      expect(MENSAJE_ERROR_COMPRA[codigo].length).toBeGreaterThan(10);
+    }
+    expect(ESTADO_HTTP_ERROR_COMPRA.no_encontrado).toBe(404);
+    expect(ESTADO_HTTP_ERROR_COMPRA.oc_repetida).toBe(409);
+    expect(ESTADO_HTTP_ERROR_COMPRA.oc_cambio).toBe(409);
+    expect(ESTADO_HTTP_ERROR_COMPRA.sin_cambios).toBe(409);
+    expect(ESTADO_HTTP_ERROR_COMPRA.oc_invalida).toBe(400);
+    expect(mensajeOcRepetida("4500012345", "C-000201")).toBe("La OC 4500012345 ya está en C-000201 de este proveedor. Una OC es de una sola compra: revisa el número o cancela la otra compra.");
+    expect(mensajeOcDeOtroProveedor("4500012345", "C-000202", "Feria Sur")).toBe("La OC 4500012345 también está en C-000202 de Feria Sur: ¿es otra orden?");
+    expect(ACCIONES_EVENTO).toContain("editar_oc");
+    expect(ETIQUETA_ACCION_EVENTO.editar_oc).toBeTruthy();
+    expect(MAX_NUMERO_OC).toBe(40);
+  });
+  it("las causas, los estados y los hitos tienen texto, marcador y orden", () => {
+    for (const c of CAUSAS_FECHA) expect(ETIQUETA_CAUSA_FECHA[c]).toBeTruthy();
+    expect(HITOS).toEqual(["orden_compra", "zarpe", "arribo", "ingreso_cd", "inicio_operativo", "ingreso_stock"]);
+    expect(ESTADOS_HITO).toEqual(["real", "sin_registrar", "vencido", "por_confirmar", "previsto", "pendiente", "no_aplica"]);
+    expect(CAUSAS_SIN_ATRASO).toEqual(["correccion", "programacion"]);
+  });
+  it("el evento de agrupador puede traer la causa y la opción de embarque el origen", () => {
+    const evento: EventoAgrupadorApi = { id: "e", viaje_id: null, embarque_id: "x", paquete_id: null, accion: "cambiar_fecha", antes: null, despues: null, motivo: "m", causa: "aduana", resumen: null, compras: [], usuario_nombre: null, created_at: "2026-11-12T10:00:00Z" };
+    expect(evento.causa).toBe("aduana");
   });
 });

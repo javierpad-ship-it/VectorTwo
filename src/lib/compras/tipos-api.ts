@@ -16,18 +16,21 @@
  *   DELETE /api/compras/[id]/recepciones/[recepcionId]   → CompraApi
  *   POST   /api/compras/[id]/cancelar                    → CompraApi
  *   POST   /api/compras/importar                         → ReporteImportacionComprasApi
+ *   PUT    /api/compras/[id]/oc                          → RespuestaEditarOcApi   (08b-1b: registrar, cambiar o quitar la OC)
  * Errores: `{ error, codigo }` con `CodigoErrorCompra`, su estado en `ESTADO_HTTP_ERROR_COMPRA` y su texto en
  * `MENSAJE_ERROR_COMPRA`.
  */
 import type { MotivoResolverGml } from "@/lib/arbol/tipos";
-import type { AgrupadorImportacionCompraApi, MotivoOmisionCompraAgrupador, ViajeResumenApi } from "./agrupadores/tipos-api";
+import type { AgrupadorImportacionCompraApi, MotivoOmisionCompraAgrupador, ProximoHitoApi, TramoLineaTiempoApi, ViajeResumenApi } from "./agrupadores/tipos-api";
 import type {
   AccionEvento,
+  AvisoOc,
   DestinoCompra,
   EstadoCompra,
   Mes,
   Moneda,
   MotivoFuncionCompra,
+  MotivoFuncionOc,
   OrigenCompra,
   OrigenEntrega,
   OrigenRecepcion,
@@ -35,7 +38,7 @@ import type {
   TipoLinea,
 } from "./tipos";
 
-export type { AccionEvento, DestinoCompra, EstadoCompra, Mes, Moneda, OrigenCompra, OrigenEntrega, OrigenRecepcion, TallasCompra, TipoLinea };
+export type { AccionEvento, AvisoOc, DestinoCompra, MotivoFuncionOc, EstadoCompra, Mes, Moneda, OrigenCompra, OrigenEntrega, OrigenRecepcion, TallasCompra, TipoLinea };
 
 // ─── Códigos de error ───
 
@@ -50,7 +53,13 @@ export type CodigoErrorCompra =
   | "recibida"
   | "carga_inicial_requerida"
   | "clave_existente"
-  | "proveedor_inactivo";
+  | "proveedor_inactivo"
+  // Número de OC (08b-1b §2.11): `PUT /api/compras/[id]/oc`.
+  | "no_encontrado"
+  | "sin_cambios"
+  | "oc_cambio"
+  | "oc_repetida"
+  | "oc_invalida";
 
 /** Los que una función de escritura devuelve como `motivo` coinciden con el código de la API. */
 export const ESTADO_HTTP_ERROR_COMPRA: Record<CodigoErrorCompra, number> = {
@@ -64,6 +73,11 @@ export const ESTADO_HTTP_ERROR_COMPRA: Record<CodigoErrorCompra, number> = {
   carga_inicial_requerida: 400,
   clave_existente: 409,
   proveedor_inactivo: 409,
+  no_encontrado: 404,
+  sin_cambios: 409,
+  oc_cambio: 409,
+  oc_repetida: 409,
+  oc_invalida: 400,
 };
 
 export const MENSAJE_ERROR_COMPRA: Record<CodigoErrorCompra, string> = {
@@ -77,7 +91,30 @@ export const MENSAJE_ERROR_COMPRA: Record<CodigoErrorCompra, string> = {
   carga_inicial_requerida: "Por ahora solo se pueden importar compras ya hechas: marca la casilla «Carga inicial de compras ya hechas».",
   clave_existente: "Otra importación creó alguna de estas líneas mientras revisabas: vuelve a previsualizar.",
   proveedor_inactivo: "Ese proveedor está desactivado: elige otro.",
+  no_encontrado: "No encontramos esa compra.",
+  sin_cambios: "La OC ya es esa: no hay nada que cambiar.",
+  oc_cambio: "Otra persona cambió la OC mientras editabas: vuelve a abrirla.",
+  oc_repetida: "Esa OC ya está en otra compra de este proveedor. Una OC es de una sola compra.",
+  oc_invalida: "La OC admite letras, números, guiones, barras, puntos, guiones bajos y espacios (hasta 40 caracteres).",
 };
+
+/** `motivo` de `editar_oc_compra` → código de la API (el mismo texto; `no_editable` ya existe). */
+export const CODIGO_DE_MOTIVO_OC: Record<MotivoFuncionOc, CodigoErrorCompra> = {
+  no_encontrado: "no_encontrado",
+  no_editable: "no_editable",
+  sin_cambios: "sin_cambios",
+  oc_cambio: "oc_cambio",
+  oc_repetida: "oc_repetida",
+  oc_invalida: "oc_invalida",
+};
+
+/** Texto de `oc_repetida` con los datos: «La OC 4500012345 ya está en C-000201 de este proveedor. Una OC es de una sola compra». */
+export const mensajeOcRepetida = (numeroOc: string, compraNumero: string): string =>
+  `La OC ${numeroOc} ya está en ${compraNumero} de este proveedor. Una OC es de una sola compra: revisa el número o cancela la otra compra.`;
+
+/** Texto de `oc_de_otro_proveedor`: «La OC 4500012345 también está en C-000202 de Feria Sur: ¿es otra orden?». */
+export const mensajeOcDeOtroProveedor = (numeroOc: string, compraNumero: string, proveedor: string): string =>
+  `La OC ${numeroOc} también está en ${compraNumero} de ${proveedor}: ¿es otra orden?`;
 
 /** `motivo` de una función de escritura → código de la API (son el mismo texto; la comprobación de tipos impide olvidar uno). */
 export const CODIGO_DE_MOTIVO: Record<MotivoFuncionCompra, CodigoErrorCompra> = {
@@ -227,7 +264,27 @@ export type CompraApi = {
   avisos: AvisoLineaCompra[];
   /** El viaje de la compra (ficha 08b; nulo si no tiene). Siempre presente en las respuestas de la API; opcional en el tipo por los fixtures de M8. */
   viaje?: ViajeResumenApi | null;
+  /**
+   * Número de la orden de compra real (08b-1b §2.11; el «código X» es `numero`). Nulo = «OC sin registrar». Opcional en el tipo solo hasta
+   * que T3a lo llene siempre (como `viaje`); entonces se vuelve obligatorio.
+   */
+  numero_oc?: string | null;
+  /** Línea de tiempo de la compra, un tramo por (embarque, paquete) y uno «Sin embarque» por mes (§3.4). Solo en `GET /api/compras/[id]`. */
+  linea_de_tiempo?: TramoLineaTiempoApi[];
+  /** El hito más urgente de la compra (solo en la lista de Compras; §3.3). */
+  proximo_hito?: ProximoHitoCompraApi | null;
 };
+
+/** `ProximoHitoApi` más el embarque del tramo y cuántos tramos más tiene la compra («+1 tramo»). */
+export type ProximoHitoCompraApi = ProximoHitoApi & { embarque_codigo: string | null; tramos_mas: number };
+
+/** Cuerpo de `PUT /api/compras/[id]/oc` (el esquema es `editarOcSchema`). `antes` es la OC que vio el formulario; `numero_oc = null` la quita. */
+export type EditarOcCuerpo = { antes: string | null; numero_oc: string | null; motivo?: string };
+
+export type AvisoOcApi = { aviso: AvisoOc; detalle: string };
+
+/** `PUT /api/compras/[id]/oc`. La revisión de la compra NO sube (§2.11). */
+export type RespuestaEditarOcApi = { compra: { id: string; numero: string; numero_oc: string | null }; avisos: AvisoOcApi[] };
 
 export type EventoCompraApi = {
   id: string;
@@ -355,6 +412,28 @@ export type CompraImportacionApi = {
 export type AplicadaImportacionApi = { clave: string; compra_id: string; numero: string; lineas: number };
 export type NoAplicadaImportacionApi = { clave: string; proveedor: string; referencia: string; motivo: MotivoFuncionCompra | "saldo_cerrado" | "compra_no_borrador" | "error"; mensaje: string };
 
+/** Qué pasó con la OC de una compra del archivo (columna `OC`, 08b-1b §3.7). */
+export type AccionOcImportacion = "registrada" | "cambiada" | "sin_cambio" | "omitida";
+/** Por qué la OC de una compra no se aplicó; las líneas de la compra siguen su regla. */
+export type MotivoOcImportacion = "oc_repetida" | "oc_distinta_en_compra" | "oc_no_editable" | "oc_invalida";
+
+/** Una entrada por compra del archivo que trae `OC` (o ya la tenía y el archivo la cambia). */
+export type OcImportacionApi = {
+  compra_clave: string;
+  proveedor: string;
+  referencia: string;
+  /** La compra existente; nulo si se creará con este archivo (su número se conoce al aplicar). */
+  compra: { id: string; numero: string } | null;
+  /** La OC que trae el archivo, sin espacios al borde; nulo si no trae. */
+  numero_oc: string | null;
+  /** La guardada hoy en la compra (`antes` de `editar_oc_compra`). */
+  antes: string | null;
+  accion: AccionOcImportacion;
+  motivo?: MotivoOcImportacion;
+  detalle?: string;
+  avisos: AvisoOcApi[];
+};
+
 export type ReporteImportacionComprasApi = {
   modo: ModoImportacionCompras;
   carga_inicial: boolean;
@@ -374,6 +453,8 @@ export type ReporteImportacionComprasApi = {
    * (vacío si el archivo no las usa); opcional en el tipo por los fixtures de M8.
    */
   agrupadores?: AgrupadorImportacionCompraApi[];
+  /** Qué hizo la columna `OC` por compra (08b-1b §3.7). Vacío si el archivo no la usa; opcional en el tipo por los fixtures de M8. */
+  oc?: OcImportacionApi[];
 };
 
 // ─── Cuerpos de petición (tipos de pantalla; los esquemas están en `esquemas.ts`) ───
@@ -419,4 +500,5 @@ export const ETIQUETA_ACCION_EVENTO: Record<AccionEvento, string> = {
   asignar_agrupador: "Asignó entregas a un embarque",
   mover_entregas: "Movió entregas de embarque o de fecha",
   recibir_embarque: "Confirmó el ingreso con un embarque",
+  editar_oc: "Cambió el número de OC",
 };

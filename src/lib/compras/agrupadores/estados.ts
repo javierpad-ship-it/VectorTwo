@@ -1,6 +1,7 @@
 import {
   ACCIONES_ESTADO_POR_TIPO,
   type AccionEstado,
+  type EmbarqueRegistro,
   type EstadoEmbarque,
   type EstadoPaquete,
   type EstadoViaje,
@@ -20,7 +21,7 @@ import {
  *  - Cancelar es irreversible y exige motivo (`motivo_requerido`); el resto no lo pide.
  */
 
-export type MotivoTransicionAgrupador = "transicion_invalida" | "tiene_asignaciones_activas" | "tiene_compras" | "tiene_recepciones" | "motivo_requerido";
+export type MotivoTransicionAgrupador = "transicion_invalida" | "tiene_asignaciones_activas" | "tiene_compras" | "tiene_recepciones" | "motivo_requerido" | "hito_confirmado";
 
 export type ResultadoTransicionAgrupador<E extends string> = { ok: true; hacia: E } | { ok: false; motivo: MotivoTransicionAgrupador };
 
@@ -56,6 +57,11 @@ export function transicionViaje(estado: EstadoViaje, accion: AccionEstado, ctx: 
 }
 
 export type ContextoEmbarque = {
+  /**
+   * Último hito confirmado del embarque (08b-1b §2.2): `volver_a_planificado` con un hito que ya ocurrió da `409 hito_confirmado` (un
+   * embarque planificado no puede tener hitos ocurridos, I7). Ausente o nulo = ninguno.
+   */
+  hito_confirmado?: string | null;
   /** Asignaciones activas (no históricas) del embarque. */
   asignaciones_activas: number;
   /** Recepciones vinculadas a asignaciones del embarque (08b-2; en 08b-1 siempre 0). */
@@ -73,7 +79,8 @@ export function transicionEmbarque(estado: EstadoEmbarque, accion: AccionEstado,
     case "en_transito":
       return estado === "planificado" ? { ok: true, hacia: "en_transito" } : invalida;
     case "volver_a_planificado":
-      return estado === "en_transito" ? { ok: true, hacia: "planificado" } : invalida;
+      if (estado !== "en_transito") return invalida;
+      return ctx.hito_confirmado ? { ok: false, motivo: "hito_confirmado" } : { ok: true, hacia: "planificado" };
     case "cancelar":
       if (sinMotivo(ctx.motivo)) return { ok: false, motivo: "motivo_requerido" };
       if (ctx.recepciones_vinculadas > 0) return { ok: false, motivo: "tiene_recepciones" };
@@ -112,6 +119,61 @@ export function validarGuardarEmbarque(
   if (entrada.tipo === "local" && entrada.viaje_id !== null) return "local_con_viaje";
   const llegada = vigente !== null ? vigente.fecha_llegada_estimada : entrada.fecha_llegada_estimada;
   if (llegada !== undefined && entrada.fecha_salida_estimada != null && entrada.fecha_salida_estimada > llegada) return "salida_despues_de_llegada";
+  return null;
+}
+
+// ─── Un embarque que se guarda, con los hitos de 08b-1b (§2.9: `guardar_embarque`) ───
+
+export type MotivoValidacionEmbarqueFechas = MotivoValidacionEmbarque | "fecha_requerida" | "puerto_en_local" | "hora_sin_fecha";
+
+/** Lo que el cuerpo de `POST /api/compras/embarques` o `PATCH …/[id]` trae de fechas: clave AUSENTE (`undefined`) ≠ `null`. */
+export type EntradaGuardarEmbarqueFechas = {
+  tipo: "importacion" | "local";
+  viaje_id: string | null;
+  fecha_salida_estimada?: string | null;
+  fecha_puerto_estimada?: string | null;
+  fecha_llegada_estimada?: string;
+  fecha_inicio_operativo_estimada?: string | null;
+  hora_inicio_operativo?: string | null;
+  fecha_ingreso_estimada?: string | null;
+};
+
+export type FechasEmbarqueGuardadas = Pick<
+  EmbarqueRegistro,
+  "fecha_salida_estimada" | "fecha_puerto_estimada" | "fecha_llegada_estimada" | "fecha_inicio_operativo_estimada" | "hora_inicio_operativo" | "fecha_ingreso_estimada" | "hito_confirmado"
+>;
+
+/**
+ * Lo que `guardar_embarque` comprueba con la base desde la 0038 (08b-1b §2.9; F22 y F40 d). Devuelve el motivo (`409`) o `null`.
+ *  - AL CREAR (`vigente = null`): Ingreso CD obligatorio (`fecha_requerida`), hora sin fecha (`hora_sin_fecha`), Arribo en un `local`
+ *    (`puerto_en_local`), local con viaje y Zarpe posterior al Ingreso CD.
+ *  - AL EDITAR no se escribe ninguna fecha ni hora (van por `POST …/fechas`): una clave de fecha u hora PRESENTE con un valor distinto del
+ *    guardado, `null` incluido, da `fecha_por_movimiento`; una AUSENTE conserva lo guardado (corrige el defecto de 08b-1: antes un PATCH sin
+ *    la salida la borraba). Pasar `tipo` a `local` con Arribo con fecha o con `hito_confirmado = 'arribo'` da `puerto_en_local`.
+ * Sustituye a `validarGuardarEmbarque` (08b-1) cuando T3a cambie `servicio.ts`; mientras tanto conviven.
+ */
+export function validarGuardarEmbarqueFechas(entrada: EntradaGuardarEmbarqueFechas, vigente: FechasEmbarqueGuardadas | null): MotivoValidacionEmbarqueFechas | null {
+  if (entrada.tipo === "local" && entrada.viaje_id !== null) return "local_con_viaje";
+  if (vigente === null) {
+    if (entrada.fecha_llegada_estimada === undefined) return "fecha_requerida";
+    if (entrada.hora_inicio_operativo && !entrada.fecha_inicio_operativo_estimada) return "hora_sin_fecha";
+    if (entrada.tipo === "local" && entrada.fecha_puerto_estimada) return "puerto_en_local";
+    if (entrada.fecha_salida_estimada != null && entrada.fecha_salida_estimada > entrada.fecha_llegada_estimada) return "salida_despues_de_llegada";
+    return null;
+  }
+  const hora = (h: string | null | undefined) => (h == null ? null : h.slice(0, 5));
+  const cambia = (nuevo: string | null | undefined, guardado: string | null) => nuevo !== undefined && nuevo !== guardado;
+  if (
+    cambia(entrada.fecha_salida_estimada, vigente.fecha_salida_estimada) ||
+    cambia(entrada.fecha_puerto_estimada, vigente.fecha_puerto_estimada) ||
+    cambia(entrada.fecha_llegada_estimada, vigente.fecha_llegada_estimada) ||
+    cambia(entrada.fecha_inicio_operativo_estimada, vigente.fecha_inicio_operativo_estimada) ||
+    (entrada.hora_inicio_operativo !== undefined && hora(entrada.hora_inicio_operativo) !== hora(vigente.hora_inicio_operativo)) ||
+    cambia(entrada.fecha_ingreso_estimada, vigente.fecha_ingreso_estimada)
+  ) {
+    return "fecha_por_movimiento";
+  }
+  if (entrada.tipo === "local" && (vigente.fecha_puerto_estimada !== null || vigente.hito_confirmado === "arribo")) return "puerto_en_local";
   return null;
 }
 

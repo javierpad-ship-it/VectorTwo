@@ -274,7 +274,7 @@ describe("errores de la API", () => {
 describe("importador de agrupadores: plantilla, mapeo y filas", () => {
   it("los encabezados de la plantilla son los del contrato, en su orden", () => {
     expect(ENCABEZADOS_PLANTILLA_AGRUPADORES).toEqual(COLUMNAS_IMPORTAR_AGRUPADORES.map((c) => c.encabezado));
-    expect(ENCABEZADOS_PLANTILLA_AGRUPADORES).toHaveLength(15);
+    expect(ENCABEZADOS_PLANTILLA_AGRUPADORES).toHaveLength(19);
   });
 
   it("la plantilla trae una fila de ejemplo de cada tipo, todas del ancho de la cabecera y con el código escrito", () => {
@@ -285,7 +285,7 @@ describe("importador de agrupadores: plantilla, mapeo y filas", () => {
     }
   });
 
-  it("los 15 encabezados se autodetectan y el mapeo queda completo; sin TIPO o sin NOMBRE no lo está", () => {
+  it("los 19 encabezados se autodetectan y el mapeo queda completo; sin TIPO o sin NOMBRE no lo está", () => {
     const m = detectarMapeo(ENCABEZADOS_PLANTILLA_AGRUPADORES, CAMPOS_AGRUPADORES);
     for (const c of COLUMNAS_IMPORTAR_AGRUPADORES) expect(m[c.clave], c.clave).toBe(c.encabezado);
     expect(mapeoCompleto(m, CAMPOS_AGRUPADORES)).toBe(true);
@@ -349,7 +349,7 @@ describe("Excel: hojas de Viajes y embarques", () => {
     expect(h[1][col("CODIGO")]).toBe("261001");
     expect(h[1][col("RESPONSABLE")]).toBe("c1@ejemplo.com");
     expect(h[2][col("VIAJE")]).toBe("261001");
-    expect(h[2][col("FECHA_LLEGADA")]).toBe("2026-11-20");
+    expect(h[2][col("FECHA_INGRESO_CD")]).toBe("2026-11-20");
     expect(h[2][col("PUERTO")]).toBe("Puerto Sur");
     // El embarque hereda a C1 del viaje: sale vacío para que al reimportar siga heredando.
     expect(h[2][col("RESPONSABLE")]).toBe("");
