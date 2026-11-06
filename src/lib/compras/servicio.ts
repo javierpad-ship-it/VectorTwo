@@ -16,6 +16,7 @@ import { hoyLima } from "@/lib/tiendas/estado";
 import { argsCancelarCompra, validarCancelacion } from "./cancelar";
 import {
   leerAgrupadoresDeCompras,
+  leerComprasConOc,
   rpcCancelarCompra,
   rpcEditarOcCompra,
   leerOcDeCompra,
@@ -57,11 +58,15 @@ import {
   omitirFilasDelPlan,
   previsualizarImportacionCompras,
   reporteAplicado,
+  reporteOcAplicada,
   type CompraExistente,
   type ContenidoLinea,
   type EstadoImportacionCompras,
   type LineaExistente,
+  type OcViva,
+  type PlanOcImportar,
   type ResultadoAplicacionCompra,
+  type ResultadoAplicacionOc,
   type ResultadoPrevisualizacion,
 } from "./importar";
 import { compraEsMia, FUNCIONES_DISPONIBLES_0_13_0, MENSAJE_IMPORTAR_SIN_PERMISO, puede, puedeImportar, type NodoGeneroMundo } from "./permisos";
@@ -878,9 +883,10 @@ function contenidoDeLinea(l: LineaDb, compra: CompraDb, datos: DatosCompras): Co
 
 /** El estado del mundo que necesita `previsualizarImportacionCompras`, leído FRESCO (nada de caché: se decide `igual` o `nueva` con él). */
 async function estadoImportacion(d: Db): Promise<Salida<EstadoImportacionCompras>> {
-  const [catalogo, datos, reglas] = await Promise.all([leerCatalogo(d), leerDatosCompras(d), leerVigentes(d, undefined, undefined)]);
+  const [catalogo, datos, reglas, conOc] = await Promise.all([leerCatalogo(d), leerDatosCompras(d), leerVigentes(d, undefined, undefined), leerComprasConOc(d)]);
   if (catalogo.error || !catalogo.data) return fallaDb(catalogo.error as NonNullable<typeof catalogo.error>, "compras: leer el catálogo");
   if (datos.error) return fallaDb(datos.error, "compras: leer las compras");
+  if (conOc.error) return fallaDb(conOc.error, "compras: leer las OC vivas");
   if (reglas.respuesta) return falla(reglas.respuesta);
   const cat = catalogo.data;
   const marcas = cat.gml.marcas.map((m) => ({
@@ -920,7 +926,12 @@ async function estadoImportacion(d: Db): Promise<Salida<EstadoImportacionCompras
     perfil_id: c.perfil_id,
     fecha_compra: c.fecha_compra,
     moneda: elegir(MONEDAS, c.moneda, "PEN"),
+    numero_oc: c.numero_oc ?? null,
   }));
+  const nombreProveedor = new Map(datos.data.proveedores.map((p) => [p.id, p.nombre]));
+  const ocsVivas: OcViva[] = conOc.data.flatMap((c) =>
+    c.numero_oc === null ? [] : [{ compra_id: c.id, compra_numero: c.numero, proveedor_id: c.proveedor_id, proveedor_nombre: nombreProveedor.get(c.proveedor_id) ?? "otro proveedor", numero_oc: c.numero_oc }]
+  );
   const reglasBase: ReglaBase[] = reglas.data.reglas.map((r) => ({ id: r.id, marca_id: r.marca_id, genero_mundo_linea_id: r.genero_mundo_linea_id, equivalencia_id: r.equivalencia_id, vigente_desde: r.vigente_desde, activo: true }));
 
   return listo({
@@ -952,6 +963,7 @@ async function estadoImportacion(d: Db): Promise<Salida<EstadoImportacionCompras
       filas: r.filas,
     })),
     reglas: reglasBase,
+    ocs_vivas: ocsVivas,
   });
 }
 
@@ -1004,7 +1016,7 @@ export async function importarCompras(
   // El comprador solo agrega líneas a su propio borrador (A1/A2): la previsualización omite las filas hacia otra compra existente y
   // `importar_compra` lo vuelve a comprobar bajo candado (`restringido` en `p_actor`).
   const comprador = usuario.rol === "comprador" ? { perfil_id: usuario.id } : null;
-  let resultado = previsualizarImportacionCompras(cuerpo.filas, cuerpo.mezcla, estado.data, { carga_inicial: cuerpo.carga_inicial, k_prima: k.data, comprador });
+  let resultado = previsualizarImportacionCompras(cuerpo.filas, cuerpo.mezcla, estado.data, { carga_inicial: cuerpo.carga_inicial, k_prima: k.data, comprador, archivo_nombre: cuerpo.archivo_nombre });
   // Columnas VIAJE, EMBARQUE y PAQUETE: la fila se clasifica primero como en M8 (con la huella de lo que dice el archivo) y después se
   // evalúan; las que se omiten salen del plan antes de calcular el exceso y de aplicar nada.
   let evaluacion: EvaluacionAgrupadoresCompras | null = null;
@@ -1046,5 +1058,46 @@ export async function importarCompras(
   }
   // Las otras dos transacciones de §3.9: un corte deja la compra sin agrupador y el reporte lo dice; reimportar lo completa.
   const filasAgrupador = agrupadores && evaluacion ? await agrupadores.aplicar(evaluacion, importadas) : [];
-  return listo({ ...reporteAplicado(resultado, respuestas), agrupadores: filasAgrupador });
+  // La cuarta llamada (§3.7): la OC va fuera de la huella y en su propia transacción por compra; un corte deja la compra sin OC y
+  // reimportar la completa.
+  const ocs = await aplicarOcs(d, usuario, resultado.ocs, importadas);
+  const numeros = new Map<string, { id: string; numero: string }>();
+  for (const r of respuestas) if (r.ok) numeros.set(r.clave, { id: r.compra_id, numero: r.numero });
+  const aplicado = reporteAplicado(resultado, respuestas);
+  const oc = reporteOcAplicada(aplicado.oc, resultado.ocs, ocs, numeros);
+  return listo({ ...aplicado, ...(oc === undefined ? {} : { oc }), agrupadores: filasAgrupador });
+}
+
+/**
+ * Una llamada a `editar_oc_compra` por compra con OC en el plan, en el orden del archivo. Una compra que este archivo creaba y no se
+ * aplicó no tiene id: su OC queda sin aplicar. Un fallo de la base corta (las que siguen quedan sin respuesta = `oc_no_aplicada`).
+ */
+async function aplicarOcs(d: Db, usuario: UsuarioCompras, plan: readonly PlanOcImportar[], importadas: ReadonlyMap<string, string>): Promise<ResultadoAplicacionOc[]> {
+  const respuestas: ResultadoAplicacionOc[] = [];
+  for (const o of plan) {
+    const compraId = o.compra_id ?? importadas.get(o.compra_clave) ?? null;
+    if (compraId === null) {
+      respuestas.push({ compra_clave: o.compra_clave, ok: false, motivo: "oc_no_aplicada", detalle: "La compra no se aplicó, así que su OC tampoco: reimporta el archivo." });
+      continue;
+    }
+    const rpc = await rpcEditarOcCompra(d, argsEditarOc({ compra_id: compraId, antes: o.antes, numero_oc: o.numero_oc, motivo: o.motivo, actor: actorDe(usuario) }));
+    if (rpc.error) {
+      const { status, mensaje } = describirErrorDb(rpc.error.code, rpc.error.message, rpc.error.details);
+      if (status >= 500) registrarErrorDb(rpc.error, "compras: importar la OC");
+      respuestas.push({ compra_clave: o.compra_clave, ok: false, motivo: "oc_no_aplicada", detalle: mensaje });
+      break;
+    }
+    const r = interpretarResultadoOc(rpc.data);
+    if (r === null) {
+      respuestas.push({ compra_clave: o.compra_clave, ok: false, motivo: "oc_no_aplicada", detalle: errorDeMotivo("desconocido").mensaje });
+    } else if (r.ok) {
+      respuestas.push({ compra_clave: o.compra_clave, ok: true, sin_cambios: false, avisos: avisosDeOc(r.numero_oc, r.avisos) });
+    } else if (r.motivo === "sin_cambios") {
+      respuestas.push({ compra_clave: o.compra_clave, ok: true, sin_cambios: true, avisos: [] });
+    } else {
+      const motivo = r.motivo === "oc_repetida" || r.motivo === "oc_cambio" || r.motivo === "oc_invalida" ? r.motivo : r.motivo === "no_editable" ? "oc_no_editable" : "oc_no_aplicada";
+      respuestas.push({ compra_clave: o.compra_clave, ok: false, motivo, detalle: errorDeOc(r, normalizarOc(o.numero_oc)).mensaje });
+    }
+  }
+  return respuestas;
 }

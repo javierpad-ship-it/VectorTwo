@@ -111,6 +111,8 @@ export type CompraRegistro = {
   /** `cancelada_at` no nulo con `estado = 'recibida'` ⇒ saldo cerrado (§0.11). */
   cancelada_at: string | null;
   revision: number;
+  /** Número de OC (08b-1b); ausente o nulo = sin registrar. Solo lo muestra la lista de asignaciones de un embarque. */
+  numero_oc?: string | null;
 };
 
 export type LineaRegistro = {

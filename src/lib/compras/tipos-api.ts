@@ -415,7 +415,15 @@ export type NoAplicadaImportacionApi = { clave: string; proveedor: string; refer
 /** Qué pasó con la OC de una compra del archivo (columna `OC`, 08b-1b §3.7). */
 export type AccionOcImportacion = "registrada" | "cambiada" | "sin_cambio" | "omitida";
 /** Por qué la OC de una compra no se aplicó; las líneas de la compra siguen su regla. */
-export type MotivoOcImportacion = "oc_repetida" | "oc_distinta_en_compra" | "oc_no_editable" | "oc_invalida";
+export type MotivoOcImportacion =
+  | "oc_repetida"
+  | "oc_distinta_en_compra"
+  | "oc_no_editable"
+  | "oc_invalida"
+  /** Solo al aplicar: la OC de la compra cambió entre la previsualización y `editar_oc_compra` (otra persona la tocó). */
+  | "oc_cambio"
+  /** Solo al aplicar: la OC no se llegó a escribir (la compra no se aplicó, no se encontró o la base falló); reimportar la completa. */
+  | "oc_no_aplicada";
 
 /** Una entrada por compra del archivo que trae `OC` (o ya la tenía y el archivo la cambia). */
 export type OcImportacionApi = {

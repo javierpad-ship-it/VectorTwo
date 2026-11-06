@@ -326,6 +326,7 @@ function armarMundo(db: MundoDb): Mundo {
       moneda: elegir(MONEDAS, c.moneda, "PEN"),
       cancelada_at: c.cancelada_at,
       revision: c.revision,
+      numero_oc: c.numero_oc ?? null,
     })),
     lineas: db.lineas.map((l) => ({
       id: l.id,
@@ -482,7 +483,7 @@ function lineaApi(l: LineaRegistro, compra: CompraRegistro, n: NombresCatalogo):
 }
 
 function compraApi(ix: Ix, c: CompraRegistro): AsignacionApi["compra"] {
-  return { id: c.id, numero: c.numero, revision: c.revision, estado: c.estado, proveedor: { id: c.proveedor_id, nombre: c.proveedor_nombre }, viaje_id: ix.m.viaje_de_compra[c.id] ?? null, fecha_compra: c.fecha_compra };
+  return { id: c.id, numero: c.numero, numero_oc: c.numero_oc ?? null, revision: c.revision, estado: c.estado, proveedor: { id: c.proveedor_id, nombre: c.proveedor_nombre }, viaje_id: ix.m.viaje_de_compra[c.id] ?? null, fecha_compra: c.fecha_compra };
 }
 
 function asignacionApi(ix: Ix, a: AsignacionRegistro, n: NombresCatalogo): AsignacionApi | null {

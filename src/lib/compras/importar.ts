@@ -57,6 +57,7 @@ import type {
   LineaImportacionApi,
   MotivoOmisionCompra,
   NoAplicadaImportacionApi,
+  MotivoOcImportacion,
   OcImportacionApi,
   ReporteImportacionComprasApi,
 } from "./tipos-api";
@@ -1326,6 +1327,35 @@ export function omitirFilasDelPlan(resultado: ResultadoPrevisualizacion, omision
 }
 
 // ─── Resultado de aplicar ───
+
+/** Lo que respondió `editar_oc_compra` (ya interpretado) para una compra del plan de OC. */
+export type ResultadoAplicacionOc =
+  | { compra_clave: string; ok: true; sin_cambios: boolean; avisos: OcImportacionApi["avisos"] }
+  | { compra_clave: string; ok: false; motivo: MotivoOcImportacion; detalle: string };
+
+/**
+ * `reporte.oc` de `aplicar`: parte del de la previsualización y lo corrige con lo que pasó. Una OC del plan que `editar_oc_compra` aceptó
+ * conserva su acción (`registrada` o `cambiada`; `sin_cambios` pasa a `sin_cambio`) con los avisos que dio la función; una que rechazó
+ * (o que no llegó a aplicarse) queda `omitida` con su motivo. La compra recién creada trae ahora su número. `compras` mapea la clave de
+ * cada compra creada o existente tocada por este archivo a su id y número.
+ */
+export function reporteOcAplicada(
+  oc: readonly OcImportacionApi[] | undefined,
+  plan: readonly PlanOcImportar[],
+  respuestas: readonly ResultadoAplicacionOc[],
+  compras: ReadonlyMap<string, { id: string; numero: string }>,
+): OcImportacionApi[] | undefined {
+  if (oc === undefined) return undefined;
+  const enPlan = new Set(plan.map((p) => p.compra_clave));
+  return oc.map((o) => {
+    const compra = o.compra ?? compras.get(o.compra_clave) ?? null;
+    if (!enPlan.has(o.compra_clave)) return { ...o, compra };
+    const r = respuestas.find((x) => x.compra_clave === o.compra_clave);
+    if (!r) return { ...o, compra, accion: "omitida", motivo: "oc_no_aplicada", detalle: "La OC no se aplicó: reimporta el archivo para completarla." };
+    if (!r.ok) return { ...o, compra, accion: "omitida", motivo: r.motivo, detalle: r.detalle };
+    return { ...o, compra, accion: r.sin_cambios ? "sin_cambio" : o.accion, avisos: r.avisos };
+  });
+}
 
 export type ResultadoAplicacionCompra =
   | { clave: string; ok: true; compra_id: string; numero: string }

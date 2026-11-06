@@ -111,6 +111,12 @@ export function clienteAgrupadores() {
         escenario.llamadas.push({ nombre, args });
         return Promise.resolve(reemplazos[nombre]?.(args) ?? { data: [], error: null });
       }
+      // `editar_oc_compra` (0038) la resuelve la base de compras, salvo que la prueba fuerce una respuesta (otra persona la tocó entre medio).
+      const ocForzada = nombre === "editar_oc_compra" ? reemplazos[nombre]?.(args) : null;
+      if (ocForzada) {
+        escenario.llamadas.push({ nombre, args });
+        return Promise.resolve(ocForzada);
+      }
       // Lo que no es de agrupadores (`importar_compra`, `stock_flujo`…) lo resuelve la base de compras.
       if (!ESCRITURAS_AGR.includes(nombre)) return base.rpc(nombre, args) as Promise<Respuesta>;
       escenario.llamadas.push({ nombre, args });
@@ -465,7 +471,7 @@ function aplicarMovimiento(plan: PlanAplicable, actor: { perfil_id: string | nul
 type LoteFalso = {
   archivo_nombre: string;
   viajes: { fila: number; codigo: string | null; nombre: string; destino: string | null; fecha_inicio: string; fecha_fin: string | null; responsable_id: string; nota: string | null }[];
-  embarques: { fila: number; codigo: string | null; nombre: string; tipo: string; viaje_id: string | null; viaje_codigo: string | null; responsable_id: string | null; referencia_logistica: string | null; puerto_embarque: string | null; fecha_salida_estimada: string | null; fecha_llegada_estimada: string; nota: string | null }[];
+  embarques: { fila: number; codigo: string | null; nombre: string; tipo: string; viaje_id: string | null; viaje_codigo: string | null; responsable_id: string | null; referencia_logistica: string | null; puerto_embarque: string | null; fecha_salida_estimada: string | null; fecha_puerto_estimada?: string | null; fecha_llegada_estimada: string; fecha_inicio_operativo_estimada?: string | null; hora_inicio_operativo?: string | null; fecha_ingreso_estimada?: string | null; origen?: string | null; nota: string | null }[];
   paquetes: { fila: number; codigo: string | null; nombre: string; embarque_id: string | null; embarque_codigo: string | null; responsable_id: string | null; nota: string | null }[];
 };
 
@@ -492,9 +498,20 @@ function importarLote(lote: LoteFalso, actor: { perfil_id: string | null; nombre
   for (const e of ordenar(lote.embarques)) {
     const viajeId = e.viaje_id ?? (e.viaje_codigo ? (copia.v.find((x) => String(x.codigo).toUpperCase() === e.viaje_codigo!.toUpperCase())?.id as string | undefined) ?? null : null);
     if (e.viaje_codigo && viajeId === null) return fallo("no_encontrado", "embarque", e.fila);
+    // Las mismas comprobaciones que `importar_agrupadores` (0038), en su orden.
+    if (e.viaje_id) {
+      const v = copia.v.find((x) => x.id === e.viaje_id);
+      if (!v) return fallo("no_encontrado", "embarque", e.fila);
+      if (v.estado === "cancelado") return fallo("viaje_cancelado", "embarque", e.fila);
+    }
+    if (e.fecha_salida_estimada && e.fecha_salida_estimada > e.fecha_llegada_estimada) return fallo("salida_despues_de_llegada", "embarque", e.fila);
+    if (e.hora_inicio_operativo && !e.fecha_inicio_operativo_estimada) return fallo("hora_sin_fecha", "embarque", e.fila);
+    if (e.tipo === "local" && e.fecha_puerto_estimada) return fallo("puerto_en_local", "embarque", e.fila);
+    if (e.tipo === "local" && viajeId !== null) return fallo("local_con_viaje", "embarque", e.fila);
     const c = codigoDe(copia.e, e.codigo, e.fecha_llegada_estimada);
     if (typeof c !== "string") return fallo(c.motivo, "embarque", e.fila);
-    const fila: Fila = { id: nuevoId(), codigo: c, nombre: e.nombre, tipo: e.tipo, viaje_id: viajeId, responsable_id: e.responsable_id, referencia_logistica: e.referencia_logistica, puerto_embarque: e.puerto_embarque, fecha_salida_estimada: e.fecha_salida_estimada, fecha_llegada_estimada: e.fecha_llegada_estimada, fecha_llegada_real: null, periodo_llegada: `${e.fecha_llegada_estimada.slice(0, 7)}-01`, estado: "planificado", nota: e.nota, revision: 0, perfil_id: actor.perfil_id, usuario_nombre: actor.nombre, updated_by_id: null, updated_by_nombre: null, activo: true, created_at: sello(), updated_at: sello() };
+    const ingreso = e.fecha_ingreso_estimada ?? null;
+    const fila: Fila = { id: nuevoId(), codigo: c, nombre: e.nombre, tipo: e.tipo, viaje_id: viajeId, responsable_id: e.responsable_id, referencia_logistica: e.referencia_logistica, puerto_embarque: e.puerto_embarque, fecha_salida_estimada: e.fecha_salida_estimada, fecha_puerto_estimada: e.fecha_puerto_estimada ?? null, fecha_llegada_estimada: e.fecha_llegada_estimada, fecha_inicio_operativo_estimada: e.fecha_inicio_operativo_estimada ?? null, hora_inicio_operativo: e.hora_inicio_operativo ?? null, fecha_ingreso_estimada: ingreso, hito_confirmado: null, origen: e.origen ?? null, fecha_llegada_real: null, periodo_llegada: `${String(ingreso ?? e.fecha_llegada_estimada).slice(0, 7)}-01`, estado: "planificado", nota: e.nota, revision: 0, perfil_id: actor.perfil_id, usuario_nombre: actor.nombre, updated_by_id: null, updated_by_nombre: null, activo: true, created_at: sello(), updated_at: sello() };
     copia.e.push(fila);
     creados.push({ tipo: "embarque", fila: e.fila, id: fila.id as string, codigo: c });
   }

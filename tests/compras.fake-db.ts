@@ -422,6 +422,11 @@ class Consulta implements PromiseLike<Resultado> {
     this.filtros.push((f) => f[c] !== v);
     return this;
   }
+  not(c: string, op: string, v: unknown) {
+    // Solo `is null` / `is not null`: lo que usa la lectura de OC vivas.
+    if (op === "is") this.filtros.push((f) => (v === null ? f[c] != null : f[c] !== v));
+    return this;
+  }
   in(c: string, v: unknown[]) {
     this.filtros.push((f) => v.includes(f[c]));
     return this;

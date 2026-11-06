@@ -25,14 +25,14 @@ export type AsignacionDb = Tables<"compra_entrega_asignaciones">;
 export type EventoAgrupadorDb = Tables<"compra_agrupador_eventos">;
 export type RepartoDb = Tables<"compra_linea_repartos">;
 
-const COLUMNAS_COMPRA = "id, numero, proveedor_id, origen, estado, fecha_compra, moneda, cancelada_at, revision, viaje_id" as const;
+const COLUMNAS_COMPRA = "id, numero, proveedor_id, origen, estado, fecha_compra, moneda, cancelada_at, revision, viaje_id, numero_oc" as const;
 const COLUMNAS_LINEA =
   "id, compra_id, tipo, genero_mundo_linea_id, equivalencia_id, marca_id, agrupacion_marca_id, tallas, unidades, unidades_recibidas, unidades_canceladas, costo_unitario, destino, tienda_id, alcance, activo, clave_importacion" as const;
 const COLUMNAS_ENTREGA = "id, linea_id, periodo, unidades, origen" as const;
 const COLUMNAS_RECEPCION = "id, linea_id, recibida_periodo, unidades, fecha_recepcion, origen" as const;
 const COLUMNAS_PERFIL = "id, nombre, email, rol, activo" as const;
 
-export type CompraLigeraDb = Pick<Tables<"compras">, "id" | "numero" | "proveedor_id" | "origen" | "estado" | "fecha_compra" | "moneda" | "cancelada_at" | "revision" | "viaje_id">;
+export type CompraLigeraDb = Pick<Tables<"compras">, "id" | "numero" | "proveedor_id" | "origen" | "estado" | "fecha_compra" | "moneda" | "cancelada_at" | "revision" | "viaje_id" | "numero_oc">;
 export type LineaLigeraDb = Pick<
   Tables<"compra_lineas">,
   | "id"

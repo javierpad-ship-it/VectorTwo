@@ -214,6 +214,8 @@ export const importarComprasSchema = z.object({
     .array(filaMezclaImportacionSchema)
     .max(MAX_FILAS_MEZCLA, "Se admiten hasta 20 000 filas en la hoja MEZCLA.")
     .default([]),
+  /** Nombre del archivo que se importa: solo para el motivo «Importado de <archivo>» del cambio de OC (§3.7). Opcional. */
+  archivo_nombre: z.string("El nombre del archivo debe ser texto.").trim().max(120, "El nombre del archivo no puede superar 120 caracteres.").optional(),
 });
 export type ImportarCompras = z.infer<typeof importarComprasSchema>;
 

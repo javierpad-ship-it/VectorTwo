@@ -93,6 +93,20 @@ export async function leerDatosDeCompra(db: Db, compraId: string): Promise<Resul
   return { data: { compra: compra.data, proveedor: proveedor.data ?? null, lineas: lineas.data, entregas, repartos, recepciones }, error: null };
 }
 
+/** Una compra viva (no cancelada) con OC: lo que hace falta para `oc_repetida` y el aviso `oc_de_otro_proveedor` del importador. */
+export type CompraConOcDb = Pick<CompraDb, "id" | "numero" | "proveedor_id" | "numero_oc">;
+
+/**
+ * Las compras no canceladas que tienen número de OC (las que cubre `compras_numero_oc_idx`, índice parcial `where numero_oc is not null`),
+ * con `leerTodo` por tandas de 1000 y orden estable. PostgREST no puede filtrar por `upper(btrim(numero_oc))`, así que la comparación
+ * sin mayúsculas ni espacios la hace el importador (puro) sobre este conjunto: no se pierde ninguna coincidencia por la forma.
+ */
+export function leerComprasConOc(db: Db): Promise<Resultado<CompraConOcDb[]>> {
+  return leerTodo<CompraConOcDb>((d, h) =>
+    db.from("compras").select("id, numero, proveedor_id, numero_oc").not("numero_oc", "is", null).neq("estado", "cancelada").order("id").range(d, h)
+  );
+}
+
 /** Lo mínimo de una compra para responder tras editar la OC (`numero` es inmutable; `numero_oc` es lo que quedó guardado). */
 export async function leerOcDeCompra(db: Db, compraId: string): Promise<Resultado<Pick<CompraDb, "id" | "numero" | "numero_oc"> | null>> {
   const r = await db.from("compras").select("id, numero, numero_oc").eq("id", compraId).maybeSingle();
