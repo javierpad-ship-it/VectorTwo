@@ -34,6 +34,7 @@ import {
   leerMundoCompleto,
   leerPaquetePorId,
   leerRepartosDeLineas,
+  leerResumenHitos,
   leerViajePorId,
   rpcAplicarMovimientoAgrupador,
   rpcAsignarViajeCompras,
@@ -49,23 +50,27 @@ import {
   type ViajeDb,
 } from "./consultas";
 import { avisosEmbarque, avisosPaquete, avisosViaje, type AsignacionParaAviso } from "./avisos";
+import type { AhoraLima } from "./fechas";
+import { hitosDeEmbarque, proximoHitoEmbarque, reprogramacionesTotal, tieneHitoVencido, type ResumenHito } from "./hitos";
 import type {
   EditarEmbarque,
   EditarViaje,
   AsignarViaje,
   CambiarEstado,
+  CambiarFechas,
   EmbarquesQuery,
   GuardarEmbarque,
   GuardarPaquete,
   GuardarViaje,
   HistorialQuery,
   ImportarAgrupadores,
+  IngresoPaquete,
   SinAsignarQuery,
   ViajeActivoCuerpo,
   ViajesQuery,
 } from "./esquemas";
 import { deduplicarComprasViaje } from "./esquemas";
-import { accionAdmitidaPorTipo, validarGuardarEmbarque } from "./estados";
+import { accionAdmitidaPorTipo, validarGuardarEmbarqueFechas } from "./estados";
 import {
   argsImportarAgrupadores,
   evaluarAgrupadoresDeFilaCompra,
@@ -77,12 +82,18 @@ import {
   type PerfilConCorreo,
 } from "./importar";
 import {
+  cambiaAlgunMes,
   clasificarAsignacion,
   estimarPendientesAsignaciones,
   mesDeDestino,
   periodoLlegada,
+  planCambiarFechas,
+  planIngresoPaquete,
+  type EntradaCambiarFechas,
   planificarMovimiento,
   puedeReintentar,
+  type ResultadoPlanFechas,
+  type ResultadoPlanMovimiento,
   type ContextoMovimiento,
   type PendienteAsignacion,
   type SolicitudMovimiento,
@@ -105,6 +116,7 @@ import {
   type OpcionesAgrupadoresApi,
   type PaqueteApi,
   type PersonaFechaApi,
+  type PlanFechasApi,
   type PlanMovimientoApi,
   type ReporteImportacionAgrupadoresApi,
   type RespuestaAsignarViajeApi,
@@ -116,6 +128,7 @@ import {
   type AgrupadorImportacionCompraApi,
 } from "./tipos-api";
 import {
+  AVISOS_AGRUPADOR,
   ESTADOS_EMBARQUE,
   ESTADOS_PAQUETE,
   ESTADOS_VIAJE,
@@ -182,11 +195,20 @@ const fallaMotivo = (motivo: unknown, detalle?: string): Salida<never> => falla(
 const esRegistro = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
 /**
+ * Un error de Postgres al llamar a una función de agrupadores. `40P01` (interbloqueo) y `55P03` (el candado no llegó a tiempo) no
+ * escribieron nada: `409 conflicto_reintentar`, para que la pantalla reenvíe la misma petición. El resto, a `traducirErrorDb`.
+ */
+function fallaErrorRpc(e: Parameters<typeof fallaDb>[0], contexto: string): Salida<never> {
+  if (e.code === "40P01" || e.code === "55P03") return fallaMensaje("Otra persona estaba cambiando lo mismo. Vuelve a intentarlo.", 409, "conflicto_reintentar");
+  return fallaDb(e, contexto);
+}
+
+/**
  * Lo que dice una función de la base: `ok` con sus datos, o el `motivo` traducido. Un error de Postgres (incluido `AG002`, el fallo de
  * invariante que delata un plan mal armado) se traduce con `traducirErrorDb` y acaba en `500`: se ve, no se oculta como un `409`.
  */
 function leerRpc(r: RespuestaRpc, contexto: string): Salida<Record<string, unknown>> {
-  if (r.error) return fallaDb(r.error, contexto);
+  if (r.error) return fallaErrorRpc(r.error, contexto);
   if (!esRegistro(r.data) || typeof r.data.ok !== "boolean") {
     console.error(`${contexto}: respuesta inesperada de la función de la base`);
     return fallaMensaje("No se pudo completar la operación. Inténtalo de nuevo.", 500, "error_interno");
@@ -350,6 +372,8 @@ type Ix = {
   lineasDeCompra: Map<string, LineaRegistro[]>;
   pend: Map<string, PendienteAsignacion>;
   hoy: string;
+  /** `agrupador_hitos_resumen` por embarque (08b-1b): vacío salvo que la lectura lo pida (`cargarResumenes`). */
+  resumenes: Map<string, ResumenHito[]>;
 };
 
 function indexar(m: Mundo, hoy: string): Ix {
@@ -369,9 +393,26 @@ function indexar(m: Mundo, hoy: string): Ix {
     lineasDeCompra: agrupar(m.lineas, (l) => l.compra_id),
     pend: new Map(),
     hoy,
+    resumenes: new Map(),
   };
   ix.pend = pendientesDe(ix);
   return ix;
+}
+
+/**
+ * Lee `agrupador_hitos_resumen` de los embarques del mundo (fecha original, reprogramaciones y última causa de cada hito; 08b-1b §2.9) y lo
+ * deja en el índice. Solo lo piden las lecturas que muestran hitos (lista, detalle y viaje), no los planes de movimiento.
+ */
+async function cargarResumenes(d: Db, ix: Ix, embarqueIds: readonly string[] = ix.m.embarques.map((e) => e.id)): Promise<Salida<null>> {
+  const r = await leerResumenHitos(d, embarqueIds);
+  if (r.error) return fallaDb(r.error, "agrupadores: leer el resumen de hitos");
+  for (const f of r.data) {
+    const fila: ResumenHito = { hito: f.hito as ResumenHito["hito"], paquete_id: f.paquete_id, fecha_original: f.fecha_original, reprogramaciones: Number(f.reprogramaciones), ultima_causa: f.ultima_causa };
+    const l = ix.resumenes.get(f.embarque_id);
+    if (l) l.push(fila);
+    else ix.resumenes.set(f.embarque_id, [fila]);
+  }
+  return listo(null);
 }
 
 /**
@@ -529,6 +570,13 @@ function paqueteApi(ix: Ix, p: PaqueteRegistro, e: EmbarqueRegistro): PaqueteApi
   const t = totalesDe(ix, asigs);
   const viaje = e.viaje_id ? ix.viaje.get(e.viaje_id) : undefined;
   const responsable = responsableEfectivo({ propio: p.responsable_id, embarque: e.responsable_id, viaje: viaje?.responsable_id ?? null }, ix.m.perfiles);
+  // Lotes al barrer con asignaciones activas en el paquete (una línea cuenta una vez).
+  const lotes = new Set<string>();
+  for (const a of asigs) {
+    const linea = ix.entrega.get(a.entrega_id) ? ix.linea.get(ix.entrega.get(a.entrega_id)?.linea_id ?? "") : undefined;
+    const compra = linea ? ix.compra.get(linea.compra_id) : undefined;
+    if (linea && compra && linea.tipo !== "especifica" && !clasificarAsignacion(compra, linea).historica) lotes.add(linea.id);
+  }
   return {
     id: p.id,
     embarque_id: p.embarque_id,
@@ -536,6 +584,10 @@ function paqueteApi(ix: Ix, p: PaqueteRegistro, e: EmbarqueRegistro): PaqueteApi
     nombre: p.nombre,
     estado: p.estado,
     nota: p.nota,
+    fecha_ingreso: p.fecha_ingreso_estimada,
+    periodo_ingreso: p.periodo_ingreso,
+    ingreso_propio: p.fecha_ingreso_estimada !== null,
+    lotes_al_barrer: lotes.size,
     responsable_efectivo: responsable.efectivo,
     totales: { asignaciones: asigs.length, compras: t.compras.size, lineas: t.lineas.size, unidades: t.unidades, recibidas: t.recibidas, pendientes: t.pendientes, historicas: t.historicas },
     avisos: avisosPaquete({ paquete: p, embarque: e, responsable, asignaciones: paraAviso(ix, asigs) }),
@@ -549,6 +601,11 @@ function embarqueApi(ix: Ix, e: EmbarqueRegistro): EmbarqueApi {
   const viaje = e.viaje_id ? ix.viaje.get(e.viaje_id) : undefined;
   const responsable = responsableDeEmbarque(ix, e);
   const paquetes = ix.m.paquetes.filter((p) => p.embarque_id === e.id && p.estado !== "cancelado");
+  const resumen = ix.resumenes.get(e.id) ?? [];
+  const hitos = hitosDeEmbarque(e, ix.hoy, resumen);
+  // `hito_vencido` (08b-1b §3.5): algún hito que no es el ingreso al stock está vencido (el ingreso lo cubre `atrasado`).
+  const conHitoVencido = hitos.some((h) => h.estado === "vencido" && h.hito !== "ingreso_stock") && (e.estado === "planificado" || e.estado === "en_transito");
+  const avisos = avisosEmbarque({ embarque: e, viaje: viaje ?? null, responsable, asignaciones: paraAviso(ix, asigs), hoy: ix.hoy });
   return {
     id: e.id,
     codigo: e.codigo,
@@ -559,7 +616,16 @@ function embarqueApi(ix: Ix, e: EmbarqueRegistro): EmbarqueApi {
     puerto_embarque: e.puerto_embarque,
     puertos_habituales: [],
     fecha_salida_estimada: e.fecha_salida_estimada,
+    fecha_puerto_estimada: e.fecha_puerto_estimada,
     fecha_llegada_estimada: e.fecha_llegada_estimada,
+    fecha_inicio_operativo_estimada: e.fecha_inicio_operativo_estimada,
+    hora_inicio_operativo: e.hora_inicio_operativo,
+    fecha_ingreso_estimada: e.fecha_ingreso_estimada,
+    hito_confirmado: e.hito_confirmado,
+    origen: e.origen,
+    hitos,
+    reprogramaciones_total: reprogramacionesTotal(resumen),
+    proximo_hito: proximoHitoEmbarque(hitos),
     fecha_llegada_real: e.fecha_llegada_real,
     periodo_llegada: e.periodo_llegada,
     estado: e.estado,
@@ -571,7 +637,7 @@ function embarqueApi(ix: Ix, e: EmbarqueRegistro): EmbarqueApi {
     proveedores: [...t.proveedores]
       .map((id) => ({ id, nombre: ix.proveedor.get(id) ?? "—" }))
       .sort((a, b) => comparar(a.nombre, b.nombre) || comparar(a.id, b.id)),
-    avisos: avisosEmbarque({ embarque: e, viaje: viaje ?? null, responsable, asignaciones: paraAviso(ix, asigs), hoy: ix.hoy }),
+    avisos: conHitoVencido ? AVISOS_AGRUPADOR.filter((a) => a === "hito_vencido" || avisos.includes(a)) : avisos,
     creado_por: persona(db?.usuario_nombre ?? null, db?.created_at ?? ""),
     modificado_por: e.revision > 0 && db ? persona(db.updated_by_nombre, db.updated_at) : null,
   };
@@ -705,7 +771,10 @@ export async function leerViaje(d: Db, id: string): Promise<Salida<ViajeDetalleA
     .filter((c) => ix.m.viaje_de_compra[c.id] === id && c.estado !== "cancelada")
     .map((c) => compraDeViaje(ix, c))
     .sort((a, b) => comparar(a.numero, b.numero));
-  const embarques = ix.m.embarques.filter((e) => e.viaje_id === id).map((e) => embarqueApi(ix, e)).sort(ordenEmbarques);
+  const delViaje = ix.m.embarques.filter((e) => e.viaje_id === id);
+  const resumenes = await cargarResumenes(d, ix, delViaje.map((e) => e.id));
+  if (resumenes.respuesta) return falla(resumenes.respuesta);
+  const embarques = delViaje.map((e) => embarqueApi(ix, e)).sort(ordenEmbarques);
   return listo({ viaje: viajeApi(ix, v), compras, embarques });
 }
 
@@ -716,26 +785,31 @@ async function viajeFresco(d: Db, id: string): Promise<Salida<ViajeApi>> {
   return v ? listo(viajeApi(w.data, v)) : noEncontrado();
 }
 
-/** `GET /api/compras/embarques`: todos los embarques con totales y avisos, filtrados. */
+/** `GET /api/compras/embarques`: todos los embarques con totales, avisos y hitos (con su resumen de reprogramaciones), filtrados. */
 export async function listarEmbarques(d: Db, usuario: UsuarioAgrupadores, q: EmbarquesQuery): Promise<Salida<{ embarques: EmbarqueApi[] }>> {
   const w = await mundoCompleto(d);
   if (w.respuesta) return falla(w.respuesta);
   const ix = w.data;
-  const embarques = ix.m.embarques
-    .filter((e) => {
-      if (q.estado !== undefined && e.estado !== q.estado) return false;
-      if (q.tipo !== undefined && e.tipo !== q.tipo) return false;
-      if (q.viaje_id !== undefined && (q.viaje_id === "sin_viaje" ? e.viaje_id !== null : e.viaje_id !== q.viaje_id)) return false;
-      if (q.desde !== undefined && e.periodo_llegada < q.desde) return false;
-      if (q.hasta !== undefined && e.periodo_llegada > q.hasta) return false;
-      return true;
-    })
+  const origenBuscado = q.origen === undefined || q.origen === "" ? null : sinAcentos(q.origen).trim();
+  const candidatos = ix.m.embarques.filter((e) => {
+    if (q.estado !== undefined && e.estado !== q.estado) return false;
+    if (q.tipo !== undefined && e.tipo !== q.tipo) return false;
+    if (q.viaje_id !== undefined && (q.viaje_id === "sin_viaje" ? e.viaje_id !== null : e.viaje_id !== q.viaje_id)) return false;
+    if (q.desde !== undefined && e.periodo_llegada < q.desde) return false;
+    if (q.hasta !== undefined && e.periodo_llegada > q.hasta) return false;
+    if (origenBuscado !== null && sinAcentos(e.origen ?? "") !== origenBuscado) return false;
+    return true;
+  });
+  const resumenes = await cargarResumenes(d, ix, candidatos.map((e) => e.id));
+  if (resumenes.respuesta) return falla(resumenes.respuesta);
+  const embarques = candidatos
     .map((e) => embarqueApi(ix, e))
     .filter((e) => {
       if (q.responsable_id !== undefined && e.responsable_efectivo?.perfil_id !== q.responsable_id) return false;
       if (q.mio && !esMio(e.responsable_efectivo, usuario.id)) return false;
-      if (q.atrasados && !e.avisos.includes("atrasado")) return false;
-      if (q.q !== undefined && q.q !== "" && !contiene(`${e.codigo} ${e.nombre} ${e.puerto_embarque ?? ""} ${e.referencia_logistica ?? ""} ${e.viaje?.codigo ?? ""}`, q.q)) return false;
+      if (q.atrasados && !tieneHitoVencido(e.hitos ?? [])) return false;
+      if (q.reprogramados && (e.reprogramaciones_total ?? 0) === 0) return false;
+      if (q.q !== undefined && q.q !== "" && !contiene(`${e.codigo} ${e.nombre} ${e.puerto_embarque ?? ""} ${e.referencia_logistica ?? ""} ${e.origen ?? ""} ${e.viaje?.codigo ?? ""}`, q.q)) return false;
       return true;
     })
     .sort(ordenEmbarques);
@@ -748,7 +822,10 @@ async function detalleDe(d: Db, id: string): Promise<Salida<EmbarqueDetalleApi>>
   if (w.respuesta) return falla(w.respuesta);
   if (nombres.respuesta) return falla(nombres.respuesta);
   const e = w.data.embarque.get(id);
-  return e ? listo(embarqueDetalleApi(w.data, e, nombres.data)) : noEncontrado();
+  if (!e) return noEncontrado();
+  const resumenes = await cargarResumenes(d, w.data, [id]);
+  if (resumenes.respuesta) return falla(resumenes.respuesta);
+  return listo(embarqueDetalleApi(w.data, e, nombres.data));
 }
 
 /** `GET /api/compras/embarques/[id]`. */
@@ -932,21 +1009,34 @@ export async function asignarComprasAViaje(d: Db, usuario: UsuarioAgrupadores, i
 
 /**
  * `POST /api/compras/embarques` (`id = null`) y `PATCH /api/compras/embarques/[id]` (guardar_embarque). Antes de llamar a la base aplica
- * `validarGuardarEmbarque` (local sin viaje, salida ≤ llegada, la llegada solo por movimiento); la base lo repite. Devuelve el detalle.
+ * `validarGuardarEmbarqueFechas` (08b-1b §2.9; la base lo repite): al CREAR escribe los cinco hitos y el ingreso al stock; al EDITAR no
+ * escribe ninguna fecha ni hora (van por `POST …/fechas`: una clave presente y distinta de lo guardado da `409 fecha_por_movimiento`) y
+ * una clave AUSENTE conserva lo guardado (F22: antes un `PATCH` sin la salida la mandaba como `null` y la borraba). Devuelve el detalle.
  */
 export async function guardarEmbarque(d: Db, usuario: UsuarioAgrupadores, cuerpo: GuardarEmbarque | EditarEmbarque, id: string | null): Promise<Salida<{ embarque: EmbarqueDetalleApi }>> {
-  let vigente: { fecha_llegada_estimada: string } | null = null;
+  let vigente: EmbarqueDb | null = null;
   if (id !== null) {
     const e = await leerEmbarquePorId(d, id);
     if (e.error) return fallaDb(e.error, "agrupadores: leer el embarque");
     if (!e.data) return noEncontrado();
-    vigente = { fecha_llegada_estimada: e.data.fecha_llegada_estimada };
+    vigente = e.data;
   }
-  // Un cliente que reenvía la llegada vigente sin cambiarla no pide ningún movimiento: se ignora, como hace la función.
-  const llegada = vigente !== null && cuerpo.fecha_llegada_estimada === vigente.fecha_llegada_estimada ? undefined : cuerpo.fecha_llegada_estimada;
-  const motivo = validarGuardarEmbarque({ tipo: cuerpo.tipo, viaje_id: cuerpo.viaje_id, fecha_salida_estimada: cuerpo.fecha_salida_estimada, ...(llegada === undefined ? {} : { fecha_llegada_estimada: llegada }) }, vigente);
+  const motivo = validarGuardarEmbarqueFechas(
+    {
+      tipo: cuerpo.tipo,
+      viaje_id: cuerpo.viaje_id,
+      ...(cuerpo.fecha_salida_estimada === undefined ? {} : { fecha_salida_estimada: cuerpo.fecha_salida_estimada }),
+      ...(cuerpo.fecha_puerto_estimada === undefined ? {} : { fecha_puerto_estimada: cuerpo.fecha_puerto_estimada }),
+      ...(cuerpo.fecha_llegada_estimada === undefined ? {} : { fecha_llegada_estimada: cuerpo.fecha_llegada_estimada }),
+      ...(cuerpo.fecha_inicio_operativo_estimada === undefined ? {} : { fecha_inicio_operativo_estimada: cuerpo.fecha_inicio_operativo_estimada }),
+      ...(cuerpo.hora_inicio_operativo === undefined ? {} : { hora_inicio_operativo: cuerpo.hora_inicio_operativo }),
+      ...(cuerpo.fecha_ingreso_estimada === undefined ? {} : { fecha_ingreso_estimada: cuerpo.fecha_ingreso_estimada }),
+    },
+    vigente === null ? null : { ...vigente, hito_confirmado: HITOS_CONFIRMABLES.find((h) => h === vigente.hito_confirmado) ?? null },
+  );
   if (motivo !== null) return fallaMotivo(motivo);
 
+  // Solo viajan las claves que el cuerpo trae: la función trata la ausente como «conserva» y la presente (`null` incluido) como valor.
   const embarque: Record<string, string | null> = {
     ...(id ? { id } : {}),
     ...(id === null && cuerpo.codigo ? { codigo: cuerpo.codigo } : {}),
@@ -956,10 +1046,20 @@ export async function guardarEmbarque(d: Db, usuario: UsuarioAgrupadores, cuerpo
     responsable_id: cuerpo.responsable_id,
     referencia_logistica: recortarNulo(cuerpo.referencia_logistica),
     puerto_embarque: recortarNulo(cuerpo.puerto_embarque),
-    fecha_salida_estimada: cuerpo.fecha_salida_estimada ?? null,
-    ...(id === null && llegada !== undefined ? { fecha_llegada_estimada: llegada } : {}),
+    ...(cuerpo.origen === undefined ? {} : { origen: recortarNulo(cuerpo.origen) }),
     nota: recortarNulo(cuerpo.nota),
   };
+  if (id === null) {
+    const fechas: [string, string | null | undefined][] = [
+      ["fecha_salida_estimada", cuerpo.fecha_salida_estimada],
+      ["fecha_puerto_estimada", cuerpo.fecha_puerto_estimada],
+      ["fecha_llegada_estimada", cuerpo.fecha_llegada_estimada],
+      ["fecha_inicio_operativo_estimada", cuerpo.fecha_inicio_operativo_estimada],
+      ["hora_inicio_operativo", cuerpo.hora_inicio_operativo],
+      ["fecha_ingreso_estimada", cuerpo.fecha_ingreso_estimada],
+    ];
+    for (const [clave, valor] of fechas) if (valor !== undefined) embarque[clave] = valor;
+  }
   const r = leerRpc(await rpcGuardarEmbarque(d, { embarque, revision: id === null ? null : (cuerpo.revision ?? null), actor: actorDe(usuario) }), "agrupadores: guardar el embarque");
   if (r.respuesta) return falla(r.respuesta);
   const detalle = await detalleDe(d, String(r.data.embarque_id));
@@ -1096,24 +1196,29 @@ function conRevisionesVigentes(s: SolicitudMovimiento, ix: Ix): SolicitudMovimie
   return s;
 }
 
-type PlanListo = Extract<ReturnType<typeof planificarMovimiento>, { ok: true }>;
+type PlanListo = Extract<ResultadoPlanMovimiento | ResultadoPlanFechas, { ok: true }>;
 
 export type OpcionesMovimiento = { previsualizar: boolean; huella_plan?: string };
 
 type ResultadoMovimiento = { tipo: "vista"; vista: PlanMovimientoApi } | { tipo: "aplicado"; plan: PlanListo; ctx: ContextoLeido; resultado: Record<string, unknown> };
+
+/** Arma el plan sobre lo leído; `vigentes` pide rehacerlo con las revisiones vigentes de las compras (el reintento tras `compra_cambio`). */
+type Planificar = (c: ContextoLeido, vigentes: boolean) => ResultadoPlanMovimiento | ResultadoPlanFechas;
 
 /**
  * El núcleo de todo movimiento (§3, R19). Lee, arma el plan con la regla pura y, si no es una vista previa, lo aplica con
  * `aplicar_movimiento_agrupador`. Si la compra cambió (la regla pura o la función dicen `compra_cambio`): sin `huella_plan` no hay
  * reintento (`409 compra_cambio`); con ella, se relee, se rehace el plan con las revisiones vigentes y SOLO SI LA HUELLA NUEVA ES IDÉNTICA
  * se reintenta una vez; si no, `409 plan_cambio`. La revisión del EMBARQUE nunca se refresca (`agrupador_cambio`: recarga la pantalla).
+ * `huellaSiCambiaMes` (08b-1b §2.10, F44): el plan mueve entregas de mes, así que exige la `huella_plan` de la vista previa y que coincida
+ * con la del plan recalculado ahora (`409 plan_cambio`); si ningún mes cambia no se pide.
  */
-async function ejecutar(d: Db, usuario: UsuarioAgrupadores, construir: (ctx: ContextoLeido) => SolicitudMovimiento, semillas: Semillas, opciones: OpcionesMovimiento): Promise<Salida<ResultadoMovimiento>> {
+async function ejecutar(d: Db, usuario: UsuarioAgrupadores, planificar: Planificar, semillas: Semillas, opciones: OpcionesMovimiento, huellaSiCambiaMes = false): Promise<Salida<ResultadoMovimiento>> {
   const c1 = await contextoDe(d, semillas);
   if (c1.respuesta) return falla(c1.respuesta);
-  const solicitud = construir(c1.data);
-  const plan1 = planificarMovimiento(solicitud, c1.data.ctx);
+  const plan1 = planificar(c1.data, false);
   if (opciones.previsualizar) return plan1.ok ? listo({ tipo: "vista" as const, vista: plan1.vista }) : fallaMotivo(plan1.motivo, plan1.detalle);
+  if (plan1.ok && huellaSiCambiaMes && cambiaAlgunMes(plan1.aplicable) && !puedeReintentar(opciones.huella_plan, plan1.vista.huella_plan)) return fallaMotivo("plan_cambio");
 
   let obsoleto = !plan1.ok && plan1.motivo === "compra_cambio";
   if (plan1.ok) {
@@ -1130,7 +1235,7 @@ async function ejecutar(d: Db, usuario: UsuarioAgrupadores, construir: (ctx: Con
   if (opciones.huella_plan === undefined) return fallaMotivo("compra_cambio");
   const c2 = await contextoDe(d, semillas);
   if (c2.respuesta) return falla(c2.respuesta);
-  const plan2 = planificarMovimiento(conRevisionesVigentes(construir(c2.data), c2.data.ix), c2.data.ctx);
+  const plan2 = planificar(c2.data, true);
   if (!plan2.ok) return fallaMotivo(plan2.motivo, plan2.detalle);
   if (!puedeReintentar(opciones.huella_plan, plan2.vista.huella_plan)) return fallaMotivo("plan_cambio");
   const r2 = await rpcAplicarMovimientoAgrupador(d, { plan: plan2.aplicable, actor: actorDe(usuario) });
@@ -1153,12 +1258,17 @@ export async function moverEntregas(
   solicitud: SolicitudMovimiento,
   opciones: OpcionesMovimiento,
 ): Promise<Salida<PlanMovimientoApi | RespuestaMovimientoApi>> {
-  const r = await ejecutar(d, usuario, () => solicitud, semillasDe(solicitud), opciones);
+  const r = await ejecutar(d, usuario, (c, vigentes) => planificarMovimiento(vigentes ? conRevisionesVigentes(solicitud, c.ix) : solicitud, c.ctx), semillasDe(solicitud), opciones);
   if (r.respuesta) return falla(r.respuesta);
   if (r.data.tipo === "vista") return listo(r.data.vista);
 
-  const { plan, ctx, resultado } = r.data;
   const embarqueRespuesta = solicitud.operacion === "mover_paquete" ? solicitud.embarque_destino_id : solicitud.embarque_id;
+  return respuestaDeAplicado(d, r.data, embarqueRespuesta);
+}
+
+/** La respuesta de un movimiento aplicado: el detalle del embarque pedido, los otros embarques tocados (con su revisión nueva) y las compras tocadas. */
+async function respuestaDeAplicado(d: Db, aplicado: Extract<ResultadoMovimiento, { tipo: "aplicado" }>, embarqueRespuesta: string): Promise<Salida<RespuestaMovimientoApi>> {
+  const { plan, ctx, resultado } = aplicado;
   const detalle = await detalleDe(d, embarqueRespuesta);
   if (detalle.respuesta) return falla(detalle.respuesta);
   const revisiones = new Map((Array.isArray(resultado.embarques) ? resultado.embarques.filter(esRegistro) : []).map((e) => [String(e.id), Number(e.revision)]));
@@ -1168,6 +1278,65 @@ export async function moverEntregas(
   // Solo las compras TOCADAS (0034): puede ser `[]`. Las demás del plan conservan su revisión, así que no se inventa ninguna.
   const compras = Array.isArray(resultado.compras) ? resultado.compras.filter(esRegistro).map((c) => ({ id: String(c.id), revision: Number(c.revision) })) : [];
   return listo({ embarque: detalle.data, embarques_tocados: tocados, compras, avisos: plan.vista.avisos });
+}
+
+/** Ahora mismo en Lima (`aaaa-mm-dd` y `hh:mm`), para la integridad de los hitos que ya ocurrieron (I7). */
+export function ahoraEnLima(ahora: Date = new Date()): AhoraLima {
+  const partes = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(ahora);
+  const v = (t: string) => partes.find((x) => x.type === t)?.value ?? "00";
+  return { fecha: `${v("year")}-${v("month")}-${v("day")}`, hora: `${v("hour")}:${v("minute")}` };
+}
+
+/** Los campos de `CambiarFechas` que el plan puro entiende (clave ausente = no cambia). */
+function entradaDeFechas(embarqueId: string, c: CambiarFechas, ahora: AhoraLima): EntradaCambiarFechas {
+  return {
+    embarque_id: embarqueId,
+    revision: c.revision,
+    ...(c.fecha_zarpe === undefined ? {} : { fecha_zarpe: c.fecha_zarpe }),
+    ...(c.fecha_arribo === undefined ? {} : { fecha_arribo: c.fecha_arribo }),
+    ...(c.fecha_ingreso_cd === undefined ? {} : { fecha_ingreso_cd: c.fecha_ingreso_cd }),
+    ...(c.inicio_operativo === undefined ? {} : { inicio_operativo: c.inicio_operativo }),
+    ...(c.fecha_ingreso_stock === undefined ? {} : { fecha_ingreso_stock: c.fecha_ingreso_stock }),
+    ...(c.hito_confirmado === undefined ? {} : { hito_confirmado: c.hito_confirmado }),
+    ...(c.motivo === undefined ? {} : { motivo: c.motivo }),
+    ...(c.causa === undefined ? {} : { causa: c.causa }),
+    ahora,
+  };
+}
+
+/**
+ * `POST /api/compras/embarques/[id]/fechas` (08b-1b §3.2): cambia cualquier hito del embarque. Con `previsualizar` devuelve el `PlanFechasApi`
+ * sin escribir. La `huella_plan` solo se exige si algún mes cambia (F44); motivo y causa, solo si reprograma (los pide el plan puro).
+ */
+export async function cambiarFechasEmbarque(d: Db, usuario: UsuarioAgrupadores, id: string, cuerpo: CambiarFechas, opciones: { previsualizar: boolean }): Promise<Salida<PlanFechasApi | RespuestaMovimientoApi>> {
+  const ahora = ahoraEnLima();
+  const r = await ejecutar(d, usuario, (c) => planCambiarFechas(entradaDeFechas(id, cuerpo, ahora), c.ctx), { embarques: [id] }, { previsualizar: opciones.previsualizar, huella_plan: cuerpo.huella_plan }, true);
+  if (r.respuesta) return falla(r.respuesta);
+  if (r.data.tipo === "vista") return listo(r.data.vista as PlanFechasApi);
+  return respuestaDeAplicado(d, r.data, id);
+}
+
+/**
+ * `POST /api/compras/paquetes/[id]/ingreso` (08b-1b §3.2): fija, cambia o suelta (`null`) el ingreso al stock propio de un paquete. Tras leer
+ * (y antes de planificar) comprueba que el paquete SIGUE en el embarque de la revisión que trae el cuerpo: si lo movieron mientras tanto,
+ * `409 agrupador_cambio`. Si queda antes de la llegada del embarque, el plan lo sube al piso y avisa `ingreso_paquete_ajustado`.
+ */
+export async function ingresoDePaquete(d: Db, usuario: UsuarioAgrupadores, paqueteId: string, cuerpo: IngresoPaquete, opciones: { previsualizar: boolean }): Promise<Salida<PlanFechasApi | RespuestaMovimientoApi>> {
+  const p = await leerPaquetePorId(d, paqueteId);
+  if (p.error) return fallaDb(p.error, "agrupadores: leer el paquete");
+  if (!p.data) return noEncontrado();
+  const embarqueId = p.data.embarque_id;
+  const ahora = ahoraEnLima();
+  const planificar: Planificar = (c) => {
+    // El candado de la función ya fue tomado por la lectura vigente: si el paquete cambió de embarque, el plan de otro embarque no vale.
+    const vigente = c.ctx.paquetes.find((x) => x.id === paqueteId);
+    if (vigente && vigente.embarque_id !== embarqueId) return { ok: false, motivo: "agrupador_cambio", detalle: `El paquete ${vigente.codigo} ya no es de este embarque.` };
+    return planIngresoPaquete({ paquete_id: paqueteId, revision_embarque: cuerpo.revision_embarque, fecha_ingreso_stock: cuerpo.fecha_ingreso_stock, ...(cuerpo.motivo === undefined ? {} : { motivo: cuerpo.motivo }), ...(cuerpo.causa === undefined ? {} : { causa: cuerpo.causa }), ahora }, c.ctx);
+  };
+  const r = await ejecutar(d, usuario, planificar, { embarques: [embarqueId], paquetes: [paqueteId] }, { previsualizar: opciones.previsualizar, huella_plan: cuerpo.huella_plan }, true);
+  if (r.respuesta) return falla(r.respuesta);
+  if (r.data.tipo === "vista") return listo(r.data.vista as PlanFechasApi);
+  return respuestaDeAplicado(d, r.data, embarqueId);
 }
 
 // ─── Importador de agrupadores (§3.11) ───
@@ -1370,7 +1539,7 @@ export function ganchosAgrupadoresCompras(d: Db, usuario: UsuarioAgrupadores): G
           const r = await ejecutar(
             d,
             usuario,
-            ({ ix }) => {
+            ({ ix, ctx }, vigentes) => {
               const e = ix.embarque.get(embarqueId as string);
               const items = entregas.data
                 // 08b-1b §2.4 bis: la entrega debe estar en el MES DE DESTINO (el del ingreso propio del paquete de la fila, si lo tiene).
@@ -1381,7 +1550,8 @@ export function ganchosAgrupadoresCompras(d: Db, usuario: UsuarioAgrupadores): G
                   return { entrega_id: x.id, unidades: libre, compra_revision: compra?.revision ?? 0 };
                 })
                 .filter((x) => x.unidades > 0);
-              return { operacion: "asignar", embarque_id: embarqueId as string, revision: e?.revision ?? 0, paquete_id: paqueteId, items };
+              const solicitud: SolicitudMovimiento = { operacion: "asignar", embarque_id: embarqueId as string, revision: e?.revision ?? 0, paquete_id: paqueteId, items };
+              return planificarMovimiento(vigentes ? conRevisionesVigentes(solicitud, ix) : solicitud, ctx);
             },
             { embarques: [embarqueId as string], entregas: entregas.data.map((x) => x.id), paquetes: paqueteId ? [paqueteId] : [] },
             { previsualizar: false },

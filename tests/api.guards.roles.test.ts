@@ -165,7 +165,7 @@ describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritur
 describe("08b: agrupadores de compras (decisiones 92 y 95): el comprador escribe; solo cerrar, reabrir y cancelar son de admin y planner", () => {
   const agr = CASOS.filter((c) => esDeAgrupadores(c.ruta));
 
-  it("están las dieciocho escrituras de 08b-1", () => {
+  it("están las veinte escrituras de 08b-1 y 08b-1b", () => {
     expect(agr.map(nombreDe).sort()).toEqual(
       [
         "POST compras/viajes",
@@ -180,10 +180,12 @@ describe("08b: agrupadores de compras (decisiones 92 y 95): el comprador escribe
         "POST compras/embarques/[id]/quitar",
         "POST compras/embarques/[id]/paquete",
         "POST compras/embarques/[id]/fecha",
+        "POST compras/embarques/[id]/fechas",
         "POST compras/embarques/[id]/pasar-pendientes",
         "PATCH compras/paquetes/[id]",
         "POST compras/paquetes/[id]/estado",
         "POST compras/paquetes/[id]/mover",
+        "POST compras/paquetes/[id]/ingreso",
         "POST compras/agrupadores/importar",
         "PUT compras/viaje-activo",
       ].sort(),

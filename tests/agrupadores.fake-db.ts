@@ -106,6 +106,11 @@ export function clienteAgrupadores() {
   return {
     from: base.from,
     rpc: (nombre: string, args: Record<string, unknown> = {}): Promise<Respuesta> => {
+      // Lectura de 08b-1b: `agrupador_hitos_resumen` (sin reprogramaciones salvo que el escenario las fuerce con `reemplazos`).
+      if (nombre === "agrupador_hitos_resumen") {
+        escenario.llamadas.push({ nombre, args });
+        return Promise.resolve(reemplazos[nombre]?.(args) ?? { data: [], error: null });
+      }
       // Lo que no es de agrupadores (`importar_compra`, `stock_flujo`…) lo resuelve la base de compras.
       if (!ESCRITURAS_AGR.includes(nombre)) return base.rpc(nombre, args) as Promise<Respuesta>;
       escenario.llamadas.push({ nombre, args });
@@ -215,12 +220,16 @@ function guardarEmbarque(e: Fila, revision: number | null, actor: { perfil_id: s
   if (!actual) {
     if (!asignable(e.responsable_id) && e.responsable_id) return no("responsable_no_asignable");
     if (!e.fecha_llegada_estimada) return no("fecha_requerida");
+    if (e.hora_inicio_operativo && !e.fecha_inicio_operativo_estimada) return no("hora_sin_fecha");
+    if (e.tipo === "local" && e.fecha_puerto_estimada) return no("puerto_en_local");
     if (e.fecha_salida_estimada && String(e.fecha_salida_estimada) > String(e.fecha_llegada_estimada)) return no("salida_despues_de_llegada");
     const codigo = codigoNuevo("compra_embarques", String(e.codigo ?? ""), String(e.fecha_llegada_estimada));
     if (typeof codigo !== "string") return no(codigo.motivo);
+    const ingreso = e.fecha_ingreso_estimada ?? null;
     const fila: Fila = {
       id: nuevoId(), codigo, nombre: e.nombre, tipo: e.tipo ?? "importacion", viaje_id: e.viaje_id ?? null, responsable_id: e.responsable_id ?? null, referencia_logistica: e.referencia_logistica ?? null, puerto_embarque: e.puerto_embarque ?? null,
-      fecha_salida_estimada: e.fecha_salida_estimada ?? null, fecha_llegada_estimada: e.fecha_llegada_estimada, fecha_llegada_real: null, periodo_llegada: `${String(e.fecha_llegada_estimada).slice(0, 7)}-01`, estado: "planificado", nota: e.nota ?? null, revision: 0,
+      fecha_salida_estimada: e.fecha_salida_estimada ?? null, fecha_puerto_estimada: e.fecha_puerto_estimada ?? null, fecha_llegada_estimada: e.fecha_llegada_estimada, fecha_inicio_operativo_estimada: e.fecha_inicio_operativo_estimada ?? null, hora_inicio_operativo: e.hora_inicio_operativo ?? null,
+      fecha_ingreso_estimada: ingreso, hito_confirmado: null, origen: e.origen ?? null, fecha_llegada_real: null, periodo_llegada: `${String(ingreso ?? e.fecha_llegada_estimada).slice(0, 7)}-01`, estado: "planificado", nota: e.nota ?? null, revision: 0,
       perfil_id: actor.perfil_id, usuario_nombre: actor.nombre, updated_by_id: actor.perfil_id, updated_by_nombre: actor.nombre, activo: true, created_at: sello(), updated_at: sello(),
     };
     filas.push(fila);
@@ -229,10 +238,13 @@ function guardarEmbarque(e: Fila, revision: number | null, actor: { perfil_id: s
   }
   if (actual.estado === "cancelado") return no("no_editable");
   if (revision === null || actual.revision !== revision) return no("agrupador_cambio");
-  if (e.fecha_llegada_estimada && e.fecha_llegada_estimada !== actual.fecha_llegada_estimada) return no("fecha_por_movimiento");
+  // Al editar NO se escribe ninguna fecha ni hora: clave presente y distinta de lo guardado (`null` incluido) = `fecha_por_movimiento`; ausente conserva (0038).
+  const hora = (h: unknown) => (h == null ? null : String(h).slice(0, 5));
+  const claves = ["fecha_salida_estimada", "fecha_puerto_estimada", "fecha_llegada_estimada", "fecha_inicio_operativo_estimada", "fecha_ingreso_estimada"];
+  if (claves.some((k) => k in e && (e[k] ?? null) !== (actual[k] ?? null)) || ("hora_inicio_operativo" in e && hora(e.hora_inicio_operativo) !== hora(actual.hora_inicio_operativo))) return no("fecha_por_movimiento");
   if (e.responsable_id !== actual.responsable_id && e.responsable_id && !asignable(e.responsable_id)) return no("responsable_no_asignable");
-  if (e.fecha_salida_estimada && String(e.fecha_salida_estimada) > String(actual.fecha_llegada_estimada)) return no("salida_despues_de_llegada");
-  Object.assign(actual, { nombre: e.nombre, tipo: e.tipo, viaje_id: e.viaje_id ?? null, responsable_id: e.responsable_id ?? null, referencia_logistica: e.referencia_logistica ?? null, puerto_embarque: e.puerto_embarque ?? null, fecha_salida_estimada: e.fecha_salida_estimada ?? null, nota: e.nota ?? null, revision: (actual.revision as number) + 1, updated_by_nombre: actor.nombre, updated_at: sello() });
+  if (e.tipo === "local" && (actual.fecha_puerto_estimada != null || actual.hito_confirmado === "arribo")) return no("puerto_en_local");
+  Object.assign(actual, { nombre: e.nombre, tipo: e.tipo, viaje_id: e.viaje_id ?? null, responsable_id: e.responsable_id ?? null, referencia_logistica: e.referencia_logistica ?? null, puerto_embarque: e.puerto_embarque ?? null, ...("origen" in e ? { origen: e.origen ?? null } : {}), nota: e.nota ?? null, revision: (actual.revision as number) + 1, updated_by_nombre: actor.nombre, updated_at: sello() });
   evento({ embarque_id: actual.id, viaje_id: actual.viaje_id, accion: "editar", resumen: `Embarque ${actual.codigo} editado` }, actor);
   return ok({ embarque_id: actual.id, codigo: actual.codigo, revision: actual.revision, creado: false, avisos });
 }
@@ -295,7 +307,10 @@ function cambiarEstado(a: { p_tipo: string; p_id: string; p_accion: string; p_re
     if (e.estado === "cancelado") return no("transicion_invalida");
     let hacia: string;
     if (a.p_accion === "en_transito" && e.estado === "planificado") hacia = "en_transito";
-    else if (a.p_accion === "volver_a_planificado" && e.estado === "en_transito") hacia = "planificado";
+    else if (a.p_accion === "volver_a_planificado" && e.estado === "en_transito") {
+      if (e.hito_confirmado) return no("hito_confirmado");
+      hacia = "planificado";
+    }
     else if (a.p_accion === "cancelar") {
       if (motivo === "") return no("motivo_requerido");
       if (tabla("compra_entrega_asignaciones").some((x) => x.embarque_id === e.id && activa(x.id))) return no("tiene_asignaciones_activas");
@@ -417,11 +432,18 @@ function aplicarMovimiento(plan: PlanAplicable, actor: { perfil_id: string | nul
     tabla("compra_linea_repartos").splice(0, tabla("compra_linea_repartos").length, ...resto);
     for (const f of rp.filas) tabla("compra_linea_repartos").push({ id: nuevoId(), linea_id: rp.linea_id, entrega_id: entregaId, ...f, activo: true });
   }
-  const emb = plan.embarques.find((e) => e.fecha_llegada_estimada);
-  if (emb) {
-    const fila = get("compra_embarques", emb.id)!;
-    fila.fecha_llegada_estimada = emb.fecha_llegada_estimada;
-    fila.periodo_llegada = `${String(emb.fecha_llegada_estimada).slice(0, 7)}-01`;
+  // `cambiar_fecha` (0038): solo `embarques[0]` trae claves de fecha; presente = valor nuevo, `null` = vaciar, ausente = conserva.
+  const cambia = plan.operacion === "cambiar_fecha" ? plan.embarques[0] : undefined;
+  if (cambia) {
+    const fila = get("compra_embarques", cambia.id)!;
+    for (const k of ["fecha_salida_estimada", "fecha_puerto_estimada", "fecha_llegada_estimada", "fecha_inicio_operativo_estimada", "hora_inicio_operativo", "fecha_ingreso_estimada", "hito_confirmado"] as const) {
+      if (k in cambia) fila[k] = cambia[k] ?? null;
+    }
+    fila.periodo_llegada = `${String(fila.fecha_llegada_real ?? fila.fecha_ingreso_estimada ?? fila.fecha_llegada_estimada).slice(0, 7)}-01`;
+  }
+  for (const pq of plan.paquetes ?? []) {
+    const fila = get("compra_paquetes", pq.id);
+    if (fila) Object.assign(fila, { fecha_ingreso_estimada: pq.fecha_ingreso_estimada, periodo_ingreso: pq.fecha_ingreso_estimada === null ? null : `${pq.fecha_ingreso_estimada.slice(0, 7)}-01` });
   }
   // Como la SQL (0034, M1): solo las compras TOCADAS (su `compra_foto_entregas` cambió) suben revisión y salen en `compras`.
   const comprasNuevas = plan.compras

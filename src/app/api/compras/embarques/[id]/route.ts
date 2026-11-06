@@ -20,9 +20,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 }
 
 /**
- * `PATCH /api/compras/embarques/[id]` (`requireUser`): edita todo menos la llegada estimada (que mueve entregas y va por `/fecha`: `409
- * fecha_por_movimiento`); la salida sí, y no mueve nada. Con `revision` (`409 agrupador_cambio`). `409` también: `salida_despues_de_llegada`,
- * `local_con_viaje`, `no_editable` (cancelado), `viaje_cancelado`. Respuesta `{ embarque }` con el detalle.
+ * `PATCH /api/compras/embarques/[id]` (`requireUser`): edita nombre, tipo, viaje, responsable, referencia, puerto, origen y nota. NO escribe
+ * fechas ni horas (van por `POST …/fechas`): una clave de fecha u hora presente y distinta de lo guardado, `null` incluido, da `409
+ * fecha_por_movimiento`; una ausente conserva lo guardado. Con `revision` (`409 agrupador_cambio`). `409` también: `local_con_viaje`,
+ * `puerto_en_local`, `no_editable` (cancelado), `viaje_cancelado`, `conflicto_reintentar`. Respuesta `{ embarque }` con el detalle.
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { perfil, rol, response } = await requireUser();

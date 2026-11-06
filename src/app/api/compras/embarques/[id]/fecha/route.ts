@@ -7,7 +7,7 @@ import { cambiarFechaSchema, previsualizarQuerySchema } from "@/lib/compras/agru
 import { moverEntregas, usuarioDe } from "@/lib/compras/agrupadores/servicio";
 
 /**
- * `POST /api/compras/embarques/[id]/fecha` (`requireUser`: planner y comprador cambian las fechas, respuesta b de Javier): cambia la llegada
+ * ALIAS por una versión de `/fechas` (solo pestañas abiertas durante el despliegue). `POST /api/compras/embarques/[id]/fecha` (`requireUser`: planner y comprador cambian las fechas, respuesta b de Javier): cambia la llegada
  * estimada con motivo obligatorio. Si el mes cambia, mueve en bloque las asignaciones ACTIVAS al mes nuevo (las históricas no se mueven);
  * dentro del mismo mes solo cambia el embarque y no toca ninguna compra. `?previsualizar=1` y `huella_plan` como en `/asignar`. `409`:
  * `embarque_con_recepciones`, `embarque_no_editable`, `salida_despues_de_llegada`, `max_entregas`, `reparto_sin_vector`, `motivo_requerido`,

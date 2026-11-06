@@ -298,13 +298,15 @@ export const ESCRITURAS_ABIERTAS_A_COMPRADOR: ReadonlySet<string> = new Set([
   "src/app/api/compras/embarques/[id]/route.ts#PATCH", // decisión 92
   "src/app/api/compras/embarques/[id]/asignar/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/[id]/estado/route.ts#POST", // decisión 92; `puedeCambiarEstado(rol, accion)` tras el guard
-  "src/app/api/compras/embarques/[id]/fecha/route.ts#POST", // decisión 92
+  "src/app/api/compras/embarques/[id]/fecha/route.ts#POST", // decisión 92 (alias de /fechas por una versión)
+  "src/app/api/compras/embarques/[id]/fechas/route.ts#POST", // decisión 92 (planner y comprador cambian las fechas; 08b-1b §3.1)
   "src/app/api/compras/embarques/[id]/paquete/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/[id]/paquetes/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/[id]/pasar-pendientes/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/[id]/quitar/route.ts#POST", // decisión 92
   "src/app/api/compras/importar/route.ts#POST", // decisión 108 (solo borrador propio; carga_inicial 403)
   "src/app/api/compras/paquetes/[id]/route.ts#PATCH", // decisión 92
+  "src/app/api/compras/paquetes/[id]/ingreso/route.ts#POST", // decisión 92 (ingreso al stock propio del paquete; 08b-1b §3.1)
   "src/app/api/compras/paquetes/[id]/mover/route.ts#POST", // decisión 92
   "src/app/api/compras/viaje-activo/route.ts#PUT", // decisión 92 (preferencia; sin efecto en permisos)
   "src/app/api/compras/viajes/route.ts#POST", // decisión 92

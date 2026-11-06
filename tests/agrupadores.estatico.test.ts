@@ -52,10 +52,12 @@ const ESPERADAS: Esperada[] = [
   { ruta: "compras/embarques/[id]/quitar/route.ts", metodo: "POST", guard: "requireUser" },
   { ruta: "compras/embarques/[id]/paquete/route.ts", metodo: "POST", guard: "requireUser" },
   { ruta: "compras/embarques/[id]/fecha/route.ts", metodo: "POST", guard: "requireUser" },
+  { ruta: "compras/embarques/[id]/fechas/route.ts", metodo: "POST", guard: "requireUser" },
   { ruta: "compras/embarques/[id]/pasar-pendientes/route.ts", metodo: "POST", guard: "requireUser" },
   { ruta: "compras/paquetes/[id]/route.ts", metodo: "PATCH", guard: "requireUser" },
   { ruta: "compras/paquetes/[id]/estado/route.ts", metodo: "POST", guard: "requirePlanner" },
   { ruta: "compras/paquetes/[id]/mover/route.ts", metodo: "POST", guard: "requireUser" },
+  { ruta: "compras/paquetes/[id]/ingreso/route.ts", metodo: "POST", guard: "requireUser" },
   { ruta: "compras/agrupadores/opciones/route.ts", metodo: "GET", guard: "requireUser" },
   { ruta: "compras/agrupadores/sin-asignar/route.ts", metodo: "GET", guard: "requireUser" },
   { ruta: "compras/agrupadores/historial/route.ts", metodo: "GET", guard: "requireUser" },
@@ -112,7 +114,7 @@ describe("rutas de los agrupadores: guards de la ficha (§3, R15)", () => {
 });
 
 describe("datos: solo `.rpc(` para escribir (R16) y solo en consultas.ts", () => {
-  const FUNCIONES = ["guardar_viaje", "guardar_embarque", "guardar_paquete", "cambiar_estado_agrupador", "asignar_viaje_compras", "aplicar_movimiento_agrupador", "importar_agrupadores"];
+  const FUNCIONES = ["guardar_viaje", "guardar_embarque", "guardar_paquete", "cambiar_estado_agrupador", "asignar_viaje_compras", "aplicar_movimiento_agrupador", "importar_agrupadores", "agrupador_hitos_resumen"];
 
   it("ningún archivo de acceso a datos de src/lib/compras ni de src/app/api/compras escribe una tabla con .insert, .update, .upsert o .delete", () => {
     // Un `.update(` de un hash o un `.delete(` de un Map no son escrituras: se miran los archivos que hablan con la base (`.from(` o `.rpc(`).
@@ -122,7 +124,7 @@ describe("datos: solo `.rpc(` para escribir (R16) y solo en consultas.ts", () =>
     expect(ofensores).toEqual([]);
   });
 
-  it("las únicas funciones `rpc` de agrupadores son las siete de `0032` y se llaman solo desde consultas.ts", () => {
+  it("las únicas funciones `rpc` de agrupadores son las siete de `0032` más la lectura `agrupador_hitos_resumen` (0038) y se llaman solo desde consultas.ts", () => {
     const usadas = [...sinComentarios(archivo("src/lib/compras/agrupadores/consultas.ts").texto).matchAll(/\.rpc\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
     expect(usadas.sort()).toEqual([...FUNCIONES].sort());
     const fuera = enDir("src/lib/compras/agrupadores/").filter((f) => f.ruta !== "src/lib/compras/agrupadores/consultas.ts" && /\.(rpc|from)\s*\(/.test(sinComentarios(f.texto)));

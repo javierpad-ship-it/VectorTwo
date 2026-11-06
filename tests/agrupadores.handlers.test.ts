@@ -68,6 +68,8 @@ import { POST as asignar } from "@/app/api/compras/embarques/[id]/asignar/route"
 import { POST as quitar } from "@/app/api/compras/embarques/[id]/quitar/route";
 import { POST as aPaquete } from "@/app/api/compras/embarques/[id]/paquete/route";
 import { POST as cambiarFecha } from "@/app/api/compras/embarques/[id]/fecha/route";
+import { POST as cambiarFechas } from "@/app/api/compras/embarques/[id]/fechas/route";
+import { POST as ingresoPaquete } from "@/app/api/compras/paquetes/[id]/ingreso/route";
 import { POST as pasarPendientes } from "@/app/api/compras/embarques/[id]/pasar-pendientes/route";
 import { GET as opciones } from "@/app/api/compras/agrupadores/opciones/route";
 import { GET as sinAsignar } from "@/app/api/compras/agrupadores/sin-asignar/route";
@@ -84,6 +86,7 @@ import type {
   EmbarqueApi,
   EmbarqueDetalleApi,
   OpcionesAgrupadoresApi,
+  PlanFechasApi,
   PlanMovimientoApi,
   ReporteImportacionAgrupadoresApi,
   RespuestaAsignarViajeApi,
@@ -146,6 +149,8 @@ afterEach(() => {
 
 const asignarItems = (embarque: string, cuerpo: Record<string, unknown>, consulta = "") => asignar(enviar("POST", `/compras/embarques/${embarque}/asignar${consulta}`, cuerpo), ctx(embarque));
 const fechaDe = (embarque: string, cuerpo: Record<string, unknown>, consulta = "") => cambiarFecha(enviar("POST", `/compras/embarques/${embarque}/fecha${consulta}`, cuerpo), ctx(embarque));
+const fechasDe = (embarque: string, cuerpo: Record<string, unknown>, consulta = "") => cambiarFechas(enviar("POST", `/compras/embarques/${embarque}/fechas${consulta}`, cuerpo), ctx(embarque));
+const ingresoDe = (paquete: string, cuerpo: Record<string, unknown>, consulta = "") => ingresoPaquete(enviar("POST", `/compras/paquetes/${paquete}/ingreso${consulta}`, cuerpo), ctx(paquete));
 const quitarDe = (embarque: string, cuerpo: Record<string, unknown>, consulta = "") => quitar(enviar("POST", `/compras/embarques/${embarque}/quitar${consulta}`, cuerpo), ctx(embarque));
 
 /** Las asignaciones del caso 1 ya hechas: l1 nov 300 → 261101 / paquete 261101 y dic 200 → 261201. */
@@ -177,6 +182,8 @@ describe("permisos (R15): sesión, comprador que escribe y lo que solo hacen adm
     () => quitarDe(E.e261101, {}),
     () => aPaquete(enviar("POST", "/x"), ctx(E.e261101)),
     () => fechaDe(E.e261101, {}),
+    () => fechasDe(E.e261101, {}),
+    () => ingresoPaquete(enviar("POST", "/x", {}), ctx(PAQUETE_AGR.p261101)),
     () => pasarPendientes(enviar("POST", "/x"), ctx(E.e261101)),
     () => importarAgrupadores(enviar("POST", "/compras/agrupadores/importar")),
     () => viajeActivo(enviar("PUT", "/compras/viaje-activo")),
@@ -301,8 +308,10 @@ describe("lecturas: viajes, embarques, opciones, sin asignar e historial", () =>
     expect(await codigos("?desde=2026-12&hasta=2027-03")).toEqual(["261201", "270301"]);
     expect(await codigos("?mio=1")).toEqual(["261101", "261201"]);
     expect(await codigos("?atrasados=1")).toEqual([]);
+    expect(await codigos("?reprogramados=1")).toEqual([]);
     vi.setSystemTime(new Date("2026-11-25T15:00:00.000Z"));
-    expect(await codigos("?atrasados=1")).toEqual(["261101", "261102"]);
+    // 08b-1b: «atrasado» = algún hito vencido (también un Zarpe previsto que ya pasó): 261201 salía el 12-nov.
+    expect(await codigos("?atrasados=1")).toEqual(["261101", "261102", "261201"]);
     expect((await listaEmbarques(get("/compras/embarques", "?viaje_id=basura"))).status).toBe(400);
   });
 
@@ -532,12 +541,23 @@ describe("embarques y paquetes: crear, editar, estados (casos 6 y 10)", () => {
     expect((await leer(llegada)).codigo).toBe("fecha_por_movimiento");
     expect(escriturasAgr()).toEqual([]);
     const antes = tablaDe("compra_linea_entregas").map((e) => `${e.id}:${e.periodo}:${e.unidades}`).sort();
-    const ok = await editarEmbarque(enviar("PATCH", "/x", { ...base, puerto_embarque: "Puerto Norte", fecha_salida_estimada: "2026-10-28", fecha_llegada_estimada: "2026-11-20" }), ctx(E.e261101));
+    // F22: la salida NO se escribe al editar. Una distinta (o `null` con una guardada) es `fecha_por_movimiento`; la misma, o ausente, conserva.
+    const otraSalida = await editarEmbarque(enviar("PATCH", "/x", { ...base, fecha_salida_estimada: "2026-10-28" }), ctx(E.e261101));
+    expect((await leer(otraSalida)).codigo).toBe("fecha_por_movimiento");
+    const salidaNula = await editarEmbarque(enviar("PATCH", "/x", { ...base, fecha_salida_estimada: null }), ctx(E.e261101));
+    expect((await leer(salidaNula)).codigo).toBe("fecha_por_movimiento");
+    expect(escriturasAgr()).toEqual([]);
+    const ok = await editarEmbarque(enviar("PATCH", "/x", { ...base, puerto_embarque: "Puerto Norte", fecha_salida_estimada: "2026-10-25", fecha_llegada_estimada: "2026-11-20" }), ctx(E.e261101));
     expect(ok.status).toBe(200);
-    expect((await leer<{ embarque: EmbarqueDetalleApi }>(ok)).data.embarque).toMatchObject({ puerto_embarque: "Puerto Norte", fecha_salida_estimada: "2026-10-28", revision: 2 });
+    expect((await leer<{ embarque: EmbarqueDetalleApi }>(ok)).data.embarque).toMatchObject({ puerto_embarque: "Puerto Norte", fecha_salida_estimada: "2026-10-25", revision: 2 });
     expect(tablaDe("compra_linea_entregas").map((e) => `${e.id}:${e.periodo}:${e.unidades}`).sort()).toEqual(antes);
-    const tarde = await editarEmbarque(enviar("PATCH", "/x", { ...base, revision: 2, fecha_salida_estimada: "2026-12-01" }), ctx(E.e261101));
-    expect((await leer(tarde)).codigo).toBe("salida_despues_de_llegada");
+    // Sin la clave de la salida: se conserva (antes el servicio mandaba `null` y la borraba).
+    const sinSalida = await editarEmbarque(enviar("PATCH", "/x", { ...base, revision: 2, nombre: "Nov-26 · Feria Sur (editado)" }), ctx(E.e261101));
+    expect(sinSalida.status).toBe(200);
+    expect((await leer<{ embarque: EmbarqueDetalleApi }>(sinSalida)).data.embarque).toMatchObject({ fecha_salida_estimada: "2026-10-25", fecha_llegada_estimada: "2026-11-20", revision: 3 });
+    expect(fila("compra_embarques", E.e261101)?.fecha_salida_estimada).toBe("2026-10-25");
+    const claves = llamadasRpc("guardar_embarque").at(-1)?.args.p_embarque as Record<string, unknown>;
+    expect(Object.keys(claves)).not.toContain("fecha_salida_estimada");
     expect((await leer(await editarEmbarque(enviar("PATCH", "/x", base), ctx(E.e261101)))).codigo).toBe("agrupador_cambio");
     const { revision: _r, ...sinRevision } = base;
     void _r;
@@ -1107,5 +1127,151 @@ describe("errores de Postgres que la persona puede provocar: mensajes útiles (r
   it("una FK de agrupadores: apuntar a un viaje que no existe es 404 y borrar uno con hijos, 409", () => {
     expect(describirErrorDb("23503", 'insert or update on table "compras" violates foreign key constraint "compras_viaje_id_fkey"')).toEqual({ status: 404, mensaje: "No encontramos ese viaje." });
     expect(describirErrorDb("23503", 'update or delete on table "compra_viajes" violates foreign key constraint "compra_embarques_viaje_id_fkey"').status).toBe(409);
+  });
+});
+
+// ─── 08b-1b T3a-1: fechas logísticas, ingreso por paquete, lista de embarques ───
+
+describe("fechas logísticas (08b-1b §3.1 a §3.3): POST …/fechas, alias /fecha, ingreso por paquete y lecturas", () => {
+  it("F44: solo el Arribo se aplica sin huella_plan; el Ingreso CD a otro mes la exige (`plan_cambio`), la vista previa la da y con ella se aplica", async () => {
+    conCaso1();
+    const arribo = await fechasDe(E.e261101, { revision: 1, fecha_arribo: "2026-11-10" });
+    expect(arribo.status).toBe(200);
+    const a = (await leer<RespuestaMovimientoApi>(arribo)).data;
+    expect(a.embarque).toMatchObject({ fecha_puerto_estimada: "2026-11-10", revision: 2, fecha_llegada_estimada: "2026-11-20" });
+    expect(a.compras).toEqual([]);
+    expect(revisionCompra(COMPRA_AGR.c101)).toBe(3);
+
+    const cuerpo = { revision: 2, fecha_ingreso_cd: "2026-12-03", motivo: "Aduana retiene el contenedor", causa: "aduana" };
+    const sinHuella = await fechasDe(E.e261101, cuerpo);
+    expect(sinHuella.status).toBe(409);
+    expect((await leer(sinHuella)).codigo).toBe("plan_cambio");
+    expect(escriturasAgr().filter((l) => l.nombre === "aplicar_movimiento_agrupador")).toHaveLength(1);
+
+    const prev = (await leer<PlanFechasApi>(await fechasDe(E.e261101, cuerpo, "?previsualizar=1"))).data;
+    expect(prev).toMatchObject({ reprograma: true, unidades_movidas: 300 });
+    expect(prev.meses).toEqual([{ de: "2026-11", a: "2026-12", unidades: 300 }]);
+    expect(prev.cambios.map((c) => c.hito)).toContain("ingreso_cd");
+    expect(escriturasAgr().filter((l) => l.nombre === "aplicar_movimiento_agrupador")).toHaveLength(1);
+
+    const otraHuella = await fechasDe(E.e261101, { ...cuerpo, huella_plan: "0".repeat(64) });
+    expect((await leer(otraHuella)).codigo).toBe("plan_cambio");
+    const r = await fechasDe(E.e261101, { ...cuerpo, huella_plan: prev.huella_plan });
+    expect(r.status).toBe(200);
+    expect((await leer<RespuestaMovimientoApi>(r)).data.embarque).toMatchObject({ fecha_llegada_estimada: "2026-12-03", periodo_llegada: "2026-12", revision: 3 });
+    expect(escriturasAgr().at(-1)?.args.p_plan).toMatchObject({ causa: "aduana" });
+  });
+
+  it("reprogramar exige motivo y causa; sin ninguna clave de fecha es 400; las claves ausentes no viajan al plan", async () => {
+    conCaso1();
+    expect((await fechasDe(E.e261101, { revision: 1 })).status).toBe(400);
+    const sinMotivo = await fechasDe(E.e261101, { revision: 1, fecha_ingreso_cd: "2026-11-28" });
+    expect((await leer(sinMotivo)).codigo).toBe("motivo_requerido");
+    const sinCausa = await fechasDe(E.e261101, { revision: 1, fecha_ingreso_cd: "2026-11-28", motivo: "Ajuste" });
+    expect((await leer(sinCausa)).codigo).toBe("causa_requerida");
+    expect(escriturasAgr()).toEqual([]);
+    const ok = await fechasDe(E.e261101, { revision: 1, fecha_ingreso_cd: "2026-11-28", motivo: "Ajuste", causa: "programacion" });
+    expect(ok.status).toBe(200);
+    const emb = (escriturasAgr().at(-1)?.args.p_plan as { embarques: Record<string, unknown>[] }).embarques[0];
+    expect(Object.keys(emb).sort()).toEqual(["fecha_llegada_estimada", "id", "revision"]);
+    const igual = await fechasDe(E.e261101, { revision: 2, fecha_ingreso_cd: "2026-11-28" });
+    expect((await leer(igual)).codigo).toBe("sin_cambios");
+  });
+
+  it("F23: el alias `/fecha` deja el embarque como `/fechas` con solo el Ingreso CD y causa `otro`", async () => {
+    conCaso1();
+    expect((await fechaDe(E.e261101, { revision: 1, fecha_llegada_estimada: "2026-11-28", motivo: "Ajuste menor" })).status).toBe(200);
+    const alias = { ...fila("compra_embarques", E.e261101) };
+    const aliasCompras = revisionCompra(COMPRA_AGR.c101);
+    conCaso1();
+    expect((await fechasDe(E.e261101, { revision: 1, fecha_ingreso_cd: "2026-11-28", motivo: "Ajuste menor", causa: "otro" })).status).toBe(200);
+    const nuevo = fila("compra_embarques", E.e261101)!;
+    for (const k of ["fecha_llegada_estimada", "periodo_llegada", "fecha_salida_estimada", "fecha_puerto_estimada", "revision"]) expect(nuevo[k]).toEqual(alias[k]);
+    expect(revisionCompra(COMPRA_AGR.c101)).toBe(aliasCompras);
+  });
+
+  it("POST …/fechas: hito_confirmado sin otra fecha se acepta; en un embarque cancelado, `embarque_no_editable`; embarque desconocido, 404; revisión vieja, `agrupador_cambio`", async () => {
+    conCaso1();
+    vi.setSystemTime(new Date("2026-11-25T15:00:00.000Z"));
+    const confirmar = await fechasDe(E.e261101, { revision: 1, hito_confirmado: "zarpe" });
+    expect(confirmar.status).toBe(200);
+    expect(fila("compra_embarques", E.e261101)?.hito_confirmado).toBe("zarpe");
+    expect((await leer(await fechasDe(E.e261101, { revision: 1, fecha_arribo: "2026-11-10" }))).codigo).toBe("agrupador_cambio");
+    expect((await fechasDe(INEXISTENTE, { revision: 1, fecha_arribo: "2026-11-10" })).status).toBe(404);
+    fila("compra_embarques", E.e261201)!.estado = "cancelado";
+    expect((await leer(await fechasDe(E.e261201, { revision: 1, fecha_arribo: "2026-12-01" }))).codigo).toBe("embarque_no_editable");
+  });
+
+  it("volver a planificado con un hito confirmado es 409 `hito_confirmado`", async () => {
+    conCaso1();
+    Object.assign(fila("compra_embarques", E.e261101)!, { estado: "en_transito", hito_confirmado: "zarpe" });
+    const r = await estadoEmbarque(enviar("POST", "/x", { revision: 1, accion: "volver_a_planificado" }), ctx(E.e261101));
+    expect(r.status).toBe(409);
+    expect((await leer(r)).codigo).toBe("hito_confirmado");
+  });
+
+  it("un interbloqueo o un candado que no llegó (`40P01`, `55P03`) es 409 `conflicto_reintentar`", async () => {
+    conCaso1();
+    for (const code of ["40P01", "55P03"]) {
+      reemplazos.aplicar_movimiento_agrupador = () => ({ data: null, error: { code, message: "deadlock detected", details: null, hint: null } });
+      const r = await fechasDe(E.e261101, { revision: 1, fecha_arribo: "2026-11-10" });
+      expect(r.status).toBe(409);
+      expect((await leer(r)).codigo).toBe("conflicto_reintentar");
+    }
+    reemplazos.guardar_embarque = () => ({ data: null, error: { code: "40P01", message: "deadlock detected", details: null, hint: null } });
+    const e = await editarEmbarque(enviar("PATCH", "/x", { revision: 1, nombre: "x", tipo: "importacion", viaje_id: VIAJE_AGR.v261001, responsable_id: null }), ctx(E.e261101));
+    expect((await leer(e)).codigo).toBe("conflicto_reintentar");
+  });
+
+  it("ingreso de un paquete: un mes distinto pide la huella (mueve la entrega); por debajo de la llegada se sube a ella con el aviso `ingreso_paquete_ajustado`", async () => {
+    conCaso1();
+    const cuerpo = { revision_embarque: 1, fecha_ingreso_stock: "2026-12-05", motivo: "El paquete sale después", causa: "programacion" };
+    const sinHuella = await ingresoDe(PAQUETE_AGR.p261101, cuerpo);
+    expect((await leer(sinHuella)).codigo).toBe("plan_cambio");
+    const prev = (await leer<PlanFechasApi>(await ingresoDe(PAQUETE_AGR.p261101, cuerpo, "?previsualizar=1"))).data;
+    expect(prev.meses).toEqual([{ de: "2026-11", a: "2026-12", unidades: 300 }]);
+    const r = await ingresoDe(PAQUETE_AGR.p261101, { ...cuerpo, huella_plan: prev.huella_plan });
+    expect(r.status).toBe(200);
+    const { data } = await leer<RespuestaMovimientoApi>(r);
+    expect(data.embarque.paquetes.find((p) => p.id === PAQUETE_AGR.p261101)).toMatchObject({ fecha_ingreso: "2026-12-05", ingreso_propio: true });
+    expect(fila("compra_paquetes", PAQUETE_AGR.p261101)?.fecha_ingreso_estimada).toBe("2026-12-05");
+    expect(data.embarque.asignaciones.find((x) => x.paquete_id === PAQUETE_AGR.p261101)).toMatchObject({ periodo: "2026-12", unidades: 300 });
+
+    // Otro paquete, sin asignaciones: un ingreso anterior a la llegada (20-nov) se sube a ella (mismo mes: sin huella).
+    const rev = revisionEmbarque(E.e261101);
+    const ajustado = await ingresoDe(PAQUETE_AGR.p261102, { revision_embarque: rev, fecha_ingreso_stock: "2026-11-10", motivo: "Llega antes al almacén", causa: "programacion" });
+    expect(ajustado.status).toBe(200);
+    const aj = (await leer<RespuestaMovimientoApi>(ajustado)).data;
+    expect(aj.avisos.map((x) => x.aviso)).toContain("ingreso_paquete_ajustado");
+    expect(fila("compra_paquetes", PAQUETE_AGR.p261102)?.fecha_ingreso_estimada).toBe("2026-11-20");
+    // Soltarlo: hereda el del embarque.
+    const suelto = await ingresoDe(PAQUETE_AGR.p261102, { revision_embarque: revisionEmbarque(E.e261101), fecha_ingreso_stock: null, motivo: "Vuelve a seguir al embarque", causa: "programacion" });
+    expect(suelto.status).toBe(200);
+    expect(fila("compra_paquetes", PAQUETE_AGR.p261102)?.fecha_ingreso_estimada).toBeNull();
+  });
+
+  it("ingreso de un paquete: paquete desconocido, 404; paquete cancelado, `no_editable`; revisión vieja, `agrupador_cambio`", async () => {
+    conCaso1();
+    expect((await ingresoDe(INEXISTENTE, { revision_embarque: 1, fecha_ingreso_stock: "2026-11-25" })).status).toBe(404);
+    expect((await leer(await ingresoDe(PAQUETE_AGR.p261101, { revision_embarque: 9, fecha_ingreso_stock: "2026-11-25" }))).codigo).toBe("agrupador_cambio");
+    fila("compra_paquetes", PAQUETE_AGR.p261102)!.estado = "cancelado";
+    expect((await leer(await ingresoDe(PAQUETE_AGR.p261102, { revision_embarque: 1, fecha_ingreso_stock: "2026-11-25" }))).codigo).toBe("no_editable");
+  });
+
+  it("lista y detalle de embarques traen hitos y reprogramaciones (agrupador_hitos_resumen); filtros `reprogramados` y `origen`", async () => {
+    fila("compra_embarques", E.e261201)!.origen = "California";
+    reemplazos.agrupador_hitos_resumen = () => ({ data: [{ embarque_id: E.e261201, paquete_id: null, hito: "ingreso_cd", fecha_original: "2026-12-01", reprogramaciones: 2, ultima_causa: "aduana" }], error: null });
+    const codigos = async (consulta: string) => (await leer<{ embarques: EmbarqueApi[] }>(await listaEmbarques(get("/compras/embarques", consulta)))).data.embarques.map((e) => e.codigo).sort();
+    expect(await codigos("?reprogramados=1")).toEqual(["261201"]);
+    expect(await codigos("?origen=california")).toEqual(["261201"]);
+    expect(await codigos("?origen=Otro")).toEqual([]);
+    const lista = (await leer<{ embarques: EmbarqueApi[] }>(await listaEmbarques(get("/compras/embarques")))).data.embarques;
+    const e = lista.find((x) => x.codigo === "261201")!;
+    expect(e).toMatchObject({ origen: "California", reprogramaciones_total: 2 });
+    expect(e.hitos?.map((h) => h.hito)).toEqual(["zarpe", "arribo", "ingreso_cd", "inicio_operativo", "ingreso_stock"]);
+    expect(e.hitos?.find((h) => h.hito === "ingreso_cd")).toMatchObject({ fecha_original: "2026-12-01", reprogramaciones: 2 });
+    const detalle = (await leer<{ embarque: EmbarqueDetalleApi }>(await unEmbarque(get("/x"), ctx(E.e261201)))).data.embarque;
+    expect(detalle.reprogramaciones_total).toBe(2);
+    expect(llamadasRpc("agrupador_hitos_resumen").length).toBeGreaterThan(0);
   });
 });

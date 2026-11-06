@@ -320,6 +320,36 @@ export async function leerAgrupadores(db: Db): Promise<Resultado<Pick<MundoDb, "
 /** Lo que devuelve una llamada `rpc`: el `jsonb` de la función o el error de Postgres (`AG002` = fallo interno: llega como error y se ve). */
 export type RespuestaRpc = { data: unknown; error: PostgrestError | null };
 
+/**
+ * Una fila de `agrupador_hitos_resumen` (0038, 08b-1b §2.9): por embarque y hito (`zarpe`, `arribo`, `ingreso_cd`, `inicio_operativo`,
+ * `ingreso_stock`, y `ingreso_paquete` con su `paquete_id`), la fecha original, las reprogramaciones y la última causa.
+ */
+export type ResumenHitoDb = {
+  embarque_id: string;
+  paquete_id: string | null;
+  hito: string;
+  fecha_original: string | null;
+  reprogramaciones: number;
+  ultima_causa: string | null;
+};
+
+/** Embarques por llamada: la función devuelve 5 filas por embarque (más una por paquete con ingreso propio) y PostgREST corta en 1 000 sin avisar. */
+const TANDA_RESUMEN_HITOS = 100;
+
+/**
+ * `agrupador_hitos_resumen` (solo lectura): fecha original, reprogramaciones y última causa por embarque y hito. Se llama en tandas de
+ * `TANDA_RESUMEN_HITOS` embarques para que ninguna respuesta pase de 1 000 filas.
+ */
+export async function leerResumenHitos(db: Db, embarqueIds: readonly string[]): Promise<Resultado<ResumenHitoDb[]>> {
+  const salida: ResumenHitoDb[] = [];
+  for (const tanda of enTandas(unicos(embarqueIds), TANDA_RESUMEN_HITOS)) {
+    const r = await db.rpc("agrupador_hitos_resumen", { p_embarques: tanda });
+    if (r.error) return { data: salida, error: r.error };
+    salida.push(...((r.data ?? []) as unknown as ResumenHitoDb[]));
+  }
+  return { data: salida, error: null };
+}
+
 /** `guardar_viaje`: crea (sin `id`, `p_revision` nulo) o edita (con `id` y la revisión vigente). */
 export function rpcGuardarViaje(db: Db, a: { viaje: Record<string, Json | undefined>; revision: number | null; actor: ActorAgrupador }): Promise<RespuestaRpc> {
   return Promise.resolve(db.rpc("guardar_viaje", { p_viaje: a.viaje as Json, p_revision: a.revision, p_actor: a.actor }));
