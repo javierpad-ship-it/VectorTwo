@@ -16,6 +16,7 @@ import { CierreGM } from "./cierre-gm";
 import { GraficoGM } from "./grafico-gm";
 import { ReferenciasGM } from "./referencias-gm";
 import { TablaGM } from "./tabla-gm";
+import { VentaTiendaGM } from "./venta-tienda-gm";
 import { VersionesGM } from "./versiones-gm";
 import {
   TEXTO_OBSOLETO,
@@ -163,6 +164,8 @@ export function DetalleGMVista({
           <TablaGM id={ID_TABLA} detalle={detalle} modo={modo} pct={pct} nombreArchivo={`curva-${esResto ? "resto" : titulo.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/g, "-")}.csv`} />
         </div>
       </Card>
+
+      <VentaTiendaGM proyeccionId={proyeccionId} clave={detalle.clave} anio={anio} />
 
       <Card titulo={`Cómo se cierra ${anio - 1}`} descripcion={`El cierre de ${anio - 1} por agrupación, con su curva vigente y el factor del Niño, y la base de ${anio} con las tiendas de ${anio}. Solo informa: el factor se cambia en Proyección.`}>
         <CierreGM detalle={detalle} />

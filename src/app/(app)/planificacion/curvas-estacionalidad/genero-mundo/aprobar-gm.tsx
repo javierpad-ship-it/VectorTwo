@@ -20,6 +20,9 @@ import {
   hayNino,
   idOpcionBase,
   leerPct,
+  leerUnidades,
+  pctParaObjetivo,
+  formatearUds,
   motivoNotaObligatoria,
   opcionesDeBase,
   pctATexto,
@@ -88,6 +91,7 @@ export function AprobarGM({
   const [pctInterno, setPctInterno] = useState<string>(() => pctATexto(precargaDeBase(opciones.find((o) => o.id === baseInicial(detalle.referencias, avanceBajo))?.valor ?? null)));
   const pctTexto = pctControlado ?? pctInterno;
   const [nota, setNota] = useState("");
+  const [objetivoTexto, setObjetivoTexto] = useState("");
 
   function escribirPct(texto: string) {
     setPctInterno(texto);
@@ -108,6 +112,10 @@ export function AprobarGM({
   });
   const notaFalta = motivoNota !== null && nota.trim() === "";
   const resumen = resumenAprobacion(detalle, pct);
+  const objetivo = leerUnidades(objetivoTexto);
+  const pctNecesario = pctParaObjetivo(objetivo, resumen.base);
+  const pctNecesarioRedondeado = pctNecesario === null ? null : Math.round(pctNecesario * 100) / 100;
+  const equivalenteObjetivoReal = resumen.base && resumen.base.real !== null && resumen.base.real > 0 && objetivo !== null ? (objetivo / resumen.base.real - 1) * 100 : null;
   const version = proximaVersion(detalle.versiones);
   const vigente = detalle.vigente;
   const titulo = tituloGM(detalle);
@@ -224,6 +232,54 @@ export function AprobarGM({
             <span id={`${ID_NOTA_GM}-ayuda`} className={`mt-1 block text-xs ${motivoNota ? "text-alerta" : "text-tinta-suave"}`}>
               {motivoNota ?? "Con el % igual a la base (±0,5 puntos) no hace falta nota."} {nota.length}/300
             </span>
+          </div>
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-borde p-3">
+          <p className="text-sm font-medium text-tinta">Objetivo a mano</p>
+          <div className="grid items-start gap-3 md:grid-cols-3">
+            <Field
+              label={`Objetivo ${anio} (unidades)`}
+              hint={
+                resumen.base
+                  ? `Base ${anio} corregida: ${formatearUds(resumen.base.corregida)} u (tiendas de ${anio}). Escribe las unidades que quieres vender y verás el crecimiento que hace falta.`
+                  : `Sin base ${anio} calculable: no se puede traducir un objetivo a crecimiento.`
+              }
+            >
+              <Input inputMode="numeric" value={objetivoTexto} onChange={(e) => setObjetivoTexto(e.target.value)} disabled={ocupado || !resumen.base} placeholder="Ej. 65 000" />
+            </Field>
+            <div className="text-sm md:col-span-2">
+              {objetivoTexto.trim() !== "" && objetivo === null && <p className="text-alerta">Escribe un número de unidades mayor que cero (por ejemplo 65000).</p>}
+              {objetivo !== null && pctNecesario !== null && resumen.base && resumen.base.corregida !== null && (
+                <div className="space-y-1">
+                  <p className="text-tinta">
+                    Crecimiento necesario: <strong>{formatearPctSigno(pctNecesario, 2)}</strong> sobre {y} corregido
+                    {equivalenteObjetivoReal !== null && <> (= {formatearPctSigno(equivalenteObjetivoReal, 2)} sobre {y} real)</>}.
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {formatearUds(objetivo)} u frente a {formatearUds(resumen.base.corregida)} u de base: {objetivo >= resumen.base.corregida ? "+" : "−"}
+                    {formatearUds(Math.abs(Math.round(objetivo - resumen.base.corregida)))} u.
+                    {resumen.resultado !== null && pct !== null && (
+                      <>
+                        {" "}Con el {formatearPctPlano(pct, 2)} escrito arriba llegarías a {formatearUds(resumen.resultado)} u, {resumen.resultado >= objetivo ? "+" : "−"}
+                        {formatearUds(Math.abs(resumen.resultado - Math.round(objetivo)))} u frente al objetivo.
+                      </>
+                    )}
+                  </p>
+                  <Button
+                    tamano="sm"
+                    variante="secundario"
+                    disabled={ocupado || pctNecesarioRedondeado === null || pctNecesarioRedondeado < -95 || pctNecesarioRedondeado > 500}
+                    onClick={() => {
+                      if (pctNecesarioRedondeado !== null) escribirPct(pctATexto(pctNecesarioRedondeado));
+                    }}
+                    title="Pone este % en el campo de arriba; todavía no aprueba nada"
+                  >
+                    Usar {formatearPctSigno(pctNecesarioRedondeado, 2)} como crecimiento
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

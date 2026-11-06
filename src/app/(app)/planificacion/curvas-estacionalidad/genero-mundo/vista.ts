@@ -262,6 +262,30 @@ export function resultadoSobreCorregida(pct: number | null, base: Pick<BaseGM, "
   return Math.round(base.corregida * (1 + pct / 100));
 }
 
+/**
+ * Lee unidades escritas a mano: «64719», «64 719», «64,719» o «64.719» (los separadores de miles se aceptan y se ignoran; un solo
+ * separador con 1 o 2 decimales —«64,5»— se toma como decimal). `null` si no es un número mayor que cero.
+ */
+export function leerUnidades(texto: string): number | null {
+  const t = texto.trim().replace(/[\s\u00a0']/g, "");
+  if (t === "") return null;
+  let n: number;
+  if (/^\d+$/.test(t)) n = Number(t);
+  else if (/^\d{1,3}([,.]\d{3})+$/.test(t)) n = Number(t.replace(/[,.]/g, ""));
+  else if (/^\d+[,.]\d{1,2}$/.test(t)) n = Number(t.replace(",", "."));
+  else return null;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * El crecimiento que hace falta para llegar a un objetivo de unidades escrito a mano: `objetivo ÷ B' − 1` sobre la base corregida
+ * (las tiendas del año). `null` sin objetivo o sin base. No redondea: quien lo muestra elige los decimales.
+ */
+export function pctParaObjetivo(objetivo: number | null, base: Pick<BaseGM, "corregida"> | null): number | null {
+  if (objetivo === null || !base || base.corregida === null || !(base.corregida > 0)) return null;
+  return (objetivo / base.corregida - 1) * 100;
+}
+
 export type TotalSobreReal = { corregido: number | null; real: number | null };
 
 /**
