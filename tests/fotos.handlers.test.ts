@@ -394,13 +394,14 @@ describe("GET /api/compras/fotos/[fotoId] (foto grande)", () => {
 });
 
 describe("GET /api/compras/fotos/[fotoId]/miniatura", () => {
-  it("R27 · devuelve los bytes con image/jpeg y las cabeceras privadas, cacheables y a prueba de nosniff", async () => {
+  it("R27 · devuelve los bytes con image/jpeg y las cabeceras privadas, con caché corta (5 min, sin immutable) y a prueba de nosniff", async () => {
     como("comprador");
     const id = sembrarFoto(IDS.compraA, IDS.lineaA1);
     const r = await miniatura(json("GET", "/x"), ctxFoto(id));
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("image/jpeg");
-    expect(r.headers.get("cache-control")).toBe("private, max-age=86400, immutable");
+    expect(r.headers.get("cache-control")).toBe("private, max-age=300");
+    expect(r.headers.get("cache-control")).not.toContain("immutable");
     expect(r.headers.get("x-content-type-options")).toBe("nosniff");
     expect(r.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(r.headers.get("content-disposition")).toBe("inline");

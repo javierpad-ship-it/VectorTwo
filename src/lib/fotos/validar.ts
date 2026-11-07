@@ -1,4 +1,4 @@
-import { dimensionesJpeg, quitarMetadatos, terminaEnEoi, tieneFirmaJpeg } from "./jpeg";
+import { datosDeImagenValidos, dimensionesJpeg, quitarMetadatos, terminaEnEoi, tieneFirmaJpeg } from "./jpeg";
 import { LADO_MAX_FOTO, LADO_MAX_MINIATURA, MAX_BYTES_FOTO, MAX_BYTES_MINIATURA, MAX_BYTES_SUBIDA } from "./constantes";
 import type { CodigoErrorFoto } from "./tipos-api";
 
@@ -12,7 +12,7 @@ export type MotivoFoto = Extract<CodigoErrorFoto, "formato_invalido" | "dimensio
 export type JpegValidado = { ok: true; ancho: number; alto: number; bytes: number } | { ok: false; motivo: MotivoFoto };
 
 /**
- * Una parte válida: JPEG (firma `FF D8 FF` y `FF D9` al final), ancho y alto del SOF dentro de `maxLado` y peso dentro de `maxBytes`.
+ * Una parte válida: JPEG (firma `FF D8 FF`, un solo `FF D9` y es el final, sin APPn/COM entre scans), ancho y alto del SOF dentro de `maxLado` y peso dentro de `maxBytes`.
  * El peso se mira primero (es lo más barato): 400 KB + 1 → `foto_grande`.
  */
 export function validarJpeg(bytes: Uint8Array, opciones: { maxLado: number; maxBytes: number }): JpegValidado {
@@ -20,6 +20,8 @@ export function validarJpeg(bytes: Uint8Array, opciones: { maxLado: number; maxB
   if (!tieneFirmaJpeg(bytes) || !terminaEnEoi(bytes)) return { ok: false, motivo: "formato_invalido" };
   const d = dimensionesJpeg(bytes);
   if (!d) return { ok: false, motivo: "formato_invalido" };
+  // H-1: el primer EOI es el final y no hay APPn/COM ni otro marcador raro entre los scans.
+  if (!datosDeImagenValidos(bytes)) return { ok: false, motivo: "formato_invalido" };
   if (d.ancho > opciones.maxLado || d.alto > opciones.maxLado) return { ok: false, motivo: "dimensiones_invalidas" };
   return { ok: true, ancho: d.ancho, alto: d.alto, bytes: bytes.length };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_BYTES_SUBIDA } from "@/lib/fotos/constantes";
 import { leerCuerpoConTope, leerSubida, origenPermitido } from "@/lib/fotos/validar";
-import { cuerpoMultipart, jpegSintetico, PNG_FALSO } from "./fotos.fixture";
+import { cuerpoMultipart, jpegDeVariosScans, jpegSintetico, PNG_FALSO } from "./fotos.fixture";
 
 /** Arma la petición como la hace el navegador: el `Content-Type` con su frontera y el `Content-Length` real del cuerpo. */
 async function peticion(partes: Parameters<typeof cuerpoMultipart>[0], extra: Record<string, string | null> = {}) {
@@ -103,5 +103,12 @@ describe("R3 · tamaño y origen de la subida", () => {
     expect(await leerSubida(await peticion({ foto: PNG_FALSO, miniatura: MINI }))).toEqual({ ok: false, codigo: "formato_invalido" });
     expect(await leerSubida(await peticion({ foto: jpegSintetico({ ancho: 801, alto: 600 }), miniatura: MINI }))).toEqual({ ok: false, codigo: "dimensiones_invalidas" });
     expect(await leerSubida(await peticion({ foto: FOTO, miniatura: jpegSintetico({ ancho: 321, alto: 100 }) }))).toEqual({ ok: false, codigo: "dimensiones_invalidas" });
+  });
+
+  it("H-1 · una foto o miniatura con un archivo pegado tras un EOI intermedio → formato_invalido", async () => {
+    const trampa = jpegDeVariosScans({ eoiIntermedio: true, cola: [0x50, 0x4b, 0x03, 0x04, 9, 9, 0xff, 0xd9] });
+    expect(await leerSubida(await peticion({ foto: trampa, miniatura: MINI }))).toEqual({ ok: false, codigo: "formato_invalido" });
+    const trampaMini = jpegDeVariosScans({ ancho: 320, alto: 240, eoiIntermedio: true, cola: [1, 2, 3, 0xff, 0xd9] });
+    expect(await leerSubida(await peticion({ foto: FOTO, miniatura: trampaMini }))).toEqual({ ok: false, codigo: "formato_invalido" });
   });
 });

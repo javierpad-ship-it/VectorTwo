@@ -48,6 +48,44 @@ function segmentosHastaSos(b: Uint8Array): Segmento[] | null {
   return null;
 }
 
+/** Marcadores con longitud que la norma permite entre scans (progresivos o de varios scans): DHT, DQT, DRI, DNL y el propio SOS. */
+const permitidoEntreScans = (m: number) => m === 0xc4 || m === 0xdb || m === 0xdd || m === 0xdc || m === SOS;
+
+/**
+ * Recorre lo que sigue al primer SOS (datos entrópicos y scans siguientes) y exige que el archivo sea UN solo JPEG sin metadatos ocultos
+ * (H-1 de la auditoría de 08c E1):
+ *  - Dentro de los datos entrópicos solo caben `FF 00` (byte de relleno), `FF D0`–`FF D7` (reinicios) y `FF FF` (relleno).
+ *  - Los únicos marcadores que pueden abrir un segmento entre scans son DHT, DQT, DRI, DNL y SOS. APPn, COM, otro SOF, SOI o TEM → inválido
+ *    (así no se cuelan EXIF ni comentarios entre los scans de un progresivo, y `quitarMetadatos` solo tiene que mirar antes del primer SOS).
+ *  - El primer `FF D9` debe ser el de los dos últimos bytes: nada de otro archivo pegado tras un EOI intermedio.
+ * `false` si la estructura no es válida.
+ */
+export function datosDeImagenValidos(b: Uint8Array): boolean {
+  const segs = segmentosHastaSos(b);
+  if (!segs) return false;
+  let i = segs[segs.length - 1].fin;
+  while (i < b.length) {
+    // Datos entrópicos hasta el siguiente marcador de verdad.
+    if (b[i] !== 0xff) {
+      i += 1;
+      continue;
+    }
+    while (i < b.length && b[i] === 0xff) i += 1; // relleno FF FF…
+    if (i >= b.length) return false;
+    const m = b[i];
+    i += 1;
+    if (m === 0x00 || (m >= 0xd0 && m <= 0xd7)) continue;
+    if (m === EOI) return i === b.length;
+    if (!permitidoEntreScans(m)) return false;
+    if (i + 2 > b.length) return false;
+    const largo = (b[i] << 8) | b[i + 1];
+    if (largo < 2 || i + largo > b.length) return false;
+    i += largo;
+  }
+  // Se acabaron los bytes sin llegar a un EOI.
+  return false;
+}
+
 /** Ancho y alto del marcador SOF, o `null` si no hay (o miden 0). */
 export function dimensionesJpeg(b: Uint8Array): { ancho: number; alto: number } | null {
   if (!tieneFirmaJpeg(b)) return null;

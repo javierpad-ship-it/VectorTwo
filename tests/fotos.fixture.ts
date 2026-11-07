@@ -9,6 +9,10 @@ const segmento = (marcador: number, carga: number[]): number[] => [0xff, marcado
 
 const ascii = (t: string): number[] => [...t].map((c) => c.charCodeAt(0));
 
+/** Segmentos sueltos para colocar entre scans. */
+export const segmentoApp = (marcador: number, carga: number[]): number[] => segmento(marcador, carga);
+export const bytesAscii = ascii;
+
 export type OpcionesJpeg = {
   ancho: number;
   alto: number;
@@ -37,6 +41,34 @@ export function jpegSintetico(o: OpcionesJpeg): Uint8Array {
   const datos = Array.from({ length: o.relleno ?? 32 }, (_, i) => (i * 7 + 3) % 250);
   const meta = o.metadatos ? [...SEGMENTOS_META.exif, ...SEGMENTOS_META.perfil, ...SEGMENTOS_META.comentario] : [];
   const bytes = [0xff, 0xd8, ...jfif, ...meta, ...dqt, ...sof, ...sos, ...datos, ...(o.sinEoi ? [] : [0xff, 0xd9])];
+  return Uint8Array.from(bytes);
+}
+
+/**
+ * JPEG armado byte a byte para los casos de H-1 (auditoría 08c E1): `datos1` son los datos entrópicos del primer scan, `entreScans` los
+ * segmentos (ya armados) que se ponen entre el primer scan y el segundo y `cola` lo que cierra el archivo (sin `cola`, un `FF D9`).
+ * `eoiIntermedio` pone un `FF D9` justo después del primer scan.
+ */
+export function jpegDeVariosScans(o: {
+  ancho?: number;
+  alto?: number;
+  progresivo?: boolean;
+  datos1?: number[];
+  entreScans?: number[];
+  segundoScan?: boolean;
+  eoiIntermedio?: boolean;
+  cola?: number[];
+}): Uint8Array {
+  const jfif = segmento(0xe0, [...ascii("JFIF"), 0, 1, 1, 0, ...u16(1), ...u16(1), 0, 0]);
+  const dqt = segmento(0xdb, [0, ...Array.from({ length: 64 }, () => 8)]);
+  const sof = segmento(o.progresivo ? 0xc2 : 0xc0, [8, ...u16(o.alto ?? 600), ...u16(o.ancho ?? 800), 1, 1, 0x11, 0]);
+  const sos = segmento(0xda, [1, 1, 0, 0, 63, 0]);
+  const datos1 = o.datos1 ?? Array.from({ length: 32 }, (_, i) => (i * 7 + 3) % 250);
+  const bytes = [0xff, 0xd8, ...jfif, ...dqt, ...sof, ...sos, ...datos1];
+  if (o.eoiIntermedio) bytes.push(0xff, 0xd9);
+  bytes.push(...(o.entreScans ?? []));
+  if (o.segundoScan) bytes.push(...sos, 5, 6, 7, 8);
+  bytes.push(...(o.cola ?? [0xff, 0xd9]));
   return Uint8Array.from(bytes);
 }
 
