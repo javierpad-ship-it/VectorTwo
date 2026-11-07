@@ -21,6 +21,7 @@ Aquí se versionan los informes del agente `seguridad` (solo lectura) y el estad
 | 2026-11-04 | [auditoria-2026-10-total.md](auditoria-2026-10-total.md) | Total (HEAD `2885945`, `0.15.0`) | S-01 a S-16 | ver tabla de ese archivo |
 | 2026-11-04 | [auditoria-2026-11-08b1.md](auditoria-2026-11-08b1.md) | 08b-1 agrupadores de compras (`0.16.0`) | A1/A2, B, M, E, F, G, H, I | E, F |
 | 2026-11-06 | [auditoria-2026-11-08b1b.md](auditoria-2026-11-08b1b.md) | 08b-1b fechas logísticas, línea de tiempo y OC (`0.17.0`, sonnet) | F1 a F6 (sin bloqueantes; el texto de F3 a F6 no consta en el repo) | F5 (alias `/fecha`, se borra en la versión siguiente) y F6 (no verificable) |
+| 2026-11-07 | [auditoria-2026-11-08c-e1.md](auditoria-2026-11-08c-e1.md) | 08c E1 proveedores y fotos de líneas (`0.18.0`, sonnet; corte `951eb25..6bef6f6`) | H-1 a H-8 (sin bloqueantes ni importantes; resumen, el informe íntegro no se versiona) | H-3 (probar `camera` en teléfono), H-4 (decide Javier), H-7 (no verificable) |
 
 **Nota sobre la primera auditoría.** Constan: I-2 y M-8/M-10 (permisos de `anon`/`authenticated`, migración `0013`), I-3 (venta esperada de la tienda visible al comprador, corregido en `0.9.2`), M-7 (test estático de guards), M-3 de M8 (trigger `before truncate` en `compra_eventos`, migración `0032`). I-1 e I-4 no constan por su número; el CHANGELOG `0.9.2` describe lo corregido (topes de importadores, `next` del login, `ban_duration`, errores de Auth, cabeceras, escape de fórmulas CSV).
 

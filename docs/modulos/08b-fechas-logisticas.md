@@ -226,7 +226,7 @@ Las reprogramaciones con causa `correccion` o `programacion` **no cuentan como a
 | `VIAJE` | El código del viaje de COTV en Vector2 |
 | **`LLEGADA`** | **`2026-12`** en todas las filas (Javier: «inicialmente ponle a todo llegada en diciembre»). Es un **mes**, como siempre en el importador: la entrega queda con `periodo = 2026-12-01`, que en M8 significa «diciembre», no «el día 1» |
 | `EMBARQUE` · `PAQUETE` · `OC` | Vacías (la OC se completa después, §3.7). `RECIBIDAS` vacía salvo que Javier diga que algo ya llegó |
-| `NOTA` | **Una sola por grupo**, igual en todas sus filas: «Registrada en COTV por {compradores distintos}» y las notas distintas de las cabeceras del grupo, separadas por « · », cortadas a 500 (el corte se avisa en la sesión) |
+| `NOTA` | **Una sola por grupo**, igual en todas sus filas: «Registrada en COTV por {compradores distintos}» y las notas distintas de las cabeceras del grupo, separadas por « · », **cortadas a 200** (el tope de la nota de una línea, `MAX_NOTA_LINEA`: el importador guarda la nota en cada línea y deja nula la de la cabecera; el corte se avisa con `nota_cortada`; corregido el 2026-11-07, decisión 133, tras ver que 500 era el tope de la cabecera y no el que usa el importador) |
 
 Las demás columnas, como 08c §12.2 b. Las dos informativas las ignora el importador: `filaImportacionCompraSchema` es `z.object` no estricto y descarta claves que no conoce (`qa` lo comprueba en el ensayo C0).
 
