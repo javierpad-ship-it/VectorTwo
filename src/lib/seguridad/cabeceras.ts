@@ -61,7 +61,7 @@ export function construirCsp({ isDev, supabaseUrl }: OpcionesCabeceras): string 
 
 /** La app no usa ninguna de estas funciones del navegador; `fullscreen` queda para el propio origen. */
 export const PERMISSIONS_POLICY =
-  "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), accelerometer=(), gyroscope=(), magnetometer=(), midi=(), display-capture=(), fullscreen=(self)";
+  "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), accelerometer=(), gyroscope=(), magnetometer=(), midi=(), display-capture=(), fullscreen=(self)";
 
 export function cabecerasDeSeguridad(opciones: OpcionesCabeceras): Cabecera[] {
   return [

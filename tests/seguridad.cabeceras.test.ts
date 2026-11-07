@@ -92,7 +92,7 @@ describe("cabecerasDeSeguridad", () => {
     const pp = cabecera(lista, "Permissions-Policy");
     expect(pp).toBe(PERMISSIONS_POLICY);
     expect(pp).not.toContain("interest-cohort");
-    for (const f of ["camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()", "bluetooth=()", "serial=()", "accelerometer=()", "gyroscope=()", "magnetometer=()", "midi=()", "display-capture=()", "fullscreen=(self)"]) {
+    for (const f of ["camera=(self)", "microphone=()", "geolocation=()", "payment=()", "usb=()", "bluetooth=()", "serial=()", "accelerometer=()", "gyroscope=()", "magnetometer=()", "midi=()", "display-capture=()", "fullscreen=(self)"]) {
       expect(pp, f).toContain(f);
     }
   });
