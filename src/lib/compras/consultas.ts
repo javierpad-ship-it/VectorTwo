@@ -5,6 +5,7 @@ import { leerEquivalencias, leerTodo } from "@/lib/arbol/consultas";
 import { enTandas, TANDA_IN } from "@/lib/arbol/importar";
 import { cargarEstadoGml, type EstadoGmlCargado } from "@/lib/marcas/gml/estado";
 import { leerAsignaciones } from "@/lib/responsables/consultas";
+import { leerFotosEnCancelada } from "@/lib/fotos/consultas";
 import { leerTiendas } from "@/lib/tiendas/consultas";
 import type { ArgsCancelarCompra } from "./cancelar";
 import type { ArgsEditarOc } from "./oc";
@@ -63,7 +64,13 @@ export async function leerDatosCompras(db: Db): Promise<Resultado<DatosCompras>>
 /** Lo que se muestra de una foto activa en la compra (08c): nunca la ruta de Storage. */
 export type FotoLineaDb = Pick<Tables<"compra_linea_fotos">, "id" | "linea_id" | "ancho" | "alto" | "subida_por_nombre" | "created_at">;
 
-export type DatosDeCompra = Omit<DatosCompras, "compras" | "proveedores"> & { compra: CompraDb; proveedor: ProveedorDb | null; fotos: FotoLineaDb[] };
+export type DatosDeCompra = Omit<DatosCompras, "compras" | "proveedores"> & {
+  compra: CompraDb;
+  proveedor: ProveedorDb | null;
+  fotos: FotoLineaDb[];
+  /** Línea → fotos que «Traer» copiaría de su versión cancelada (decisión 104). Solo las líneas con algo que traer. Vacío en una compra cancelada. */
+  fotos_en_cancelada: ReadonlyMap<string, number>;
+};
 
 /** Una compra con todo lo suyo; `null` si no existe. Los hijos se piden por los ids de sus líneas (en tandas: viajan en la URL). */
 export async function leerDatosDeCompra(db: Db, compraId: string): Promise<Resultado<DatosDeCompra | null>> {
@@ -97,7 +104,23 @@ export async function leerDatosDeCompra(db: Db, compraId: string): Promise<Resul
     repartos.push(...r.data);
     recepciones.push(...x.data);
   }
-  return { data: { compra: compra.data, proveedor: proveedor.data ?? null, lineas: lineas.data, entregas, repartos, recepciones, fotos: fotos.data }, error: null };
+
+  // 08c, decisión 104: solo para las líneas activas con clave de importación de una compra que no está cancelada; una sola pasada por tandas.
+  const { proveedor_id: proveedorDeCompra, estado: estadoCompra } = compra.data;
+  let enCancelada: ReadonlyMap<string, number> = new Map();
+  if (estadoCompra !== "cancelada") {
+    const activas = new Map<string, number>();
+    for (const f of fotos.data) activas.set(f.linea_id, (activas.get(f.linea_id) ?? 0) + 1);
+    const traer = await leerFotosEnCancelada(
+      db,
+      lineas.data
+        .filter((l) => l.activo)
+        .map((l) => ({ id: l.id, compra_id: l.compra_id, proveedor_id: proveedorDeCompra, clave_importacion: l.clave_importacion, activas: activas.get(l.id) ?? 0 }))
+    );
+    if (traer.error) return { data: null, error: traer.error };
+    enCancelada = traer.data;
+  }
+  return { data: { compra: compra.data, proveedor: proveedor.data ?? null, lineas: lineas.data, entregas, repartos, recepciones, fotos: fotos.data, fotos_en_cancelada: enCancelada }, error: null };
 }
 
 /** Una compra viva (no cancelada) con OC: lo que hace falta para `oc_repetida` y el aviso `oc_de_otro_proveedor` del importador. */

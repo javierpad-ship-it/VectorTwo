@@ -5,6 +5,7 @@ import { sumarDias } from "./fechas";
 import { mesDeDestino, periodoLlegada } from "./movimiento";
 import { mesDe } from "@/lib/compras/reglas";
 import type { FilaAgrupador } from "./esquemas";
+import { puertoDistintoDelHabitual } from "./puertos";
 import { esAsignable, responsableEfectivo } from "./responsable";
 import type { AgrupadorImportacionCompraApi, FilaImportacionAgrupadorApi, ReporteImportacionAgrupadoresApi, ResumenClasificacionApi } from "./tipos-api";
 import {
@@ -122,6 +123,11 @@ export type EstadoImportacionAgrupadores = {
   embarques: readonly EmbarqueRegistro[];
   paquetes: readonly PaqueteRegistro[];
   perfiles: readonly PerfilConCorreo[];
+  /**
+   * 08c, R29 (opcional): puertos habituales de los proveedores de las compras de cada embarque que ya existe (`embarque_id` → puertos). Sin
+   * entrada o con lista vacía no se avisa `puerto_distinto_del_habitual`. Un embarque nuevo del archivo aún no tiene compras: no avisa.
+   */
+  puertos_habituales?: ReadonlyMap<string, readonly string[]>;
 };
 
 export type LoteViaje = {
@@ -190,6 +196,11 @@ export type ResultadoPrevisualizacionAgrupadores = {
   lote: LoteImportarAgrupadores;
   /** Fila → código que recibirá cada nueva sin código, simulando la numeración de la función. Solo para pruebas y humo; no se envía al cliente. */
   codigos_simulados: ReadonlyMap<number, string>;
+  /**
+   * Ids de los embarques que YA existen y cuya fila escribe un puerto (08c, R29): para esos el servicio carga los puertos habituales de sus
+   * compras y vuelve a previsualizar con `estado.puertos_habituales`. Solo para el servicio; no se envía al cliente.
+   */
+  embarques_con_puerto: readonly string[];
 };
 
 // ─── Lectura y validación de una fila ───
@@ -508,6 +519,7 @@ export function previsualizarImportacionAgrupadores(
   }
 
   // Pasada 2: embarques.
+  const embarquesConPuerto: string[] = [];
   for (const e of delArchivo("embarque")) {
     if (e.clasificacion === "omitida") continue;
     const d = e.datos as DatosFila;
@@ -557,6 +569,11 @@ export function previsualizarImportacionAgrupadores(
         e.clasificacion = "cambiada";
         e.motivo = "cambiada_requiere_edicion";
         e.detalle = dif.join("; ");
+      }
+      // 08c, R29: el puerto escrito frente a los habituales de los proveedores de ese embarque. Informativo: nunca cambia la clasificación.
+      if (d.puerto !== null) {
+        embarquesConPuerto.push(existente.id);
+        if (puertoDistintoDelHabitual(d.puerto, estado.puertos_habituales?.get(existente.id) ?? [])) e.avisos.push("puerto_distinto_del_habitual");
       }
       continue;
     }
@@ -708,7 +725,7 @@ export function previsualizarImportacionAgrupadores(
     }
   }
 
-  return { reporte: { modo: "previsualizar", resumen, filas: reporteFilas }, lote, codigos_simulados: codigosSimulados };
+  return { reporte: { modo: "previsualizar", resumen, filas: reporteFilas }, lote, codigos_simulados: codigosSimulados, embarques_con_puerto: [...new Set(embarquesConPuerto)] };
 }
 
 /**

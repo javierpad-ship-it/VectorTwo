@@ -224,10 +224,11 @@ export function ProveedoresPanel({ rol }: { rol: Rol }) {
       </section>
 
       <p className="text-sm text-tinta-suave" aria-live="polite">
-        {lista.cargando ? "Cargando…" : `${visibles.length} de ${lista.datos.length} proveedores`}
+        {lista.cargando ? "Cargando…" : lista.error && lista.datos.length === 0 ? "" : `${visibles.length} de ${lista.datos.length} proveedores`}
       </p>
 
-      {!lista.cargando && lista.datos.length === 0 ? (
+      {/* Si la lista falló y no hay datos, solo se ve la alerta de error: no es cierto que «todavía no haya proveedores». */}
+      {!lista.cargando && lista.error && lista.datos.length === 0 ? null : !lista.cargando && lista.datos.length === 0 ? (
         <EmptyState titulo="Todavía no hay proveedores" detalle="Crea el primero con «Nuevo proveedor». Los que ya existen en COTV se cargan una sola vez desde su base.">
           <Button onClick={() => setFormulario({ ficha: null })}>Nuevo proveedor</Button>
         </EmptyState>

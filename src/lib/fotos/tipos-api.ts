@@ -1,4 +1,6 @@
+import type { ViajeResumenApi } from "@/lib/compras/agrupadores/tipos-api";
 import type { PersonaFechaApi } from "@/lib/compras/tipos-api";
+import type { EstadoCompra, Moneda, TallasCompra, TipoLinea } from "@/lib/compras/tipos";
 
 /**
  * Contratos de la API de fotos de las líneas (08c, §3.3).
@@ -7,6 +9,7 @@ import type { PersonaFechaApi } from "@/lib/compras/tipos-api";
  *   DELETE /api/compras/[id]/lineas/[lineaId]/fotos/[fotoId]     → { id }
  *   POST   /api/compras/[id]/lineas/[lineaId]/fotos/traer        → RespuestaTraerFotosApi
  *   PATCH  /api/compras/[id]/lineas/[lineaId]/ficha              → LineaFichaApi
+ *   GET    /api/compras/fotos                                    → FotosModuloApi            (Compras → Fotos, §3.3 y §4.3)
  *   GET    /api/compras/fotos/[fotoId]                           → FotoGrandeApi
  *   GET    /api/compras/fotos/[fotoId]/miniatura                 → bytes image/jpeg
  *   GET    /api/compras/fotos/limpiar                            → LimpiezaFotosApi          (admin)
@@ -31,6 +34,54 @@ export type FotoGrandeApi = {
   ancho: number;
   alto: number;
   leyenda: string;
+};
+
+// ─── Compras → Fotos (§3.3 y §4.3) ───
+
+/** El nodo género · mundo · línea de una línea específica; `null` en un lote al barrer (la pantalla escribe «Lote BETA al barrer»). */
+export type NombreGml = { genero: string; mundo: string; linea: string; etiqueta: string };
+
+export type MiniaturaLineaApi = { id: string; miniatura_url: string; subida_por_nombre: string | null; at: string };
+
+/**
+ * Una tarjeta de la pantalla Fotos: una línea con su compra, sus fotos activas (de la más antigua a la más nueva) y lo que puede hacer quien
+ * mira. NO lleva la `revision` de la compra (la tarjeta no la necesita, §2.7).
+ */
+export type LineaConFotosApi = {
+  compra: { id: string; numero: string; estado: EstadoCompra; proveedor: { id: string; nombre: string }; viaje: ViajeResumenApi | null };
+  linea: {
+    id: string;
+    tipo: TipoLinea;
+    gml: NombreGml | null;
+    marca: string | null;
+    agrupacion_marca: string | null;
+    tallas: TallasCompra;
+    unidades: number;
+    costo_unitario: number | null;
+    moneda: Moneda;
+    descripcion: string | null;
+    modelo: string | null;
+  };
+  fotos: MiniaturaLineaApi[];
+  /** Fotos que «Traer» copiaría ahora de la versión cancelada de esta línea (decisión 104); 0 si no hay o la línea ya está completa. */
+  fotos_en_cancelada: number;
+  puede: { subir: boolean; quitar: boolean; editar_ficha: boolean };
+};
+
+export type ProveedorFotosApi = { id: string; nombre: string; lineas: number; sin_foto: number };
+
+/**
+ * `GET /api/compras/fotos`. `contadores` son del conjunto filtrado por viaje, compra, origen, estado, proveedor y búsqueda (sin «solo sin
+ * foto»): «8 de 12 líneas con foto». `por_proveedor` es lo mismo SIN el filtro de proveedor, para armar el selector «Feria Sur · 12 líneas ·
+ * 4 sin foto». `total` es el de la lista (con «solo sin foto»), de la que `lineas` es una página.
+ */
+export type FotosModuloApi = {
+  contadores: { lineas: number; con_foto: number; sin_foto: number };
+  por_proveedor: ProveedorFotosApi[];
+  lineas: LineaConFotosApi[];
+  pagina: number;
+  por_pagina: number;
+  total: number;
 };
 
 export type LineaFichaApi = { linea_id: string; descripcion: string | null; modelo: string | null };

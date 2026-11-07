@@ -24,3 +24,7 @@ export const HORAS_HUERFANAS = 24;
 /** Nombres por llamada de limpieza (`fotos_huerfanas` y `.remove()`). */
 export const TANDA_LIMPIEZA = 1_000;
 
+
+/** Compras → Fotos: líneas por página (por defecto y tope, §3.3). */
+export const POR_PAGINA_FOTOS_DEFECTO = 20;
+export const MAX_POR_PAGINA_FOTOS = 100;

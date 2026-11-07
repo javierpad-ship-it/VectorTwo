@@ -56,7 +56,7 @@ export type LineaLigeraDb = Pick<
 export type EntregaLigeraDb = Pick<Tables<"compra_linea_entregas">, "id" | "linea_id" | "periodo" | "unidades" | "origen">;
 export type RecepcionLigeraDb = Pick<Tables<"compra_linea_recepciones">, "id" | "linea_id" | "recibida_periodo" | "unidades" | "fecha_recepcion" | "origen" | "asignacion_id">;
 export type PerfilDb = Pick<Tables<"perfiles">, "id" | "nombre" | "email" | "rol" | "activo">;
-export type ProveedorLigeroDb = Pick<Tables<"proveedores">, "id" | "nombre">;
+export type ProveedorLigeroDb = Pick<Tables<"proveedores">, "id" | "nombre"> & { puerto_embarque?: Tables<"proveedores">["puerto_embarque"] };
 
 /** Lo que se lee de la base para armar listas, detalles y planes: filas planas, sin interpretar. */
 export type MundoDb = {
@@ -102,7 +102,7 @@ const todasCompras = (db: Db) => leerTodo<CompraLigeraDb>((d, h) => db.from("com
 const todasLineas = (db: Db) => leerTodo<LineaLigeraDb>((d, h) => db.from("compra_lineas").select(COLUMNAS_LINEA).order("id").range(d, h));
 const todasEntregas = (db: Db) => leerTodo<EntregaLigeraDb>((d, h) => db.from("compra_linea_entregas").select(COLUMNAS_ENTREGA).order("id").range(d, h));
 const todasRecepciones = (db: Db) => leerTodo<RecepcionLigeraDb>((d, h) => db.from("compra_linea_recepciones").select(COLUMNAS_RECEPCION).order("id").range(d, h));
-const todosProveedores = (db: Db) => leerTodo<ProveedorLigeroDb>((d, h) => db.from("proveedores").select("id, nombre").order("id").range(d, h));
+const todosProveedores = (db: Db) => leerTodo<ProveedorLigeroDb>((d, h) => db.from("proveedores").select("id, nombre, puerto_embarque").order("id").range(d, h));
 
 /** Todos los perfiles (id, nombre, correo, rol, activo): los responsables y los asignables se calculan con ellos. */
 export const leerPerfilesDb = (db: Db) => leerTodo<PerfilDb>((d, h) => db.from("perfiles").select(COLUMNAS_PERFIL).order("id").range(d, h));
@@ -227,7 +227,7 @@ export async function leerMundoAlcanzado(db: Db, s: Semillas): Promise<Resultado
   const [paquetesDeEmbarques, viajes, proveedores, perfiles] = await Promise.all([
     porIds(idsEmbarqueTodos, (t) => leerTodo<PaqueteDb>((d, h) => db.from("compra_paquetes").select("*").in("embarque_id", t).order("id").range(d, h))),
     porIds([...(s.viajes ?? []), ...embarques.data.map((e) => e.viaje_id), ...compras.map((c) => c.viaje_id)], (t) => leerTodo<ViajeDb>((d, h) => db.from("compra_viajes").select("*").in("id", t).order("id").range(d, h))),
-    porIds(compras.map((c) => c.proveedor_id), (t) => leerTodo<ProveedorLigeroDb>((d, h) => db.from("proveedores").select("id, nombre").in("id", t).order("id").range(d, h))),
+    porIds(compras.map((c) => c.proveedor_id), (t) => leerTodo<ProveedorLigeroDb>((d, h) => db.from("proveedores").select("id, nombre, puerto_embarque").in("id", t).order("id").range(d, h))),
     leerPerfilesDb(db),
   ]);
   const f6 = paquetesDeEmbarques.error ?? viajes.error ?? proveedores.error ?? perfiles.error;

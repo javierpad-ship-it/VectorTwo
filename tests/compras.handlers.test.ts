@@ -583,6 +583,30 @@ describe("GET /api/compras y detalle", () => {
     expect(lista.find((c) => c.id === C12)?.lineas.every((x) => x.fotos_activas.length === 0)).toBe(true);
   });
 
+  it("08c · el detalle cuenta fotos_en_cancelada de la misma línea de la versión cancelada (misma clave y proveedor); el listado las deja en 0", async () => {
+    const c12 = tablaDe("compras").find((c) => c.id === C12);
+    const lineaC12 = tablaDe("compra_lineas").find((l) => l.id === LINEA.c12);
+    expect(c12 && lineaC12).toBeTruthy();
+    Object.assign(lineaC12 ?? {}, { clave_importacion: "NORTE|REF-9|1" });
+    const CANCELADA = "40000000-0000-4000-8000-0000000000f1";
+    const LINEA_CANCELADA = "30000000-0000-4000-8000-0000000000f1";
+    tablaDe("compras").push({ ...c12, id: CANCELADA, numero: "C-000011", estado: "cancelada", cancelada_at: "2026-10-05T10:00:00.000Z" });
+    tablaDe("compra_lineas").push({ ...lineaC12, id: LINEA_CANCELADA, compra_id: CANCELADA, created_at: "2026-10-01T10:00:00.000Z" });
+    const foto = (id: string) => ({ id, linea_id: LINEA_CANCELADA, compra_id: CANCELADA, ancho: 800, alto: 600, subida_por_nombre: "Comprador Uno", created_at: "2026-10-02T10:00:00.000Z", activo: true, origen_foto_id: null, ruta: `compras/${CANCELADA}/${LINEA_CANCELADA}/${id}.jpg`, ruta_miniatura: `compras/${CANCELADA}/${LINEA_CANCELADA}/${id}_min.jpg` });
+    tablaDe("compra_linea_fotos").push(foto("f0000000-0000-4000-8000-0000000000a1"), foto("f0000000-0000-4000-8000-0000000000a2"));
+    const detalle = (await leer<CompraApi>(await unaCompra(get(`/compras/${C12}`), ctx(C12)))).data;
+    expect(detalle.lineas.find((x) => x.id === LINEA.c12)?.fotos_en_cancelada).toBe(2);
+    // Una de las dos ya se trajo: queda 1.
+    tablaDe("compra_linea_fotos").push({ ...foto("f0000000-0000-4000-8000-0000000000b1"), linea_id: LINEA.c12, compra_id: C12, origen_foto_id: "f0000000-0000-4000-8000-0000000000a1", ruta: "x", ruta_miniatura: "y" });
+    const tras = (await leer<CompraApi>(await unaCompra(get(`/compras/${C12}`), ctx(C12)))).data;
+    expect(tras.lineas.find((x) => x.id === LINEA.c12)?.fotos_en_cancelada).toBe(1);
+    // La compra cancelada misma no ofrece traer, y el listado no cuenta.
+    const deLaCancelada = (await leer<CompraApi>(await unaCompra(get(`/compras/${CANCELADA}`), ctx(CANCELADA)))).data;
+    expect(deLaCancelada.lineas.every((x) => x.fotos_en_cancelada === 0)).toBe(true);
+    const lista = (await leer<CompraApi[]>(await listaCompras(get("/compras")))).data;
+    expect(lista.every((c) => c.lineas.every((x) => x.fotos_en_cancelada === 0))).toBe(true);
+  });
+
   it("los proveedores traen sus compras no canceladas y sus contactos (ninguno en este escenario)", async () => {
     const { data } = await leer<ProveedorApi[]>(await proveedores(get("/compras/proveedores")));
     expect(data.map((p) => [p.nombre, p.compras, p.contactos.length])).toEqual([

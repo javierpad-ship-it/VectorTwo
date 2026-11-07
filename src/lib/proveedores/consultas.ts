@@ -19,25 +19,42 @@ export type RespuestaRpc = { data: unknown; error: PostgrestError | null };
 
 export type ProveedorDb = Tables<"proveedores">;
 
+const COLUMNAS_CONTACTO = "id, proveedor_id, nombre, cargo, telefono, correo, es_principal, orden, created_at";
+
 export const leerProveedores = (db: Db): Promise<Resultado<ProveedorDb[]>> =>
   leerTodo<ProveedorDb>((d, h) => db.from("proveedores").select("*").order("nombre").order("id").range(d, h));
+
+/** Un proveedor con sus contactos y cuántas compras NO canceladas tiene: lo que arma una fila del listado. */
+export type ProveedorConAgregados = { proveedor: ProveedorDb; contactos: ContactoFila[]; compras: number };
+
+/**
+ * El listado en UNA consulta paginada de proveedores (1 000 por página, orden estable): los contactos y la cuenta de compras no canceladas
+ * van EMBEBIDOS (`proveedor_contactos(...)` y `compras(count)` con el filtro `compras.estado <> 'cancelada'` sobre el recurso embebido), así
+ * que ya no se leen todas las compras ni todos los contactos en cada llamada. `soloActivos` filtra en la base.
+ */
+export async function leerProveedoresConAgregados(db: Db, opciones: { soloActivos?: boolean } = {}): Promise<Resultado<ProveedorConAgregados[]>> {
+  const r = await leerTodo<ProveedorDb & { compras: { count: number }[] | null; proveedor_contactos: ContactoFila[] | null }>((d, h) => {
+    const base = db.from("proveedores").select(`*, compras(count), proveedor_contactos(${COLUMNAS_CONTACTO})`).neq("compras.estado", "cancelada");
+    return (opciones.soloActivos ? base.eq("activo", true) : base).order("nombre").order("id").range(d, h);
+  });
+  if (r.error) return { data: [], error: r.error };
+  return {
+    data: r.data.map(({ compras, proveedor_contactos, ...proveedor }) => ({
+      proveedor: proveedor as ProveedorDb,
+      contactos: proveedor_contactos ?? [],
+      compras: compras?.[0]?.count ?? 0,
+    })),
+    error: null,
+  };
+}
 
 export async function leerProveedor(db: Db, id: string): Promise<Resultado<ProveedorDb | null>> {
   const r = await db.from("proveedores").select("*").eq("id", id).maybeSingle();
   return { data: r.data ?? null, error: r.error };
 }
 
-const COLUMNAS_CONTACTO = "id, proveedor_id, nombre, cargo, telefono, correo, es_principal, orden, created_at";
-
-export const leerContactos = (db: Db): Promise<Resultado<ContactoFila[]>> =>
-  leerTodo<ContactoFila>((d, h) => db.from("proveedor_contactos").select(COLUMNAS_CONTACTO).order("proveedor_id").order("orden").order("id").range(d, h));
-
 export const leerContactosDe = (db: Db, proveedorId: string): Promise<Resultado<ContactoFila[]>> =>
   leerTodo<ContactoFila>((d, h) => db.from("proveedor_contactos").select(COLUMNAS_CONTACTO).eq("proveedor_id", proveedorId).order("orden").order("id").range(d, h));
-
-/** `proveedor_id` y estado de todas las compras: de ahí sale cuántas no canceladas tiene cada proveedor. */
-export const leerComprasPorProveedor = (db: Db): Promise<Resultado<{ id: string; proveedor_id: string; estado: string }[]>> =>
-  leerTodo<{ id: string; proveedor_id: string; estado: string }>((d, h) => db.from("compras").select("id, proveedor_id, estado").order("id").range(d, h));
 
 /** Las compras de un proveedor y sus líneas (en tandas: los ids viajan en la URL). */
 export async function leerComprasYLineasDe(db: Db, proveedorId: string): Promise<Resultado<{ compras: CompraParaResumen[]; lineas: LineaParaResumen[] }>> {

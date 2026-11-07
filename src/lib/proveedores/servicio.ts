@@ -5,15 +5,14 @@ import { errorConCodigo, errorConDetalle } from "@/lib/api/respuestas";
 import { buscarProveedor } from "@/lib/compras/proveedores";
 import { falla, fallaDb, fallaMensaje, listo, type Db, type Salida } from "@/lib/proyeccion/servicio-base";
 import type { Json } from "@/lib/supabase/database.types";
-import { armarFicha, armarListado, armarResumen, type ContactoFila, type ProveedorFila } from "./api";
+import { armarFicha, armarListado, armarResumen, type ProveedorFila } from "./api";
 import {
-  leerComprasPorProveedor,
   leerComprasYLineasDe,
-  leerContactos,
   leerContactosDe,
   leerEventosDeProveedor,
   leerProveedor,
   leerProveedores,
+  leerProveedoresConAgregados,
   rpcCambiarActivoProveedor,
   rpcEliminarProveedor,
   rpcGuardarProveedor,
@@ -57,31 +56,19 @@ function falloProveedor(codigo: Parameters<typeof rechazoProveedor>[0], detalle?
 
 const aFila = (p: ProveedorDb): ProveedorFila => p;
 
-const porProveedor = (contactos: readonly ContactoFila[]): Map<string, ContactoFila[]> => {
-  const m = new Map<string, ContactoFila[]>();
-  for (const c of contactos) m.set(c.proveedor_id, [...(m.get(c.proveedor_id) ?? []), c]);
-  return m;
-};
-
 // ─── Lectura ───
 
 /** `GET /api/compras/proveedores?activos=1&q=`: con contactos, cuántas compras no canceladas y si la ficha está completa. */
 export async function listarProveedores(d: Db, consulta: ProveedoresQuery = {}): Promise<Salida<ProveedorListadoApi[]>> {
-  const [proveedores, contactos, compras] = await Promise.all([leerProveedores(d), leerContactos(d), leerComprasPorProveedor(d)]);
-  if (proveedores.error) return fallaDb(proveedores.error, "proveedores: leer");
-  if (contactos.error) return fallaDb(contactos.error, "proveedores: leer los contactos");
-  if (compras.error) return fallaDb(compras.error, "proveedores: contar las compras");
-  const cuenta = new Map<string, number>();
-  for (const c of compras.data) if (c.estado !== "cancelada") cuenta.set(c.proveedor_id, (cuenta.get(c.proveedor_id) ?? 0) + 1);
-  const delProveedor = porProveedor(contactos.data);
+  const r = await leerProveedoresConAgregados(d, { soloActivos: consulta.activos === "1" });
+  if (r.error) return fallaDb(r.error, "proveedores: leer");
   const q = consulta.q ? normalizarNombre(consulta.q) : "";
   const quita = (s: string | null) => (s ? normalizarNombre(s).normalize("NFD").replace(/[̀-ͯ]/g, "") : "");
   const buscado = q === "" ? "" : quita(q);
   return listo(
-    proveedores.data
-      .filter((p) => (consulta.activos === "1" ? p.activo : true))
-      .filter((p) => buscado === "" || [p.nombre, p.codigo, p.pais, p.ciudad, p.puerto_embarque].some((t) => quita(t).includes(buscado)))
-      .map((p) => armarListado(aFila(p), delProveedor.get(p.id) ?? [], cuenta.get(p.id) ?? 0)),
+    r.data
+      .filter(({ proveedor: p }) => buscado === "" || [p.nombre, p.codigo, p.pais, p.ciudad, p.puerto_embarque].some((t) => quita(t).includes(buscado)))
+      .map(({ proveedor, contactos, compras }) => armarListado(aFila(proveedor), contactos, compras)),
   );
 }
 

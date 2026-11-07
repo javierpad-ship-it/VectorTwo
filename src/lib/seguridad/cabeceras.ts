@@ -41,11 +41,13 @@ export function origenDeSupabase(supabaseUrl: string | undefined): string | null
 export function construirCsp({ isDev, supabaseUrl }: OpcionesCabeceras): string {
   const origenSupabase = origenDeSupabase(supabaseUrl);
   const connect = ["'self'", ...(origenSupabase ? [origenSupabase] : []), ...(isDev ? ["ws://localhost:*", "ws://127.0.0.1:*"] : [])];
+  // La foto grande del visor (08c) es una URL firmada de Storage, del mismo origen que el proyecto de Supabase.
+  const img = ["'self'", "data:", "blob:", ...(origenSupabase ? [origenSupabase] : [])];
   const directivas = [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    `img-src ${img.join(" ")}`,
     "font-src 'self'",
     `connect-src ${connect.join(" ")}`,
     "object-src 'none'",

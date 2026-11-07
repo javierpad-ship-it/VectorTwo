@@ -168,15 +168,29 @@ class Consulta implements PromiseLike<Resultado> {
   private una: "single" | "maybeSingle" | null = null;
   private desde = 0;
   private hasta = Infinity;
+  /** Recursos embebidos (`compras(count)`, `proveedor_contactos(cols)`) que pide el `select`, y sus filtros (`neq("compras.estado", …)`). */
+  private embebidos: { tabla: string; cuenta: boolean }[] = [];
+  private filtrosEmbebidos: Array<{ tabla: string; pasa: (f: Fila) => boolean }> = [];
   constructor(private readonly nombre: string) {}
-  select() {
+  select(columnas?: string) {
+    for (const m of (columnas ?? "").matchAll(/(\w+)\(([^)]*)\)/g)) this.embebidos.push({ tabla: m[1], cuenta: m[2].trim() === "count" });
     return this;
   }
   eq(c: string, v: unknown) {
     this.filtros.push((f) => f[c] === v);
     return this;
   }
+  is(c: string, v: null) {
+    this.filtros.push((f) => (f[c] ?? null) === v);
+    return this;
+  }
   neq(c: string, v: unknown) {
+    const punto = c.indexOf(".");
+    if (punto > 0) {
+      const columna = c.slice(punto + 1);
+      this.filtrosEmbebidos.push({ tabla: c.slice(0, punto), pasa: (f) => f[columna] !== v });
+      return this;
+    }
     this.filtros.push((f) => f[c] !== v);
     return this;
   }
@@ -214,8 +228,16 @@ class Consulta implements PromiseLike<Resultado> {
       });
     }
     r = r.slice(this.desde, this.hasta === Infinity ? undefined : Math.min(this.hasta + 1, this.desde + 1000));
-    if (this.una) return { data: r[0] ? { ...r[0] } : null, error: null };
-    return { data: r.map((f) => ({ ...f })), error: null };
+    const conEmbebidos = (f: Fila): Fila => {
+      const copia: Fila = { ...f };
+      for (const e of this.embebidos) {
+        const hijos = tabla(e.tabla).filter((h) => h.proveedor_id === f.id && this.filtrosEmbebidos.every((x) => x.tabla !== e.tabla || x.pasa(h)));
+        copia[e.tabla] = e.cuenta ? [{ count: hijos.length }] : hijos.map((h) => ({ ...h }));
+      }
+      return copia;
+    };
+    if (this.una) return { data: r[0] ? conEmbebidos(r[0]) : null, error: null };
+    return { data: r.map(conEmbebidos), error: null };
   }
 }
 

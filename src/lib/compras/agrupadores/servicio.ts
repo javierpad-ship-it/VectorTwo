@@ -70,6 +70,7 @@ import type {
   ViajesQuery,
 } from "./esquemas";
 import { deduplicarComprasViaje } from "./esquemas";
+import { puertosHabituales } from "./puertos";
 import { accionAdmitidaPorTipo, validarGuardarEmbarqueFechas } from "./estados";
 import {
   argsImportarAgrupadores,
@@ -263,6 +264,8 @@ type Mundo = {
   viaje_de_compra: Record<string, string | null>;
   viajeDb: ReadonlyMap<string, ViajeDb>;
   embarqueDb: ReadonlyMap<string, EmbarqueDb>;
+  /** `proveedores.puerto_embarque` (puerto habitual, 08c) por proveedor leído; sin entrada o nulo si no tiene. */
+  puerto_de_proveedor: ReadonlyMap<string, string | null>;
 };
 
 const numeroONulo = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -363,6 +366,7 @@ function armarMundo(db: MundoDb): Mundo {
     viaje_de_compra: Object.fromEntries(db.compras.map((c) => [c.id, c.viaje_id])),
     viajeDb: new Map(db.viajes.map((v) => [v.id, v])),
     embarqueDb: new Map(db.embarques.map((e) => [e.id, e])),
+    puerto_de_proveedor: new Map(db.proveedores.map((p) => [p.id, p.puerto_embarque ?? null])),
   };
 }
 
@@ -626,7 +630,8 @@ function embarqueApi(ix: Ix, e: EmbarqueRegistro): EmbarqueApi {
     viaje: viaje ? { id: viaje.id, codigo: viaje.codigo, nombre: viaje.nombre, estado: viaje.estado } : null,
     referencia_logistica: e.referencia_logistica,
     puerto_embarque: e.puerto_embarque,
-    puertos_habituales: [],
+    // 08c, R29: el `puerto_embarque` no nulo de los proveedores de las compras con entregas en el embarque (también las históricas), sin repetir y en orden alfabético.
+    puertos_habituales: puertosHabituales([...t.proveedores].map((id) => ix.m.puerto_de_proveedor.get(id))),
     fecha_salida_estimada: e.fecha_salida_estimada,
     fecha_puerto_estimada: e.fecha_puerto_estimada,
     fecha_llegada_estimada: e.fecha_llegada_estimada,
@@ -1360,6 +1365,28 @@ function estadoDeImportacion(ag: { viajes: ViajeDb[]; embarques: EmbarqueDb[]; p
   return { viajes: m.viajes, embarques: m.embarques, paquetes: m.paquetes, perfiles: m.perfiles };
 }
 
+/** Puertos habituales (08c, R29) de los proveedores de las compras con entregas en cada embarque: `embarque_id` → puertos sin repetir y en orden alfabético. */
+async function puertosHabitualesDeEmbarques(d: Db, embarqueIds: readonly string[]): Promise<Salida<Map<string, string[]>>> {
+  const r = await leerMundoAlcanzado(d, { embarques: embarqueIds });
+  if (r.error) return fallaDb(r.error, "agrupadores: leer los proveedores de los embarques");
+  const mundo = r.data;
+  const lineaDeEntrega = new Map(mundo.entregas.map((e) => [e.id, e.linea_id]));
+  const compraDeLinea = new Map(mundo.lineas.map((l) => [l.id, l.compra_id]));
+  const proveedorDeCompra = new Map(mundo.compras.map((c) => [c.id, c.proveedor_id]));
+  const puertoDe = new Map(mundo.proveedores.map((p) => [p.id, p.puerto_embarque ?? null]));
+  const proveedoresPorEmbarque = new Map<string, Set<string>>();
+  for (const a of mundo.asignaciones) {
+    const proveedor = proveedorDeCompra.get(compraDeLinea.get(lineaDeEntrega.get(a.entrega_id) ?? "") ?? "");
+    if (!proveedor) continue;
+    const set = proveedoresPorEmbarque.get(a.embarque_id) ?? new Set<string>();
+    set.add(proveedor);
+    proveedoresPorEmbarque.set(a.embarque_id, set);
+  }
+  const salida = new Map<string, string[]>();
+  for (const id of embarqueIds) salida.set(id, puertosHabituales([...(proveedoresPorEmbarque.get(id) ?? [])].map((p) => puertoDe.get(p))));
+  return listo(salida);
+}
+
 /**
  * `POST /api/compras/agrupadores/importar`: previsualizar o aplicar la hoja única de §3.11. Solo crea. Aplicar es todo o nada
  * (importar_agrupadores) y se lee el estado FRESCO; si alguien creó una de las claves entre previsualizar y aplicar, `409
@@ -1368,7 +1395,15 @@ function estadoDeImportacion(ag: { viajes: ViajeDb[]; embarques: EmbarqueDb[]; p
 export async function importarAgrupadores(d: Db, usuario: UsuarioAgrupadores, cuerpo: ImportarAgrupadores): Promise<Salida<ReporteImportacionAgrupadoresApi>> {
   const ag = await leerAgrupadores(d);
   if (ag.error) return fallaDb(ag.error, "agrupadores: leer lo que ya existe");
-  const previo = previsualizarImportacionAgrupadores(cuerpo.filas, estadoDeImportacion(ag.data), { archivo_nombre: cuerpo.archivo_nombre });
+  const estadoBase = estadoDeImportacion(ag.data);
+  let previo = previsualizarImportacionAgrupadores(cuerpo.filas, estadoBase, { archivo_nombre: cuerpo.archivo_nombre });
+  // 08c, R29: si alguna fila escribe el puerto de un embarque que ya existe, se cargan los puertos habituales de los proveedores de sus compras
+  // y se vuelve a previsualizar (pura y barata) para emitir `puerto_distinto_del_habitual`. Informativo: no cambia lo que se crea.
+  if (previo.embarques_con_puerto.length > 0) {
+    const puertos = await puertosHabitualesDeEmbarques(d, previo.embarques_con_puerto);
+    if (puertos.respuesta) return puertos;
+    previo = previsualizarImportacionAgrupadores(cuerpo.filas, { ...estadoBase, puertos_habituales: puertos.data }, { archivo_nombre: cuerpo.archivo_nombre });
+  }
   if (cuerpo.modo === "previsualizar") return listo(previo.reporte);
   if (loteVacio(previo.lote)) return listo(reporteAplicado(previo.reporte, []));
 

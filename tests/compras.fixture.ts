@@ -371,6 +371,7 @@ export function lineaApiDesdeRegistros(d: DatosLinea, kPrima: string = K_PRIMA):
     descripcion: null,
     modelo: null,
     fotos_activas: [],
+    fotos_en_cancelada: 0,
   };
 }
 

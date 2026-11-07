@@ -336,6 +336,7 @@ export const LECTURAS_ABIERTAS_A_COMPRADOR: ReadonlySet<string> = new Set([
   "src/app/api/compras/agrupadores/sin-asignar/route.ts#GET",
   "src/app/api/compras/embarques/[id]/route.ts#GET",
   "src/app/api/compras/embarques/route.ts#GET",
+  "src/app/api/compras/fotos/route.ts#GET", // 08c: Compras → Fotos (solo lectura; los tres roles)
   "src/app/api/compras/fotos/[fotoId]/route.ts#GET", // 08c: la foto grande firmada a demanda
   "src/app/api/compras/fotos/[fotoId]/miniatura/route.ts#GET", // 08c: la miniatura servida por la API
   "src/app/api/compras/proveedores/route.ts#GET",

@@ -17,7 +17,7 @@ describe("construirCsp (etapa 1: sin nonce, Report-Only)", () => {
     expect(d.get("default-src")).toEqual(["'self'"]);
     expect(d.get("script-src")).toEqual(["'self'", "'unsafe-inline'"]);
     expect(d.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
-    expect(d.get("img-src")).toEqual(["'self'", "data:", "blob:"]);
+    expect(d.get("img-src")).toEqual(["'self'", "data:", "blob:", SUPABASE]);
     expect(d.get("font-src")).toEqual(["'self'"]);
     expect(d.get("connect-src")).toEqual(["'self'", SUPABASE]);
     expect(d.get("object-src")).toEqual(["'none'"]);
@@ -47,6 +47,12 @@ describe("construirCsp (etapa 1: sin nonce, Report-Only)", () => {
 
   it("connect-src toma solo el ORIGEN de NEXT_PUBLIC_SUPABASE_URL (ruta y barra final fuera)", () => {
     expect(directivas(construirCsp({ isDev: false, supabaseUrl: `${SUPABASE}/rest/v1/` })).get("connect-src")).toEqual(["'self'", SUPABASE]);
+  });
+
+  it("img-src admite el origen de Supabase (foto grande por URL firmada) y sin URL queda como antes", () => {
+    expect(directivas(construirCsp({ isDev: false, supabaseUrl: `${SUPABASE}/storage/v1/` })).get("img-src")).toEqual(["'self'", "data:", "blob:", SUPABASE]);
+    expect(directivas(construirCsp({ isDev: false, supabaseUrl: undefined })).get("img-src")).toEqual(["'self'", "data:", "blob:"]);
+    expect(directivas(construirCsp(dev)).get("img-src")).toEqual(["'self'", "data:", "blob:", SUPABASE]);
   });
 
   it("la URL ficticia de la CI es válida; una ausente o inválida deja connect-src en 'self' sin romper", () => {

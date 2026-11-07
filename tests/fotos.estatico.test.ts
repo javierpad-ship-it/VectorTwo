@@ -43,6 +43,7 @@ const ESPERADAS: Esperada[] = [
   { ruta: "compras/[id]/lineas/[lineaId]/fotos/[fotoId]/route.ts", metodo: "DELETE", guard: "requireUser" },
   { ruta: "compras/[id]/lineas/[lineaId]/fotos/traer/route.ts", metodo: "POST", guard: "requireUser" },
   { ruta: "compras/[id]/lineas/[lineaId]/ficha/route.ts", metodo: "PATCH", guard: "requireUser" },
+  { ruta: "compras/fotos/route.ts", metodo: "GET", guard: "requireUser" },
   { ruta: "compras/fotos/[fotoId]/route.ts", metodo: "GET", guard: "requireUser" },
   { ruta: "compras/fotos/[fotoId]/miniatura/route.ts", metodo: "GET", guard: "requireUser" },
   { ruta: "compras/fotos/limpiar/route.ts", metodo: "GET", guard: "requireAdmin" },

@@ -234,6 +234,8 @@ export type LineaCompraApi = {
   modelo: string | null;
   /** 08c: fotos activas de la línea (hasta 3, de la más antigua a la más nueva). Solo viene llena en `GET /api/compras/[id]` y en las respuestas de escritura de una compra; el listado `GET /api/compras` las deja en `[]`. */
   fotos_activas: FotoLineaApi[];
+  /** 08c, decisión 104: fotos que «Traer» copiaría de la misma línea de la versión cancelada (misma `clave_importacion` y proveedor), sin pasar de 3 activas. Solo el detalle `GET /api/compras/[id]` lo cuenta; el listado lo deja en 0. */
+  fotos_en_cancelada: number;
 };
 
 export type PersonaFechaApi = { nombre: string | null; at: string };

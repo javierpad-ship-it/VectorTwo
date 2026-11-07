@@ -334,7 +334,7 @@ function nombresDeAlcance(c: Catalogo, alcance: unknown): NonNullable<LineaCompr
   };
 }
 
-type PartesLinea = { linea: LineaDb; entregas: EntregaDb[]; recepciones: RecepcionDb[]; repartos: RepartoDb[]; fotos?: FotoLineaDb[] };
+type PartesLinea = { linea: LineaDb; entregas: EntregaDb[]; recepciones: RecepcionDb[]; repartos: RepartoDb[]; fotos?: FotoLineaDb[]; fotos_en_cancelada?: number };
 
 export function armarLineaApi(p: PartesLinea, compra: CompraDb, ctx: ContextoLectura): LineaCompraApi {
   const { linea: l } = p;
@@ -442,6 +442,7 @@ export function armarLineaApi(p: PartesLinea, compra: CompraDb, ctx: ContextoLec
     fotos_activas: [...(p.fotos ?? [])]
       .sort((a, b) => comparar(a.created_at, b.created_at) || comparar(a.id, b.id))
       .map((f) => ({ id: f.id, miniatura_url: urlMiniatura(f.id), ancho: f.ancho, alto: f.alto, subida_por: { nombre: f.subida_por_nombre, at: f.created_at } })),
+    fotos_en_cancelada: p.fotos_en_cancelada ?? 0,
   };
 }
 
@@ -480,6 +481,8 @@ type PartesCompra = {
   eventos: EventoDb[] | null;
   /** Fotos activas por línea (08c). Solo el detalle las lee; sin ellas, `fotos_activas` va `[]`. */
   fotos?: ReadonlyMap<string, FotoLineaDb[]>;
+  /** Línea → fotos que «Traer» copiaría de la versión cancelada (08c, decisión 104). Solo el detalle las cuenta. */
+  fotos_en_cancelada?: ReadonlyMap<string, number>;
 };
 
 export function armarCompraApi(p: PartesCompra, ctx: ContextoLectura): CompraApi {
@@ -487,7 +490,7 @@ export function armarCompraApi(p: PartesCompra, ctx: ContextoLectura): CompraApi
   const estado = elegir(ESTADOS_COMPRA, compra.estado, "confirmada");
   const activas = p.lineas.filter((l) => l.activo).sort((a, b) => ordinalDe(a) - ordinalDe(b) || comparar(a.created_at, b.created_at) || comparar(a.id, b.id));
   const lineas = activas.map((l) =>
-    armarLineaApi({ linea: l, entregas: p.entregas.get(l.id) ?? [], recepciones: p.recepciones.get(l.id) ?? [], repartos: p.repartos.get(l.id) ?? [], fotos: p.fotos?.get(l.id) }, compra, ctx)
+    armarLineaApi({ linea: l, entregas: p.entregas.get(l.id) ?? [], recepciones: p.recepciones.get(l.id) ?? [], repartos: p.repartos.get(l.id) ?? [], fotos: p.fotos?.get(l.id), fotos_en_cancelada: p.fotos_en_cancelada?.get(l.id) ?? 0 }, compra, ctx)
   );
   const periodos = lineas.flatMap((l) => l.entregas.map((e) => e.periodo)).sort();
   const conCosto = lineas.filter((l) => l.costo_unitario !== null);
@@ -649,7 +652,7 @@ async function armarDeDatos(d: Db, usuario: UsuarioCompras, datos: DatosDeCompra
   }
   return listo(
     armarCompraApi(
-      { compra: datos.compra, proveedor: datos.proveedor, lineas: datos.lineas, entregas: agrupar(datos.entregas, (e) => e.linea_id), recepciones: agrupar(datos.recepciones, (r) => r.linea_id), repartos: agrupar(datos.repartos, (r) => r.linea_id), eventos, fotos: agrupar(datos.fotos, (f) => f.linea_id) },
+      { compra: datos.compra, proveedor: datos.proveedor, lineas: datos.lineas, entregas: agrupar(datos.entregas, (e) => e.linea_id), recepciones: agrupar(datos.recepciones, (r) => r.linea_id), repartos: agrupar(datos.repartos, (r) => r.linea_id), eventos, fotos: agrupar(datos.fotos, (f) => f.linea_id), fotos_en_cancelada: datos.fotos_en_cancelada },
       ctx.data
     )
   );
