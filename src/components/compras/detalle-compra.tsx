@@ -15,6 +15,8 @@ import {
 } from "@/lib/compras/tipos-api";
 import type { EntregaSinEmbarqueApi } from "@/lib/compras/agrupadores/tipos-api";
 import type { AvisoOcApi } from "@/lib/compras/tipos-api";
+import { FichaLinea } from "@/components/fotos/ficha-linea";
+import { FotosLinea } from "@/components/fotos/fotos-linea";
 import { EditorOc } from "./editor-oc";
 import { LineaDeTiempoCompra } from "./linea-tiempo-compra";
 import { textoOc } from "./vista-oc";
@@ -59,6 +61,7 @@ export function DetalleCompra({
   onOcLimpiarMensaje,
   onRecargar,
   hoy,
+  fotos,
 }: {
   compra: CompraApi;
   puedeEscribir: boolean;
@@ -71,6 +74,12 @@ export function DetalleCompra({
   onRecargar?: () => void | Promise<void>;
   /** Hoy en Lima (`aaaa-mm-dd`) para el «Debía ocurrir hace N días» de la línea de tiempo; sin él se omite. */
   hoy?: string;
+  /**
+   * Ficha 08c: con esta prop cada línea muestra su descripción y modelo (editables) y sus fotos, para los TRES roles (no dependen de
+   * `puedeEscribir`; la API lo exige con requireUser). `esAdmin`: solo el admin puede quitar una foto de una compra cancelada (R6). Sin la
+   * prop no hay nada de esto (fixtures y pantallas que solo leen).
+   */
+  fotos?: { esAdmin: boolean };
   /** Abre el diálogo del viaje de la compra (los tres roles). Sin él no hay botón. */
   onCambiarViaje?: () => void;
   /** Abre el diálogo de asignar esas entregas a un embarque (los tres roles). Sin él no hay botones. */
@@ -154,7 +163,7 @@ export function DetalleCompra({
       <div className="space-y-4">
         <h3 className="text-sm font-semibold">Líneas ({compra.lineas.length})</h3>
         {compra.lineas.map((l, i) => (
-          <BloqueLinea key={l.id} linea={l} numero={i + 1} compra={compra} puedeRecibir={puedeRecibir} puedeQuitar={puedeQuitar} ocupado={ocupado} onConfirmarIngreso={onConfirmarIngreso} onQuitarIngreso={onQuitarIngreso} onAsignarEmbarque={onAsignarEmbarque} />
+          <BloqueLinea key={l.id} linea={l} numero={i + 1} compra={compra} fotos={fotos} puedeRecibir={puedeRecibir} puedeQuitar={puedeQuitar} ocupado={ocupado} onConfirmarIngreso={onConfirmarIngreso} onQuitarIngreso={onQuitarIngreso} onAsignarEmbarque={onAsignarEmbarque} />
         ))}
       </div>
 
@@ -235,6 +244,7 @@ function BloqueLinea({
   linea: l,
   numero,
   compra,
+  fotos,
   puedeRecibir,
   puedeQuitar,
   ocupado,
@@ -245,6 +255,7 @@ function BloqueLinea({
   linea: LineaCompraApi;
   numero: number;
   compra: CompraApi;
+  fotos?: { esAdmin: boolean };
   puedeRecibir: boolean;
   puedeQuitar: boolean;
   ocupado: boolean;
@@ -389,6 +400,14 @@ function BloqueLinea({
         <Dato titulo="Destino" valor={ETIQUETA_DESTINO(l)} />
       </dl>
       {l.nota && <p className="text-sm text-tinta-suave">Nota: {l.nota}</p>}
+
+      {/* Ficha 08c: descripción, modelo y fotos de la línea. Los tres roles las editan (no dependen de `puedeEscribir`); la API lo exige con requireUser. */}
+      {fotos && (
+        <>
+          <FichaLinea compraId={compra.id} lineaId={l.id} descripcion={l.descripcion ?? null} modelo={l.modelo ?? null} editable={compra.estado !== "cancelada"} etiqueta={`línea ${numero}`} />
+          <FotosLinea compraId={compra.id} lineaId={l.id} fotos={l.fotos_activas ?? []} etiqueta={`línea ${numero}`} compraCancelada={compra.estado === "cancelada"} esAdmin={fotos.esAdmin} />
+        </>
+      )}
 
       {l.avisos.length > 0 && (
         <ul className="space-y-1 text-xs text-alerta">

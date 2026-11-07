@@ -23,11 +23,14 @@ export function clasesControl(className = ""): string {
 export function Field({
   label,
   hint,
+  error,
   children,
   className = "",
 }: {
   label: string;
   hint?: string;
+  /** Mensaje de validación del campo (en rojo, debajo del control). Quien lo pasa pone `aria-invalid` en el control. */
+  error?: string;
   children: ReactNode;
   className?: string;
 }) {
@@ -35,7 +38,7 @@ export function Field({
     <label className={`block ${className}`}>
       <span className="mb-1 block text-sm font-medium text-tinta">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-tinta-suave">{hint}</span>}
+      {error ? <span className="mt-1 block text-xs font-medium text-alerta">{error}</span> : hint && <span className="mt-1 block text-xs text-tinta-suave">{hint}</span>}
     </label>
   );
 }

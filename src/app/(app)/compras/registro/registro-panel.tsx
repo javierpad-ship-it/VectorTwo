@@ -195,6 +195,7 @@ export function RegistroPanel({ rol, perfilId, viajeActivoInicial }: { rol: Rol;
             puedeEscribir={puedeEscribir}
             ocupado={accion.ocupado}
             hoy={hoyFecha}
+            fotos={{ esAdmin: rol === "admin" }}
             onRecargar={recargarTodo}
             onOcLimpiarMensaje={() => setMensaje(null)}
             onOcGuardada={async (texto, avisos) => {
