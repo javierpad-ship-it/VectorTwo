@@ -68,7 +68,10 @@ describe("estructura", () => {
   });
 
   it("toda acción destructiva pide confirmación: quitar foto, desactivar, eliminar y recargar una ficha que se pisa", () => {
-    expect(fuente("src/components/fotos/fotos-linea.tsx")).toMatch(/confirm\("¿Quitar esta foto\? Quedará registrado que la quitaste\."\)/);
+    // Quitar una foto usa la confirmación del kit (QA E1, hallazgo 9), no el `confirm()` nativo.
+    const quitar = fuente("src/components/fotos/fotos-linea.tsx");
+    expect(quitar).toMatch(/<DialogoConfirmar[\s\S]*¿Quitar esta foto\? Quedará registrado que la quitaste\./);
+    expect(quitar).not.toMatch(/\bconfirm\(/);
     const d = fuente("src/components/proveedores/detalle-proveedor.tsx");
     expect(d).toMatch(/confirm\(aviso\)/);
     expect(d).toMatch(/confirm\(`¿Eliminar «\$\{ficha\.nombre\}»\?/);

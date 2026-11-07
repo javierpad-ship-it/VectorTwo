@@ -72,8 +72,12 @@ export function RegistroPanel({ rol, perfilId, viajeActivoInicial }: { rol: Rol;
   const activo = useViajeActivo({ inicial: viajeActivoInicial, viajes: viajes.datos?.viajes ?? null, perfilId });
   // La lista espera a saber el viaje activo (la cookie, o los viajes para el valor por defecto) para no pedir primero todo y luego lo filtrado;
   // si los viajes no cargan, el error se muestra y la lista sigue con «Todos».
-  const viajeActivoListo = activo.listo || viajes.error !== null || !usaAgrupadores;
-  const compras = useCompras(viajeActivoListo ? { ...filtrosCompras(parametros), viaje_id: usaAgrupadores ? viajeParaApi(activo.valor) : undefined } : null);
+  // Con `?viaje=todos` (p. ej. «Ver sus compras» de un proveedor) la lista no espera ni usa el viaje activo.
+  const ignoraViajeActivo = parametros.todosLosViajes;
+  const viajeActivoListo = activo.listo || viajes.error !== null || !usaAgrupadores || ignoraViajeActivo;
+  const compras = useCompras(
+    viajeActivoListo ? { ...filtrosCompras(parametros), viaje_id: usaAgrupadores ? viajeParaApi(activo.valor) : undefined, ...(ignoraViajeActivo && { viaje_id: undefined }) } : null,
+  );
   const detalle = useCompra(parametros.compra);
   const proveedores = useProveedores();
   const arbol = useArbol(false);
@@ -147,7 +151,7 @@ export function RegistroPanel({ rol, perfilId, viajeActivoInicial }: { rol: Rol;
   }
 
   const compraAbierta = detalle.datos;
-  const viajeActivoFiltra = usaAgrupadores && activo.valor !== "todos";
+  const viajeActivoFiltra = usaAgrupadores && !ignoraViajeActivo && activo.valor !== "todos";
   const textoVacio =
     viajeActivoFiltra && compras.datos.length === 0 && !hayFiltrosCompras(parametros)
       ? "Ninguna compra en el viaje activo. Cambia el viaje arriba o elige «Todos los viajes»."
@@ -302,11 +306,24 @@ export function RegistroPanel({ rol, perfilId, viajeActivoInicial }: { rol: Rol;
       <BarraViajeActiva
         valor={activo.valor}
         viajes={opcionesAgrupadores.datos?.viajes ?? viajes.datos?.viajes ?? []}
-        onCambiar={(id) => void activo.cambiar(id)}
+        onCambiar={(id) => {
+          // Elegir un viaje en la barra es pedir que filtre: se suelta el «todos los viajes» de la URL.
+          if (ignoraViajeActivo) cambiar({ todosLosViajes: false });
+          void activo.cambiar(id);
+        }}
         ocupado={activo.ocupado}
         error={activo.error ? textoErrorAccion(activo.error) : null}
         onCerrarError={activo.limpiarError}
       />
+
+      {ignoraViajeActivo && (
+        <Alert tono="info">
+          Mostrando las compras de todos los viajes, no solo las del viaje activo.{" "}
+          <button type="button" onClick={() => cambiar({ todosLosViajes: false })} className="font-medium underline underline-offset-2">
+            Volver al viaje activo
+          </button>
+        </Alert>
+      )}
 
       {datosFlujo && <AvisoPorConfirmar resumen={datosFlujo.por_confirmar} mes={datosFlujo.periodos[1]} onRevisar={() => cambiar({ porConfirmar: true })} />}
 

@@ -52,6 +52,9 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/compras/registro", label: "Compras" },
       // 08b: viajes, embarques y paquetes de las compras. Los tres roles leen y escriben (decisión 92); cerrar, reabrir y cancelar se ocultan por rol.
       { href: "/compras/agrupadores", label: "Viajes y embarques" },
+      // 08c: fotos de las líneas, pensada para el celular. Los tres roles ven y escriben (fotos, descripción y modelo); limpiar huérfanas es del
+      // admin dentro de la pantalla y la API lo exige con requireAdmin. Sin `roles`: `puedeVerRuta` autoriza por prefijo (ficha 08c §4.1).
+      { href: "/compras/fotos", label: "Fotos" },
       // 08c: fichas de proveedores (maestro de importación). Los tres roles crean y editan (decisión 28); desactivar, eliminar y «intercompany» se
       // ocultan al comprador en la pantalla y la API los exige con requirePlanner. Sin `roles`: `puedeVerRuta` autoriza por prefijo (ficha 08c §4.1).
       { href: "/compras/proveedores", label: "Proveedores" },

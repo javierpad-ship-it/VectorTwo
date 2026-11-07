@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { useFotosLinea } from "@/lib/fotos/use-fotos";
-import type { FotoLineaApi } from "@/lib/fotos/tipos-api";
+import { DialogoConfirmar } from "@/components/ui/dialogo-confirmar";
+import { useFotosLinea, type FotoMostrada } from "@/lib/fotos/use-fotos";
 import { SelectorFotos } from "./selector-fotos";
 import { VisorFoto } from "./visor-foto";
 
@@ -22,24 +22,50 @@ export function FotosLinea({
   compraCancelada = false,
   esAdmin = false,
   lineaInactiva = false,
+  puedeSubir,
+  puedeQuitar: puedeQuitarFoto,
+  fotosEnCancelada,
+  onCambio,
 }: {
   compraId: string;
   lineaId: string;
-  fotos: readonly FotoLineaApi[];
+  fotos: readonly FotoMostrada[];
   /** «Línea 2» (para los lectores de pantalla y los textos). */
   etiqueta: string;
   compraCancelada?: boolean;
   esAdmin?: boolean;
   lineaInactiva?: boolean;
+  /** Si la API ya dijo qué puede hacer quien mira (`puede` de Compras → Fotos), manda sobre lo que se deduce de la compra cancelada y del rol. */
+  puedeSubir?: boolean;
+  puedeQuitar?: boolean;
+  /**
+   * Cuántas fotos copiaría «Traer» ahora de la versión cancelada (`fotos_en_cancelada`). Con el dato, el botón solo sale si hay algo que
+   * traer; sin él (detalle de la compra) sale siempre que quepa otra foto, como antes.
+   */
+  fotosEnCancelada?: number;
+  /** Cuántas fotos tiene la línea cada vez que cambia (subir, quitar, traer). */
+  onCambio?: (cantidad: number) => void;
 }) {
-  const f = useFotosLinea({ compraId, lineaId, fotosServidor });
+  const f = useFotosLinea({ compraId, lineaId, fotosServidor, onCambio });
   const [visor, setVisor] = useState<number | null>(null);
-  const soloLectura = compraCancelada || lineaInactiva;
-  const puedeQuitar = !soloLectura || (compraCancelada && esAdmin);
+  const [porQuitar, setPorQuitar] = useState<{ foto: FotoMostrada; numero: number } | null>(null);
+  const [quitando, setQuitando] = useState(false);
+  const [yaTrajo, setYaTrajo] = useState(false);
+  const soloLectura = puedeSubir !== undefined ? !puedeSubir : compraCancelada || lineaInactiva;
+  const puedeQuitar = puedeQuitarFoto ?? (!soloLectura || (compraCancelada && esAdmin));
+  const hayParaTraer = fotosEnCancelada === undefined ? true : fotosEnCancelada > 0 && !yaTrajo;
 
-  async function pedirQuitar(foto: FotoLineaApi) {
-    if (!confirm("¿Quitar esta foto? Quedará registrado que la quitaste.")) return;
-    await f.quitar(foto.id);
+  async function confirmarQuitar() {
+    if (!porQuitar) return;
+    // Se cierra el diálogo al terminar, salga bien o mal: el error (si lo hay) queda en la alerta de la tarjeta.
+    setQuitando(true);
+    await f.quitar(porQuitar.foto.id);
+    setQuitando(false);
+    setPorQuitar(null);
+  }
+
+  async function traer() {
+    if (await f.traer()) setYaTrajo(true);
   }
 
   return (
@@ -72,12 +98,13 @@ export function FotosLinea({
               {puedeQuitar && (
                 <button
                   type="button"
-                  onClick={() => void pedirQuitar(foto)}
+                  onClick={() => setPorQuitar({ foto, numero: i + 1 })}
                   disabled={f.ocupado}
                   aria-label={`Quitar foto ${i + 1}, ${etiqueta}`}
-                  className="absolute -right-2 -top-2 flex h-8 w-8 items-center justify-center rounded-full border border-borde bg-superficie text-sm font-bold text-alerta shadow-sm hover:bg-alerta-suave disabled:cursor-not-allowed disabled:opacity-50"
+                  // Área táctil de 44 × 44 px (la ✕ se ve más chica: el círculo es el `span`); se mete hacia dentro de la miniatura para no salirse de la pantalla.
+                  className="group absolute -right-3 -top-3 flex h-11 w-11 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  ✕
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-borde bg-superficie text-sm font-bold text-alerta shadow-sm group-hover:bg-alerta-suave group-focus-visible:outline-2 group-focus-visible:outline-marca">✕</span>
                 </button>
               )}
             </li>
@@ -113,18 +140,30 @@ export function FotosLinea({
       {!soloLectura && (
         <div className="space-y-2">
           <SelectorFotos activas={f.fotos.length} cupo={f.cupo} etiqueta={etiqueta} onElegir={f.agregar} />
-          {f.cupo > 0 && (
+          {f.cupo > 0 && hayParaTraer && (
             <Button
               variante="fantasma"
               tamano="sm"
-              onClick={() => void f.traer()}
+              className="h-11! sm:h-8!"
+              onClick={() => void traer()}
               disabled={f.ocupado}
               title="Si esta línea viene de corregir una compra importada, copia las fotos de la misma línea de la versión cancelada. Las de la cancelada no cambian."
             >
-              Traer fotos de la versión cancelada
+              {fotosEnCancelada !== undefined && fotosEnCancelada > 0 ? `Traer fotos de la versión cancelada (${fotosEnCancelada})` : "Traer fotos de la versión cancelada"}
             </Button>
           )}
         </div>
+      )}
+
+      {porQuitar && (
+        <DialogoConfirmar
+          titulo="Quitar foto"
+          mensaje="¿Quitar esta foto? Quedará registrado que la quitaste."
+          confirmar="Quitar"
+          ocupado={quitando}
+          onConfirmar={() => void confirmarQuitar()}
+          onCancelar={() => setPorQuitar(null)}
+        />
       )}
 
       {visor !== null && f.fotos.length > 0 && <VisorFoto fotos={f.fotos} indiceInicial={visor} onCerrar={() => setVisor(null)} />}

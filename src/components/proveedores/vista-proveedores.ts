@@ -270,8 +270,11 @@ export function textoResumen(r: ResumenProveedorApi): string {
 /** `Ana Paz · 2026-10-14 10:02`. */
 export const textoPersona = (p: PersonaFechaApi, fecha: (iso: string) => string): string => `${p.nombre ?? "—"} · ${fecha(p.at)}`;
 
-/** Enlace a las compras de un proveedor (`/compras/registro?proveedor=` es el filtro que lee el panel de Compras). */
-export const hrefComprasDeProveedor = (id: string): string => `/compras/registro?proveedor=${encodeURIComponent(id)}`;
+/**
+ * Enlace a las compras de un proveedor (`/compras/registro?proveedor=` es el filtro que lee el panel de Compras). Lleva `viaje=todos`: el
+ * resumen del proveedor cuenta sus compras de todos los viajes y la lista no debe quedar recortada por el viaje activo del navegador.
+ */
+export const hrefComprasDeProveedor = (id: string): string => `/compras/registro?proveedor=${encodeURIComponent(id)}&viaje=todos`;
 
 /** ¿Ya hay un proveedor con este nombre (sin tildes ni mayúsculas)? Para ofrecer «Crear» solo cuando no hay coincidencia exacta. */
 export const hayNombreIgual = (lista: readonly Pick<ProveedorListadoApi, "nombre">[], nombre: string): boolean => {

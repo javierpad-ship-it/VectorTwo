@@ -197,13 +197,14 @@ describe("datos, kit de UI y errores", () => {
 describe("menú y acceso por rol", () => {
   const compras = NAV_SECTIONS.find((s) => s.title === "Compras");
 
-  it("la sección Compras trae Huecos, Flujo mensual, Compras, Viajes y embarques (08b) y Proveedores (08c), sin pendiente y para los tres roles", () => {
+  it("la sección Compras trae Huecos, Flujo mensual, Compras, Viajes y embarques (08b), Fotos y Proveedores (08c), sin pendiente y para los tres roles", () => {
     expect(compras?.roles).toEqual(["admin", "planner", "comprador"]);
     expect(compras?.links.map((l) => [l.href, l.label])).toEqual([
       ["/compras", "Huecos"],
       ["/compras/flujo", "Flujo mensual"],
       ["/compras/registro", "Compras"],
       ["/compras/agrupadores", "Viajes y embarques"],
+      ["/compras/fotos", "Fotos"],
       ["/compras/proveedores", "Proveedores"],
     ]);
     for (const l of compras?.links ?? []) {
@@ -214,8 +215,8 @@ describe("menú y acceso por rol", () => {
 
   it("los tres roles ven la sección y pueden abrir sus rutas, también por URL directa", () => {
     for (const rol of ["admin", "planner", "comprador"] as const) {
-      expect(seccionesVisibles(rol).find((s) => s.title === "Compras")?.links).toHaveLength(5);
-      for (const ruta of ["/compras", "/compras/flujo", "/compras/registro", "/compras/registro/", "/compras/agrupadores", "/compras/proveedores"]) expect(puedeVerRuta(rol, ruta), `${rol} ${ruta}`).toBe(true);
+      expect(seccionesVisibles(rol).find((s) => s.title === "Compras")?.links).toHaveLength(6);
+      for (const ruta of ["/compras", "/compras/flujo", "/compras/registro", "/compras/registro/", "/compras/agrupadores", "/compras/fotos", "/compras/proveedores"]) expect(puedeVerRuta(rol, ruta), `${rol} ${ruta}`).toBe(true);
     }
   });
 

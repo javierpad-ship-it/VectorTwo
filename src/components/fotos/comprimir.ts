@@ -58,17 +58,28 @@ function reducir(fuente: CanvasImageSource, origen: Dimensiones, destino: Dimens
 
 const aJpeg = (canvas: HTMLCanvasElement, calidad: number): Promise<Blob | null> => new Promise((resolver) => canvas.toBlob((b) => resolver(b), "image/jpeg", calidad));
 
+/**
+ * Abre el archivo con la orientación EXIF aplicada. Algunos navegadores (Safari antiguo) rechazan la opción `imageOrientation` aunque la imagen
+ * sea un JPEG normal: se reintenta SIN opciones (esos navegadores ya aplican la orientación al decodificar) antes de rendirse. Solo si también
+ * falla se dice «Formato no compatible» (HEIC en Chrome de escritorio, un archivo dañado o algo que no es imagen).
+ */
+export async function abrirImagen(archivo: Blob, abrir: typeof createImageBitmap = createImageBitmap): Promise<ImageBitmap> {
+  try {
+    return await abrir(archivo, { imageOrientation: "from-image" });
+  } catch {
+    try {
+      return await abrir(archivo);
+    } catch {
+      throw new ErrorFoto(MENSAJE_FORMATO_NO_COMPATIBLE);
+    }
+  }
+}
+
 export async function prepararFoto(archivo: File): Promise<FotoPreparada> {
   const rechazo = motivoArchivoRechazado(archivo);
   if (rechazo) throw new ErrorFoto(rechazo);
 
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(archivo, { imageOrientation: "from-image" });
-  } catch {
-    // HEIC en Chrome de escritorio, un archivo dañado o algo que no es imagen.
-    throw new ErrorFoto(MENSAJE_FORMATO_NO_COMPATIBLE);
-  }
+  const bitmap = await abrirImagen(archivo);
 
   try {
     const origen = { ancho: bitmap.width, alto: bitmap.height };

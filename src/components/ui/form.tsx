@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { Children, cloneElement, isValidElement, useId, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 const COLOR_Y_FORMA =
   "rounded-md border border-borde bg-superficie px-3 text-sm text-tinta placeholder:text-tinta-suave/70 focus:border-marca focus:outline-none focus:ring-2 focus:ring-marca/20 disabled:bg-neutro-suave";
@@ -20,6 +20,8 @@ export function clasesControl(className = ""): string {
   return [alto, ancho, COLOR_Y_FORMA, className].filter(Boolean).join(" ");
 }
 
+type ControlAria = { "aria-describedby"?: string; "aria-invalid"?: boolean | "true" | "false" };
+
 export function Field({
   label,
   hint,
@@ -29,16 +31,37 @@ export function Field({
 }: {
   label: string;
   hint?: string;
-  /** Mensaje de validación del campo (en rojo, debajo del control). Quien lo pasa pone `aria-invalid` en el control. */
+  /**
+   * Mensaje de validación del campo (en rojo, debajo del control). `Field` pone `aria-invalid` y `aria-describedby` (apuntando
+   * al mensaje) en los controles `Input`, `Select` y `Textarea` que lleve dentro; en otros hijos, quien lo pasa lo hace a mano.
+   */
   error?: string;
   children: ReactNode;
   className?: string;
 }) {
+  const idMensaje = useId();
+  // Solo los controles (`Input`, `Select`, `Textarea` o su etiqueta nativa) reciben el enlace al mensaje; un `<datalist>` hermano no.
+  const hijo = error
+    ? Children.map(children, (h) => {
+        if (!isValidElement(h) || !(h.type === Input || h.type === Select || h.type === Textarea || h.type === "input" || h.type === "select" || h.type === "textarea")) return h;
+        const props = (h as ReactElement<ControlAria>).props;
+        return cloneElement(h as ReactElement<ControlAria>, {
+          "aria-invalid": props["aria-invalid"] ?? true,
+          "aria-describedby": [props["aria-describedby"], idMensaje].filter(Boolean).join(" "),
+        });
+      })
+    : children;
   return (
     <label className={`block ${className}`}>
       <span className="mb-1 block text-sm font-medium text-tinta">{label}</span>
-      {children}
-      {error ? <span className="mt-1 block text-xs font-medium text-alerta">{error}</span> : hint && <span className="mt-1 block text-xs text-tinta-suave">{hint}</span>}
+      {hijo}
+      {error ? (
+        <span id={idMensaje} className="mt-1 block text-xs font-medium text-alerta">
+          {error}
+        </span>
+      ) : (
+        hint && <span className="mt-1 block text-xs text-tinta-suave">{hint}</span>
+      )}
     </label>
   );
 }

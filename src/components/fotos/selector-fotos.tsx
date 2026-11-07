@@ -35,8 +35,10 @@ export function SelectorFotos({
 
   if (cupo <= 0 && !deshabilitado) {
     return (
-      <p className="text-sm font-medium text-tinta-suave" aria-label={`${etiqueta}: ${contadorFotos(activas)} fotos, ya no caben más`}>
-        {contadorFotos(activas)}
+      // Un `aria-label` en un <p> sin rol lo ignoran los lectores de pantalla: el texto para ellos va en un `sr-only`.
+      <p className="text-sm font-medium text-tinta-suave">
+        <span aria-hidden="true">{contadorFotos(activas)}</span>
+        <span className="sr-only">{`${etiqueta}: ${contadorFotos(activas)} fotos, ya no caben más`}</span>
       </p>
     );
   }

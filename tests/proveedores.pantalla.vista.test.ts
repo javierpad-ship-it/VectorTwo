@@ -187,7 +187,7 @@ describe("textos", () => {
     expect(textoResumen({ compras: 1, ultima_compra: null, unidades: 10, costo: { USD: 0, PEN: 0 } })).toMatch(/1 compra · 10 u · sin costo registrado/);
   });
   it("«Ver sus compras» abre el filtro `proveedor` de /compras/registro", () => {
-    expect(hrefComprasDeProveedor("abc-1")).toBe("/compras/registro?proveedor=abc-1");
+    expect(hrefComprasDeProveedor("abc-1")).toBe("/compras/registro?proveedor=abc-1&viaje=todos");
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, codigoDeError } from "@/lib/api-client";
 import { ErrorFoto, prepararFoto } from "@/components/fotos/comprimir";
 import { avisoSobrantes, cupoDeFotos, seleccionarArchivos } from "./cliente";
@@ -12,6 +12,12 @@ import type { FotoLineaApi, RespuestaTraerFotosApi } from "./tipos-api";
  * (10-pwa): una foto que falla queda a la vista con su mensaje y [Reintentar] mientras la pantalla siga abierta. Nunca habla con Supabase:
  * todo pasa por `api`. El estado de las fotos se inicializa de `fotosServidor` y se vuelve a alinear cuando la compra se relee.
  */
+
+/**
+ * Lo mínimo de una foto para pintar su miniatura y abrir el visor. `FotoLineaApi` (detalle de la compra) cumple; la pantalla Fotos solo
+ * recibe `MiniaturaLineaApi`, sin tamaño: el `<img>` se ajusta con CSS.
+ */
+export type FotoMostrada = { id: string; miniatura_url: string; ancho?: number; alto?: number };
 
 export type SubidaEnCurso = {
   clave: string;
@@ -32,8 +38,32 @@ function mensajeDe(e: unknown): string {
   return "No pudimos subir la foto. Inténtalo de nuevo.";
 }
 
-export function useFotosLinea({ compraId, lineaId, fotosServidor }: { compraId: string; lineaId: string; fotosServidor: readonly FotoLineaApi[] }) {
-  const [fotos, setFotos] = useState<FotoLineaApi[]>([...fotosServidor]);
+export function useFotosLinea({
+  compraId,
+  lineaId,
+  fotosServidor,
+  onCambio,
+}: {
+  compraId: string;
+  lineaId: string;
+  fotosServidor: readonly FotoMostrada[];
+  /** Se llama con cuántas fotos tiene la línea cada vez que cambia ese número por una subida, un quitar o un traer (no por releer el servidor). */
+  onCambio?: (cantidad: number) => void;
+}) {
+  const [fotos, setFotos] = useState<FotoMostrada[]>([...fotosServidor]);
+  // Avisa al que escucha cuando cambia la cantidad (no en el primer render). Si el servidor se relee con otra cantidad, el aviso repite lo que
+  // ya sabe quien lo recibe: es inofensivo.
+  const avisar = useRef(onCambio);
+  const cantidadAvisada = useRef(fotosServidor.length);
+  useEffect(() => {
+    avisar.current = onCambio;
+  });
+  const cantidad = fotos.length;
+  useEffect(() => {
+    if (cantidadAvisada.current === cantidad) return;
+    cantidadAvisada.current = cantidad;
+    avisar.current?.(cantidad);
+  }, [cantidad]);
   const [subidas, setSubidas] = useState<SubidaEnCurso[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
@@ -134,7 +164,7 @@ export function useFotosLinea({ compraId, lineaId, fotosServidor }: { compraId: 
     [compraId, lineaId],
   );
 
-  const traer = useCallback(async (): Promise<void> => {
+  const traer = useCallback(async (): Promise<boolean> => {
     setError(null);
     setAviso(null);
     setTrabajando(true);
@@ -146,10 +176,15 @@ export function useFotosLinea({ compraId, lineaId, fotosServidor }: { compraId: 
           ? `Se ${r.traidas.length === 1 ? "trajo 1 foto" : `trajeron ${r.traidas.length} fotos`} de la versión cancelada.`
           : "No había fotos nuevas por traer: las de la versión cancelada ya estaban en esta línea.",
       );
+      return true;
     } catch (e) {
-      // Sin versión cancelada con fotos no es una falla: se explica en tono informativo.
-      if (codigoDeError(e) === "sin_origen") setAviso("Esta línea no tiene fotos en una versión cancelada para traer.");
-      else setError(mensajeDe(e));
+      // Sin versión cancelada con fotos no es una falla: se explica en tono informativo (y ya no hay nada que traer).
+      if (codigoDeError(e) === "sin_origen") {
+        setAviso("Esta línea no tiene fotos en una versión cancelada para traer.");
+        return true;
+      }
+      setError(mensajeDe(e));
+      return false;
     } finally {
       setTrabajando(false);
     }

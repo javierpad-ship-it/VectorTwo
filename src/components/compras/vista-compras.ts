@@ -41,6 +41,11 @@ export type ParametrosCompras = {
   hitosVencidos: boolean;
   q: string;
   importar: boolean;
+  /**
+   * `?viaje=todos`: la lista ignora el viaje activo y muestra las compras de TODOS los viajes. Lo pone un enlace que debe cuadrar con un
+   * conteo global (p. ej. «Ver sus compras» del proveedor). No cambia la preferencia del navegador: es solo de esta URL.
+   */
+  todosLosViajes: boolean;
 };
 
 export const PARAMETROS_COMPRAS_VACIOS: ParametrosCompras = {
@@ -59,6 +64,7 @@ export const PARAMETROS_COMPRAS_VACIOS: ParametrosCompras = {
   hitosVencidos: false,
   q: "",
   importar: false,
+  todosLosViajes: false,
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -94,6 +100,7 @@ export function leerParametrosCompras(get: (clave: string) => string | null): Pa
     hitosVencidos: get("hitos_vencidos") === "1",
     q: get("q") ?? "",
     importar: get("importar") === "1",
+    todosLosViajes: get("viaje") === "todos",
   };
 }
 
@@ -114,6 +121,7 @@ export function consultaCompras(p: ParametrosCompras): string {
   if (p.hitosVencidos) q.set("hitos_vencidos", "1");
   if (p.q.trim() !== "") q.set("q", p.q);
   if (p.importar) q.set("importar", "1");
+  if (p.todosLosViajes) q.set("viaje", "todos");
   return q.toString();
 }
 

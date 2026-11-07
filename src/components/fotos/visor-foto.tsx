@@ -5,14 +5,15 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { api } from "@/lib/api-client";
-import type { FotoGrandeApi, FotoLineaApi } from "@/lib/fotos/tipos-api";
+import type { FotoGrandeApi } from "@/lib/fotos/tipos-api";
+import type { FotoMostrada } from "@/lib/fotos/use-fotos";
 
 /**
  * Visor de una foto ampliada (08c, §4.3): pide la foto de 800 px a `GET /api/compras/fotos/[id]` (URL firmada de 1 h generada en el
  * servidor) y la muestra con su leyenda. Si la URL caducó mientras estaba abierto, la vuelve a pedir una sola vez. Con varias fotos en la
  * línea, [Anterior] y [Siguiente] cambian de una a otra.
  */
-export function VisorFoto({ fotos, indiceInicial, onCerrar }: { fotos: readonly FotoLineaApi[]; indiceInicial: number; onCerrar: () => void }) {
+export function VisorFoto({ fotos, indiceInicial, onCerrar }: { fotos: readonly FotoMostrada[]; indiceInicial: number; onCerrar: () => void }) {
   const [indice, setIndice] = useState(Math.min(Math.max(0, indiceInicial), Math.max(0, fotos.length - 1)));
   const foto = fotos[indice];
   if (!foto) return null;
@@ -42,7 +43,7 @@ export function VisorFoto({ fotos, indiceInicial, onCerrar }: { fotos: readonly 
   );
 }
 
-function ContenidoVisor({ foto }: { foto: FotoLineaApi }) {
+function ContenidoVisor({ foto }: { foto: FotoMostrada }) {
   const [grande, setGrande] = useState<FotoGrandeApi | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [yaReintento, setYaReintento] = useState(false);
