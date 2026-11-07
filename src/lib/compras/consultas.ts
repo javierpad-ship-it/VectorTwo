@@ -60,19 +60,26 @@ export async function leerDatosCompras(db: Db): Promise<Resultado<DatosCompras>>
   };
 }
 
-export type DatosDeCompra = Omit<DatosCompras, "compras" | "proveedores"> & { compra: CompraDb; proveedor: ProveedorDb | null };
+/** Lo que se muestra de una foto activa en la compra (08c): nunca la ruta de Storage. */
+export type FotoLineaDb = Pick<Tables<"compra_linea_fotos">, "id" | "linea_id" | "ancho" | "alto" | "subida_por_nombre" | "created_at">;
+
+export type DatosDeCompra = Omit<DatosCompras, "compras" | "proveedores"> & { compra: CompraDb; proveedor: ProveedorDb | null; fotos: FotoLineaDb[] };
 
 /** Una compra con todo lo suyo; `null` si no existe. Los hijos se piden por los ids de sus líneas (en tandas: viajan en la URL). */
 export async function leerDatosDeCompra(db: Db, compraId: string): Promise<Resultado<DatosDeCompra | null>> {
   const compra = await db.from("compras").select("*").eq("id", compraId).maybeSingle();
   if (compra.error) return { data: null, error: compra.error };
   if (!compra.data) return { data: null, error: null };
-  const [lineas, proveedor] = await Promise.all([
+  const [lineas, proveedor, fotos] = await Promise.all([
     leerTodo<LineaDb>((d, h) => db.from("compra_lineas").select("*").eq("compra_id", compraId).order("id").range(d, h)),
     db.from("proveedores").select("*").eq("id", compra.data.proveedor_id).maybeSingle(),
+    leerTodo<FotoLineaDb>((d, h) =>
+      db.from("compra_linea_fotos").select("id, linea_id, ancho, alto, subida_por_nombre, created_at").eq("compra_id", compraId).eq("activo", true).order("created_at").order("id").range(d, h)
+    ),
   ]);
   if (lineas.error) return { data: null, error: lineas.error };
   if (proveedor.error) return { data: null, error: proveedor.error };
+  if (fotos.error) return { data: null, error: fotos.error };
 
   const ids = lineas.data.map((l) => l.id);
   const entregas: EntregaDb[] = [];
@@ -90,7 +97,7 @@ export async function leerDatosDeCompra(db: Db, compraId: string): Promise<Resul
     repartos.push(...r.data);
     recepciones.push(...x.data);
   }
-  return { data: { compra: compra.data, proveedor: proveedor.data ?? null, lineas: lineas.data, entregas, repartos, recepciones }, error: null };
+  return { data: { compra: compra.data, proveedor: proveedor.data ?? null, lineas: lineas.data, entregas, repartos, recepciones, fotos: fotos.data }, error: null };
 }
 
 /** Una compra viva (no cancelada) con OC: lo que hace falta para `oc_repetida` y el aviso `oc_de_otro_proveedor` del importador. */

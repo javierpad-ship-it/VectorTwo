@@ -38,6 +38,7 @@ import {
   type DatosDeCompra,
   type EntregaDb,
   type EventoDb,
+  type FotoLineaDb,
   type LineaDb,
   type ProveedorDb,
   type RecepcionDb,
@@ -72,6 +73,7 @@ import {
 import { compraEsMia, FUNCIONES_DISPONIBLES_0_13_0, MENSAJE_IMPORTAR_SIN_PERMISO, puede, puedeImportar, type NodoGeneroMundo } from "./permisos";
 import { pendientesPorEntrega, esEntregaVencida } from "./pendientes";
 import { argsQuitarRecepcion, argsRegistrarRecepciones, avisosRecepcion, recepcionDeSugerencia, validarQuitarRecepcion, validarRecepciones } from "./recepciones";
+import { urlMiniatura } from "@/lib/fotos/rutas";
 import { hayRepartoCambio, sumarRepartos } from "./reparto";
 import {
   errorDeMotivo,
@@ -332,7 +334,7 @@ function nombresDeAlcance(c: Catalogo, alcance: unknown): NonNullable<LineaCompr
   };
 }
 
-type PartesLinea = { linea: LineaDb; entregas: EntregaDb[]; recepciones: RecepcionDb[]; repartos: RepartoDb[] };
+type PartesLinea = { linea: LineaDb; entregas: EntregaDb[]; recepciones: RecepcionDb[]; repartos: RepartoDb[]; fotos?: FotoLineaDb[] };
 
 export function armarLineaApi(p: PartesLinea, compra: CompraDb, ctx: ContextoLectura): LineaCompraApi {
   const { linea: l } = p;
@@ -435,6 +437,11 @@ export function armarLineaApi(p: PartesLinea, compra: CompraDb, ctx: ContextoLec
       })),
     nota: l.nota,
     avisos: [...new Set<AvisoLineaCompra>([...guardados, ...dinamicos])],
+    descripcion: l.descripcion,
+    modelo: l.modelo,
+    fotos_activas: [...(p.fotos ?? [])]
+      .sort((a, b) => comparar(a.created_at, b.created_at) || comparar(a.id, b.id))
+      .map((f) => ({ id: f.id, miniatura_url: urlMiniatura(f.id), ancho: f.ancho, alto: f.alto, subida_por: { nombre: f.subida_por_nombre, at: f.created_at } })),
   };
 }
 
@@ -471,6 +478,8 @@ type PartesCompra = {
   recepciones: ReadonlyMap<string, RecepcionDb[]>;
   repartos: ReadonlyMap<string, RepartoDb[]>;
   eventos: EventoDb[] | null;
+  /** Fotos activas por línea (08c). Solo el detalle las lee; sin ellas, `fotos_activas` va `[]`. */
+  fotos?: ReadonlyMap<string, FotoLineaDb[]>;
 };
 
 export function armarCompraApi(p: PartesCompra, ctx: ContextoLectura): CompraApi {
@@ -478,7 +487,7 @@ export function armarCompraApi(p: PartesCompra, ctx: ContextoLectura): CompraApi
   const estado = elegir(ESTADOS_COMPRA, compra.estado, "confirmada");
   const activas = p.lineas.filter((l) => l.activo).sort((a, b) => ordinalDe(a) - ordinalDe(b) || comparar(a.created_at, b.created_at) || comparar(a.id, b.id));
   const lineas = activas.map((l) =>
-    armarLineaApi({ linea: l, entregas: p.entregas.get(l.id) ?? [], recepciones: p.recepciones.get(l.id) ?? [], repartos: p.repartos.get(l.id) ?? [] }, compra, ctx)
+    armarLineaApi({ linea: l, entregas: p.entregas.get(l.id) ?? [], recepciones: p.recepciones.get(l.id) ?? [], repartos: p.repartos.get(l.id) ?? [], fotos: p.fotos?.get(l.id) }, compra, ctx)
   );
   const periodos = lineas.flatMap((l) => l.entregas.map((e) => e.periodo)).sort();
   const conCosto = lineas.filter((l) => l.costo_unitario !== null);
@@ -640,7 +649,7 @@ async function armarDeDatos(d: Db, usuario: UsuarioCompras, datos: DatosDeCompra
   }
   return listo(
     armarCompraApi(
-      { compra: datos.compra, proveedor: datos.proveedor, lineas: datos.lineas, entregas: agrupar(datos.entregas, (e) => e.linea_id), recepciones: agrupar(datos.recepciones, (r) => r.linea_id), repartos: agrupar(datos.repartos, (r) => r.linea_id), eventos },
+      { compra: datos.compra, proveedor: datos.proveedor, lineas: datos.lineas, entregas: agrupar(datos.entregas, (e) => e.linea_id), recepciones: agrupar(datos.recepciones, (r) => r.linea_id), repartos: agrupar(datos.repartos, (r) => r.linea_id), eventos, fotos: agrupar(datos.fotos, (f) => f.linea_id) },
       ctx.data
     )
   );

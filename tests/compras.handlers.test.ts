@@ -166,7 +166,7 @@ describe("permisos: sesión (401), comprador solo lee (403 en toda escritura)", 
     () => listaCompras(get("/compras")),
     () => unaCompra(get(`/compras/${C12}`), ctx(C12)),
     () => historial(get(`/compras/${C12}/historial`), ctx(C12)),
-    () => proveedores(),
+    () => proveedores(get("/compras/proveedores")),
   ];
   const escriben = () => [
     () => guardarParametros(enviar("PUT", "/flujo/parametros", {})),
@@ -568,8 +568,23 @@ describe("GET /api/compras y detalle", () => {
     expect((await historial(get(`/compras/${INEXISTENTE}/historial`), ctx(INEXISTENTE))).status).toBe(404);
   });
 
-  it("los proveedores traen sus compras no canceladas y ningún contacto (llegan con M9a)", async () => {
-    const { data } = await leer<ProveedorApi[]>(await proveedores());
+  it("08c · el detalle trae descripción, modelo y las fotos activas de cada línea (sin rutas); el listado las deja vacías", async () => {
+    const linea = tablaDe("compra_lineas").find((l) => l.id === LINEA.c12);
+    if (linea) Object.assign(linea, { descripcion: "Jean slim azul medio", modelo: "DL-2231" });
+    const foto = (id: string, activo: boolean, creada: string) => ({ id, linea_id: LINEA.c12, compra_id: C12, ancho: 800, alto: 600, subida_por_nombre: "Comprador Uno", created_at: creada, activo, ruta: `compras/${C12}/${LINEA.c12}/${id}.jpg`, ruta_miniatura: `compras/${C12}/${LINEA.c12}/${id}_min.jpg` });
+    tablaDe("compra_linea_fotos").push(foto("f0000000-0000-4000-8000-000000000002", true, "2026-10-02T10:00:00.000Z"), foto("f0000000-0000-4000-8000-000000000001", true, "2026-10-01T10:00:00.000Z"), foto("f0000000-0000-4000-8000-000000000003", false, "2026-10-03T10:00:00.000Z"));
+    const detalle = (await leer<CompraApi>(await unaCompra(get(`/compras/${C12}`), ctx(C12)))).data;
+    const l = detalle.lineas.find((x) => x.id === LINEA.c12);
+    expect(l).toMatchObject({ descripcion: "Jean slim azul medio", modelo: "DL-2231" });
+    expect(l?.fotos_activas.map((f) => f.id)).toEqual(["f0000000-0000-4000-8000-000000000001", "f0000000-0000-4000-8000-000000000002"]);
+    expect(l?.fotos_activas[0]).toEqual({ id: "f0000000-0000-4000-8000-000000000001", miniatura_url: "/api/compras/fotos/f0000000-0000-4000-8000-000000000001/miniatura", ancho: 800, alto: 600, subida_por: { nombre: "Comprador Uno", at: "2026-10-01T10:00:00.000Z" } });
+    expect(JSON.stringify(detalle)).not.toMatch(/"ruta_miniatura"|_min\.jpg"/);
+    const lista = (await leer<CompraApi[]>(await listaCompras(get("/compras")))).data;
+    expect(lista.find((c) => c.id === C12)?.lineas.every((x) => x.fotos_activas.length === 0)).toBe(true);
+  });
+
+  it("los proveedores traen sus compras no canceladas y sus contactos (ninguno en este escenario)", async () => {
+    const { data } = await leer<ProveedorApi[]>(await proveedores(get("/compras/proveedores")));
     expect(data.map((p) => [p.nombre, p.compras, p.contactos.length])).toEqual([
       ["Feria Sur", 2, 0],
       ["Proveedor Norte", 2, 0],

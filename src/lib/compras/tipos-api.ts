@@ -21,6 +21,7 @@
  * `MENSAJE_ERROR_COMPRA`.
  */
 import type { MotivoResolverGml } from "@/lib/arbol/tipos";
+import type { FotoLineaApi } from "@/lib/fotos/tipos-api";
 import type { AgrupadorImportacionCompraApi, MotivoOmisionCompraAgrupador, ProximoHitoApi, TramoLineaTiempoApi, ViajeResumenApi } from "./agrupadores/tipos-api";
 import type {
   AccionEvento,
@@ -228,6 +229,11 @@ export type LineaCompraApi = {
   recepciones: RecepcionLineaApi[];
   nota: string | null;
   avisos: AvisoLineaCompra[];
+  /** 08c: qué es el producto y el código del proveedor (opcionales; los edita `PATCH …/lineas/[lineaId]/ficha`). */
+  descripcion: string | null;
+  modelo: string | null;
+  /** 08c: fotos activas de la línea (hasta 3, de la más antigua a la más nueva). Solo viene llena en `GET /api/compras/[id]` y en las respuestas de escritura de una compra; el listado `GET /api/compras` las deja en `[]`. */
+  fotos_activas: FotoLineaApi[];
 };
 
 export type PersonaFechaApi = { nombre: string | null; at: string };

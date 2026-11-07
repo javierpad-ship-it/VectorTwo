@@ -368,6 +368,9 @@ export function lineaApiDesdeRegistros(d: DatosLinea, kPrima: string = K_PRIMA):
     recepciones,
     nota: null,
     avisos: d.avisos ?? (entregas.some((e) => e.vencida) ? ["entrega_vencida"] : []),
+    descripcion: null,
+    modelo: null,
+    fotos_activas: [],
   };
 }
 

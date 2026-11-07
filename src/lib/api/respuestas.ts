@@ -26,6 +26,14 @@ export function errorConCodigo(mensaje: string, status: number, codigo: string) 
 }
 
 /**
+ * Error con código y datos extra para la pantalla (`{ error, codigo, ...detalle }`): p. ej. `conflicto` en `nombre_repetido` o la lista
+ * `parecidos` de `nombre_parecido` (08c). `detalle` no puede pisar `error` ni `codigo`.
+ */
+export function errorConDetalle(mensaje: string, status: number, codigo: string, detalle: Record<string, unknown>) {
+  return NextResponse.json({ ...detalle, error: mensaje, codigo }, { status, headers: SIN_CACHE });
+}
+
+/**
  * Tope del cuerpo JSON de cualquier petición: 6 MB. Lo más pesado que manda la
  * pantalla son tandas de venta (10 000 filas, unos 400 KB) y las cargas de
  * 10 000 filas de los importadores (pocos MB como mucho); los bloques de 2 MB

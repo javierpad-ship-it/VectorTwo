@@ -29,6 +29,9 @@ import {
 const RAIZ = path.resolve(__dirname, "..");
 const API = path.join(RAIZ, "src", "app", "api");
 
+/** Rutas que reciben `multipart/form-data` (no JSON) y no pasan por `leerCuerpo`. */
+const RUTAS_MULTIPART: ReadonlySet<string> = new Set(["src/app/api/compras/[id]/lineas/[lineaId]/fotos/route.ts"]);
+
 const leerFuente = (rel: string) => limpiar(readFileSync(path.join(RAIZ, rel), "utf8"));
 
 describe("rutas reales de la API", () => {
@@ -64,6 +67,8 @@ describe("rutas reales de la API", () => {
         if (cuerpo === null) continue;
         const primera = primeraSentencia(cuerpo);
         if (primera.tipo === "delegado" || /\bleerCuerpo\s*\(/.test(cuerpo)) continue;
+        // La subida de fotos (08c) es multipart: su tope de 512 KB, el 411 y el `Origin` viven en `src/lib/fotos/validar.ts` (probado en tests/fotos.*).
+        if (RUTAS_MULTIPART.has(path.relative(RAIZ, archivo).split(path.sep).join("/"))) continue;
         // POST sin cuerpo (p. ej. acciones como "calcular") es válido si no usa `request`.
         if (!/\brequest\b/.test(cuerpo)) continue;
         sin.push(`${path.relative(RAIZ, archivo)} ${metodo}`);
@@ -81,10 +86,10 @@ describe("el comprador solo escribe lo decidido (requireUser en escrituras y lec
     expect(violaciones, `Aperturas al comprador sin registrar o listas obsoletas:\n${describirViolaciones(violaciones)}\n`).toEqual([]);
   });
 
-  it("las 20 escrituras abiertas (decisiones 92, 108 y 121) son exactamente las de compras: viajes, embarques, paquetes, agrupadores, viaje activo, importar y la OC", () => {
-    expect(ESCRITURAS_ABIERTAS_A_COMPRADOR.size).toBe(20);
+  it("las 26 escrituras abiertas (decisiones 28, 88, 92, 100, 103, 104, 108 y 121) son exactamente las de compras: viajes, embarques, paquetes, agrupadores, viaje activo, importar, la OC, proveedores y fotos de línea", () => {
+    expect(ESCRITURAS_ABIERTAS_A_COMPRADOR.size).toBe(26);
     for (const clave of ESCRITURAS_ABIERTAS_A_COMPRADOR) {
-      expect(clave, clave).toMatch(/^src\/app\/api\/compras\/(?:agrupadores|embarques|paquetes|viajes|viaje-activo|importar|\[id\]\/oc)(?:\/|\/route\.ts)/);
+      expect(clave, clave).toMatch(/^src\/app\/api\/compras\/(?:agrupadores|embarques|paquetes|viajes|viaje-activo|importar|proveedores|\[id\]\/(?:oc|lineas))(?:\/|\/route\.ts)/);
       expect(clave, clave).toMatch(/#(?:POST|PUT|PATCH|DELETE)$/);
     }
   });

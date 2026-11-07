@@ -305,11 +305,17 @@ export const ESCRITURAS_ABIERTAS_A_COMPRADOR: ReadonlySet<string> = new Set([
   "src/app/api/compras/embarques/[id]/paquetes/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/[id]/pasar-pendientes/route.ts#POST", // decisión 92
   "src/app/api/compras/embarques/[id]/quitar/route.ts#POST", // decisión 92
+  "src/app/api/compras/[id]/lineas/[lineaId]/ficha/route.ts#PATCH", // 08c, decisión 88 (los tres roles editan descripción y modelo de la línea, con `antes`)
+  "src/app/api/compras/[id]/lineas/[lineaId]/fotos/route.ts#POST", // 08c, decisión 100 (los tres roles suben fotos; compra cancelada 409)
+  "src/app/api/compras/[id]/lineas/[lineaId]/fotos/[fotoId]/route.ts#DELETE", // 08c, decisión 100 (compra cancelada: solo admin, lo decide la función)
+  "src/app/api/compras/[id]/lineas/[lineaId]/fotos/traer/route.ts#POST", // 08c, decisión 104 (traer las fotos de la versión cancelada)
   "src/app/api/compras/importar/route.ts#POST", // decisión 108 (solo borrador propio; carga_inicial 403)
   "src/app/api/compras/paquetes/[id]/route.ts#PATCH", // decisión 92
   "src/app/api/compras/paquetes/[id]/ingreso/route.ts#POST", // decisión 92 (ingreso al stock propio del paquete; 08b-1b §3.1)
   "src/app/api/compras/paquetes/[id]/mover/route.ts#POST", // decisión 92
   "src/app/api/compras/viaje-activo/route.ts#PUT", // decisión 92 (preferencia; sin efecto en permisos)
+  "src/app/api/compras/proveedores/route.ts#POST", // 08c, decisión 28 (cualquiera crea proveedores; intercompany solo planner, lo decide el servicio)
+  "src/app/api/compras/proveedores/[id]/route.ts#PATCH", // 08c, decisión 28 y 103 (cualquiera edita; deja historial; intercompany solo planner)
   "src/app/api/compras/viajes/route.ts#POST", // decisión 92
   "src/app/api/compras/viajes/[id]/route.ts#PATCH", // decisión 92
   "src/app/api/compras/viajes/[id]/compras/route.ts#POST", // decisión 92
@@ -330,7 +336,11 @@ export const LECTURAS_ABIERTAS_A_COMPRADOR: ReadonlySet<string> = new Set([
   "src/app/api/compras/agrupadores/sin-asignar/route.ts#GET",
   "src/app/api/compras/embarques/[id]/route.ts#GET",
   "src/app/api/compras/embarques/route.ts#GET",
+  "src/app/api/compras/fotos/[fotoId]/route.ts#GET", // 08c: la foto grande firmada a demanda
+  "src/app/api/compras/fotos/[fotoId]/miniatura/route.ts#GET", // 08c: la miniatura servida por la API
   "src/app/api/compras/proveedores/route.ts#GET",
+  "src/app/api/compras/proveedores/[id]/route.ts#GET", // 08c
+  "src/app/api/compras/proveedores/[id]/historial/route.ts#GET", // 08c, decisión 103
   "src/app/api/compras/route.ts#GET",
   "src/app/api/compras/viajes/[id]/route.ts#GET",
   "src/app/api/compras/viajes/route.ts#GET",

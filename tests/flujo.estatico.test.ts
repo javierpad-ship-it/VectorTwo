@@ -48,19 +48,20 @@ const ESPERADAS: Esperada[] = [
   { ruta: "compras/[id]/recibir/route.ts", metodo: "POST", guard: "requirePlanner" },
   { ruta: "compras/[id]/recepciones/[recepcionId]/route.ts", metodo: "DELETE", guard: "requirePlanner" },
   { ruta: "compras/[id]/cancelar/route.ts", metodo: "POST", guard: "requirePlanner" },
-  { ruta: "compras/proveedores/route.ts", metodo: "GET", guard: "requireUser" },
   { ruta: "compras/importar/route.ts", metodo: "POST", guard: "requireUser" }, // el rol lo decide `puedeImportar` (carga inicial: solo planner y admin)
   { ruta: "compras/[id]/oc/route.ts", metodo: "PUT", guard: "requireUser" }, // 08b-1b, decisión 121: los tres roles editan la OC de una compra no cancelada
 ];
 const METODOS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 const API = path.join(RAIZ, "src", "app", "api");
 // Las rutas de los agrupadores (viajes, embarques, paquetes, agrupadores, viaje-activo; ficha 08b) tienen su propia prueba
-// (`tests/agrupadores.estatico.test.ts`): aquí solo van las 15 de M8.
+// (`tests/agrupadores.estatico.test.ts`): aquí solo van las 15 de M8 (las de proveedores y fotos, 08c, también tienen la suya).
 const esDeAgrupadores = (ruta: string) => /\/api\/compras\/(viajes|embarques|paquetes|agrupadores|viaje-activo)\//.test(ruta.split(path.sep).join("/"));
-const rutasM8 = [...rutasDeApi(path.join(API, "flujo")), ...rutasDeApi(path.join(API, "compras"))].filter((r) => !esDeAgrupadores(r));
+// Proveedores y fotos de línea (ficha 08c, E1) tienen su propia prueba (`tests/fotos.estatico.test.ts`).
+const esDe08c = (ruta: string) => /\/api\/compras\/(proveedores|fotos|\[id\]\/lineas)\//.test(ruta.split(path.sep).join("/"));
+const rutasM8 = [...rutasDeApi(path.join(API, "flujo")), ...rutasDeApi(path.join(API, "compras"))].filter((r) => !esDeAgrupadores(r) && !esDe08c(r));
 
 describe("rutas de M8: guards de la ficha (sección 7)", () => {
-  it("son exactamente las 16 de 0.13.0 y 08b-1b (sin DELETE de compras: se cancelan; sin POST de compras ni de proveedores hasta 0.13.1 y M9a)", () => {
+  it("son exactamente las 15 de 0.13.0 y 08b-1b (sin DELETE de compras: se cancelan; sin POST de compras hasta 0.13.1; las de proveedores son de 08c)", () => {
     const encontradas: string[] = [];
     for (const r of rutasM8) {
       const limpio = limpiar(readFileSync(r, "utf8"));

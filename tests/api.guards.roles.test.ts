@@ -127,10 +127,12 @@ describe("rutas de escritura: sesión y rol (guards reales)", () => {
 
 /** Las rutas de los agrupadores de compras (ficha 08b): el comprador las escribe, salvo cerrar, reabrir y cancelar. */
 const esDeAgrupadores = (ruta: string) => /^compras\/(viajes|embarques|paquetes|agrupadores|viaje-activo)\//.test(ruta);
+/** Proveedores y fotos de línea (ficha 08c): su propio bloque más abajo. */
+const esDe08c = (ruta: string) => /^compras\/(proveedores|fotos|\[id\]\/lineas)\//.test(ruta);
 const nombreDe = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}`;
 
 describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritura (el comprador recibe 403)", () => {
-  const m8 = CASOS.filter((c) => /^(flujo|compras)\//.test(c.ruta) && !esDeAgrupadores(c.ruta));
+  const m8 = CASOS.filter((c) => /^(flujo|compras)\//.test(c.ruta) && !esDeAgrupadores(c.ruta) && !esDe08c(c.ruta));
 
   it("están las siete escrituras de 0.13.0 y 08b-1b; todas exigen rol salvo importar (decide el rol dentro) y la OC (requireUser: decisión 121)", () => {
     const nombre = (c: Caso) => `${c.metodo} ${c.ruta.replace(/\/route\.ts$/, "")}`;
@@ -172,6 +174,39 @@ describe("M8: las escrituras de /api/flujo y /api/compras exigen rol de escritur
       // cuerpo vacío: pasa el guard y se frena en la validación del cuerpo (400), nunca en un 403 de rol
       const respuesta = await llamar(caso);
       expect(respuesta.status, rol).toBe(400);
+      expect(estado.tablasTocadas).toEqual([]);
+    }
+  });
+});
+
+describe("08c: proveedores y fotos de línea: los tres roles escriben; desactivar y eliminar son del planner; limpiar fotos, del admin", () => {
+  const c08 = CASOS.filter((c) => esDe08c(c.ruta));
+
+  it("están las nueve escrituras de E1 y solo las de planner o admin exigen rol", () => {
+    expect(c08.map(nombreDe).sort()).toEqual(
+      [
+        "POST compras/proveedores",
+        "PATCH compras/proveedores/[id]",
+        "DELETE compras/proveedores/[id]",
+        "POST compras/proveedores/[id]/activo",
+        "POST compras/[id]/lineas/[lineaId]/fotos",
+        "DELETE compras/[id]/lineas/[lineaId]/fotos/[fotoId]",
+        "POST compras/[id]/lineas/[lineaId]/fotos/traer",
+        "PATCH compras/[id]/lineas/[lineaId]/ficha",
+        "POST compras/fotos/limpiar",
+      ].sort(),
+    );
+    expect(c08.filter((c) => c.exigeRol).map(nombreDe).sort()).toEqual(["DELETE compras/proveedores/[id]", "POST compras/fotos/limpiar", "POST compras/proveedores/[id]/activo"].sort());
+  });
+
+  it("POST compras/fotos/limpiar es de requireAdmin: el planner también recibe 403 y no toca datos", async () => {
+    const caso = CASOS.find((c) => c.ruta === "compras/fotos/limpiar/route.ts" && c.metodo === "POST");
+    expect(caso).toBeDefined();
+    if (!caso) return;
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    for (const rol of ["comprador", "planner"]) {
+      estado.rol = rol;
+      expect((await llamar(caso)).status, rol).toBe(403);
       expect(estado.tablasTocadas).toEqual([]);
     }
   });
