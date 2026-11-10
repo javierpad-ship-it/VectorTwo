@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
+import { AvisoDireccion } from "@/components/direccion/aviso-direccion";
 import { BadgeEstadoProyeccion } from "./comunes";
 import { textoCerradaMetodoAnterior } from "./crecimientos-vista";
 import { crecimientosSinAprobarDe, enlaceCrecimientoGeneroMundo, formatearMomento, motivosCierreBloqueado, resumenCabecera, textoNoSePuedeCerrarPorCrecimientos, textoMotivoDesactualizada } from "./vista";
@@ -120,6 +121,9 @@ export function CabeceraProyeccion({
           ))}
         </ul>
       )}
+
+      {/* M14 (§4.11): estado de la aprobación de dirección. Solo avisa: no cambia ninguna acción de la proyección. La página es de admin y planner. */}
+      <AvisoDireccion key={`${proyeccion.id}:${proyeccion.estado}`} proyeccionId={proyeccion.id} contexto="proyeccion" />
 
       {avisoMetodo && <Alert tono="info">{avisoMetodo}</Alert>}
 

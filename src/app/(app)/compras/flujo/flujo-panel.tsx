@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/form";
 import { Tabs } from "@/components/ui/tabs";
 import { AvisoPorConfirmar } from "@/components/compras/aviso-por-confirmar";
 import { AvisosFlujo } from "@/components/compras/avisos-flujo";
+import { AvisoDireccion } from "@/components/direccion/aviso-direccion";
 import { BarraFiltrosFlujo } from "@/components/compras/barra-filtros-flujo";
 import { descargarFlujo } from "@/components/compras/descarga";
 import { DetalleFila } from "@/components/compras/detalle-fila";
@@ -258,6 +259,8 @@ export function FlujoPanel({ rol }: { rol: Rol }) {
       {accion.error && <Alert onCerrar={accion.limpiar}>{accion.error.mensaje}</Alert>}
 
       {datos && <AvisosFlujo datos={datos} enlaceProyeccion={puedeEscribir} />}
+      {/* M14 (§4.11): aprobación de dirección de la cerrada que usa el flujo. Solo admin y planner (el comprador no ve datos de aprobación); no cambia lo que el flujo calcula ni lo que muestra. */}
+      {puedeEscribir && datos && <AvisoDireccion paraCompras contexto="flujo" />}
       {datos && <AvisoPorConfirmar resumen={datos.por_confirmar} mes={datos.periodos[1]} onRevisar={() => irA({ ...parametros, pestana: "conciliacion", soloConciliacion: "por_confirmar", fila: null }, "push")} />}
 
       <Tabs

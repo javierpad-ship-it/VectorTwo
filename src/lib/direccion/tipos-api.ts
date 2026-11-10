@@ -201,7 +201,18 @@ export type ClavePuente =
   | "total_siguiente";
 
 export type PuenteApi = {
-  lineas: { clave: ClavePuente; etiqueta: string; u: number; acumulado: number; subtotal: boolean }[];
+  /**
+   * T2 (añadido, opcional): `ayuda` es el texto de ayuda de la línea (`title` y lector de pantalla). Viaja en `puente.recorte` y `puente.por_gm` del
+   * tablero; NO se guarda en la foto de la aprobación (`resumen.puente`).
+   *
+   * La línea `manual` («Fijado a mano») es `delta_manual` de la migración 0041: `vigente − propuesta` de los registros base con `B` CLASIFICADOS
+   * `manual` (los fijó una persona: `origen = 'manual'`, sin lote ni propuesta de IA), la misma clase «a mano» de `decisiones`. Las cifras de IA
+   * aceptadas y lo aceptado en bloque van en `otras` («Otras diferencias con la propuesta»).
+   *
+   * `pct` (cada paso sobre el acumulado anterior a él): `base_sobre_real` = base ÷ cierre − 1; `nino` = (B′ − B) ÷ B; `crecimiento` =
+   * (propuesta − B′) ÷ B′; `manual` y `otras`, sobre el acumulado previo; `total_vs_cierre` = total ÷ cierre − 1.
+   */
+  lineas: { clave: ClavePuente; etiqueta: string; u: number; acumulado: number; subtotal: boolean; ayuda?: string }[];
   /** `nino` es `null` si la proyección (o el GM) no tiene base corregida (`B_corr` nulo: método anterior). */
   pct: {
     base_sobre_real: number | null;
@@ -220,7 +231,12 @@ export type ComparativoApi = {
   /** Algún año del par es del Niño. */
   nino: boolean;
   total: { pct: number | null; motivo: null | "sin_base" | "incompleto" | "nueva" };
-  mismas: { pct: number | null; tiendas: string[]; motivo: null | "sin_base" | "incompleto" };
+  /**
+   * T2 (añadido, opcional): `pct_corregido` es la variación de mismas tiendas sobre la base CORREGIDA del Niño. Solo tiene sentido en
+   * `sig_vs_cierre` (año siguiente sobre `B′` en vez de `B`: +5,2 % frente a +6,9 % en el caso de la ficha); en los demás pares va `null`, y también
+   * si la proyección no tiene base corregida o `pct` es `null`.
+   */
+  mismas: { pct: number | null; tiendas: string[]; motivo: null | "sin_base" | "incompleto"; pct_corregido?: number | null };
 };
 
 // ─── Crecimientos, decisiones y alertas ───
@@ -229,6 +245,11 @@ export type CrecimientoGMApi = {
   gm_clave: string;
   /** «HOMBRE · URBANO», «Resto» o «Total». */
   nombre: string;
+  /**
+   * T2 (precisión): para el Resto es el que APLICÓ el último cálculo (`parametros.crecimiento_resto_usado`). Si esa clave falta (proyección sin
+   * calcular o de antes de `0.12.1`), `declarado_pct`, `sobre_base`, `version`, `autor` y `aprobada_at` van `null` y el semáforo es `sin_dato`: el
+   * tablero dice «sin dato» y NO muestra el Resto provisional (`crecimiento_pct_defecto`). Por eso no hace falta un campo `provisional`.
+   */
   declarado_pct: number | null;
   sobre_base: SobreBaseTablero | null;
   version: number | null;
@@ -257,6 +278,10 @@ export type ClaseDecision = "lote" | "ia" | "propuesta" | "manual" | "escalada" 
 
 export type DecisionesAnioApi = {
   anio: number;
+  /**
+   * T2 (precisión): `pct_u` es un PORCENTAJE de 0 a 100 (49,2 = 49,2 %), como todos los `*pct` del contrato: las unidades de esa clase sobre el
+   * vigente de todos los registros del año en el recorte. Los seis suman 100 (o todos 0 si el año no tiene unidades).
+   */
   por_origen: { clave: ClaseDecision; etiqueta: string; n: number; u: number; pct_u: number }[];
   /** T1: `desde` y `hasta` pueden ser `null` (registros decididos sin `decidido_at`: la función SQL los devuelve así). `nombre` puede ser `""`. */
   autores: { nombre: string; n: number; u: number; desde: string | null; hasta: string | null }[];
@@ -499,7 +524,13 @@ export type TableroApi = {
   kpis: {
     siguiente: number;
     cierre: number;
+    /**
+     * T2 (precisión): real de enero a `k` (el mes con que se calculó la proyección): con `proyectado_resto` suma `cierre` (salvo unidades sin reparto
+     * mensual). Sin tiendas ni bloque es lo vendido guardado; con ellos, la venta publicada de esas tiendas.
+     */
     real_ac: number;
+    /** T2 (añadido, opcional): real de enero a `k'` (el último mes publicado, `datos.k_prima`), para «en lo que va»; `null` si no hay venta publicada. */
+    real_ac_k_prima?: number | null;
     proyectado_resto: number;
     anterior: number;
     hace_dos: number;
@@ -606,7 +637,7 @@ export type BaseAnioSiguienteSql = BaseComunSql & {
   propuesto_con_B: number;
   /** Registros base sin `B` (otro método): van aparte en el puente. */
   vigente_sin_B: number;
-  /** Σ (vigente − propuesto) de los registros con `B` y `origen = 'manual'`. */
+  /** Σ (vigente − propuesto) de los registros con `B` clasificados `manual` (`origen = 'manual'`, sin lote ni propuesta de IA). */
   delta_manual: number;
   /** `vigente_con_B − propuesto_con_B − delta_manual` (exacto, sobre las cifras ya redondeadas). */
   delta_otras: number;

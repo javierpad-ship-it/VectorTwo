@@ -27,10 +27,13 @@ const LECTURAS = new Set([
   "venta_marca_gml_resumen",
   "unidades_mensuales",
   "stock_flujo",
+  // M14 (tablero de dirección): las dos agregaciones pesadas. `huella_proyeccion` (≈ 30 ms) va sin plazo y `registrar_aprobacion_direccion` es escritura.
+  "tablero_proyeccion",
+  "tablero_venta",
 ]);
 
 describe("plazo de 7,5 s: solo en lecturas", () => {
-  it("cada `.abortSignal(` cuelga de un `.rpc(` de la lista de lecturas, y las 11 la llevan", () => {
+  it("cada `.abortSignal(` cuelga de un `.rpc(` de la lista de lecturas, y las 13 la llevan", () => {
     const usados = new Set<string>();
     let total = 0;
     for (const f of src) {
@@ -40,7 +43,7 @@ describe("plazo de 7,5 s: solo en lecturas", () => {
         usados.add(m[1]);
       }
     }
-    expect(total).toBe(11); // una por función
+    expect(total).toBe(13); // una por función
     expect([...usados].sort()).toEqual([...LECTURAS].sort());
   });
   it("ninguna escritura lleva plazo ni `AbortSignal.timeout` (solo la IA lo usa, fuera de la base)", () => {

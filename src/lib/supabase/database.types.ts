@@ -15,6 +15,14 @@
  * aqui y `never` alli; (e) el generador agrega `__InternalSupabase` y no pone `;`. Un test de deriva debe comparar tablas, columnas,
  * relaciones y funciones por estructura, no el texto.
  *
+ * Actualizados el 2026-11-10 con la 0041 (M14, tablero de direccion, aplicada completa en `Vector2`), a partir de `generate_typescript_types`
+ * de `Vector2`: 1 tabla nueva (`aprobaciones_direccion`, de solo insercion, con FK a `perfiles` y a `proyecciones`; el bloque es el del
+ * generador tal cual, con prettier) y 4 funciones (`huella_proyeccion(p_proyeccion_id) -> string`, `tablero_proyeccion(p, p_proyeccion_id)
+ * -> Json`, `tablero_venta(p) -> Json` y `registrar_aprobacion_direccion(p) -> Json`). Comparado por estructura con el generador entero:
+ * fuera de la 0041 solo quedan las diferencias deliberadas de la nota de arriba, que desde la 0038 y la 0039 alcanzan tambien a
+ * `editar_oc_compra` (`p_antes`, `p_motivo`, `p_numero_oc`), `editar_ficha_linea` (`p_descripcion`, `p_modelo`), `guardar_proveedor`
+ * (`p_id`, `p_revision`) y a la columna generada `compra_paquetes.periodo_ingreso`. La 0040 (privilegios) no cambia tipos.
+ *
  * Actualizados a mano el 2026-11-06 con la 0039 (08c E1, proveedores y fotos de compras): 3 tablas nuevas (`proveedor_contactos`,
  * `proveedor_eventos`, de solo insercion, y `compra_linea_fotos`), 12 columnas nuevas en `proveedores` (`direccion`, `region`,
  * `puerto_embarque`, `incoterm`, `moneda`, `plazo_produccion_dias`, `plazo_transito_dias`, `condiciones_pago`, `revision`, `updated_by_id`,
@@ -210,6 +218,75 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      aprobaciones_direccion: {
+        Row: {
+          activo: boolean;
+          anio_en_curso: number;
+          comentario: string | null;
+          created_at: string;
+          estado_proyeccion: string;
+          huella: string;
+          id: string;
+          motivo: string | null;
+          perfil_id: string | null;
+          proyeccion_id: string;
+          resultado: string;
+          resumen: Json;
+          rol: string;
+          updated_at: string;
+          usuario_nombre: string;
+        };
+        Insert: {
+          activo?: boolean;
+          anio_en_curso: number;
+          comentario?: string | null;
+          created_at?: string;
+          estado_proyeccion: string;
+          huella: string;
+          id?: string;
+          motivo?: string | null;
+          perfil_id?: string | null;
+          proyeccion_id: string;
+          resultado: string;
+          resumen: Json;
+          rol: string;
+          updated_at?: string;
+          usuario_nombre: string;
+        };
+        Update: {
+          activo?: boolean;
+          anio_en_curso?: number;
+          comentario?: string | null;
+          created_at?: string;
+          estado_proyeccion?: string;
+          huella?: string;
+          id?: string;
+          motivo?: string | null;
+          perfil_id?: string | null;
+          proyeccion_id?: string;
+          resultado?: string;
+          resumen?: Json;
+          rol?: string;
+          updated_at?: string;
+          usuario_nombre?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "aprobaciones_direccion_perfil_id_fkey";
+            columns: ["perfil_id"];
+            isOneToOne: false;
+            referencedRelation: "perfiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "aprobaciones_direccion_proyeccion_id_fkey";
+            columns: ["proyeccion_id"];
+            isOneToOne: false;
+            referencedRelation: "proyecciones";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       cargas_venta_stock: {
         Row: {
@@ -5024,6 +5101,31 @@ export type Database = {
         Args: {
           p_horas: number;
           p_limite?: number;
+        };
+        Returns: Json;
+      };
+      huella_proyeccion: {
+        Args: {
+          p_proyeccion_id: string;
+        };
+        Returns: string;
+      };
+      tablero_proyeccion: {
+        Args: {
+          p: Json;
+          p_proyeccion_id: string;
+        };
+        Returns: Json;
+      };
+      tablero_venta: {
+        Args: {
+          p: Json;
+        };
+        Returns: Json;
+      };
+      registrar_aprobacion_direccion: {
+        Args: {
+          p: Json;
         };
         Returns: Json;
       };

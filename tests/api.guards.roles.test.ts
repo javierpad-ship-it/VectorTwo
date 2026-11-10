@@ -297,3 +297,58 @@ describe("07f: GET …/crecimientos/por-tienda (guard requirePlanner real)", () 
     }
   });
 });
+
+/**
+ * M14: el tablero de aprobación de dirección (`/api/direccion/*`). Las cinco lecturas son de `requirePlanner` (el comprador no ve Planificación, decisión 113)
+ * y aprobar es de `requireAdmin` (el planner tampoco aprueba). Con los guards REALES: ni el 401 ni el 403 tocan ninguna tabla de datos.
+ */
+describe("M14: /api/direccion (guards reales)", () => {
+  const LECTURAS = ["opciones", "tablero", "bloqueos", "aprobaciones", "estado"] as const;
+  const modulo = async (ruta: string) => (await import(/* @vite-ignore */ path.join(API, "direccion", ruta, "route.ts"))) as Record<string, (r: NextRequest) => Promise<Response>>;
+  const leer = async (ruta: string, consulta = "") => (await modulo(ruta)).GET(new NextRequest(`http://localhost/api/direccion/${ruta}${consulta}`));
+  const aprobar = async () => (await modulo("aprobaciones")).POST(new NextRequest("http://localhost/api/direccion/aprobaciones", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }));
+
+  it("están las seis rutas: cinco `GET` con `requirePlanner` y el `POST` de aprobaciones con `requireAdmin`, como primera sentencia", () => {
+    for (const ruta of LECTURAS) {
+      const cuerpo = cuerpoDeFuncion(limpiar(readFileSync(path.join(API, "direccion", ruta, "route.ts"), "utf8")), "GET");
+      expect(cuerpo, ruta).not.toBeNull();
+      expect(primeraSentencia(cuerpo ?? ""), ruta).toMatchObject({ tipo: "guard", guard: "requirePlanner" });
+    }
+    const post = cuerpoDeFuncion(limpiar(readFileSync(path.join(API, "direccion", "aprobaciones", "route.ts"), "utf8")), "POST");
+    expect(primeraSentencia(post ?? "")).toMatchObject({ tipo: "guard", guard: "requireAdmin" });
+    expect(CASOS.filter((c) => c.ruta.startsWith("direccion/")).map(nombreDe)).toEqual(["POST direccion/aprobaciones"]);
+  });
+
+  it("sin sesión, las seis responden 401 y no tocan ninguna tabla de datos", async () => {
+    estado.user = null;
+    for (const ruta of LECTURAS) expect((await leer(ruta, `?proyeccion_id=${UUID}`)).status, ruta).toBe(401);
+    expect((await aprobar()).status).toBe(401);
+    expect(estado.tablasTocadas).toEqual([]);
+  });
+
+  it("el comprador recibe 403 en las seis; el planner, 403 al aprobar; ninguno toca datos", async () => {
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    estado.rol = "comprador";
+    for (const ruta of LECTURAS) expect((await leer(ruta, `?proyeccion_id=${UUID}`)).status, ruta).toBe(403);
+    expect((await aprobar()).status).toBe(403);
+    estado.rol = "planner";
+    expect((await aprobar()).status).toBe(403);
+    expect(estado.tablasTocadas).toEqual([]);
+  });
+
+  it("admin y planner pasan el guard de las lecturas (nunca 401 ni 403): con la consulta mal formada, 400 antes de leer datos; el admin pasa el de aprobar", async () => {
+    estado.user = { id: "u1", email: "c@ejemplo.pe" };
+    for (const rol of ["admin", "planner"]) {
+      estado.rol = rol;
+      for (const ruta of ["tablero", "bloqueos", "aprobaciones", "estado"] as const) {
+        const respuesta = await leer(ruta, "?proyeccion_id=no-es-uuid");
+        expect(respuesta.status, `${rol} ${ruta}`).toBe(400);
+      }
+      expect(estado.tablasTocadas, rol).toEqual([]);
+    }
+    estado.rol = "admin";
+    // Cuerpo vacío: pasa el guard y se frena en la validación.
+    expect((await aprobar()).status).toBe(400);
+    expect(estado.tablasTocadas).toEqual([]);
+  });
+});

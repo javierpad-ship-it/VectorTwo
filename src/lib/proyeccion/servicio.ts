@@ -6,6 +6,7 @@ import { calcularEfectoNino } from "@/lib/curvas/lectura";
 import type { TemporadaAgrupacion } from "@/lib/curvas/tipos-api";
 import { enTandas } from "@/lib/arbol/importar";
 import { leerVigentes } from "@/lib/crecimientos/consultas-vigentes";
+import { esFkDeAprobaciones, MENSAJE_TIENE_APROBACIONES } from "@/lib/direccion/consultas";
 import { faltantesDeCierre, gmExigidos, matrizDeVigentes, restoEfectivo, type GmConNino, type VigenteCrecimiento } from "@/lib/crecimientos/vigentes";
 import type { Tables, TablesInsert } from "@/lib/supabase/database.types";
 import { aPeriodo } from "@/lib/ventas/periodo";
@@ -649,6 +650,8 @@ export async function eliminarProyeccion(id: string): Promise<Salida<{ id: strin
   if (rechazo) return fallaRegla(rechazo);
   // Condicional: solo si sigue en trabajo y sin cálculo vivo.
   const r = await eliminarProyeccionCondicional(d, id, limiteCalculoVivo(sello()));
+  // M14 (R20): una proyección con aprobaciones de dirección no se elimina (FK `restrict`): se archiva.
+  if (r.error && esFkDeAprobaciones(r.error)) return fallaMensaje(MENSAJE_TIENE_APROBACIONES, 409, "tiene_aprobaciones");
   if (r.error) return fallaDb(r.error, "proyección: eliminar");
   if (!r.data) return fallaMensaje("La proyección cambió mientras se eliminaba (se cerró o empezó a calcularse). Vuelve a cargar.", 409, "estado_cambiado");
   return listo({ id });

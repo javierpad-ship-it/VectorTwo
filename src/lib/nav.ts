@@ -72,6 +72,9 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/planificacion/curvas-estacionalidad", label: "Crecimiento por GM", pestana: "genero-mundo" },
       // M7: proyección anual de unidades (año en curso y año siguiente). Solo admin y planner, como toda la sección.
       { href: "/planificacion/proyeccion", label: "Proyección de unidades" },
+      // M14: tablero con el que dirección aprueba la proyección (solo lectura salvo la decisión). Admin y planner lo ven; solo el admin decide
+      // (el botón se oculta al planner y la API lo exige con requireAdmin). El comprador no entra (decisión 113).
+      { href: "/planificacion/aprobacion-direccion", label: "Aprobación de dirección" },
       // M12: análisis de las marcas al barrer por GML y reparto aprobado de una compra de la marca. Solo admin y planner.
       { href: "/planificacion/marcas-barrer", label: "Marcas al barrer por GML" },
     ],

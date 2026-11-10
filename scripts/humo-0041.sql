@@ -332,13 +332,13 @@ create temp table ax (cod text, anio integer, bloque text, sub text, vendido int
                       quien text, cuando timestamptz, meses integer[], b integer, bc numeric, mp integer[]);
 insert into ax values
   ('F1', 2026, 'mismas', null, 16150, 24000, 24000, 'propuesta', 24000, false, 'Planner P.', '2026-11-07 15:00:00+00',
-    array[1359, 942, 1198, 1608, 2374, 2244, 2854, 1926, 1645, 1750, 1900, 4200], null, null, null),
+    array[1196, 779, 1035, 1445, 2211, 2571, 3181, 2252, 1480, 1750, 1900, 4200], null, null, null),
   ('F2', 2026, 'mismas', null, 6750, 10000, 10000, 'propuesta', 10000, false, 'Planner P.', '2026-11-07 15:00:00+00',
     array[750, 750, 750, 750, 750, 750, 750, 750, 750, 800, 950, 1500], null, null, null),
   ('F3', 2026, 'mismas', null, 5400, 8001, 8001, 'propuesta', 8001, false, 'Planner P.', '2026-11-07 15:00:00+00',
-    array[600, 600, 600, 600, 600, 600, 600, 600, 600, 700, 800, 1101], null, null, null),
+    array[700, 700, 700, 700, 700, 400, 400, 400, 700, 700, 800, 1101], null, null, null),
   ('F4', 2026, 'mismas', null, 2700, 3900, 3900, 'propuesta', 3900, false, 'Planner P.', '2026-11-07 15:00:00+00',
-    array[300, 300, 300, 300, 300, 300, 300, 300, 300, 350, 400, 450], null, null, null),
+    array[363, 363, 363, 363, 363, 173, 173, 174, 365, 350, 400, 450], null, null, null),
   ('FT10', 2026, 'nuevas', 'nuevas_anterior', 3000, 4100, 4100, 'propuesta', 4100, false, 'Planner P.', '2026-11-07 15:00:00+00',
     array[334, 334, 334, 333, 333, 333, 333, 333, 333, 300, 330, 470], null, null, null),
   ('M1', 2026, 'mismas', null, 12000, 17500, 17500, 'propuesta', 17500, false, 'Planner P.', '2026-11-07 15:00:00+00',
@@ -722,9 +722,10 @@ insert into r (caso, ok) values
     and pg_temp.an(pg_temp.rk('tp_hu'), 0) -> 'base' -> 'vigente_con_B' = 'null'::jsonb
     and pg_temp.an(pg_temp.rk('tp_hu'), 1) -> 'base' -> 'meses_sin_nino' = 'null'::jsonb
     and jsonb_array_length(pg_temp.an(pg_temp.rk('tp_hu'), 0) -> 'base' -> 'meses_sin_nino') = 12),
-  ('«2026 sin Nino»: junio a agosto divide por 0,70 las filas de invierno (900 u pasan a 1 285,71) y el resto queda igual',
-    pg_temp.jn(pg_temp.rk('tp_hu'), 'anios', '0', 'base', 'meses_sin_nino', '5') = 3894 - 900 + 1285.71
-    and pg_temp.jn(pg_temp.rk('tp_hu'), 'anios', '0', 'base', 'meses_sin_nino', '6') = 4504 - 900 + 1285.71
+  ('«2026 sin Nino»: junio a agosto divide por 0,70 las filas de invierno (573 u pasan a 818,57) y el resto queda igual',
+    pg_temp.jn(pg_temp.rk('tp_hu'), 'anios', '0', 'base', 'meses_sin_nino', '5') = 3894 - 573 + 818.57
+    and pg_temp.jn(pg_temp.rk('tp_hu'), 'anios', '0', 'base', 'meses_sin_nino', '6') = 4504 - 573 + 818.57
+    and pg_temp.jn(pg_temp.rk('tp_hu'), 'anios', '0', 'base', 'meses_sin_nino', '7') = 3576 - 574 + 820
     and pg_temp.jn(pg_temp.rk('tp_hu'), 'anios', '0', 'base', 'meses_sin_nino', '0') = 3009
     and pg_temp.jn(pg_temp.rk('tp_hu'), 'anios', '0', 'base', 'meses_sin_nino', '11') = 7251),
   ('tiendas de bloque: T10 (2026, nuevas del anio anterior, 4 100, para_base 4 100); T04 (2027, cierres, 1 000) y T12 (2027, aperturas, 1 408) sin para_base',
@@ -753,13 +754,29 @@ insert into r (caso, ok) values
                 where (x -> 'Y1' ->> 'vigente_con_B')::numeric + (x -> 'Y1' ->> 'vigente_sin_B')::numeric + (x -> 'Y1' ->> 'nuevas_anterior')::numeric
                     + (x -> 'Y1' ->> 'aperturas')::numeric + (x -> 'Y1' ->> 'cierres')::numeric <> (x -> 'Y1' ->> 'total')::numeric)
     and jsonb_array_length(pg_temp.rk('tp0') -> 'por_gm') = 2
-    and pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y' = '{"cierre": 50001, "base": 45901, "fuera_base_exacto": 0}'::jsonb
+    and pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y' @> '{"cierre": 50001, "base": 45901, "fuera_base_exacto": 0}'::jsonb
+    and (select array_agg(k order by k) from jsonb_object_keys(pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y') k)
+        = array['base', 'base_meses', 'base_meses_sin_nino', 'cierre', 'fuera_base_exacto']
     and pg_temp.jn(pg_temp.gm(pg_temp.rk('tp0'), 'H41H'), 'Y1', 'total') = 52708
     and pg_temp.jn(pg_temp.gm(pg_temp.rk('tp0'), 'H41M'), 'Y', 'cierre') = 28500
     and pg_temp.jn(pg_temp.gm(pg_temp.rk('tp0'), 'H41M'), 'Y1', 'B') = 28500
     and pg_temp.jn(pg_temp.gm(pg_temp.rk('tp0'), 'H41M'), 'Y1', 'B_corr') = 28500
     and pg_temp.jn(pg_temp.gm(pg_temp.rk('tp0'), 'H41M'), 'Y1', 'propuesto_con_B') = 30780
     and pg_temp.jn(pg_temp.gm(pg_temp.rk('tp0'), 'H41M'), 'Y1', 'total') = 32006),
+  ('I-E por_gm.Y.base_meses y base_meses_sin_nino: HOMBRE x URBANO ene–oct suma 34 600 y, sin Nino, 35 337,14 (1 720 u de invierno en jun–ago entre 0,70)',
+    pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y' -> 'base_meses' = '[3009, 2592, 2848, 3258, 4024, 3894, 4504, 3576, 3295, 3600, 4050, 7251]'::jsonb
+    and (select sum(m::numeric) from jsonb_array_elements_text(pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y' -> 'base_meses') with ordinality as q(m, i) where i <= 10) = 34600
+    and (select sum(m::numeric) from jsonb_array_elements_text(pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y' -> 'base_meses_sin_nino') with ordinality as q(m, i) where i <= 10) = 35337.14
+    and pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y' -> 'base_meses_sin_nino' = pg_temp.an(pg_temp.rk('tp_hu'), 0) -> 'base' -> 'meses_sin_nino'
+    and pg_temp.gm(pg_temp.rk('tp0'), 'H41H') -> 'Y' -> 'base_meses' = pg_temp.an(pg_temp.rk('tp_hu'), 0) -> 'base' -> 'meses'),
+  ('I-E en un GM sin Nino las dos series son iguales; la suma por GM de base_meses es la de anios[Y].base.meses; 12 valores siempre',
+    (select sum(m::numeric) from jsonb_array_elements_text(pg_temp.gm(pg_temp.rk('tp0'), 'H41M') -> 'Y' -> 'base_meses') m)
+      = (select sum(m::numeric) from jsonb_array_elements_text(pg_temp.gm(pg_temp.rk('tp0'), 'H41M') -> 'Y' -> 'base_meses_sin_nino') m)
+    and (select sum(m::numeric) from jsonb_array_elements_text(pg_temp.gm(pg_temp.rk('tp0'), 'H41M') -> 'Y' -> 'base_meses') m) = 28500
+    and (select sum(m::numeric) from jsonb_array_elements(pg_temp.rk('tp0') -> 'por_gm') x, jsonb_array_elements_text(x -> 'Y' -> 'base_meses') m)
+      = (select sum(m::numeric) from jsonb_array_elements_text(pg_temp.an(pg_temp.rk('tp0'), 0) -> 'base' -> 'meses') m)
+    and not exists (select 1 from jsonb_array_elements(pg_temp.rk('tp0') -> 'por_gm') x
+                    where jsonb_array_length(x -> 'Y' -> 'base_meses') <> 12 or jsonb_array_length(x -> 'Y' -> 'base_meses_sin_nino') <> 12)),
   ('por_gm es SIEMPRE de toda la proyeccion: no cambia con filtros, con unidad de marca ni con desglose',
     pg_temp.rk('tp_hu') -> 'por_gm' = pg_temp.rk('tp0') -> 'por_gm' and pg_temp.rk('tp_x') -> 'por_gm' = pg_temp.rk('tp0') -> 'por_gm'
     and pg_temp.rk('tp_inv') -> 'por_gm' = pg_temp.rk('tp0') -> 'por_gm' and pg_temp.rk('tp_vacio') -> 'por_gm' = pg_temp.rk('tp0') -> 'por_gm'
@@ -863,6 +880,9 @@ update proyeccion_filas set activo = false
 -- Una fila ACEPTADA TAL CUAL (12 000) cuya propuesta baja despues a 11 950 al recalcular: 50 u que no son una decision a mano.
 update proyeccion_fila_anios a set propuesto = 11950
   from proyeccion_filas f where f.id = a.fila_id and f.proyeccion_id = pg_temp.id(101) and f.clave = (select clave from proyeccion_filas where id = pg_temp.f('F2')) and a.anio = 2027;
+-- Una fila con origen manual (20 006 frente a 18 780) que despues queda dentro de un lote: se clasifica `lote`, no `manual`.
+update proyeccion_fila_anios a set decision_lote_id = pg_temp.id(300)
+  from proyeccion_filas f where f.id = a.fila_id and f.proyeccion_id = pg_temp.id(101) and f.clave = (select clave from proyeccion_filas where id = pg_temp.f('M1')) and a.anio = 2027;
 insert into res values ('tpv', pg_temp.tp(pg_temp.id(101), '{}'::jsonb)),
   ('tpv_x', pg_temp.tp(pg_temp.id(101), jsonb_build_object('gml_ids', (select to_jsonb(ids) from hun), 'unidad_marca_id', pg_temp.mc('B1'))));
 insert into r (caso, ok) values
@@ -884,10 +904,14 @@ insert into r (caso, ok) values
                         + (x -> 'Y1' ->> 'aperturas')::numeric + (x -> 'Y1' ->> 'cierres')::numeric <> (x -> 'Y1' ->> 'total')::numeric)),
   ('variante delta_otras: una fila aceptada cuya propuesta cambio despues (12 000 frente a 11 950) va a delta_otras (50), no a delta_manual (117)',
     pg_temp.jn(pg_temp.gm(pg_temp.rk('tpv'), 'H41H'), 'Y1', 'delta_manual') = 117
-    and pg_temp.jn(pg_temp.gm(pg_temp.rk('tpv'), 'H41H'), 'Y1', 'delta_otras') = 50
-    and pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'delta_manual') = 1343
-    and pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'delta_otras') = 50
-    and pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'vigente_con_B') - pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'propuesto_con_B') = 1393),
+    and pg_temp.jn(pg_temp.gm(pg_temp.rk('tpv'), 'H41H'), 'Y1', 'delta_otras') = 50),
+  ('variante clasificacion excluyente: una fila con origen manual que esta en un lote NO es «fijado a mano» (MUJER: delta_manual 0, delta_otras 1 226); la identidad se mantiene',
+    pg_temp.jn(pg_temp.gm(pg_temp.rk('tpv'), 'H41M'), 'Y1', 'delta_manual') = 0
+    and pg_temp.jn(pg_temp.gm(pg_temp.rk('tpv'), 'H41M'), 'Y1', 'delta_otras') = 1226
+    and pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'delta_manual') = 117
+    and pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'delta_otras') = 1276
+    and pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'vigente_con_B') - pg_temp.jn(pg_temp.rk('tpv'), 'anios', '1', 'base', 'propuesto_con_B') = 1393
+    and pg_temp.an(pg_temp.rk('tpv'), 1) -> 'decisiones' -> 'manual' ->> 'n' = '1'),
   ('variante delta con unidad de marca (B1 pesa 1 en L1 x AM-B): la identidad se mantiene tambien con pesos (delta_manual 0, delta_otras 50)',
     pg_temp.jn(pg_temp.rk('tpv_x'), 'anios', '1', 'base', 'delta_manual') = 0
     and pg_temp.jn(pg_temp.rk('tpv_x'), 'anios', '1', 'base', 'delta_otras') = 50

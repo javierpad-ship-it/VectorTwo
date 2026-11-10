@@ -5,7 +5,7 @@ export function Alert({
   children,
   onCerrar,
 }: {
-  tono?: "alerta" | "exito" | "info";
+  tono?: "alerta" | "exito" | "info" | "neutro";
   children: ReactNode;
   onCerrar?: () => void;
 }) {
@@ -13,6 +13,7 @@ export function Alert({
     alerta: "border-alerta/30 bg-alerta-suave text-alerta",
     exito: "border-exito/30 bg-exito-suave text-exito",
     info: "border-marca/30 bg-marca-suave text-marca-oscura",
+    neutro: "border-borde bg-neutro-suave text-tinta-suave",
   }[tono];
 
   return (

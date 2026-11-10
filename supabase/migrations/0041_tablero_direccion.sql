@@ -351,7 +351,8 @@ comment on function public.huella_proyeccion(uuid) is
 --         "dia_pico": { "fecha": "aaaa-mm-dd", "n": n } | null },
 --       "conteos": { "registros": n, "propuesta_cambio": n, "curva_cambio": n } } ],
 --     "por_gm": [ { "g": genero_id, "m": mundo_id,    -- SIEMPRE de toda la proyección: sin filtros y sin unidad de marca
---       "Y":  { "cierre": n, "base": n, "fuera_base_exacto": n },
+--       "Y":  { "cierre": n, "base": n, "fuera_base_exacto": n,
+--               "base_meses": [12 enteros], "base_meses_sin_nino": [12 números] },
 --       "Y1": { "B": n | null, "B_corr": n | null, "propuesto_con_B": n, "vigente_con_B": n, "vigente_sin_B": n,
 --               "delta_manual": n, "delta_otras": n, "nuevas_anterior": n, "aperturas": n, "cierres": n, "total": n } } ],
 --     "por_dim": [ { "d": id_o_texto, "Y": { "base": n, "base_resto": n, "tiendas": [[uuid, n]] },
@@ -367,9 +368,14 @@ comment on function public.huella_proyeccion(uuid) is
 --     `crecimiento_pct_defecto`, que es el provisional de la creación y nunca cambia). `null` si falta. Es el mismo dato que entra
 --     en la huella.
 --   * `delta_manual` y `delta_otras` (línea «decisiones a mano» del puente): `vigente − propuesta` de los registros base con B
---     mezcla dos cosas distintas, así que va partido. `delta_manual` suma `vigente − propuesto` de los registros con
---     `origen = 'manual'` (los fijó una persona, incluida una cifra de la IA aceptada, que también se guarda como manual);
---     `delta_otras` es todo lo demás: sobre todo filas aceptadas tal cual o en bloque cuya propuesta cambió después al recalcular.
+--     mezcla dos cosas distintas, así que va partido. `delta_manual` suma `vigente − propuesto` de los registros CLASIFICADOS
+--     `manual` con la misma clasificación excluyente de `decisiones` (lote > ia > origen): `origen = 'manual'`, sin
+--     `decision_lote_id` ni `decision_ia_fila_id` (los fijó una persona a mano). `delta_otras` es todo lo demás: filas aceptadas en
+--     bloque, por IA o tal cual cuya propuesta cambió después al recalcular, escaladas, etc.
+--   * `por_gm.Y.base_meses` y `base_meses_sin_nino` (I-E, tendencia corregida del Niño): lo mismo que `anios[Y].base.meses` y
+--     `meses_sin_nino`, pero por GM y siempre de toda la proyección (sin filtros ni unidad de marca): suma de `meses` de los registros
+--     base de Y del GM y esa suma dividida, mes a mes y fila a fila, por phi_Y,m. Doce ceros si el GM no tiene registros base con
+--     reparto mensual.
 --     Siempre `delta_manual + delta_otras = vigente_con_B − propuesto_con_B`, exacto (con unidad de marca, `delta_otras` se calcula
 --     como el complemento de las cifras ya redondeadas, para que la identidad no dependa del redondeo): el cuadre del puente no cambia.
 --   * `base` son los registros de filas sin tienda y `tiendas` los de filas con tienda, agrupados por (tienda, bloque, subbloque) del
@@ -489,6 +495,12 @@ as $$
       a.base_siguiente,
       a.base_normalizada,
       coalesce(a.decidido, a.propuesto, 0) as vig,
+      (
+        a.decidido is not null
+        and a.decision_lote_id is null
+        and a.decision_ia_fila_id is null
+        and a.origen is not distinct from 'manual'
+      ) as es_manual,
       coalesce((select sum(x.u) from unnest(a.meses) as x(u)), 0) as suma_meses,
       coalesce((select sum(x.u) from unnest(a.meses) with ordinality as x(u, i) where x.i > pr.k), 0) as resto,
       f.clave,
@@ -594,7 +606,7 @@ as $$
       sum(r.w * r.propuesto) filter (where r.base_siguiente is not null) as propuesto_con_b,
       sum(r.w * r.vig) filter (where r.base_siguiente is null) as vigente_sin_b,
       sum(r.w * (r.vig - coalesce(r.propuesto, 0))) filter (
-        where r.base_siguiente is not null and r.origen is not distinct from 'manual'
+        where r.base_siguiente is not null and r.es_manual
       ) as delta_manual,
       sum(r.w * r.vig) filter (where r.base_con_b) as para_base,
       bool_or(r.en_mismas_sig) as en_mismas_sig
@@ -662,10 +674,10 @@ as $$
       coalesce(sum(r.vig) filter (where not r.es_y and r.tienda_id is null and r.base_siguiente is not null), 0) as vigente_con_b,
       coalesce(sum(r.vig) filter (where not r.es_y and r.tienda_id is null and r.base_siguiente is null), 0) as vigente_sin_b,
       coalesce(sum(r.vig - coalesce(r.propuesto, 0)) filter (
-        where not r.es_y and r.tienda_id is null and r.base_siguiente is not null and r.origen is not distinct from 'manual'
+        where not r.es_y and r.tienda_id is null and r.base_siguiente is not null and r.es_manual
       ), 0) as delta_manual,
       coalesce(sum(r.vig - coalesce(r.propuesto, 0)) filter (
-        where not r.es_y and r.tienda_id is null and r.base_siguiente is not null and r.origen is distinct from 'manual'
+        where not r.es_y and r.tienda_id is null and r.base_siguiente is not null and not r.es_manual
       ), 0) as delta_otras,
       coalesce(sum(r.vig) filter (
         where not r.es_y and r.tienda_id is not null and r.bloque <> 'cierres' and r.subbloque is not distinct from 'nuevas_anterior'
@@ -677,6 +689,38 @@ as $$
       coalesce(sum(r.vig) filter (where not r.es_y), 0) as total
     from reg r
     group by 1, 2
+  ),
+  gmm as materialized (
+    select
+      q.genero_id,
+      q.mundo_id,
+      jsonb_agg(round(q.u) order by q.i) as meses,
+      jsonb_agg(round(q.u_sn, 2) order by q.i) as meses_sn
+    from (
+      select
+        r.genero_id,
+        r.mundo_id,
+        x.i,
+        coalesce(sum(x.u), 0) as u,
+        coalesce(sum(
+          x.u / (
+            case
+              when jsonb_typeof(r.phi -> (x.i - 1)::integer) = 'number' then
+                case
+                  when (r.phi ->> (x.i - 1)::integer)::numeric > 0 then (r.phi ->> (x.i - 1)::integer)::numeric
+                  else 1::numeric
+                end
+              else 1::numeric
+            end
+          )
+        ), 0) as u_sn
+      from reg r
+      cross join lateral unnest(r.meses) with ordinality as x(u, i)
+      where r.es_y
+        and r.tienda_id is null
+      group by 1, 2, 3
+    ) q
+    group by q.genero_id, q.mundo_id
   ),
   dimr as materialized (
     select
@@ -871,7 +915,13 @@ as $$
                jsonb_build_object(
                  'g', g.genero_id,
                  'm', g.mundo_id,
-                 'Y', jsonb_build_object('cierre', g.y_cierre, 'base', g.y_base, 'fuera_base_exacto', g.y_fuera),
+                 'Y', jsonb_build_object(
+                        'cierre', g.y_cierre,
+                        'base', g.y_base,
+                        'fuera_base_exacto', g.y_fuera,
+                        'base_meses', coalesce(mm.meses, '[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]'::jsonb),
+                        'base_meses_sin_nino', coalesce(mm.meses_sn, '[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]'::jsonb)
+                      ),
                  'Y1', jsonb_build_object(
                          'B', g.b,
                          'B_corr', g.b_corr,
@@ -889,6 +939,9 @@ as $$
                order by g.genero_id, g.mundo_id
              )
       from gm g
+      left join gmm mm
+        on mm.genero_id = g.genero_id
+       and mm.mundo_id = g.mundo_id
     ), '[]'::jsonb),
     'por_dim', case
       when pr.desglose in ('genero', 'mundo', 'linea', 'agrupacion_marca', 'marca', 'temporada') then coalesce((
@@ -1521,10 +1574,10 @@ revoke all on public.aprobaciones_direccion from public, anon, authenticated, se
 grant select, insert on public.aprobaciones_direccion to service_role;
 
 -- ---------------------------------------------------------------------------
--- MEDICIÓN 0041 (puerta de la ficha §2.4) · estado al 2026-11-10: PENDIENTE DE LOS TIEMPOS REALES
+-- MEDICIÓN 0041 (puerta de la ficha §2.4) · estado al 2026-11-10: MEDIDA EN VECTOR-TWO (punto 5); cumple tiempo y tamaño
 -- ---------------------------------------------------------------------------
--- La medición definitiva (tiempo en frío y en caliente y tamaño del documento, cinco casos) se hace llamando a `tablero_venta` YA
--- APLICADA en vector-two, con un `statement_timeout` corto, y se anota aquí. Lo que hay hasta ese momento:
+-- La medición definitiva se hizo llamando a las funciones YA APLICADAS en vector-two, con `statement_timeout` de 20 s (punto 5).
+-- Los puntos 1 a 4 son el camino hasta ahí:
 --
 -- 1. Lo que pasó en vector-two (solo lecturas, sin crear nada). La PRIMERA versión del cuerpo (dimensiones en CTEs filtradas por
 --    parámetros y un preagregado por nodo x AM x tienda x mes), medida como consulta suelta con `explain (analyze, buffers)` en el
@@ -1559,6 +1612,18 @@ grant select, insert on public.aprobaciones_direccion to service_role;
 --    veces: en `precios.gml` y en `por_dim.ids`), no de rendimiento. `tablero_proyeccion` sin desglose: `por_par` (un uuid por nodo
 --    más una tupla por par) pesa unos 55 KB con 1 606 pares, así que el documento rondará los 80 KB, por encima de los 60 KB que
 --    estima la ficha; con `desglose = linea`, `por_dim` añade unos 230 bytes por nodo (las tiendas van con su uuid completo).
+--
+-- 5. MEDICIÓN REAL en vector-two (2026-11-10, funciones aplicadas, solo lecturas, `statement_timeout` 20 s; proyección cerrada con
+--    datos hasta 2026-09; `desde` 2023-01, `hasta` 2026-09, `k_prima` 9):
+--      * `tablero_venta`, caso 1 (sin filtros, `desglose = linea`, con `proyeccion_id`): 2,25 s la primera llamada y 2,00 s la
+--        segunda; documento de 120 KB (412 tuplas en `por_tienda`, 569 filas de `por_dim`, 1 470 de `precios`). Cumple los 2,5 s
+--        y los 150 KB.
+--      * `tablero_venta` con `temporadas = [verano]` y `desglose = marca`: 1,79 s; 39 KB.
+--      * `tablero_venta` con `solo_tendencia`: 0,49 s; 29 KB.
+--      * `tablero_proyeccion`: 0,47 s sin desglose (75 KB) y 0,47 s con `desglose = linea` (201 KB: por encima de lo que estimaba
+--        la ficha; no viaja al navegador, lo consume el servidor). `huella_proyeccion`: 79 ms.
+--    Los casos 2 a 4 de la ficha (marca sin filtros, una AM, una unidad de marca con una tienda) no se midieron en real: el plan
+--    recorre siempre toda la tabla, así que cuestan lo mismo que el caso 1 (comprobado en local, punto 2).
 
 -- ---------------------------------------------------------------------------
 -- 8. Registro de esta migración (convención de la 0035: la última sentencia)
