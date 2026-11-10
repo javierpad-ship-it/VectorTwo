@@ -1,584 +1,894 @@
 # M14 · Tablero de aprobación de dirección (proyección mes a mes frente a lo vendido)
 
-> Estado: **especificada (2026-11-09), pendiente de las decisiones de Javier (§10) y de la revisión independiente (`arquitecto-revisor`, opus) antes de construir.** Módulo nuevo, número 14 (libre: las fichas llegan hasta `13-intercompany.md`). Versión prevista **`0.19.0 · M14`** (la siguiente a la vigente `0.18.0 · M8 c`; módulo nuevo, sube la menor). Commits `M14: ...`. Una migración, citada con el marcador **`00D1_tablero_direccion.sql`** (decisión 48: `datos` le pone la siguiente libre al cerrar; hoy sería la **`0041`**, que `docs/PLAN.md` §5 tiene reservada para «la tabla de agregados de venta» cuyo alcance «lo fija su ficha»: esta ficha es la que lo fija, §2.4). Depende de [07](07-proyeccion-anual.md) (§3 bloques, §5 método, §6.3 a 6.6, `GET /api/proyeccion/cerrada` y `…/mensual`), [07c](07c-crecimientos-por-genero-mundo.md) (crecimiento declarado por GM), [06e](06e-cierre-del-anio-y-base-sin-nino.md) (base corregida del Niño, `estadoFactorY`), [07f](07f-venta-por-tienda-en-crecimientos.md) (venta por tienda sin CD, atribución por tienda informativa, decisiones 110 a 113), [07g](07g-aprobacion-en-bloque.md) (huellas, filas aprobadas en bloque) y [08](08-flujo-y-compras.md) (M8 lee la cerrada). Cifras sintéticas; ningún dato real de Lukers.
+> **Estado: especificada y ajustada tras dos revisiones (2026-11-10); lista para construir.** Primera versión el 2026-11-09 (commit `acddbcc`); la revisó el `arquitecto-revisor` (bloqueantes B1 a B3, importantes I1 a I8, menores M1 a M10) y el coordinador (hallazgos 1 a 13), y Javier decidió el 2026-11-10 (§12 mapea cada hallazgo a dónde quedó). Módulo nuevo, número 14. **Primera entrega `0.19.0 · M14`** (todo lo de esta ficha salvo §8); **segunda entrega `0.19.1 · M14`** (§8, opcional, la primera no depende de ella). Commits `M14: ...`. **Una migración: `0041_tablero_direccion.sql`** (Javier autorizó aplicarla con ese nombre en `vector-two` cuando esté probada en local; la reserva de la `0041` para la tabla de agregados de venta se retira, decisión 140). Depende de [07](07-proyeccion-anual.md) (bloques, método, cierre), [07c](07c-crecimientos-por-genero-mundo.md) y 06d (crecimientos por GM y sus versiones), [06e](06e-cierre-del-anio-y-base-sin-nino.md) (base corregida del Niño, `estadoFactorY`), [07f](07f-venta-por-tienda-en-crecimientos.md) (atribución por tienda, decisión 111, que esta ficha **reutiliza** sin cambiarla), [07g](07g-aprobacion-en-bloque.md) (lotes, `bloqueosDeLote`) y [08](08-flujo-y-compras.md) (qué cerrada lee Compras). Todas las cifras de esta ficha son sintéticas.
 
-**Petición de Javier (textual):** «para poder aprobar a nivel de dirección necesito un dashboard para aprobar las proyecciones, donde vea y pueda filtrar por GML y tiendas lo que se está proyectando para cada mes, teniendo en cuenta lo vendido en los años pasados y el que va en curso». **Precisión posterior (coordinador, a pedido de Javier):** la **agrupación de marca es un filtro de primer nivel**, combinable con todos los demás, que se aplica a lo proyectado y a la venta de años pasados y del año en curso y sale en el Excel; si es razonable, también la **marca individual** dentro de una agrupación.
+**Petición de Javier (textual):** «para poder aprobar a nivel de dirección necesito un dashboard para aprobar las proyecciones, donde vea y pueda filtrar por GML y tiendas lo que se está proyectando para cada mes, teniendo en cuenta lo vendido en los años pasados y el que va en curso». Precisiones posteriores: la **agrupación de marca** es filtro de primer nivel; **soles y cobertura** como datos de apoyo; **solo el admin aprueba**; la aprobación **no bloquea** el cierre ni las compras, pero los avisos deben ser visibles (quién cerró, cuándo, y que no hay aprobación vigente).
 
 ## 1. Objetivo
 
-Hoy la proyección se trabaja en cinco pestañas pensadas para el planner (Por línea, Matriz, Mensual, Crecimientos, Aprobación en bloque) y no hay un lugar donde dirección vea, en una sola pantalla y mes a mes, **qué se está proyectando** (el cierre del año en curso y el año siguiente) **frente a lo vendido** en los tres años anteriores y en lo que va del año, recortado por género, mundo, línea, agrupación de marca, marca y tienda. M14 da ese tablero (gráfico mensual, tabla, comparativos y alertas) en **solo lectura**, y añade un **registro inmutable de aprobación de dirección**: quién aprobó, cuándo, qué proyección y con qué huella exacta de cifras, con resultado *aprobada*, *con observaciones* o *rechazada*. La aprobación **queda invalidada sola** si la proyección cambia después. No cambia ningún cálculo de M7 ni lo que M8 lee.
+Hoy la proyección se trabaja en pestañas pensadas para el planner y nadie la aprueba: un planner puede aceptar filas, fijar factores y cerrar, y esa cerrada es la que lee Compras sin que dirección la haya visto. M14 da a dirección **una sola pantalla de solo lectura** que responde, en este orden, **qué se va a comprar** (2027 y el cierre de 2026, mes a mes, frente a lo vendido de 2023 a 2026), **de dónde sale el aumento** (puente de 2026 a 2027: base, corrección del Niño, crecimiento declarado, decisiones a mano, aperturas y cierres), **qué riesgo corre** (alertas: lo que bloquearía el cierre, factores provisionales y cuántas unidades exponen, crecimiento contra la tendencia, quién decidió y cómo, concentración) y **qué cambió desde lo último aprobado**, recortable por género (varios, con atajo «Resto»), mundo, línea, temporada, agrupación de marca, marca y tiendas. Encima añade un **registro inmutable de aprobación de dirección** (aprobada, con observaciones o rechazada; quién, cuándo y sobre qué huella exacta de cifras) que queda invalidado solo si la proyección cambia, y **avisos visibles** en Proyección y en Flujo mensual cuando la cerrada que usa Compras no tiene aprobación vigente. No cambia ningún cálculo de M7, no bloquea nada y no cambia lo que M8 lee.
 
 ### 1.1 Decisiones de diseño (con su porqué)
 
 | # | Decisión | Por qué / descartado |
 |---|---|---|
-| D1 | **Tablero de solo lectura sobre lo guardado.** Lee `proyeccion_fila_anios.meses` (el reparto ya hecho) y nunca recalcula ni reparte. | Es lo que dice 07 §5 paso 6 («la vista Mensual y `GET /api/proyeccion/cerrada` suman; nunca vuelven a repartir»). Así lo que ve dirección es exactamente lo que M8 consumirá. |
-| D2 | **Unidades, no soles.** El histórico trae soles, pero la proyección no proyecta soles (decisión 110: no se inventan soles del cierre). El tablero compara unidades con unidades. | Mezclar S/ reales con u proyectadas invita a leer un crecimiento en soles que nadie decidió. Soles: §7. |
-| D3 | **Agrupación de marca (AM) como filtro de primer nivel**, con el mismo peso que GML y tienda. En la proyección es exacto (cada fila es GML × AM). En la venta es exacto (se resuelve con la unidad de marca, como `venta_proyeccion`). | Petición expresa de Javier. |
-| D4 | **Marca individual: sí, como filtro de segundo paso dentro de una AM.** Venta: exacta. Proyección: **estimada** con `participaciones.por_marca` de la fila base (07 «Cambios 0.10.1» punto 4, I6), rotulada «estimado». | M7 no decide por marca; la única forma honesta de recortar lo proyectado por marca es la participación histórica que ya guarda la cerrada y que M8 usa para repartir. Descartado: releer venta por marca para cada fila (no cambia nada: es la misma participación). |
-| D5 | **Tienda: exacta en tiendas nuevas y cierres; estimada en mismas tiendas.** Las filas base (`tienda_id null`) suman todo `M(Z)` y no tienen tienda; lo de una tienda «misma» se atribuye por su participación en la venta de los últimos 12 meses cerrados del mismo recorte, rotulado «estimado». | Es el criterio de 07f (decisión 111: atribución informativa proporcional al real, que cuadra en la suma). Descartado: guardar la proyección por tienda (cambiaría M7 y el contrato de M8). |
-| D6 | **Se muestra por defecto la cerrada vigente** del año en curso (la que lee M8), con un selector para ver otra (en trabajo, archivada) y la opción **«Comparar con»** una segunda proyección (p. ej. la cerrada frente a «seguimiento sep»). | Dirección aprueba lo que va a comprar; la en trabajo es útil para ver hacia dónde se mueve. §4.3. |
-| D7 | **Aprobar es solo del `admin`** (`requireAdmin`); admin y planner ven el tablero y el historial; el comprador no ve nada (decisión 113). **Sin rol nuevo.** | Es la opción más simple y segura con los tres roles de hoy. Un rol `direccion` (ver sin poder editar maestros) se puede añadir después sin cambiar el registro (guarda `rol` y `perfil_id`). §5.1. |
-| D8 | **La aprobación no bloquea ni el cierre ni el flujo/compras; se ve como estado y aviso** («cerrada sin aprobación de dirección vigente») en la cabecera de Proyección y de Flujo mensual. | §5.1: las opciones de bloquear quedan descartadas con su porqué. |
-| D9 | **Huella de cifras calculada en SQL** (`huella_proyeccion`), en una sola sentencia; la aprobación guarda la huella y se compara al leer. Cambia la huella → la aprobación pasa a **invalidada** (derivado, no se escribe). | Evita paginar 9 000 registros en Node para hacer un hash y garantiza que la huella sale de un solo estado de los datos. |
-| D10 | **Dos funciones de lectura agregadas y filtradas en SQL** (venta y proyección), que devuelven un `jsonb` pequeño (≤ 300 KB), más una caché en proceso por huella. Plan B medido: una tabla de agregados de venta de solo inserción por carga (§2.4). | El límite de 1 000 filas de PostgREST no aplica a un `jsonb` de una fila, y el corte de 8 s se respeta agregando en la base. |
+| D1 | **Solo lectura sobre lo guardado.** Suma `proyeccion_fila_anios.meses` (el reparto ya hecho) y la venta publicada; nunca recalcula ni reparte la proyección. | 07 §5 paso 6: lo que se ve es lo que M8 consume. En la cerrada real `Σ meses = Σ vigente` exacto (medido por el revisor). |
+| D2 | **Unidades como medida principal; soles y cobertura como datos de apoyo rotulados.** Soles reales de 2023 a 2026; lo proyectado valorizado al precio medio de los últimos 12 meses de cada línea × agrupación de marca, siempre «estimado». Stock del último mes publicado (tiendas y CD) y meses de cobertura. | Decisión de Javier (2026-11-10). M7 no proyecta soles (decisión 110): el tablero no los guarda ni los pasa a ningún otro módulo; los calcula al mostrar y los rotula. |
+| D3 | **Agrupación de marca (AM) como filtro de primer nivel**, exacta en proyección (cada fila es GML × AM) y en venta (AM de la unidad de marca, como `venta_proyeccion`). | Petición de Javier. |
+| D4 | **«Marca» es la unidad de marca** (la cabeza de `marcas_unidad`). Venta exacta (todas las marcas de la unidad); proyección estimada con `participaciones.por_marca` de la fila base, que M7 guarda **por unidad de marca**. En `0.19.0` una sola unidad a la vez; varias en `0.19.1`. | Es la única granularidad por la que M7 guarda participación; filtrar por la marca real dejaría en cero a un miembro de un conjunto de otra cabeza (M7 del revisor). |
+| D5 | **Tienda: la misma atribución que 07f para el año (decisión 111) y un reparto mensual nuevo, compartido.** Tiendas de bloque (nuevas, aperturas, cierres de `Y+1`) exactas; las mismas tiendas, estimadas. Enero a `k` del año en curso: real exacto. §3.4. | B1 e I5 del revisor y decisión del coordinador. Dos pantallas no deben dar dos cifras para la misma tienda. |
+| D6 | **Por defecto se abre la cerrada que usa Compras**, con la misma regla que M8 (`hastaPorDefecto` + `planHorizonte`), y **«Comparar con» por defecto es la última proyección aprobada**. | I8 y hallazgo 13: en enero «la cerrada del año en curso» no existe; M8 usa la del año anterior. I6 y hallazgo 8: dirección aprueba cada mes y lo que necesita ver es la diferencia con lo último que aprobó. |
+| D7 | **Aprueba solo el `admin`**; admin y planner ven el tablero; el comprador no entra (decisión 113). Sin rol nuevo. | Decisión de Javier. |
+| D8 | **La aprobación no bloquea ni el cierre ni el flujo; avisa.** En Proyección y en Flujo mensual (admin y planner): quién cerró, cuándo, el estado de dirección y, si no hay aprobación vigente, cuánto difiere de lo último aprobado. «Con observaciones» cuenta como aprobación vigente. | Decisión de Javier. La diferencia con lo aprobado evita que el aviso se vuelva ruido (M9). |
+| D9 | **Huella de cifras en SQL, por contenido y no por identificador.** Usa la `clave` de cada fila (estable entre copias) y no `proyeccion_id` ni `fila_id`: dos proyecciones con las mismas cifras tienen la misma huella, y el tablero puede decir «idéntica a la aprobada». La aprobación **no se transfiere**: el estado es siempre de la proyección mostrada. | Hallazgo 10 del coordinador y M9 del revisor. |
+| D10 | **Una sola huella para el `resumen` y el registro.** El `resumen` de la aprobación sale de una lectura que trae su huella; si difiere de la que vio el admin, `409` antes de registrar; la función de registro vuelve a comparar. | I3. |
+| D11 | **Contrato de tamaño por elemento.** El desglose trae totales por elemento (años, ene–`k'`, cierre, 2027), nunca series mensuales por elemento; la serie mensual de un elemento se ve **eligiéndolo**, que lo aplica como filtro. | B3: con series por elemento, el desglose por línea pesaba 1,15 MB. |
+| D12 | **Lo que bloquearía el cierre sale de las reglas de M7, no de una copia.** Conteos con `filaBloqueaCierre`; causas con `motivoRechazoCerrar` en modo comprobación, a través de `bloqueosDeLote` (07g). | B2. |
+| D13 | **Sin tabla de agregados de venta en M14.** Si la medición falla, la salida es no preagregar por marca cuando no hace falta, más la caché. | I1: el plan B no se podía construir así; tendrá su propia ficha. |
+| D14 | **2023 y 2026 son años del Niño** y se rotulan como tales (de `periodos_atipicos`, no a mano); se destaca «2027 frente a 2025, último año normal» y se dibuja la línea derivada «2026 sin Niño». | I7 y hallazgo 5. |
 
-## 2. Modelo de datos (`00D1_tablero_direccion.sql`)
+## 2. Modelo de datos (`supabase/migrations/0041_tablero_direccion.sql`)
 
-Convenciones de `docs/PLAN.md` §3 y de `0013` a `0040`: idempotente (`create table if not exists`, `create or replace function`, `create index if not exists`, `create or replace trigger`), **sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`** en la migración, sin bloques `do $$`, sin backfill, cuerpos de función sin comentarios `--`, identificadores ≤ 63 caracteres. Toda tabla con `id uuid`, `activo`, `created_at`, `updated_at`, RLS activo **sin políticas**, `revoke all … from public, anon, authenticated`. Funciones `security invoker`, `set search_path = ''`, todo calificado con esquema, `revoke execute … from public, anon, authenticated`, `grant execute … to service_role`, `comment on`. Al final, `insert into public.migraciones_aplicadas … on conflict do nothing` (patrón de la `0035`). Se aplica con el MCP de Supabase **en `vector-two`, nunca en `lukers-compras`**.
+Convenciones de `docs/PLAN.md` §3 y de `0013` a `0040`: idempotente (`create table if not exists`, `create or replace function`, `create index if not exists`, `create or replace trigger`), **sin `DROP`, `DELETE`, `TRUNCATE` ni `UPDATE`**, sin bloques `do $$`, sin backfill, cuerpos de función sin comentarios `--`, identificadores ≤ 63 caracteres. Tabla con `id uuid`, `activo`, `created_at`, `updated_at`, RLS activo **sin políticas**. Funciones `security invoker`, `set search_path = ''`, todo calificado con esquema, `revoke execute … from public, anon, authenticated`, `grant execute … to service_role`, `comment on function`. Al final, `insert into public.migraciones_aplicadas (nombre, nota) values ('0041_tablero_direccion', '…') on conflict (nombre) do nothing` (patrón de la `0040`). Se aplica con el MCP de Supabase **en `vector-two`, nunca en `lukers-compras`**, después de pasar el humo en local dos veces.
+
+Contenido: una tabla (`aprobaciones_direccion`), su trigger de inmutabilidad y cuatro funciones (`huella_proyeccion`, `tablero_proyeccion`, `tablero_venta`, `registrar_aprobacion_direccion`). Ninguna tabla ni columna existente cambia.
 
 ### 2.1 Tabla `aprobaciones_direccion` (solo inserción)
 
-Una fila por acto de aprobación. Nunca se edita ni se borra: una aprobación nueva sobre la misma proyección **no reemplaza** la anterior, se suma al historial; la «vigente» se deriva al leer (§5, R10).
+Una fila por acto de aprobación. Nunca se edita ni se borra; una aprobación nueva sobre la misma proyección se suma al historial y el estado se deriva al leer (§5.1).
 
 | Columna | Tipo | Null | Notas |
 |---|---|---|---|
 | `id` | `uuid pk default gen_random_uuid()` | no | |
-| `proyeccion_id` | `uuid → proyecciones(id) on delete restrict` | no | **`restrict`**: una proyección con aprobaciones no se puede eliminar (hoy solo se elimina una en trabajo sin decisiones, 07 §6.3); la API traduce el error a `409 tiene_aprobaciones` («archívala»). Índice `(proyeccion_id, created_at desc)`. |
-| `anio_en_curso` | `integer` | no | Copia de `proyecciones.anio_en_curso` al aprobar; `check between 2024 and 2100`. Para listar sin unir. |
-| `estado_proyeccion` | `text` | no | `check in ('en_trabajo','cerrada')`: el estado de la proyección **al aprobar**. Una archivada no se aprueba. |
-| `huella` | `text` | no | `check (huella ~ '^[0-9a-f]{32}$')`: md5 de `huella_proyeccion` (§2.3) en el instante de aprobar, calculada **por la función de registro**, no por el cliente. |
-| `resultado` | `text` | no | `check in ('aprobada','con_observaciones','rechazada')`. |
-| `comentario` | `text` | sí | `check (char_length(comentario) <= 1000)`. |
-| `motivo` | `text` | sí | `check (char_length(motivo) <= 60)`; catálogo validado por zod (§3.2): `crecimiento_alto`, `crecimiento_bajo`, `tiendas_nuevas`, `nino`, `filas_sin_decidir`, `concentracion`, `otro`. **Obligatorio si `resultado <> 'aprobada'`**: `check ((resultado = 'aprobada') or (motivo is not null and comentario is not null and char_length(btrim(comentario)) >= 10))`. |
-| `resumen` | `jsonb` | no | Foto de lo que se aprobó, para leerla aunque la proyección cambie: `{ hasta_periodo, version_metodo, totales: { anio, vigente, vendido }[], por_gm: { gm_clave, nombre, en_curso, siguiente, crecimiento_declarado_pct, crecimiento_implicito_pct }[], alertas: { codigo, cantidad }[], filtros_vistos }`. Lo arma el servidor (≤ 32 KB; `check (pg_column_size(resumen) <= 65536)`). `filtros_vistos` es informativo: **la aprobación es siempre de la proyección entera**, no del recorte (R12). |
+| `proyeccion_id` | `uuid → proyecciones(id) on delete restrict` | no | `restrict`: una proyección con aprobaciones no se elimina (hoy solo se elimina una en trabajo sin decisiones, 07 §6.3); la API traduce el error a `409 tiene_aprobaciones` («archívala»). Borrar una proyección no debe borrar el rastro de una decisión de dirección. |
+| `anio_en_curso` | `integer` | no | Copia de `proyecciones.anio_en_curso` al aprobar; `check (anio_en_curso between 2024 and 2100)`. |
+| `estado_proyeccion` | `text` | no | `check (estado_proyeccion in ('en_trabajo','cerrada'))`: el estado **al aprobar**. Una archivada no se aprueba. |
+| `huella` | `text` | no | `check (huella ~ '^[0-9a-f]{32}$')`: la de `huella_proyeccion` (§2.3 a) **recalculada por la función de registro**, nunca la del cliente. |
+| `resultado` | `text` | no | `check (resultado in ('aprobada','con_observaciones','rechazada'))`. |
+| `motivo` | `text` | sí | `check (motivo is null or motivo in ('crecimiento_alto','crecimiento_bajo','contra_tendencia','tiendas_nuevas','nino','filas_sin_decidir','concentracion','otro'))`. |
+| `comentario` | `text` | sí | `check (comentario is null or char_length(comentario) <= 1000)`. Regla: `check (resultado = 'aprobada' or (motivo is not null and comentario is not null and char_length(btrim(comentario)) >= 10))`. |
+| `resumen` | `jsonb` | no | Foto de lo aprobado, para leerla aunque la proyección cambie (forma exacta en §3.3, `ResumenAprobacionApi`): `huella`, `hasta_periodo`, `version_metodo`, totales por año y bloque, puente total, por GM (cierre del año en curso, base, 2027 por bloque, crecimiento declarado e implícito) y conteo de alertas por código. `check (pg_column_size(resumen) <= 65536)` y **`check ((resumen ->> 'huella') = huella)`**: la foto y la huella son del mismo estado (D10). |
 | `perfil_id` | `uuid → perfiles(id) on delete set null` | sí | Índice. `set null` para no impedir eliminar un usuario; el nombre queda. |
-| `usuario_nombre` | `text` | no | Nombre o correo al aprobar (`check (char_length(usuario_nombre) between 1 and 200)`). |
-| `rol` | `text` | no | `check in ('admin','planner','comprador')`: el rol al aprobar (hoy siempre `admin`; queda para cuando exista otro rol aprobador). |
-| `activo` | `boolean not null default true` | no | Por convención; **sin uso** (no se «desactiva» una aprobación: se registra otra). |
-| `created_at`, `updated_at` | `timestamptz not null default now()` | no | Trigger `tg_set_updated_at` por convención (nunca se dispara: no hay `update`). |
+| `usuario_nombre` | `text` | no | `check (char_length(usuario_nombre) between 1 and 200)`; sale de la sesión. |
+| `rol` | `text` | no | **`check (rol = 'admin')`**: hoy solo aprueba el admin (D7). Un rol aprobador futuro (`direccion`) exigirá su propia migración, que es donde debe decidirse. |
+| `activo` | `boolean not null default true` | no | Por convención; sin uso (no se «desactiva» una aprobación: se registra otra). |
+| `created_at`, `updated_at` | `timestamptz not null default now()` | no | Trigger `tg_set_updated_at` por convención (no se dispara: no hay `update`). |
 
-**Inmutabilidad (patrón de `proveedor_eventos`, `0039`).** Función de trigger `tg_aprobaciones_direccion_inmutable()` que rechaza `delete`, `truncate` y todo `update` **salvo** el que solo pone `perfil_id` en `null` (lo hace la FK `set null`), con `errcode = 'restrict_violation'` y el mensaje «aprobaciones_direccion es un registro inmutable». Triggers `before update or delete … for each row` y `before truncate … for each statement`. Vale también para `service_role`.
+Índices: `(proyeccion_id, created_at desc)` (estado e historial), `(created_at desc) where resultado <> 'rechazada'` (la última aprobada, D6), `(perfil_id)`.
 
-**Privilegios (regla de la `0035` y hallazgo H-6 de la `0040`).** `revoke all on public.aprobaciones_direccion from public, anon, authenticated, service_role;` y después `grant select, insert on … to service_role;` (sin `update`, `delete`, `truncate`, `references` ni `trigger`). Se añade a la lista de tablas de solo inserción que `docs/PLAN.md` cita en la `0035`.
+**Inmutabilidad (patrón de `proveedor_eventos`, `0039`, y `tg_proyeccion_lote_inmutable`, `0031`).** Función de trigger `tg_aprobaciones_direccion_inmutable()` que rechaza `delete`, `truncate` y todo `update` **salvo** el que solo cambia `perfil_id` a `null` (lo hace la FK `set null`), con `errcode = 'restrict_violation'` y el mensaje «aprobaciones_direccion es un registro inmutable». Triggers `before update or delete … for each row` y `before truncate … for each statement`. Vale también para `service_role`.
 
-**Por qué una tabla propia y no columnas en `proyecciones`.** Una proyección puede tener varias aprobaciones en su vida (una con observaciones, luego aprobada; aprobada, cambia, vuelta a aprobar) y la pregunta de auditoría es «quién vio qué y cuándo»: con columnas se pisaría la historia. **Por qué `restrict` y no `cascade`.** Borrar una proyección no debe borrar el rastro de una decisión de dirección.
+**Privilegios (regla de la `0035` y H-6 de la `0040`).** `revoke all on public.aprobaciones_direccion from public, anon, authenticated, service_role;` y luego `grant select, insert on public.aprobaciones_direccion to service_role;` (sin `update`, `delete`, `truncate`, `references` ni `trigger`). Entra en la lista de tablas de solo inserción de `docs/PLAN.md`.
+
+**Por qué una tabla y no columnas en `proyecciones`:** una proyección puede tener varias aprobaciones (con observaciones, luego aprobada; aprobada, cambia y se vuelve a aprobar) y la pregunta de auditoría es «quién vio qué y cuándo».
 
 ### 2.2 Qué se lee de lo que ya existe (sin escribir nada)
 
 | Dato | De dónde | Para qué |
 |---|---|---|
-| `anio_en_curso`, `nombre`, `estado`, `hasta_periodo` (`k`), `calculando_desde`, `cerrada_at`, `cerrada_por_nombre`, `resumen.version_metodo`, `resumen.gm_con_nino`, `parametros.bloques[Y]` y `[Y+1]` (con `claves`), `parametros.factores_usados` | `proyecciones` | Cabecera, bloques de tiendas (mismas, nuevas, aperturas, cierres, fuera) **con los que se calculó**, claves de pertenencia `M(Y−3)…M(Y+1)` para «mismas tiendas» en los años históricos |
-| Por registro activo: `anio`, `bloque`, `subbloque`, `vendido`, `propuesto`, `decidido`, `origen`, `meses[12]`, `origen_meses[12]`, `base_siguiente` (`B`), `base_normalizada` (`B'`), `crecimiento_pct`, `avisos`; de la fila: `gml_id`, `equivalencia_id`, `agrupacion_marca_id`, `tienda_id`, `participaciones->'por_marca'` (solo filas base) | `proyeccion_fila_anios` ⋈ `proyeccion_filas` (`activo = true`), **dentro de `tablero_proyeccion`** (§2.3) | Serie mensual proyectada, totales, decididas / sin decidir, crecimiento implícito, alertas |
-| `decidido`, `propuesto`, `vendido`, `bloque`, `subbloque`, `fecha_usada` por tienda y año | `proyeccion_tiendas` (pocas filas, `leerTodo`) | Tiendas nuevas y cierres sin decidir; textos de apertura |
-| `pct`, `sobre_base` por GM; el Resto en `parametros.crecimiento_pct_defecto` / `crecimiento_resto_usado` | `proyeccion_crecimientos` (≤ 2 × 5 filas) | Crecimiento **declarado** |
-| Efectivo, `parcial`, estado por temporada de `Y` | `factores_volumen_atipico` + `estadoFactorY` (`src/lib/proyeccion`), reutilizado tal cual | Alerta «factor provisional» |
-| Venta histórica y del año en curso por mes, tienda y dimensión del desglose | `venta_stock_vigente` (solo cargas publicadas), **dentro de `tablero_venta`** (§2.3) | Las líneas 2023, 2024, 2025 y el real del año en curso |
-| Catálogo (géneros, mundos, líneas, nodos GML/GMLE, agrupaciones de marca, marcas y su unidad de marca, tiendas con código y nombre) | `cargarCatalogo`, `leerAgrupacionesMarca`, tablas pequeñas con `leerTodo` | Filtros y nombres |
+| `anio_en_curso`, `nombre`, `estado`, `hasta_periodo` (`k`), `calculando_desde`, `calculado_at`, `cerrada_at`, `cerrada_por_nombre`, `usuario_nombre`, `resumen.version_metodo`, `resumen.gm_con_nino`, `resumen.desvio_prueba_anterior_pct`, `parametros.bloques` de `Y` y `Y+1` (cada tienda trae su `clave` de pertenencia de cinco posiciones, que da `M(Y−3)` a `M(Y+1)`; no hay un mapa `claves` aparte, M10), `parametros.crecimiento_objetivo_pct`, `parametros.umbral_cola_larga` | `proyecciones` | Cabecera, quién cerró, conjuntos de tiendas `M(Z)` de 2023 a 2027, precisión del método y objetivo global |
+| Registros activos de filas activas: `anio`, `bloque`, `subbloque`, `vendido`, `propuesto`, `decidido`, `origen`, `decision_lote_id`, `decision_ia_fila_id`, `decidido_por_nombre`, `decidido_at`, `propuesta_al_decidir`, `meses`, `meses_propuestos`, `base_siguiente` (`B`), `base_normalizada` (`B'`); de la fila: `clave`, `gml_id`, `equivalencia_id`, `agrupacion_marca_id`, `tienda_id`, `temporada`, `factores_mes`, `participaciones->'por_marca'` | `proyeccion_fila_anios` ⋈ `proyeccion_filas`, **dentro de `tablero_proyeccion` y `huella_proyeccion`** | Series, puente, decisiones, exposición a factores, «2026 sin Niño» |
+| Para lo que bloquearía el cierre (solo en trabajo): `propuesto`, `decidido`, `avisos` de los registros base | `leerFilasConAnios(…, { columnas: "ligeras", tiendaId: null, soloActivas: true })`, **la misma lectura que usa `cerrarProyeccion`** | `filaBloqueaCierre` (D12) |
+| `proyeccion_tiendas` activas (`decidido`, `propuesto`, `venta_esperada_usada`, `bloque`, `anio`) | `leerTiendasProyeccion` | `tiendas_sin_decidir` (vía `motivoRechazoCerrar`) y la huella |
+| `proyeccion_crecimientos` activos (`pct`, `sobre_base`, `version`, `crecimiento_id`); versiones de `crecimientos_genero_mundo` del año `Y+1` (vigentes y reemplazadas: `version`, `estado`, `aprobada_at`, `usuario_nombre`, `nota`, `base_valor`) | lecturas pequeñas con `leerTodo` | Crecimiento declarado, anomalías del crecimiento |
+| Factores del Niño de `Y` y su estado | `factores_volumen_atipico` + `estadoFactorY` (`src/lib/proyeccion/factor-nino.ts`), sin modificar | Exposición a factores provisionales |
+| Años del Niño | `periodos_atipicos` activos | Rótulos (D14) |
+| Venta, soles y stock por mes, tienda y dimensión | `venta_stock_vigente` (cargas publicadas), **dentro de `tablero_venta`** | Líneas reales, soles reales, precio medio, stock, tendencia |
+| Aprobaciones | `aprobaciones_direccion` | Estado, historial, última aprobada |
+| Catálogo (géneros, mundos, líneas, nodos, agrupaciones de marca, unidades de marca, tiendas) | `cargarCatalogo` (`src/lib/proyeccion/contexto.ts`) y `leerTodo` sobre las tablas de M2 y M4 | Filtros y nombres |
 
-**No lee** `historico` de las filas (es pesado y no hace falta: el histórico sale de la venta), `ia_*`, stock ni costo.
+**No lee** `historico` de las filas, `ia_*`, costo ni compras.
 
-### 2.3 Cuatro funciones nuevas
+### 2.3 Cuatro funciones
 
-**a) `tablero_venta(p jsonb) returns jsonb`** — `language sql stable security invoker set search_path = ''`.
+Todas: `language sql stable` salvo la d; `security invoker`; `set search_path = ''`; `revoke execute … from public, anon, authenticated`; `grant execute … to service_role`; `comment on function`. Las listas de ids entran como arreglos dentro del `jsonb` (`array(select jsonb_array_elements_text(p -> 'gml_ids'))::uuid[]`), sin SQL dinámico. Una clave ausente o `null` = sin filtro en esa dimensión.
 
-- **Entrada** (`p`, validada antes por zod en el servidor; la función tolera claves ausentes): `{ "gml_ids": uuid[] | null, "agrupacion_marca_ids": uuid[] | null, "marca_ids": uuid[] | null, "tienda_ids": uuid[] | null, "desde": "aaaa-mm-01", "hasta": "aaaa-mm-01", "desglose": "genero" | "mundo" | "linea" | "agrupacion_marca" | "marca" | "tienda" | null, "proyeccion_id": uuid | null }`. `null` = sin filtro en esa dimensión. Los `gml_ids` los arma el backend desde el catálogo (género / mundo / línea → nodos), igual que 07f, y viajan en el cuerpo del `rpc`.
-- **Qué lee.** `venta_stock_vigente` ⋈ `tiendas` con **`tipo = 'Tienda'`** (el CD nunca entra) ⋈ `equivalencias` (para el nodo) ⋈ `marcas_unidad` ⋈ `marcas` (la **agrupación de la unidad de marca**, exactamente como `venta_proyeccion`: `join marcas_unidad mu on mu.marca_id = v.marca_id join marcas cab on cab.id = mu.unidad_marca_id`, AM = `cab.agrupacion_marca_id`). El filtro de marca individual es sobre `v.marca_id` (la marca real vendida, no la cabeza). Selecciona **solo `unidades`** (ni soles, ni costo, ni stock: D2; una prueba estática lo verifica). Preagrega por `(equivalencia_id, marca_id, tienda_id, periodo)` y después sube, como `0027`, `0029` y `0033`.
-- **Salida** (claves cortas, orden determinista):
-  `{ "por_tienda": [ { "t": tienda_id, "p": "aaaa-mm", "u": n } ], "por_dim": [ { "d": id_de_la_dimensión, "p": "aaaa-mm", "u": n } ] | null, "fuera_universo": [ { "a": anio, "u": n } ] | null, "cargas": { "aaaa-mm": carga_id } }`.
-  - `por_tienda` siempre (≤ 15 tiendas × 48 meses ≈ 720 tuplas): de ahí salen el total, las mismas tiendas de cada año (con las claves guardadas) y la atribución por tienda (D5).
-  - `por_dim` solo si `desglose` no es nulo; `d` es el `genero_id`, `mundo_id`, `gml_id` (línea = nodo GML), `agrupacion_marca_id`, `marca_id` o `tienda_id`. Tope práctico: ≈ 220 nodos × 48 meses ≈ 10 600 tuplas (≈ 250 KB) con `desglose = linea` sin filtros, que es el peor caso.
-  - `fuera_universo` solo con `proyeccion_id`: unidades por año de las combinaciones (nodo, AM) que **no** tienen fila activa en esa proyección (semiunión con `proyeccion_filas`): explica por qué 2023 puede traer venta de líneas que ya no se proyectan (fila sin venta en 24 meses, 07 §3).
-  - `cargas` del mismo CTE: meses publicados dentro de `[desde, hasta]` (para «faltan meses» y para la huella de la caché).
-- **Rango.** El backend pide desde enero de `Y−3` hasta el **último mes publicado `k'`** (no el `k` de la proyección): el año en curso se ve con todo lo vendido. ≤ 48 meses.
+#### a) `huella_proyeccion(p_proyeccion_id uuid) returns text`
 
-**b) `tablero_proyeccion(p_proyeccion_id uuid, p jsonb) returns jsonb`** — `language sql stable security invoker set search_path = ''`.
+`md5` de un texto canónico armado **por contenido** (D9). Cada campo se escribe con `coalesce(campo::text, '~')`; los campos de una línea van unidos por `'|'`, las líneas por `E'\n'` y cada línea empieza con su etiqueta. Orden total determinista:
 
-- **Entrada** `p`: los mismos filtros que `tablero_venta` salvo `desde`/`hasta` (la proyección trae sus dos años), más `"bloque": "todas" | "mismas" | "nuevas" | "cierres"`.
-- **Cómo filtra.**
-  - GML / AM: sobre `proyeccion_filas.gml_id` y `agrupacion_marca_id` (exacto).
-  - Tienda (`tienda_ids` no nulo): las filas de tienda (`tienda_id = any(...)`) entran **exactas**; las filas base (`tienda_id is null`) entran **enteras**, separadas en la clave `"mismas_sin_atribuir"`, y el servidor las atribuye en TypeScript (D5, §4.4 regla de atribución): la función no conoce la venta por tienda y no debe adivinarla.
-  - Marca (`marca_ids` no nulo): cada registro se multiplica por la participación de esas marcas en la fila base del mismo `(gml_id, equivalencia_id, agrupacion_marca_id)` (`participaciones->'por_marca'`; en las filas de tienda, la de su fila base, como hace M8). Si la fila base no trae `por_marca` (cerrada de `0.10.0`), su aporte cuenta en `"sin_participacion_marca"` y no en la serie. Los meses se suman en `numeric` y se redondean **una sola vez al final**, por mes, con `round` (la tabla avisa «estimado; puede no sumar exacto por redondeo»).
+1. `p|anio_en_curso|hasta_periodo|version_metodo` (de `proyecciones`; **no** `id`, `nombre`, `estado`, `nota`, `cerrada_at` ni `updated_at`).
+2. Por cada tienda de `parametros.bloques` (cada año presente, hoy `Y` y `Y+1`; grupos `mismas`, `nuevas`, `cierres`, `fuera`): `b|anio|grupo|subbloque|tienda_id|clave`, ordenadas por `(anio, grupo, tienda_id)`. **Solo pertenencia**: renombrar una tienda o cambiar su zona no cambia la huella (M4).
+3. Por cada registro activo de fila activa: `f|clave|anio|bloque|subbloque|propuesto|vigente|B|B'|meses`, ordenados por `(clave, anio)`; `vigente = coalesce(decidido, propuesto)`; `meses` como texto del arreglo. Se usa la `clave` de la fila (única por proyección, `0018`) y no `fila_id`, para que dos copias con las mismas cifras den la misma huella.
+4. Por cada `proyeccion_tiendas` activa: `t|tienda_id|anio|coalesce(decidido, propuesto)`, por `(tienda_id, anio)`.
+5. Por cada `proyeccion_crecimientos` **activo**: `c|genero_id|mundo_id|pct|sobre_base`, por `(genero_id, mundo_id)`; y `r|parametros->>'crecimiento_pct_defecto'`.
+
+Devuelve 32 caracteres hexadecimales, o `null` si la proyección no existe. Entra todo lo que mueve una cifra que dirección ve (mensual, puente, crecimiento declarado); no entran estado, nombre, notas, autores ni fechas: **cerrar sin cambiar cifras no invalida** (R12). `md5` porque es nativo y detecta cambios (no es un control contra un atacante: quien escribe la proyección ya es planner). Medido sobre la proyección actual: 31 ms con ≈ 6 130 registros.
+
+#### b) `tablero_proyeccion(p_proyeccion_id uuid, p jsonb) returns jsonb`
+
+- **Entrada `p`:** `{ "gml_ids": uuid[] | null, "agrupacion_marca_ids": uuid[] | null, "unidad_marca_id": uuid | null, "temporadas": ("invierno"|"verano"|"todo_el_ano"|"sin_temporada")[] | null, "desglose": "genero"|"mundo"|"linea"|"agrupacion_marca"|"marca"|"temporada"|"tienda" | null }`. **No recibe tiendas:** la proyección de las mismas tiendas no está por tienda; el servidor atribuye (§3.4) y recorta.
+- **Filtros:** GML, AM y temporada sobre la fila (`gml_id`, `agrupacion_marca_id`, `temporada`; `sin_temporada` = `temporada is null`). Unidad de marca: cada registro se multiplica por la participación de esa unidad en `participaciones->'por_marca'` de **su fila base** (la misma `(gml_id, equivalencia_id, agrupacion_marca_id)` sin tienda, como hace M8 con las filas de tienda); si esa fila base no trae `por_marca`, su vigente va a `sin_participacion_marca` y no a la serie. Las multiplicaciones van en `numeric` y se redondean **una sola vez**, al final, por mes.
+- **Salida (forma exacta, claves cortas, orden determinista):**
+
+```jsonc
+{
+  "huella": "32 hex",                 // la de §2.3 a, calculada en la MISMA sentencia (D10)
+  "anios": [ {                         // Y y Y+1, siempre los dos
+    "anio": 2027,
+    "base": {                          // registros de filas sin tienda (bloque mismas)
+      "meses": [12 enteros], "vigente": n, "propuesto": n, "vendido": n, "sin_meses": n,
+      "B": n | null, "B_corr": n | null,           // solo Y+1: Σ base_siguiente y Σ base_normalizada de registros con B no nulo
+      "vigente_con_B": n, "propuesto_con_B": n,     // solo Y+1: lo mismo restringido a registros con B no nulo
+      "vigente_sin_B": n,                            // solo Y+1: registros base sin B (otro método); va aparte en el puente
+      "meses_sin_nino": [12 números] | null          // solo Y: Σ meses_m ÷ φ_Y,m de la fila (φ de factores_mes[Y]; 1 si no hay)
+    },
+    "tiendas": [ { "t": uuid, "bloque": "nuevas"|"cierres", "subbloque": "nuevas_anterior"|"aperturas"|null,
+                   "meses": [12], "vigente": n, "sin_meses": n,
+                   "para_base": n } ],               // solo Y y solo tiendas de bloques[Y+1].mismas: vigente de sus filas de tienda cuya fila base tiene B no nulo en Y+1 (= vigentesDeTiendasNuevas.paraBase de 07f)
+    "decisiones": {                                  // clasificación excluyente, en este orden: lote > ia > origen > sin decidir
+      "lote": { "n": n, "u": n }, "ia": {…}, "propuesta": {…}, "manual": {…}, "escalada": {…}, "sin_decidir": {…},
+      "autores": [ { "nombre": text, "n": n, "u": n, "desde": "aaaa-mm-dd", "hasta": "aaaa-mm-dd" } ],   // por decidido_por_nombre, fechas en Lima
+      "dia_pico": { "fecha": "aaaa-mm-dd", "n": n } | null },
+    "conteos": { "registros": n, "propuesta_cambio": n, "curva_cambio": n } } ],
+  "por_gm": [ { "g": genero_id, "m": mundo_id,      // SIEMPRE de toda la proyección, sin filtros (tabla de crecimientos, puente por GM, resumen)
+    "Y":  { "cierre": n, "base": n, "fuera_base_exacto": n },
+    "Y1": { "B": n, "B_corr": n, "propuesto_con_B": n, "vigente_con_B": n, "vigente_sin_B": n,
+            "nuevas_anterior": n, "aperturas": n, "cierres": n, "total": n } } ],
+  "por_dim": [ { "d": id_o_texto, "Y": { "base": n, "base_resto": n, "tiendas": [[uuid, n]] }, "Y1": { "base": n, "tiendas": [[uuid, n]] } } ] | null,
+  "por_temporada": [ { "temporada": text | null, "Y1": n, "Y1_con_factor_Y": n } ],   // Y1_con_factor_Y: 2027 de filas base con algún φ_Y,m ≠ 1
+  "por_par": { "gml": [uuid], "am": [uuid], "filas": [[i_gml, i_am, y_resto, y1]] },  // para valorizar en soles (D2); y_resto = proyectado k+1..12 de Y
+  "mayores": [ { "clave": text, "gml_id": uuid, "am_id": uuid, "Y1": n, "B": n | null } ],  // las 20 filas base de mayor vigente en Y+1 del recorte
+  "sin_participacion_marca": { "Y": n, "Y1": n } | null
+}
+```
+
+  `fuera_base_exacto` (Y) = vigente de las filas de tienda de `Y` menos el `para_base` de las tiendas que entran (lo que queda fuera de la base de `Y+1`: aperturas de `Y` que siguen fuera, cierres de `Y`, filas cuya fila base no tiene `B`); la pertenencia sale de `parametros.bloques`; `base_resto` (Y) = proyectado de `k+1` a 12 de los registros base. `propuesta_cambio` cuenta registros decididos con `propuesto ≠ propuesta_al_decidir`; `curva_cambio`, registros con `meses_propuestos` no nulo. `d` es `genero_id`, `mundo_id`, `gml_id` (línea), `agrupacion_marca_id`, `unidad_marca_id` (estimado con `por_marca`), la temporada o, con `desglose = tienda`, se omite `por_dim` (la tienda sale de `tiendas` y de la atribución).
+- **Tamaño medido para dimensionar:** ≈ 6 130 registros, 567 nodos; ≈ 75 ms la agregación. Documento ≤ 60 KB sin desglose y ≤ 120 KB con `desglose = linea` (567 × 2 años × 3 números más los pares de tienda).
+
+#### c) `tablero_venta(p jsonb) returns jsonb` — con `set work_mem = '16MB'` (como las lecturas pesadas de la `0037`)
+
+- **Entrada `p`:** `{ "gml_ids", "agrupacion_marca_ids", "unidad_marca_id", "tienda_ids", "temporadas", "proyeccion_id": uuid | null, "desde": "aaaa-mm-01", "hasta": "aaaa-mm-01", "k": 1..12, "k_prima": 1..12, "desglose": … | null, "solo_tendencia": boolean }`. El backend pide de enero de `Y−3` al último mes publicado `k'` (≤ 48 meses).
+- **Qué lee.** `venta_stock_vigente` ⋈ `tiendas` ⋈ `equivalencias` (nodo de planificación, la misma correspondencia que `venta_proyeccion`, 07 §5) ⋈ `marcas_unidad` ⋈ `marcas` (AM = la de la **unidad**: `join marcas_unidad mu on mu.marca_id = v.marca_id join marcas cab on cab.id = mu.unidad_marca_id`). Venta y soles **solo de `tipo = 'Tienda'`**; el CD solo entra en `stock.cd`. Columnas: `unidades`, `venta_soles` y, solo para el mes `k'`, `stock_unidades`. Nunca `costo_vendido` ni `stock_valorizado` (prueba estática).
+- **Filtros.** GML y AM como arriba; unidad de marca sobre `mu.unidad_marca_id` (todas las marcas de la unidad); temporada por **semiunión con las filas base activas de `proyeccion_id`** con esa temporada sobre `(nodo, equivalencia si el nodo es GMLE, AM)` (la venta sin fila en la proyección queda fuera con ese filtro y se cuenta en `fuera_universo`); `tienda_ids` **solo** recorta `por_dim`, `precios` y `stock`: `por_tienda` trae siempre todas las tiendas del recorte, porque la atribución las necesita a todas.
 - **Salida:**
-  ```jsonc
-  { "anios": [ { "anio": 2026,
-                 "bloques": { "mismas": { "meses": [12 numeros], "vigente": n, "vendido": n }, "nuevas_anterior": {…}, "aperturas": {…}, "cierres": {…} },
-                 "por_tienda": [ { "t": tienda_id, "bloque": "nuevas", "subbloque": "aperturas", "meses": [12], "vigente": n } ],
-                 "mismas_sin_atribuir": { "meses": [12], "vigente": n } | null,
-                 "sin_meses": n,                       // vigente de registros con meses = null (sin curva): cuentan en el total, no en la serie
-                 "base": { "B": n, "B_corr": n } | null, // solo Y+1, filas base con B no nulo
-                 "conteos": { "registros": n, "decididos": n, "sin_decidir_bloquea": n, "sin_decidir_cola_larga": n, "aprobados_en_bloque": n,
-                              "propuesta_cambio": n, "curva_cambio": n, "sin_curva": n } } ],
-    "por_dim": [ { "d": id, "anio": n, "meses": [12], "vigente": n } ] | null,
-    "mayores": [ { "fila_id", "gml_id", "agrupacion_marca_id", "anio": Y+1, "vigente": n, "base": n | null } ],   // las 20 filas base de mayor vigente en Y+1 dentro del recorte
-    "por_gm": [ { "genero_id", "mundo_id", "B": n, "B_corr": n, "siguiente": n, "en_curso": n } ],               // para crecimiento implícito vs declarado
-    "sin_participacion_marca": n | null,
-    "huella": "md5" }
-  ```
-  `vigente = decidido ?? propuesto`; `sin_decidir_bloquea` cuenta los registros base con `decidido is null` y `propuesto >= parametros.umbral_cola_larga` (la misma regla que bloquea cerrar, 07 paso 7); `aprobados_en_bloque` cuenta los que tienen lote aplicado (07g: `proyeccion_fila_anios.decision_lote_id` no nulo, columna de la `0031`). `huella` es la de §2.3 c, calculada en la misma sentencia: lo que se dibuja y lo que se aprueba salen del mismo estado.
-- **Tamaño:** ≤ 60 KB sin desglose; ≤ 200 KB con `desglose = linea` (≈ 220 nodos × 2 años × 12 meses).
 
-**c) `huella_proyeccion(p_proyeccion_id uuid) returns text`** — `language sql stable security invoker set search_path = ''`.
+```jsonc
+{
+  "periodos": { "aaaa-mm": carga_id },                         // meses publicados en [desde, hasta]
+  "tiendas": [uuid],                                           // índice de las tuplas
+  "por_tienda": [[i_t, "aaaa-mm", u, s]],                      // ≤ 15 × 48 tuplas; sin CD
+  "por_dim": { "ids": [id], "filas": [[i_d, u_Y-3, u_Y-2, u_Y-1, u_ac_ant, u_ac_cur, s_Y-1, s_ac_cur]] } | null,   // ac = ene–k' de Y−1 y de Y
+  "precios": { "gml": [uuid], "am": [uuid], "filas": [[i_gml, i_am, u12, s12]] },   // 12 meses de k'−11 a k'
+  "stock": { "periodo": "aaaa-mm", "por_tienda": [[i_t, u]], "cd": n | null },     // cd null si hay tienda_ids
+  "tendencia_gm": [[genero_id, mundo_id, i_t, u_ac_cur, u_ac_ant]] | null,         // solo con solo_tendencia: SIN filtros, ene–k' de Y y de Y−1
+  "fuera_universo": [[anio, u]] | null                                             // solo con proyeccion_id
+}
+```
 
-`md5` de la concatenación ordenada de:
-1. `proyecciones`: `id`, `anio_en_curso`, `hasta_periodo`, `resumen->>'version_metodo'`, `parametros->'bloques'` (texto canónico de `jsonb`).
-2. Cada registro **activo** de `proyeccion_fila_anios` de filas activas, ordenado por `(fila_id, anio)`: `fila_id`, `anio`, `bloque`, `coalesce(decidido, propuesto)`, `meses` (texto del arreglo).
-3. Cada fila de `proyeccion_tiendas` activa, ordenada por `(tienda_id, anio)`: `tienda_id`, `anio`, `coalesce(decidido, propuesto)`.
-4. `proyeccion_crecimientos` ordenado por `(genero_id, mundo_id)`: `pct`, `sobre_base`; y `parametros->'crecimiento_pct_defecto'`.
+  Con `solo_tendencia = true` devuelve solo `periodos`, `tiendas` y `tendencia_gm` (la usa la alerta «contra la tendencia», siempre de toda la empresa; se cachea aparte). `fuera_universo` no se muestra en pantalla: va en una línea del Excel (M6).
+- **Tamaño:** ≤ 150 KB con `desglose = linea` (576 nodos × 8 números; `precios` ≈ 1 600 pares con índices); ≤ 60 KB sin desglose. El tamaño se resuelve en el contrato, no con una tabla nueva (B3).
 
-**No entran** `estado`, `nombre`, `nota`, `cerrada_at`, `updated_at`, `explicacion`, `avisos` ni quién decidió: **cerrar una proyección aprobada en trabajo no invalida la aprobación** si las cifras son las mismas (R11), y renombrarla tampoco. Entra todo lo que mueve una cifra mensual que M8 leería o un crecimiento declarado que dirección vio. `md5` porque es nativo (sin `pgcrypto`), basta para detectar cambios (no es un control contra un atacante: quien puede escribir la proyección ya es planner) y es la misma convención de las huellas de M6. Costo: ≈ 9 000 registros × ~80 bytes → un `string_agg` de ~0,7 MB, **objetivo ≤ 300 ms**.
+#### d) `registrar_aprobacion_direccion(p jsonb) returns jsonb` — `language plpgsql volatile`
 
-**d) `registrar_aprobacion_direccion(p jsonb) returns jsonb`** — `language plpgsql volatile security invoker set search_path = ''`.
+Entrada: `{ proyeccion_id, huella_vista, resultado, motivo, comentario, resumen, perfil_id, usuario_nombre, rol }`, ya validada por zod; perfil, nombre y rol los pone el servidor desde la sesión. En una transacción:
 
-Entrada: `{ proyeccion_id, huella_vista, resultado, motivo, comentario, resumen, perfil_id, usuario_nombre, rol }` (todo validado antes por zod; el servidor pone perfil, nombre y rol desde la sesión, nunca desde el cuerpo). En una transacción:
-1. `select … from proyecciones where id = … for share` (impide que otra sesión cierre, archive o borre la proyección mientras se registra; `calcular` y las decisiones escriben `proyeccion_fila_anios`, no `proyecciones`, así que el paso 3 es el que de verdad los detecta).
-2. Si no existe → `{ "error": "no_encontrada" }`; si `estado = 'archivada'` → `archivada`; si `calculando_desde` vivo (< 15 min, `CALCULO_CADUCA_MIN`) → `calculo_en_curso`; si nunca se calculó (`resumen is null`) → `sin_calcular`.
-3. `huella_proyeccion(id)` ≠ `huella_vista` → `{ "error": "huella_distinta", "huella_actual": … }` **sin insertar**.
-4. `insert into aprobaciones_direccion …` con la huella **recalculada** y `estado_proyeccion` leído en el paso 1; devuelve la fila.
+1. `select … from public.proyecciones where id = … for share`: impide que otra sesión cierre, archive o borre la proyección mientras se registra (choca con el `update` de `cerrar` y con el `for no key update` de `aplicar_lote_proyeccion`; verificado por el revisor).
+2. Si no existe → `{ "error": "no_encontrada" }`; `estado = 'archivada'` → `archivada`; `calculando_desde` de menos de 15 minutos (`CALCULO_CADUCA_MIN`) → `calculo_en_curso`; `resumen is null` → `sin_calcular`.
+3. `h := public.huella_proyeccion(id)`. Si `h ≠ huella_vista` o `h ≠ p->'resumen'->>'huella'` → `{ "error": "huella_distinta", "huella_actual": h }` **sin insertar**.
+4. `insert into public.aprobaciones_direccion …` con `huella = h` y `estado_proyeccion` del paso 1; devuelve la fila como `jsonb`.
 
-Los códigos de error vuelven en el `jsonb` (no `raise`), como `aplicar_lote_proyeccion` de 07g, para que el handler los traduzca a `409` sin parsear mensajes. Es la **única** función que escribe en `aprobaciones_direccion`; el handler no hace `insert` directo (prueba estática).
+Los códigos vuelven **en el `jsonb`, sin `raise`**, para que el handler los traduzca a `404`/`409` sin interpretar mensajes. (Se aparta a propósito de `aplicar_lote_proyeccion`, que usa `raise` con `LP001`–`LP007`; M2.) Es la **única** función que escribe en `aprobaciones_direccion`; el servidor no hace `insert` directo (prueba estática).
 
-**Todas:** `revoke execute … from public, anon, authenticated;` `grant execute … to service_role;` `comment on function`. `tablero_venta` lleva `set work_mem = '16MB'` como las siete lecturas pesadas de la `0037`.
+### 2.4 Rendimiento
 
-### 2.4 Rendimiento y el plan B de la tabla de agregados (reserva `0041`)
+**Mediciones de partida (revisor, solo lectura sobre `vector-two`).** ≈ 6 130 registros por proyección; huella 31 ms; agregación de la proyección ≈ 75 ms; agregación de venta sin filtros con preagregado por `(equivalencia, marca, tienda, periodo)`: 2,17 s con `work_mem` por defecto y 1,95 s con 16 MB, antes de armar el `jsonb`.
 
-**Plan A (el que se construye):** `tablero_venta` agrega sobre `venta_stock_vigente` en cada llamada (≈ 0,9 a 1,5 millones de filas con talla). Referencias medidas en Vector2 de lecturas parecidas: `venta_mensual_tienda` 0,5 s; `venta_estacionalidad_agrupacion` 0,6 a 1,5 s; `venta_tienda_nodos` del Resto 1,3 a 2,1 s en caliente. Se espera ≈ 1 a 2 s sin filtros y menos con filtro de GML (semiunión sobre `equivalencias`, índice existente). Encima, una **caché en proceso por huella** (patrón de `src/lib/curvas/cache-venta-tienda.ts`): clave = `huellaCargas` + huella de maestros (equivalencias → nodo, marcas → unidad → AM; md5 de ids y FKs, una lectura pequeña) + filtros canónicos; LRU de 24 entradas, TTL de seguridad 5 min, *single-flight*, nunca guarda lo leído si la huella cambió en medio. Cambiar de filtro y volver es instantáneo; el primer recorte nuevo paga la agregación.
+**Caché en proceso** (`src/lib/direccion/cache.ts`, patrón de `src/lib/curvas/cache-venta-tienda.ts`): clave de venta = huella de cargas + huella de maestros (equivalencias → nodo, marcas → unidad → AM, tiendas → tipo; md5 de ids y FKs en una lectura pequeña) + filtros canónicos; clave de proyección = `(proyeccion_id, huella, filtros)`; LRU de 24 entradas, TTL de seguridad 5 min, *single-flight*, nunca guarda una lectura si la huella cambió en medio. La tendencia (`solo_tendencia`) tiene su propia entrada, que solo cambia con una carga nueva. Supuesto: una sola instancia en Railway (como las demás cachés).
 
-**Puerta de medición (la corre `datos` en la tanda 1, antes de que `backend` empiece la tanda 2):** `explain (analyze, buffers)` de `tablero_venta` en `vector-two`, dos pasadas, en cuatro casos: (1) sin filtros con `desglose = linea`; (2) sin filtros con `desglose = marca`; (3) una AM sola; (4) una marca y una tienda. Se anotan al pie de la migración tiempo frío/caliente y tamaño.
-- Si el caso 1 o 2 pasa de **2,5 s en frío** o el documento de **300 KB**, se activa el **plan B dentro de la misma migración** (no abre otra versión).
+**Puerta de medición (la corre `datos` en la tanda 1, antes de que `backend` empiece la tanda 2):** `explain (analyze, buffers)` de `tablero_venta` completa (con `jsonb`) en `vector-two`, dos pasadas (frío y caliente), en cinco casos: (1) sin filtros y `desglose = linea`; (2) sin filtros y `desglose = marca`; (3) una AM; (4) una unidad de marca y una tienda; (5) `solo_tendencia`. Se anotan al pie de la migración tiempo y tamaño del documento.
+- **Criterio de tiempo** (separado del de tamaño, B3): si (1) o (2) pasan de **2,5 s en frío**, `datos` reescribe en la misma migración el preagregado para **no agrupar por marca cuando no hay filtro ni desglose de AM, de unidad de marca ni de temporada** (es lo que hoy cuesta ≈ 600 mil grupos; `precios` se calcula aparte, solo sobre 12 meses), y vuelve a medir. Si aún pasa de 2,5 s, lo anota y se apoya en la caché; **no** se crea una tabla de agregados en M14 (D13): esa tabla tendrá su propia ficha.
+- **Criterio de tamaño:** el documento de (1) ≤ 150 KB; si no se cumple, es un error del contrato, no de rendimiento, y vuelve a `datos`.
 
-**Plan B (diseñado, se construye solo si la puerta lo pide): tabla `venta_agregada_carga`**, la «tabla de agregados de venta» que reservaba la `0041`.
-- Grano: `(carga_id, tienda_id, equivalencia_id, marca_id)` con `unidades bigint` y `venta_soles numeric(14,2)` (soles por si M14b u otro módulo los quiere; esta ficha no los lee). Sin `periodo` (sale de la carga), sin talla (es lo que reduce el tamaño, se espera 3 a 6 veces menos filas). Único sobre las cuatro claves; FK `carga_id → cargas_venta_stock on delete cascade` (una carga solo se borra si nunca se publicó).
-- **Solo inserción e inmutable**, porque los hechos de una carga no cambian nunca (es el argumento de la caché de `venta_mensual_tienda`): se llena con `agregar_carga_venta(p_carga_id)` (`insert … select … on conflict do nothing`), que llama la API de M5 **después de publicar** y que `tablero_venta` también llama, en modo perezoso, para cada carga publicada que todavía no tenga filas. Republicar un mes crea filas de la carga nueva; las de la vieja quedan y se ignoran porque `tablero_venta` une con `cargas_venta_stock.estado = 'publicada'`.
-- **Por qué no guarda nodo ni AM:** el nodo de una equivalencia y la agrupación de una marca se editan en los maestros; guardarlos obligaría a invalidar la tabla. Se resuelven al leer con el mismo `join` que el plan A.
-- Mismo trigger de inmutabilidad, `grant select, insert` a `service_role`, RLS sin políticas.
-- Descartado: una vista materializada (06b la abandonó por el candado y el refresco) y una tabla con nodo/AM desnormalizados (se pudre al editar maestros).
-
-**Proyección:** `tablero_proyeccion` recorre ≈ 9 000 registros con `unnest(meses) with ordinality`: objetivo ≤ 400 ms; no necesita caché, pero el servidor guarda la última respuesta por `(proyeccion_id, huella, filtros)` (LRU 24) porque la huella sale de la misma llamada.
-
-**Presupuesto de la pantalla:** primera carga del tablero (opciones + venta + proyección en paralelo) **≤ 3 s en frío y ≤ 1 s en caliente**; cambio de filtro **≤ 2 s en frío, ≤ 300 ms con caché**; respuesta de `GET /api/direccion/tablero` **≤ 400 KB** (sin desglose ≤ 120 KB); registrar una aprobación ≤ 1 s. Ninguna sentencia cerca de los 8 s de PostgREST.
-
-**Costo del filtro de AM y de marca (respuesta a la pregunta del coordinador).**
-- AM en la proyección: **gratis** (columna de la fila, índice `(proyeccion_id, gml_id)` existente; el filtro se aplica en el mismo recorrido).
-- AM en la venta: el `join` con `marcas_unidad` y `marcas` ya está en el plan A (lo necesita el desglose por AM); filtrar **reduce** filas tras el `join`. Costo marginal ≈ 0.
-- Marca en la venta: filtro directo sobre `v.marca_id`, que ya tiene índice (`venta_stock_mensual_marca_idx`, `0007`); no se crea índice nuevo sobre la tabla de hechos. Si la medición del caso 4 pasa de 1,5 s, se resuelve con el plan B.
-- Marca en la proyección: lee `participaciones->'por_marca'` de las filas base del recorte (≈ 2 000 objetos `jsonb` chicos): + 50 a 150 ms estimados.
-- `desglose = marca` es el más pesado en tamaño (cientos de marcas × 48 meses): por eso la pantalla solo lo ofrece **con una AM elegida** (§4.4), lo que lo acota a decenas de marcas.
+**Presupuesto de la pantalla:** primera carga (opciones + tablero) **≤ 3 s en frío y ≤ 1 s en caliente**; cambio de filtro **≤ 2,5 s en frío y ≤ 300 ms con caché**; `GET /api/direccion/tablero` **≤ 250 KB** con `desglose = linea` (≤ 120 KB sin desglose); `GET /api/direccion/bloqueos` ≤ 2 s (carga el contexto de cálculo de M7; solo en trabajo); registrar una aprobación ≤ 1,5 s. Ninguna sentencia cerca de los 8 s de PostgREST.
 
 ### 2.5 Diagrama
 
 ```
-venta_stock_vigente ─► tablero_venta(filtros) ─┐ (caché por huella de cargas + maestros + filtros)
-  (sin CD, solo u)      [plan B: venta_agregada_carga]
-                                               ├─► servicio del tablero (TS puro: armarTablero) ─► GET /api/direccion/tablero ─► pantalla (gráfico + tablas + alertas)
-proyeccion_filas ⋈ proyeccion_fila_anios ─► tablero_proyeccion(id, filtros) ─┤      ▲ atribución por tienda (D5), comparativos, alertas
-proyeccion_tiendas, proyeccion_crecimientos, factores (estadoFactorY) ───────┘      │
-                                                     huella_proyeccion(id) ──────────┴─► registrar_aprobacion_direccion(p) ─► aprobaciones_direccion (solo inserción)
-                                                                                                         ▲ POST /api/direccion/aprobaciones (requireAdmin)
+venta_stock_vigente ─► tablero_venta(filtros) ──────────────┐  caché: cargas + maestros + filtros
+  (Tienda: u y S/; CD: solo stock de k')                     │
+                                                              ├─► src/lib/direccion (TS puro) ─► GET /api/direccion/tablero ─► pantalla
+proyeccion_filas ⋈ proyeccion_fila_anios ─► tablero_proyeccion(id, filtros) ─┤   atribución por tienda (atribuirBase de 07f + atribuirMensual),
+   (incluye huella_proyeccion en la misma sentencia)                          │   puente, comparativos, soles y cobertura, alertas
+crecimientos, factores (estadoFactorY), periodos_atipicos, aprobaciones ─────┘
+M7 (leerFilasConAnios, desactualizadaDe, bloqueosNinoDe, crecimientosDeHoy) ─► bloqueosDeLote / motivoRechazoCerrar / filaBloqueaCierre ─► GET /api/direccion/bloqueos
+huella_proyeccion(id) ─► registrar_aprobacion_direccion(p) ─► aprobaciones_direccion (solo inserción) ◄─ POST /api/direccion/aprobaciones (requireAdmin)
 ```
 
 ## 3. Contratos de API
 
-Convenciones de M1 a M8: `ok` / `error` / `errorConCodigo` / `leerCuerpo` (`src/lib/api/respuestas.ts`), `traducirErrorDb`, `leerTodo` solo para tablas pequeñas. **Cada handler empieza con su guard como primera sentencia** (prueba estática, como `tests/api.guards.roles.test.ts`). Datos solo con `supabaseAdmin()` desde el servidor. Handlers en `src/app/api/direccion/`; lógica pura en `src/lib/direccion/` (`tipos-api.ts` autocontenido, `esquemas.ts`, `tablero.ts`, `atribucion.ts`, `comparativos.ts`, `alertas.ts`, `aprobacion.ts`, `excel.ts`); acceso a datos solo en `src/lib/direccion/consultas.ts`, **único archivo que nombra `tablero_venta`, `tablero_proyeccion`, `huella_proyeccion` y `registrar_aprobacion_direccion`** (prueba estática); caché en `src/lib/direccion/cache.ts` (sin `@supabase/*`). Reutiliza sin modificar `src/lib/proyeccion/` (`estadoFactorY`, `correccionMaterial`, `UMBRAL_CORRECCION_NINO`, `generosDeMatriz`, `claveGM`, tipos de bloques, `calculoEnCurso`), `src/lib/arbol/consultas.ts` (`leerTodo`, catálogo) y `src/lib/curvas/grafico.ts`. Errores: `401` sin sesión · `403` rol · `400` zod · `404` · `409` regla · `500` (`fallaDb`, sin filtrar detalles de la base).
+Convenciones de M1 a M8: `ok` / `error` / `errorConCodigo` / `leerCuerpo` (`src/lib/api/respuestas.ts`), `traducirErrorDb`, `leerTodo` solo para tablas pequeñas. **Cada handler empieza con su guard como primera sentencia** (prueba estática, como `tests/api.guards.roles.test.ts`). Datos solo con `supabaseAdmin()` desde el servidor. Handlers en `src/app/api/direccion/`; lógica pura en `src/lib/direccion/` (`tipos-api.ts` autocontenido, `esquemas.ts`, `atribucion.ts`, `puente.ts`, `comparativos.ts`, `apoyo.ts`, `alertas.ts`, `aprobacion.ts`, `tablero.ts`); entrada y salida de datos solo en `src/lib/direccion/consultas.ts`, **único archivo que nombra `tablero_venta`, `tablero_proyeccion`, `huella_proyeccion`, `registrar_aprobacion_direccion` y la tabla `aprobaciones_direccion`** (prueba estática); orquestación en `src/lib/direccion/servicio.ts` y `src/lib/direccion/cierre.ts`; caché en `src/lib/direccion/cache.ts` (sin `@supabase/*`). Errores: `401` sin sesión · `403` rol · `400` zod o filtro incoherente · `404` · `409` regla · `500` (`fallaDb`, sin detalles de la base).
+
+**Se reutiliza sin modificar:** de `src/lib/proyeccion/`: `atribuirBase` (07f, decisión 111), `filaBloqueaCierre`, `motivoRechazoCerrar`, `estadoFactorY`, `correccionMaterial`, `generosDeMatriz`, `claveGM`, `calculoEnCurso`, `leerFilasConAnios`, `leerTiendasProyeccion`, `cargarContextoCalculo`, `desactualizadaDe`, `crecimientosDeHoy`, `ninoDeFilas`, `bloqueosNinoDe`, `esMetodoVigente`; de `src/lib/aprobacion/reglas.ts`: `bloqueosDeLote`; de `src/lib/crecimientos/consultas-vigentes.ts`: `leerVigentes`; de `src/lib/curvas/anios.ts`: `hastaPorDefecto`; de `src/lib/flujo/filas.ts`: `planHorizonte`; `src/lib/curvas/grafico.ts`. **No se toca ningún archivo de 07f, M7 ni M8**, salvo la traducción `409 tiene_aprobaciones` del `DELETE` de proyecciones (§3.1) y las dos líneas de aviso (§4.11).
 
 ### 3.1 Rutas
 
 | Ruta | Método | Guard | Entrada | Respuesta `{ data }` y errores |
 |---|---|---|---|---|
-| `/api/direccion/opciones` | GET | `requirePlanner` | — | `OpcionesTableroApi`: proyecciones no eliminadas (id, nombre, año, estado, `hasta_periodo`, `cerrada_at`, cuál es la **cerrada vigente** de cada año y cuál la **en trabajo más reciente**), géneros, mundos, líneas (con `genero_id`, `mundo_id`), agrupaciones de marca (orden de M2), marcas por agrupación (solo activas o con venta; id, nombre, `agrupacion_marca_id`), tiendas `tipo = 'Tienda'` (id, código, nombre, apertura, cierre, activa). No lee venta. |
-| `/api/direccion/tablero` | GET | `requirePlanner` | query `tableroQuerySchema` (§3.2) | `200 TableroApi` (§3.3). `400` filtros mal formados o `marca_id` sin `agrupacion_marca_id` (o de otra AM: `400 marca_fuera_de_agrupacion`); `404 proyeccion_no_encontrada`; `409 sin_calcular` («Calcula la proyección para verla en el tablero»); `409 calculo_en_curso` (mensaje de M7); `409 comparar_igual` (comparar con la misma); `500`. Una proyección **archivada** se puede ver (solo lectura, sin botón de aprobar). |
-| `/api/direccion/aprobaciones` | GET | `requirePlanner` | `?proyeccion_id=<uuid>` (obligatorio) | `{ huella_actual, vigente: AprobacionApi \| null, estado: EstadoAprobacion, historial: AprobacionApi[] }` (más reciente primero; cada una con `invalidada: boolean` = su huella ≠ la actual). `404`; `400`. |
-| `/api/direccion/aprobaciones` | POST | **`requireAdmin`** | `aprobarSchema` (§3.2) | `201 AprobacionApi`. `403` planner o comprador; `400` (zod: motivo y comentario obligatorios si no es `aprobada`; `confirmo_revision` debe ser `true`); `404 proyeccion_no_encontrada`; `409 huella_distinta` («La proyección cambió mientras la mirabas: vuelve a cargar el tablero», con `huella_actual`); `409 archivada`; `409 calculo_en_curso`; `409 sin_calcular`; `500`. El servidor arma `resumen` con `armarResumenAprobacion` sobre una lectura **sin filtros** del tablero de esa proyección (la aprobación es de la proyección entera, R12) y llama a `registrar_aprobacion_direccion`. |
-| `/api/direccion/estado` | GET | `requirePlanner` | `?proyeccion_id=<uuid>` | `{ estado: EstadoAprobacion, vigente: { resultado, usuario_nombre, created_at } \| null }`. Lectura barata (una aprobación + una huella) para el aviso de cabecera en Proyección y en Flujo mensual (§4.6). `404`. |
+| `/api/direccion/opciones` | GET | `requirePlanner` | — | `OpcionesTableroApi` (§3.3): proyecciones no eliminadas con estado, `cerrada_at`, `cerrada_por_nombre` y estado de dirección; **`por_defecto`** (la cerrada que usa Compras con la regla de M8: `k' = hastaPorDefecto(publicados, hoyLima())`, `planHorizonte(k', años con cerrada).anio_cerrada`; si no hay, la en trabajo más reciente; si no hay, `null`); **`comparar_por_defecto`** (la proyección de la aprobación más reciente con resultado `aprobada` o `con_observaciones`, si no es la mostrada); géneros (con `es_resto`: fuera de `generosDeMatriz`), mundos, líneas (`genero_id`, `mundo_id`), temporadas, AM (orden de M2), **unidades de marca agrupadas por la AM de la unidad** (activas o con venta), tiendas `tipo = 'Tienda'` (id, código, nombre, apertura, cierre, activa). No lee venta. |
+| `/api/direccion/tablero` | GET | `requirePlanner` | query `tableroQuerySchema` (§3.2) | `200 TableroApi` (§3.3). `400` filtros mal formados, `linea_id` sin un solo género y un mundo, `400 marca_fuera_de_agrupacion` (unidad de marca de otra AM que las elegidas), `400 comparar_igual`; `404 proyeccion_no_encontrada` (también la comparada); `409 sin_calcular` («Calcula la proyección para verla en el tablero»); `409 calculo_en_curso` (mensaje de M7); `409 sin_proyeccion` (no hay ninguna para abrir por defecto); `500`. Una **archivada** se ve (solo lectura, `puede_aprobar = false`). |
+| `/api/direccion/bloqueos` | GET | `requirePlanner` | `?proyeccion_id=<uuid>` | `BloqueosCierreApi` (§3.3): **solo en trabajo**; en cerrada o archivada `{ aplica: false }`. Se pide aparte del tablero porque carga el contexto de cálculo de M7 (§3.5). `404`, `409 calculo_en_curso`. |
+| `/api/direccion/aprobaciones` | GET | `requirePlanner` | `?proyeccion_id=<uuid>` | `{ huella_actual, estado: EstadoAprobacion, vigente: AprobacionApi \| null, historial: AprobacionApi[] }` (más reciente primero; cada una con `invalidada` = su huella ≠ la actual). `400`, `404`. |
+| `/api/direccion/aprobaciones` | POST | **`requireAdmin`** | `aprobarSchema` (§3.2) | `201 AprobacionApi`. `403` planner y comprador; `400` zod (motivo y comentario obligatorios si no es `aprobada`; `confirmo_revision` debe ser `true`); `404 proyeccion_no_encontrada`; **`409 huella_distinta`** («La proyección cambió mientras la mirabas: vuelve a cargar el tablero», con `huella_actual`) si la lectura sin filtros que arma el `resumen` trae una huella distinta de `huella_vista` (se responde **antes** de llamar a `registrar`), o si la función la detecta; `409 archivada`; `409 calculo_en_curso`; `409 sin_calcular`; `500`. |
+| `/api/direccion/estado` | GET | `requirePlanner` | `?proyeccion_id=<uuid>` **o** `?para=compras` | `EstadoDireccionApi` (§3.3): la proyección (con `para=compras`, la cerrada que usa el flujo, misma regla que `por_defecto`), quién la cerró y cuándo, estado de dirección, la vigente y la **diferencia con la última aprobada** (o «idéntica»). Lectura barata para los avisos de §4.11: una consulta de aprobaciones + `tablero_proyeccion(id, {})` cacheada por huella. `404`; con `para=compras` y sin cerrada: `{ proyeccion: null }`. |
+| `/api/proyeccion/proyecciones/[id]` | DELETE | (el de M7) | — | **Cambio mínimo en M7:** la FK `restrict` se traduce a `409 tiene_aprobaciones` («Esta proyección tiene aprobaciones de dirección: archívala en lugar de eliminarla»). |
 
-Ninguna ruta `GET` tiene efectos; la única mutación es el `POST`. No hay `PUT`, `PATCH` ni `DELETE` de aprobaciones (no existen: se registra otra). No hay ruta de descarga: el Excel se arma en el navegador (§4.5).
+Ninguna ruta `GET` tiene efectos; la única mutación es el `POST`. No hay `PUT`, `PATCH` ni `DELETE` de aprobaciones. No hay ruta de descarga: el Excel se arma en el navegador (§4.9).
 
-### 3.2 Esquemas (`src/lib/direccion/esquemas.ts`)
+### 3.2 Esquemas (`src/lib/direccion/esquemas.ts`, zod 4)
 
 ```ts
 const uuid = z.string().uuid();
-const listaUuid = (max: number) => z.string().transform((s) => s.split(",").filter(Boolean)).pipe(z.array(uuid).max(max));
+const TEMPORADAS = ["invierno", "verano", "todo_el_ano", "sin_temporada"] as const;
+// En la query (GET) las listas llegan como texto separado por comas.
+const listaQuery = <T extends z.ZodTypeAny>(item: T, max: number) =>
+  z.string().transform((s) => s.split(",").filter(Boolean)).pipe(z.array(item).max(max));
 
-export const tableroQuerySchema = z.object({
-  proyeccion_id: uuid.optional(),                       // ausente = la cerrada vigente del año en curso de hoy; si no hay, la en trabajo más reciente
-  comparar_id: uuid.optional(),                         // segunda proyección dibujada aparte (D6)
-  genero_id: uuid.optional(), mundo_id: uuid.optional(), linea_id: uuid.optional(),   // como la Matriz de M7; se combinan entre sí
-  agrupacion_marca_ids: listaUuid(40).optional(),       // primer nivel (D3); varias a la vez
-  marca_id: uuid.optional(),                            // exige UNA agrupacion_marca_ids y pertenecer a ella (D4)
-  tienda_ids: listaUuid(30).optional(),                 // incluye aperturas sin historia
+// Objeto SIN refinamientos: de aquí salen la query y `filtros_vistos` (M1: `.partial()` no se puede llamar sobre un objeto refinado).
+const filtrosQueryBase = z.object({
+  proyeccion_id: uuid.optional(),                      // ausente = por_defecto de /opciones
+  comparar_id: z.union([uuid, z.literal("ninguna")]).optional(),   // ausente = comparar_por_defecto; "ninguna" = sin comparar
+  generos: listaQuery(uuid, 20).optional(),            // varios a la vez
+  resto: z.enum(["1"]).optional(),                     // atajo: suma a `generos` los géneros del Resto (fuera de generosDeMatriz)
+  mundo_id: uuid.optional(),
+  linea_id: uuid.optional(),                           // exige un solo género (sin «resto») y mundo_id
+  temporadas: listaQuery(z.enum(TEMPORADAS), 4).optional(),
+  am: listaQuery(uuid, 40).optional(),                 // agrupaciones de marca, primer nivel
+  marca: uuid.optional(),                              // UNA unidad de marca en 0.19.0; su AM se deduce (si hay `am`, debe estar entre ellas)
+  tiendas: listaQuery(uuid, 30).optional(),
   bloque: z.enum(["todas", "mismas", "nuevas", "cierres"]).default("todas"),
-  desglose: z.enum(["genero", "mundo", "linea", "agrupacion_marca", "marca", "tienda"]).default("mundo"),
-}).superRefine(/* marca_id ⇒ exactamente una AM; desglose = marca ⇒ una AM elegida; desglose = tienda con bloque ≠ todas permitido */);
+  desglose: z.enum(["genero", "mundo", "linea", "agrupacion_marca", "marca", "temporada", "tienda"]).default("mundo"),
+});
+export const tableroQuerySchema = filtrosQueryBase.superRefine((v, ctx) => {
+  /* linea_id ⇒ generos.length === 1, sin resto, y mundo_id; comparar_id ≠ proyeccion_id ⇒ si no, "comparar_igual" */
+});
 
-export const MOTIVOS_DIRECCION = ["crecimiento_alto", "crecimiento_bajo", "tiendas_nuevas", "nino", "filas_sin_decidir", "concentracion", "otro"] as const;
+// En el cuerpo JSON (POST) las listas son arreglos, no texto.
+const filtrosVistosSchema = z.object({
+  generos: z.array(uuid).max(20), resto: z.boolean(), mundo_id: uuid.nullable(), linea_id: uuid.nullable(),
+  temporadas: z.array(z.enum(TEMPORADAS)).max(4), am: z.array(uuid).max(40), marca: uuid.nullable(),
+  tiendas: z.array(uuid).max(30), bloque: z.enum(["todas", "mismas", "nuevas", "cierres"]),
+}).partial();
+
+export const MOTIVOS_DIRECCION = ["crecimiento_alto", "crecimiento_bajo", "contra_tendencia", "tiendas_nuevas", "nino",
+  "filas_sin_decidir", "concentracion", "otro"] as const;
 
 export const aprobarSchema = z.object({
   proyeccion_id: uuid,
-  huella_vista: z.string().regex(/^[0-9a-f]{32}$/),     // la que trajo el GET del tablero
+  huella_vista: z.string().regex(/^[0-9a-f]{32}$/),    // la que trajo el GET del tablero
   resultado: z.enum(["aprobada", "con_observaciones", "rechazada"]),
   motivo: z.enum(MOTIVOS_DIRECCION).nullable(),
   comentario: z.string().trim().max(1000).nullable(),
-  confirmo_revision: z.literal(true),                   // «Revisé las alertas»: casilla obligatoria (salvaguarda de 07g §4.4)
-  filtros_vistos: tableroQuerySchema.partial().optional(),
-}).superRefine((v, ctx) => { /* resultado ≠ aprobada ⇒ motivo no nulo y comentario ≥ 10 caracteres */ });
+  confirmo_revision: z.literal(true),                  // «Revisé las alertas y las cifras de toda la proyección»
+  filtros_vistos: filtrosVistosSchema.optional(),      // informativo; la aprobación es siempre de la proyección entera
+}).superRefine((v, ctx) => { /* resultado ≠ "aprobada" ⇒ motivo no nulo y comentario con ≥ 10 caracteres */ });
 ```
+
+El servidor convierte los filtros en `gml_ids` desde el catálogo (géneros × mundo × línea → nodos, como 07f) y los manda dentro del `jsonb` de cada función. `filtros_vistos` **no** se guarda en una columna: va dentro de `resumen.filtros_vistos`.
 
 ### 3.3 Tipos (`src/lib/direccion/tipos-api.ts`, autocontenido)
 
 ```ts
-export type Bloque = "mismas" | "nuevas" | "cierres";
 export type Exactitud = "exacto" | "estimado";
+export type Bloque = "todas" | "mismas" | "nuevas" | "cierres";
+
 export type SerieMensualApi = { clave: string; etiqueta: string; anio: number;
-  tipo: "real" | "real_parcial" | "proyectado" | "comparada";            // real = año completo vendido; real_parcial = año en curso hasta k'
-  meses: (number | null)[];                                               // 12; null = mes sin dato (futuro o sin carga)
-  origen_meses: ("real" | "proyectado" | null)[]; total: number | null; exactitud: Exactitud };
-export type ComparativoApi = { clave: "siguiente_vs_en_curso" | "siguiente_vs_hace_dos" | "en_curso_vs_anterior" | "en_curso_vs_hace_dos"
-  | "en_curso_ac_vs_anterior_ac" | "anterior_vs_hace_dos";
-  etiqueta: string;                                                       // «2027 vs 2026 (cierre)», «2026 ene–set vs 2025 ene–set»
+  tipo: "real" | "real_parcial" | "proyectado" | "sin_nino" | "comparada" | "aprobada";
+  nino: boolean;                                    // año del Niño según periodos_atipicos (D14)
+  meses: (number | null)[];                         // 12; null = sin dato (futuro, sin carga o sin atribución mensual)
+  total: number | null; exactitud: Exactitud };
+
+export type ClavePuente = "cierre_en_curso" | "fuera_base" | "ajuste_base" | "base" | "nino" | "crecimiento" | "manual"
+  | "sin_base" | "mismas_siguiente" | "nuevas_anterior" | "aperturas" | "cierres" | "total_siguiente";
+export type PuenteApi = { lineas: { clave: ClavePuente; etiqueta: string; u: number; acumulado: number; subtotal: boolean }[];
+  pct: { base_sobre_real: number | null; nino: number | null; crecimiento: number | null; manual: number | null; total_vs_cierre: number | null } };
+
+export type ComparativoApi = { clave: "sig_vs_cierre" | "sig_vs_anterior" | "cierre_vs_anterior" | "cierre_vs_hace_dos" | "ac_vs_ac" | "anterior_vs_hace_dos";
+  etiqueta: string;                                 // «2027 vs 2025 (último año normal)», «2026 ene–oct vs 2025 ene–oct»
+  nino: boolean;                                    // algún año del par es del Niño
   total: { pct: number | null; motivo: null | "sin_base" | "incompleto" | "nueva" };
-  mismas: { pct: number | null; tiendas: string[]; motivo: null | "sin_base" | "incompleto" } };   // mismas tiendas del año de la izquierda
-export type CrecimientoGMApi = { gm_clave: string; nombre: string;      // «HOMBRE · URBANO» o «Resto»
-  declarado_pct: number | null; sobre_base: "bruta" | "corregida" | null;
+  mismas: { pct: number | null; tiendas: string[]; motivo: null | "sin_base" | "incompleto" } };
+
+export type CrecimientoGMApi = { gm_clave: string; nombre: string;                    // «HOMBRE · URBANO» o «Resto»
+  declarado_pct: number | null; sobre_base: "bruta" | "corregida" | null; version: number | null;
+  autor: string | null; aprobada_at: string | null; nota: string | null;
   base_real: number | null; base_corregida: number | null; con_nino: boolean;
-  siguiente_mismas: number | null;
-  implicito_sobre_real_pct: number | null; implicito_sobre_corregida_pct: number | null;
-  desvio_pp: number | null;                                               // implícito (en la base del declarado) − declarado
-  semaforo: "ok" | "revisar" | "sin_dato" };                              // |desvio| ≥ UMBRAL_DESVIO_PP (2 pp) ⇒ revisar
-export type CodigoAlerta = "factor_provisional" | "factor_desfasado" | "factor_faltante" | "filas_sin_decidir" | "tiendas_sin_decidir"
-  | "base_corregida_nino" | "tienda_nueva_relevante" | "apertura_sin_historia" | "concentracion" | "desvio_crecimiento"
-  | "propuesta_cambio" | "curva_cambio" | "sin_curva" | "desactualizada" | "datos_mas_nuevos" | "metodo_anterior"
-  | "fuera_universo" | "meses_faltantes" | "atribucion_estimada" | "marca_estimada" | "comparada_distinta_k";
-export type AlertaApi = { codigo: CodigoAlerta; nivel: "bloquea_cierre" | "importante" | "info"; titulo: string; detalle: string;
-  cifras: Record<string, number | string>; enlace: string | null };    // enlace a la pestaña de M7 donde se resuelve
+  siguiente_mismas: number | null; implicito_sobre_real_pct: number | null; implicito_sobre_corregida_pct: number | null;
+  desvio_pp: number | null;                         // implícito (en la base del declarado) − declarado
+  tendencia_mismas_pct: number | null;              // ene–k' de Y frente a ene–k' de Y−1 en M(Y), sin filtros
+  semaforo: "coincide" | "revisar" | "contra_tendencia" | "sin_dato";
+  anomalias: ("sin_base" | "reemplazada_mismo_dia" | "sin_nota")[] };
+
+export type DecisionesAnioApi = { anio: number;
+  por_origen: { clave: "lote" | "ia" | "propuesta" | "manual" | "escalada" | "sin_decidir"; etiqueta: string; n: number; u: number; pct_u: number }[];
+  autores: { nombre: string; n: number; u: number; desde: string; hasta: string }[]; dia_pico: { fecha: string; n: number } | null };
+
+export type CodigoAlerta = "factor_provisional" | "base_corregida_nino" | "contra_tendencia" | "desvio_crecimiento" | "origen_decisiones"
+  | "anomalia_crecimiento" | "tienda_nueva_relevante" | "apertura_sin_historia" | "concentracion" | "propuesta_cambio" | "curva_cambio"
+  | "sin_curva" | "datos_mas_nuevos" | "metodo_anterior" | "meses_faltantes" | "atribucion_estimada" | "atribucion_sin_mensual"
+  | "marca_estimada" | "comparada_distinta_k" | "distinta_de_aprobada";
+export type AlertaApi = { codigo: CodigoAlerta; nivel: "importante" | "info"; alcance: "proyeccion" | "recorte";
+  titulo: string; detalle: string; cifras: Record<string, number | string>; enlace: string | null };
+
+export type BloqueoCierreApi = { codigo: string; mensaje: string; detalle?: Record<string, unknown> };   // codigo y mensaje de M7 tal cual
+export type BloqueosCierreApi = { aplica: false } | { aplica: true; puede_cerrar: boolean; bloqueos: BloqueoCierreApi[];
+  filas: { anio: number; n: number; u: number; por_motivo: { umbral: number; revision_cola_larga: number } }[] };   // conteo con filaBloqueaCierre
+
 export type FilaDesgloseApi = { id: string; nombre: string; exactitud: Exactitud;
   anios: { anio: number; tipo: "real" | "real_parcial" | "cierre" | "proyectado"; total: number | null }[];
-  en_curso_ac: number | null; anterior_ac: number | null;                // ene–k del año en curso y del anterior
-  comparativos: Pick<ComparativoApi, "clave" | "total">[]; participacion_siguiente: number | null };
+  ac_anterior: number | null; ac_en_curso: number | null;
+  pct: { sig_vs_cierre: number | null; sig_vs_anterior: number | null; cierre_vs_anterior: number | null; ac_vs_ac: number | null };
+  participacion_siguiente: number | null; filtrable: boolean };          // filtrable: al elegirla se aplica como filtro (D11)
+
+export type ApoyoApi = {
+  soles: { anios: { anio: number; s: number; tipo: "real" | "real_parcial" | "estimado" }[];
+           precio_medio: number | null; ventana: { desde: string; hasta: string }; u_sin_precio: number };
+  cobertura: { periodo: string; stock_tiendas: number; stock_cd: number | null;   // null con filtro de tienda
+               imi_proyectado: number | null; imi_real: number | null; exactitud: Exactitud } };
+
 export type EstadoAprobacion = "sin_aprobacion" | "aprobada" | "con_observaciones" | "rechazada" | "invalidada";
-export type AprobacionApi = { id: string; proyeccion_id: string; estado_proyeccion: "en_trabajo" | "cerrada"; resultado: "aprobada" | "con_observaciones" | "rechazada";
-  motivo: string | null; comentario: string | null; usuario_nombre: string; rol: string; created_at: string; huella: string; invalidada: boolean;
-  resumen: { hasta_periodo: string; version_metodo: number; totales: { anio: number; vigente: number; vendido: number }[] } };
+export type ResumenAprobacionApi = { huella: string; hasta_periodo: string; version_metodo: number | null;
+  totales: { anio: number; total: number; por_bloque: Record<"mismas" | "nuevas_anterior" | "aperturas" | "cierres", number> }[];
+  puente: PuenteApi; por_gm: { gm_clave: string; nombre: string; en_curso: number; siguiente: number; declarado_pct: number | null; implicito_pct: number | null }[];
+  alertas: { codigo: string; nivel: string; cantidad: number }[]; filtros_vistos?: Record<string, unknown> };
+export type AprobacionApi = { id: string; proyeccion_id: string; estado_proyeccion: "en_trabajo" | "cerrada";
+  resultado: "aprobada" | "con_observaciones" | "rechazada"; motivo: string | null; comentario: string | null;
+  usuario_nombre: string; rol: "admin"; created_at: string; huella: string; invalidada: boolean; resumen: ResumenAprobacionApi };
+export type DiferenciaAprobadaApi = { aprobacion_id: string; proyeccion_id: string; proyeccion_nombre: string; misma_proyeccion: boolean;
+  fecha: string; usuario_nombre: string; resultado: "aprobada" | "con_observaciones"; identica: boolean;   // identica = misma huella
+  en_curso: { aprobado: number; actual: number; u: number; pct: number | null };
+  siguiente: { aprobado: number; actual: number; u: number; pct: number | null };
+  por_gm: { gm_clave: string; nombre: string; aprobado: number; actual: number; u: number; pct: number | null }[] };   // de 2027, ordenado por |u|
+
+export type ProyeccionTableroApi = { id: string; nombre: string; estado: "en_trabajo" | "cerrada" | "archivada";
+  anio_en_curso: number; anio_siguiente: number; hasta_periodo: string; k: number; version_metodo: number | null;
+  cerrada_at: string | null; cerrada_por_nombre: string | null; usa_compras: boolean };
+export type EstadoDireccionApi = { proyeccion: ProyeccionTableroApi | null; estado: EstadoAprobacion;
+  vigente: Pick<AprobacionApi, "resultado" | "usuario_nombre" | "created_at"> | null; diferencia: DiferenciaAprobadaApi | null };
+
 export type TableroApi = {
-  proyeccion: { id: string; nombre: string; estado: "en_trabajo" | "cerrada" | "archivada"; anio_en_curso: number; anio_siguiente: number;
-    hasta_periodo: string; k: number; cerrada_at: string | null; es_cerrada_vigente: boolean; version_metodo: number | null };
-  comparada: TableroApi["proyeccion"] | null;
-  datos: { ultimo_publicado: string; k_prima: number; meses_faltantes: string[] };   // k' puede ser > k
-  filtros: { aplicados: Record<string, string | string[]>; texto: string; exactitud: Exactitud };   // «HOMBRE · URBANO · AM: RECONOCIDO · T03 (estimado)»
-  series: SerieMensualApi[];        // 2023, 2024, 2025 reales; 2026 real hasta k'; 2026 proyectado k+1..12; 2027 proyectado; comparada si hay
-  tabla_mensual: { filas: { clave: string; etiqueta: string; meses: (number | null)[]; total: number | null; tipo: SerieMensualApi["tipo"] | "variacion" }[] };
-  kpis: { en_curso: { real_ac: number; cierre: number; proyectado_resto: number }; siguiente: number;
-    anterior: number; hace_dos: number; hace_tres: number; comparativos: ComparativoApi[] };
-  por_bloque: { anio: number; mismas: number; nuevas_anterior: number; aperturas: number; cierres: number; sin_meses: number }[];
-  crecimientos: CrecimientoGMApi[];  // siempre de toda la proyección (no se recorta por filtros: el % es por GM)
+  proyeccion: ProyeccionTableroApi;
+  comparada: (ProyeccionTableroApi & { motivo: "aprobada" | "elegida"; huella_igual_a_aprobada: boolean | null }) | null;
+  datos: { k_prima: number; ultimo_publicado: string; meses_faltantes: string[]; anios_nino: number[] };
+  filtros: { texto: string; exactitud: Exactitud; conjunto_tiendas: { etiqueta: string; codigos: string[] } | null };
+  decidir: {                                        // SIEMPRE de la proyección entera (no depende de los filtros)
+    lineas: string[];                               // 3 a 5 líneas (§4.3)
+    estado: EstadoAprobacion; vigente: AprobacionApi | null; diferencia: DiferenciaAprobadaApi | null;
+    precision: { desvio_prueba_anterior_pct: number | null; rotulo: "dentro de muestra" };
+    objetivo_pct: number | null; puede_aprobar: boolean; alertas_importantes: number };
+  puente: { recorte: PuenteApi | null;              // null con filtro de tienda (el puente no se recorta por tienda)
+            por_gm: (PuenteApi & { gm_clave: string; nombre: string })[] };   // de toda la proyección
+  alertas: AlertaApi[];                             // importantes primero; las de bloqueo del cierre vienen de /bloqueos
+  kpis: { siguiente: number; cierre: number; real_ac: number; proyectado_resto: number; anterior: number; hace_dos: number; hace_tres: number;
+          comparativos: ComparativoApi[]; exactitud: Exactitud };
+  series: SerieMensualApi[];
+  tabla_mensual: { filas: { clave: string; etiqueta: string; meses: (number | null)[]; total: number | null; tipo: SerieMensualApi["tipo"] | "variacion"; exactitud: Exactitud }[] };
   desglose: { dimension: string; filas: FilaDesgloseApi[]; total: FilaDesgloseApi };
-  alertas: AlertaApi[];              // ordenadas: bloquea_cierre, importante, info
-  mayores: { fila: string; vigente: number; participacion: number; crecimiento_pct: number | null }[];   // 10 mayores del recorte en Y+1
-  aprobacion: { estado: EstadoAprobacion; vigente: AprobacionApi | null; puede_aprobar: boolean };      // puede_aprobar = rol admin y no archivada
-  huella: string;                    // huella_proyeccion de la proyección mostrada (la que se manda al aprobar)
+  crecimientos: CrecimientoGMApi[];                 // siempre de toda la proyección
+  decisiones: DecisionesAnioApi[];                  // del recorte (sin filtro de tienda)
+  apoyo: ApoyoApi;
+  mayores: { fila: string; vigente: number; participacion: number; crecimiento_pct: number | null }[];
+  atribucion: { tiendas: { tienda_id: string; codigo: string; participacion_anual: number; participacion_mes: (number | null)[] }[];
+                sin_atribuir: { en_curso: number; siguiente: number }; mensual: boolean } | null;   // solo con filtro de tienda o bloque
+  huella: string;                                   // la que se manda al aprobar
 };
+
+export type OpcionesTableroApi = {
+  proyecciones: (ProyeccionTableroApi & { estado_direccion: EstadoAprobacion })[];
+  por_defecto: { proyeccion_id: string; motivo: "usa_compras" | "en_trabajo_mas_reciente" } | null;
+  comparar_por_defecto: { proyeccion_id: string; aprobacion_id: string } | null;
+  generos: { id: string; nombre: string; es_resto: boolean }[]; mundos: { id: string; nombre: string }[];
+  lineas: { id: string; nombre: string; genero_id: string; mundo_id: string }[];
+  agrupaciones_marca: { id: string; nombre: string }[];
+  unidades_marca: { id: string; nombre: string; agrupacion_marca_id: string }[];
+  tiendas: { id: string; codigo: string; nombre: string; fecha_apertura: string | null; fecha_cierre: string | null; activa: boolean }[] };
 ```
 
-Constantes (`src/lib/direccion/tipos-api.ts`): `UMBRAL_DESVIO_PP = 2`, `UMBRAL_CONCENTRACION_TOP10 = 0.40`, `UMBRAL_FILA_DOMINANTE = 0.05`, `UMBRAL_TIENDA_NUEVA_RELEVANTE = 0.05` (participación de una tienda nueva o apertura en el `Y+1` del recorte), `MESES_ATRIBUCION = 12`, `MAX_TIENDAS = 30`, `MAX_AGRUPACIONES = 40`.
+Constantes: `UMBRAL_DESVIO_PP = 2`, `UMBRAL_TENDENCIA_PP = 5`, `UMBRAL_CONCENTRACION_TOP10 = 0.40`, `UMBRAL_FILA_DOMINANTE = 0.05`, `UMBRAL_TIENDA_NUEVA_RELEVANTE = 0.05`, `UMBRAL_DECISION_MASIVA = 0.80`, `MAX_TIENDAS = 30`, `MAX_AGRUPACIONES = 40`, `MAX_GENEROS = 20`, `IPF_TOLERANCIA = 1e-6`, `IPF_MAX_ITERACIONES = 1000`.
+
+### 3.4 Atribución por tienda (compartida con 07f; `src/lib/direccion/atribucion.ts`, pura)
+
+Se usa cuando hay filtro de tienda o un bloque distinto de «todas». Todo se calcula **sobre el recorte** (GML, AM, unidad de marca, temporada) y **con todas las tiendas del recorte**; recién al final se suma lo de las tiendas elegidas. Notación: `M(Z)` = tiendas con la posición de `Z` de su `clave` en `1`; *misma* = en `M(Y)` y en `M(Y+1)`; *entra* = en `bloques[Y].nuevas` y en `M(Y+1)`; *sale* = en `M(Y)` y en `bloques[Y+1].cierres`; `real_t` = venta de `t` de enero a `k` de `Y` en el recorte (de `por_tienda`; `k` de la proyección, no `k'`, igual que 07f).
+
+**A. Año en curso, total anual por tienda (exactamente la regla 111).**
+1. `07f := atribuirBase({ total: base(Y+1).B, entran: { t → para_base_t de cada *entra* }, mismas: [{ t, codigo, real: real_t } de las *misma*] })` — **la misma función de 07f con las mismas entradas** que arma `armarVentaPorTienda` para un GM. Da `A_t` de cada *misma*, el vigente exacto de cada *entra* y `sin_atribuir_07f`.
+2. Lo que queda de la base de `Y`: `L = base(Y).vigente − (base(Y+1).B − Σ_{entra} para_base)`. `sale := atribuirBase({ total: L, entran: ∅, mismas: [{ t, codigo, real: real_t } de las *sale*] })` da `A_t` de cada *sale* y `sin_atribuir_sale` (si `L ≤ 0`, no hay *sale* o todas pesan 0, todo `L` va ahí).
+3. Invariante, exacto en enteros: `Σ_{misma} A_t + sin_atribuir_07f + Σ_{sale} A_t + sin_atribuir_sale = base(Y).vigente`.
+4. **Para un GM (o el Resto) sin más filtros, `A_t` de cada *misma* es idéntico al «2026 cierre vigente» de 07f** (R8): misma función, mismas entradas.
+
+**B. Año siguiente, total anual por tienda.** `atribuirBase({ total: base(Y+1).vigente, entran: ∅, mismas: [{ t, codigo, real: w_t } de M(Y+1)] ∪ [{ "~sin_atribuir", real: sin_atribuir_07f } si > 0] })` con `w_t` = `A_t` de 07f para una *misma* y el vigente exacto para una *entra*. Es decir: **el 2027 de cada tienda es su base 2026 por el crecimiento del recorte** (`2027 ÷ B`), en enteros por mayor resto; no se inventa un crecimiento por tienda.
+
+**C. Reparto mensual** (`atribuirMensual`, nueva, genérica):
+- Entrada: `filas: { id, orden, total ≥ 0, semilla: number[n] }[]`, `columnas: entero[n] ≥ 0`.
+- Algoritmo: (1) `T = Σ total`, `C = Σ columnas`; si `T = 0`, todo a `sin_atribuir`; si `C = 0`, cada fila se reparte por su semilla y `sin_atribuir_m = −Σ`. (2) Objetivo por columna `o_m = columnas_m × T ÷ C`. (3) Ajuste biproporcional (IPF): semillas `max(semilla, 0) + 1e-9`, alternando filas (a `total`) y columnas (a `o_m`) hasta un desvío máximo ≤ `IPF_TOLERANCIA` o `IPF_MAX_ITERACIONES`. (4) Columnas enteras por redondeo acumulado (`c_m = round(Σ_{j≤m} o_j) − round(Σ_{j<m} o_j)`). (5) Mes absorbente `a` = el de mayor `c_m` (empate: el último); los demás meses, en orden, por **mayor resto con arrastre** (cada fila suma a su valor el resto que le quedó del mes anterior; empates por `orden`). (6) En `a`, cada fila recibe `total − Σ` de sus otros meses. (7) `sin_atribuir_m = columnas_m − Σ_filas`.
+- Invariantes (prueba de propiedad, 5 000 casos): `Σ_m fila = total` exacto; `Σ_filas + sin_atribuir_m = columnas_m` exacto; todo ≥ 0; si `T = C`, `sin_atribuir ≡ 0`.
+- **Semillas (participación del mismo mes calendario en el último año completo):** año de referencia = `Y−1` (si le falta un mes publicado, ese mes se toma de `Y−2`). Para la tienda `t` y el mes `m`: `semilla = venta_t,m ÷ Σ venta_u,m` sobre las tiendas de la llamada con **historia completa** en el año de referencia (abiertas los doce meses). **Reserva:** si `t` no tiene historia completa ese año (abrió o cerró dentro de él), su semilla es su participación anual `total_t ÷ T` en **todos** los meses (sigue la forma de la red: así una tienda en rampa no hereda su arranque); si su venta del mes es ≤ 0, se usa el mismo mes de `Y−2` si allí tenía historia completa y venta > 0, y si no, `total_t ÷ T`. La fila «sin atribuir» usa `total ÷ T`.
+
+**D. Qué se reparte por mes.**
+- **Año en curso:** enero a `k`, **real exacto** por tienda (de `por_tienda`); de `k+1` a diciembre, `atribuirMensual` con `total_t = A_t − real_t` (las *misma* y las *sale*, más «sin atribuir» si es ≥ 0) y `columnas = base(Y).meses[k+1..12]`. Si algún `A_t − real_t < 0` (se republicó un mes a la baja, o `B` quedó por debajo del real), **no se reparte por mes**: el total anual sigue siendo `A_t`, los meses `k+1..12` de esas tiendas salen «—» y la alerta `atribucion_sin_mensual` lo explica.
+- **Año siguiente:** `atribuirMensual` con `total_t` de B y `columnas = base(Y+1).meses`.
+- **Tiendas de bloque** (nuevas del año anterior, aperturas y cierres de `Y+1`, y las filas de tienda de `Y`): sus `meses` exactos.
+- **Con tiendas elegidas:** se suman las elegidas; «sin atribuir» nunca se asigna a una tienda (se informa al pie). **Con un bloque elegido** (sin tiendas), el conjunto es el del bloque en `Y+1` y su «sin atribuir» sí se suma, de modo que el total del bloque es exacto.
+
+**E. Qué se muestra.** Rótulo «estimado» en cada cifra atribuida (tarjetas, tabla, gráfico, Excel); para cada tienda elegida, su participación anual y la de cada mes (`atribucion.tiendas`), y una nota: «T03: 2027 estimado con su parte de la base 2026 (15,7 %) y, mes a mes, con su participación de cada mes de 2025 (de 11,5 % en enero a 22,8 % en junio)».
+
+**F. Desglose con tiendas elegidas.** Para dimensiones distintas de «tienda», lo proyectado de las mismas tiendas de cada elemento se estima con **la participación anual de las tiendas elegidas en el recorte** (una sola tasa para todos los elementos), en enteros por mayor resto para que la suma sea el total atribuido; lo de tiendas de bloque sale exacto de `por_dim.tiendas`. La cifra precisa por tienda es la del desglose «Tienda».
+
+**Alcance en 07f: ninguno.** 07f no cambia (ni código ni pruebas). `atribuirBase` se importa tal cual; `atribuirMensual` es nueva y vive en `src/lib/direccion/`. Si un día 07f quisiera mostrar el reparto mensual, lo importaría de ahí.
+
+### 3.5 Lo que bloquearía el cierre (`src/lib/direccion/cierre.ts`)
+
+Solo para una proyección **en trabajo**. Arma las entradas **como lo hace `leerBloqueos` de 07g y `cerrarProyeccion` de M7**, con las funciones exportadas de M7 (`cargarContextoCalculo(d, { conEat: false, conFlujo: true })`, `leerVigentes` de `Y+1`, `desactualizadaDe`, `crecimientosDeHoy` con `ninoDeFilas` de las filas base de hoy, `bloqueosNinoDe`) y:
+1. **Causas que no son filas:** `bloqueosDeLote(...)` de `src/lib/aprobacion/reglas.ts`, que llama a `motivoRechazoCerrar` en bucle en modo comprobación (método anterior, crecimientos cambiados, los del Niño, crecimientos sin aprobar, desactualizada). Los códigos y mensajes son los de M7 tal cual.
+2. **Filas:** una llamada a `motivoRechazoCerrar` con `filasBase` (de `leerFilasConAnios(…, { columnas: "ligeras", tiendaId: null, soloActivas: true })`, con sus `avisos`) y todo lo demás neutro, que devuelve `filas_sin_decidir`; el conteo por año y por motivo y las unidades se calculan con **`filaBloqueaCierre`** registro por registro.
+3. **Tiendas:** otra llamada con `filasBase: []` y `tiendas`, que devuelve `tiendas_sin_decidir`.
+
+Ningún predicado se reescribe (D12; prueba estática: `src/lib/direccion/` no contiene `revision_cola_larga` ni `umbral_cola_larga` fuera de pasarlo como argumento). Cacheado 60 s por `(proyeccion_id, huella, calculado_at)`.
 
 ## 4. Pantallas
 
 ### 4.1 Dónde vive y quién la ve
 
-- Ruta **`/planificacion/aprobacion-direccion`**, item **«Aprobación de dirección»** en la sección Planificación de `nav.ts` (roles `PLANIFICACION`: admin y planner). El comprador no lo ve y `puedeVerRuta` lo redirige (decisión 113: los datos de la proyección no se abren al comprador).
-- **Admin:** ve todo y tiene el panel «Decisión de dirección» con los tres botones.
-- **Planner:** ve todo (prepara la proyección y necesita saber qué verá dirección y qué observó), sin el panel de decisión; en su lugar, el estado y el historial.
-- Kit existente: `Card`, `DataTable`, `Chips`, `ChipsMultiples`, `ChipFiltro`, `Select` y `Field` (`form.tsx`), `Tabs`, `Badge`, `Alert`, `Modal`, `DialogoConfirmar`, `EmptyState`, `Switch`, `Checkbox`. Hook propio `use-tablero-direccion.ts` (patrón `use-proyeccion.ts`). Formato `es-PE` de `src/lib/formato.ts` (miles con coma, mes «set»), igual en pantalla y Excel.
-- Archivos: `src/app/(app)/planificacion/aprobacion-direccion/page.tsx`, `tablero-panel.tsx`, `filtros-tablero.tsx`, `grafico-tablero.tsx`, `tabla-mensual.tsx`, `tabla-desglose.tsx`, `crecimientos-gm.tsx`, `alertas-tablero.tsx`, `decision-direccion.tsx`, `historial-aprobaciones.tsx`, `vista-tablero.ts` (puro: filas, textos, hojas de Excel).
+- Ruta **`/planificacion/aprobacion-direccion`**, item **«Aprobación de dirección»** en la sección Planificación de `src/lib/nav.ts` (roles `PLANIFICACION`: admin y planner). El comprador no ve el item y `puedeVerRuta` lo redirige (decisión 113).
+- **Admin:** todo, con el botón **«Decidir»** siempre visible (barra fija arriba en escritorio, abajo en móvil).
+- **Planner:** todo, sin el botón; en su lugar, el estado de dirección en texto y el historial (prepara la proyección y necesita ver lo que verá dirección y lo que observó).
+- Kit existente: `Card`, `DataTable`, `Chips`, `ChipsMultiples`, `ChipFiltro`, `Select` y `Field` (`form.tsx`), `Tabs`, `Badge`, `Alert`, `Modal`, `DialogoConfirmar`, `EmptyState`, `Switch`, `Checkbox`. Hook `use-tablero-direccion.ts` (patrón `use-proyeccion.ts`). Formato `es-PE` de `src/lib/formato.ts` (miles con coma, decimal con punto, mes «set»), igual en pantalla y Excel. En esta ficha las cifras se escriben con espacio de miles y coma decimal solo por legibilidad.
+- Archivos: `src/app/(app)/planificacion/aprobacion-direccion/page.tsx`, `tablero-panel.tsx`, `barra-decision.tsx`, `resumen-decidir.tsx`, `puente.tsx`, `alertas-tablero.tsx`, `frente-aprobada.tsx`, `filtros-tablero.tsx`, `kpis.tsx`, `grafico-tablero.tsx`, `tabla-mensual.tsx`, `tabla-desglose.tsx`, `crecimientos-gm.tsx`, `decisiones-origen.tsx`, `apoyo.tsx`, `decision-modal.tsx`, `historial-aprobaciones.tsx`, `use-tablero-direccion.ts`, `vista-tablero.ts` (puro: filas, textos, hojas del Excel).
 
-### 4.2 Estructura de la página (de arriba abajo; en móvil, una columna en el mismo orden)
+### 4.2 Orden de la página (de arriba abajo; en móvil, una columna en el mismo orden)
 
-1. **Cabecera.** Selector de proyección («Proyección 2026–2027 · **cerrada** el 07 nov 2026 · datos hasta set 2026 · la que usa Compras») y `Badge` de estado **en texto**: «Sin aprobación de dirección» · «Aprobada por *nombre* el 08 nov 2026» · «Con observaciones» · «Rechazada» · «Aprobación invalidada: la proyección cambió después del 08 nov». Debajo, si `k' > k`: «Hay venta publicada hasta oct 2026; esta proyección se calculó con datos hasta set 2026» (alerta `datos_mas_nuevos`). Si la proyección mostrada es en trabajo: `Alert` ámbar «En trabajo: las cifras pueden cambiar; la que usa Compras es *Proyección 2026–2027 (cerrada)*» con enlace para cambiar. Control **«Comparar con»** (`Select`, opcional).
-2. **Filtros** (barra; en móvil, un botón «Filtros (3)» que abre un `Modal` de pantalla completa con los mismos controles). Todos en la URL (`?proyeccion=&comparar=&genero=&mundo=&linea=&am=&marca=&tiendas=&bloque=&desglose=`) para compartir el enlace y recargar sin perder el recorte.
-   - Género · Mundo · Línea (`Select` encadenados, como la Matriz de M7).
-   - **Agrupación de marca** (`ChipsMultiples`, primer nivel, junto a GML; «Todas» por defecto).
-   - **Marca** (`Select` con búsqueda), **habilitado solo con una agrupación elegida**; texto de ayuda: «Lo proyectado por marca es estimado con la participación histórica de la marca en su fila».
-   - **Tiendas** (`ChipsMultiples` agrupado por estado al año siguiente: «Mismas tiendas 2027», «Nuevas del año anterior», «Aperturas 2027», «Cierres», «Cerradas»; cada chip con código y nombre; las aperturas sin historia también aparecen).
-   - **Bloque**: `Chips` «Todas · Mismas tiendas · Tiendas nuevas · Cierres».
-   - Botón «Limpiar filtros». Bajo la barra, el **resumen del recorte en texto** («HOMBRE · URBANO · AM: RECONOCIDO · tiendas: T03, T12 · cifras de T03 estimadas»).
-3. **Tarjetas de cifras (KPIs)**, cuatro en fila (dos por fila en móvil), cada una con el número y una frase:
-   - «**2027 proyectado** · 53 208 u · +6,4 % vs cierre 2026 · +13,2 % vs 2025».
-   - «**2026 cierre** · 50 001 u = real ene–set 34 000 + proyectado oct–dic 16 001 · +6,4 % vs 2025».
-   - «**2026 en lo que va** · ene–set 34 000 u · +3,0 % vs 2025 ene–set».
-   - «**Mismas tiendas** · 2027 vs 2026: +6,7 % sobre real, +5,0 % sobre corregido (4 tiendas) · total con nuevas, aperturas y cierres: +6,4 %».
-4. **Gráfico mensual** (§4.3) con su tabla mensual debajo (§4.4).
-5. **Crecimiento declarado frente a implícito** por GM (§4.4, tabla 3).
-6. **Alertas para aprobar** (§4.4, lista).
-7. **Desglose** por la dimensión elegida (§4.4, tabla 2) y **las 10 filas mayores** del recorte.
-8. **Decisión de dirección** (solo admin) e **Historial de aprobaciones** (todos los que ven la página) (§4.6).
+La página tiene dos partes. **Arriba, «Para decidir»: siempre la proyección entera**, sin filtros (es lo que se aprueba). **Abajo, «Explorar»: el recorte** que elija quien mira.
 
-### 4.3 Gráfico mensual
-
-- **SVG propio, sin librerías**, reutilizando `calcularGeometriaCurvas` y `lecturaMes` de `src/lib/curvas/grafico.ts` en modo unidades, como `grafico-mensual-fila.tsx` de M7 (que es su punto de partida). Eje X: ene … dic; eje Y: unidades con miles `es-PE`.
-- **Series** (una línea por año; se distinguen por **trazo y grosor, no solo por color**):
-  - 2023, 2024, 2025: real, líneas finas continuas en grises/azules decrecientes; el año del Niño con guion y punto (la convención de M6).
-  - 2026: **real** hasta `k'` (continuo, grueso) y **proyectado** desde `k+1` (discontinuo, grueso, mismo color); si `k' > k`, en los meses `k+1 … k'` se ven los dos puntos (real y proyectado) y la lectura del mes dice la diferencia.
-  - 2027: proyectado, discontinuo, el más grueso y el color de acento.
-  - «Comparar con»: la otra proyección en punteado fino, con su nombre en la leyenda.
-  - Línea vertical en `k` con el rótulo «datos hasta set 2026».
-- **Conmutadores** (`Chips`): «Mensual · Acumulado» y, en la leyenda, cada serie se enciende o apaga (por defecto: 2024, 2025, 2026 y 2027; 2023 apagado para no saturar en móvil).
-- **Accesible:** `<figure aria-describedby="tabla-mensual">` con un `<figcaption>` que resume en texto («2027 proyecta 53 208 u, +6,4 % sobre el cierre 2026; el mes mayor es diciembre con 5 641 u»); la tabla mensual es la alternativa con las cifras exactas; navegación por teclado entre meses (flechas) con la lectura del mes en una región `aria-live="polite"` («Diciembre: 2025 5 210 · 2026 5 380 proyectado · 2027 5 641 proyectado»); contraste AA; en pantallas de menos de 640 px el gráfico ocupa el ancho y la leyenda pasa debajo, en dos columnas.
-- **Exactitud en el gráfico:** si el recorte incluye una tienda «misma» o una marca, la leyenda de 2026 proyectado y 2027 dice «(estimado)» y hay una nota debajo (§4.4 atribución).
-
-### 4.4 Tablas, comparativos, atribución y alertas
-
-**Tabla 1 · Mensual** (`DataTable` con desplazamiento horizontal y primera columna fija): filas `2023`, `2024`, `2025`, `2026 real`, `2026 proyectado`, `2026 cierre` (real + proyectado), `2027`, y dos filas de variación «2027 vs 2026 cierre (%)» y «2026 vs 2025 (%)» mes a mes; columnas `ene … dic`, `Total`, `ene–k`. Real en redonda, proyectado en cursiva (la convención de la vista Mensual de M7), y **cada celda proyectada lleva la palabra «proy.» en su `title` y en lector de pantalla** (no solo la cursiva). Meses sin carga: «—» con `title` «sin carga publicada».
-
-**Comparativos** (`comparativos.ts`, puros; §5 R4 a R6):
-- **vs año anterior:** `2027 ÷ 2026 cierre − 1`; `2026 cierre ÷ 2025 − 1`; `2026 ene–k' ÷ 2025 ene–k' − 1` (el único comparativo 100 % real del año en curso).
-- **vs dos años:** `2027 ÷ 2025 − 1`; `2026 cierre ÷ 2024 − 1`.
-- **Mismas tiendas frente a total:** para un comparativo «Z vs Z−1», «mismas» usa solo las tiendas de `M(Z)` (las abiertas los doce meses de `Z−1` y todo `Z`; claves de pertenencia guardadas en `parametros.bloques`), tanto en el numerador como en el denominador; para `2027 vs 2026`, mismas = filas base de `Y+1` frente a su base `B` (exacto, es lo que mide M7). «Total» = todas las tiendas (sin CD), con nuevas, aperturas y cierres.
-- Motivos en lugar de un %: `sin_base` (denominador 0), `incompleto` (falta un mes publicado en alguno de los dos), `nueva` (solo tiendas sin año anterior en el recorte).
-
-**Regla de atribución por tienda (D5; `atribucion.ts`, pura).** Con `tienda_ids` elegidas:
-- Tiendas nuevas, aperturas y cierres elegidas: su proyección **exacta** (filas con `tienda_id`).
-- Tienda `t` de `M(Z)` elegida: `proy_t,Z,m = mismas_Z,m × s_t,Z`, con `s_t,Z = venta_t ÷ Σ_{u ∈ M(Z)} venta_u` sobre los **12 meses cerrados hasta `k`** del mismo recorte (GML, AM, marca), de `por_tienda` de `tablero_venta`. Para `Z = Y+1` el conjunto es `M(Y+1)` (incluye las nuevas del año anterior que entran a la base, con sus meses reales). Si `Σ venta = 0`, reparto por igual y aviso. Enteros por mayor resto al final, por mes.
-- Invariante: con **todas** las tiendas de `M(Z)` elegidas, la suma atribuida es exactamente `mismas_Z` (R7).
-- Rótulo «estimado» en la tarjeta, la tabla, el gráfico y el Excel; alerta `atribucion_estimada` («T03: 2027 estimado con su participación de oct 2025–set 2026 en mismas tiendas, 18,4 %»).
-
-**Tabla 2 · Desglose** por la dimensión elegida (`Select`: Género · Mundo · Línea · Agrupación de marca · Marca [solo con una AM] · Tienda): una fila por elemento con `2023`, `2024`, `2025`, `2025 ene–k`, `2026 ene–k`, `2026 cierre`, `2027`, `% 27/26`, `% 27/25`, `% 26/25`, `% ene–k`, `part. 2027`; total al pie, que cuadra con los KPIs (R3). Orden por 2027 descendente. Filas estimadas con `Badge` «estimado». Paginación de 200 como M11 (`src/lib/reportes/paginacion.ts`).
-
-**Las 10 filas mayores** (GML × AM) del recorte en 2027, con su participación y crecimiento; si las 10 suman ≥ 40 % o una sola ≥ 5 % del recorte, alerta `concentracion`.
-
-**Tabla 3 · Crecimiento declarado frente a implícito** (siempre de la proyección entera, una fila por GM de HOMBRE y MUJER más el Resto, y el Total):
-- Declarado: `proyeccion_crecimientos.pct` (o el Resto), con «sobre 2026 corregido» o «sobre 2026 real» según `sobre_base` (06e D6).
-- Implícito: `Σ vigente 2027 de las filas base del GM ÷ Σ B − 1` («sobre real») y `÷ Σ B' − 1` («sobre corregido»); se compara con el declarado **en su misma base**.
-- Desvío en puntos y semáforo **en texto**: «coincide» (< 2 pp) · «revisar: +4,3 pp» (decisiones a mano o filas fijadas que se apartan del %). Columna «Niño»: «base corregida +1,6 % (B' 48 380 frente a B 47 600)» si `correccionMaterial`.
-- Al pie: «Total 2027 mismas tiendas +6,7 % sobre real (+5,0 % sobre corregido) · con nuevas, aperturas y cierres +6,4 %», que puentea al KPI.
-
-**Alertas para aprobar** (`alertas.ts`; lista con icono **y** palabra de nivel: «Bloquea el cierre», «Importante», «Informativo»; cada una con su enlace a la pestaña de M7 donde se arregla):
-
-| Código | Nivel | Cuándo | Texto de ejemplo |
+| # | Bloque | Parte | Contenido (detalle en §4.3 a §4.10) |
 |---|---|---|---|
-| `filas_sin_decidir` | bloquea_cierre (en trabajo) / info (cerrada) | registros base con `propuesto ≥ umbral_cola_larga` y sin decidir, por año | «2027: 37 filas sin decidir con 41 200 u propuestas (4,4 % del año)» |
-| `tiendas_sin_decidir` | bloquea_cierre | `proyeccion_tiendas` con propuesta y sin decisión | «Apertura T12 (abr 2027) sin decidir: 8 300 u propuestas» |
-| `factor_provisional` / `factor_desfasado` / `factor_faltante` | bloquea_cierre si es de `Y` y la proyección está en trabajo; importante si es cerrada | `estadoFactorY` ≠ `ok` (06e D5) | «Factor del Niño de verano 2026: provisional (1 mes del periodo, escrito a mano 1,12). Mueve 2027 de las líneas de verano» |
-| `base_corregida_nino` | importante | algún GM con `correccionMaterial` | «4 GM con base 2027 corregida del Niño: 2027 se apoya en 2026 dividido por 0,70 en invierno» |
-| `tienda_nueva_relevante` | importante | una tienda nueva del año anterior o apertura pesa ≥ 5 % del 2027 del recorte, o una tienda que entra a la base pesa ≥ 5 % de `B` | «T10 entra a mismas tiendas en 2027 y es el 8,6 % de la base: abrió en nov 2025 y su 2026 es real ene–set más proyectado oct–dic» (con los datos reales, es el caso de la tienda nueva grande que entra a la base de 2027) |
-| `apertura_sin_historia` | importante | apertura de `Y+1` proyectada por venta esperada | «T12 se proyecta por venta esperada S/ … y referente T05: no tiene venta propia» |
-| `concentracion` | importante | top 10 ≥ 40 % o una fila ≥ 5 % | «Las 10 filas mayores son el 46 % de 2027; DENIM · RECONOCIDO sola, el 7 %» |
-| `desvio_crecimiento` | importante | algún GM con semáforo «revisar» | «MUJER · URBANO: declarado +8,0 %, implícito +12,3 %» |
-| `propuesta_cambio` / `curva_cambio` | info | conteos > 0 | «112 filas decididas cuya propuesta cambió al recalcular» |
-| `sin_curva` | importante | `sin_meses > 0` | «1 240 u de 2027 sin reparto mensual (filas sin curva): suman al total, no al gráfico» |
-| `desactualizada` | importante (en trabajo) | `desactualizada` de M7 no vacío | «Desactualizada: cargas nuevas, crecimientos cambiados» |
-| `datos_mas_nuevos` | info | `k' > k` | «Hay oct 2026 publicado: en el gráfico ves el real de oct junto al proyectado» |
-| `metodo_anterior` | importante | `version_metodo < VERSION_METODO` | «Calculada con el método 4: sin base corregida del Niño» |
-| `fuera_universo` | info | `fuera_universo` > 0 | «2023 incluye 3 100 u de filas que ya no se proyectan (sin venta en 24 meses)» |
-| `meses_faltantes` | importante | falta una carga en el rango | «Falta mar 2024: las cifras de 2024 están incompletas» |
-| `atribucion_estimada` / `marca_estimada` | info | filtro de tienda «misma» o de marca | ver arriba; para marca: «Marca X: 2027 estimado con su participación de oct 2025–set 2026 en su fila (63 %)»; si hay `sin_participacion_marca`, «N u sin participación por marca no se pueden recortar» |
-| `comparada_distinta_k` | info | «Comparar con» una de otro `hasta_periodo` | «La comparada se calculó con datos hasta ago 2026» |
+| 1 | Cabecera fija | — | Selector de proyección, estado de dirección en texto, «Comparar con», botón «Decidir» (admin) y «Descargar Excel» |
+| 2 | Resumen para decidir | Para decidir | 3 a 5 líneas (§4.3) |
+| 3 | De 2026 a 2027 (puente) | Para decidir | Total y por género × mundo (§4.4) |
+| 4 | Alertas para aprobar | Para decidir | Lo que bloquearía el cierre (si está en trabajo), importantes e informativas (§4.5) |
+| 5 | Frente a lo aprobado | Para decidir | Diferencia con la última aprobada, por GM (§4.6) |
+| 6 | Filtros | Explorar | §4.7 |
+| 7 | Cifras del recorte | Explorar | Cuatro tarjetas y el puente del recorte en una línea (§4.7) |
+| 8 | Gráfico mensual y tabla mensual | Explorar | §4.8 |
+| 9 | Desglose | Explorar | Tabla por la dimensión elegida; elegir una fila la aplica como filtro (§4.8) |
+| 10 | Crecimiento declarado, implícito y tendencia | Para decidir (no se recorta) | §4.8 |
+| 11 | Cómo se decidió | Explorar (recorte sin tienda) | Origen de las decisiones (§4.8) |
+| 12 | Datos de apoyo: soles y cobertura | Explorar | §4.8 |
+| 13 | Las 10 filas mayores | Explorar | §4.8 |
+| 14 | Historial de aprobaciones | — | §4.10 |
 
-### 4.5 Exportar a Excel
+**Cabecera (1).** «Proyección 2026–2027 · **cerrada** el 07 nov 2026 por *Planner P.* · datos hasta set 2026 · **la que usa Compras**», y el `Badge` de estado **en texto**: «Sin aprobación de dirección» · «Aprobada por *nombre* el 08 nov 2026» · «Aprobada con observaciones por *nombre*» · «Rechazada por *nombre*» · «Aprobación invalidada: la proyección cambió después del 08 nov». Si la mostrada está en trabajo: `Alert` ámbar «En trabajo: las cifras pueden cambiar; la que usa Compras es *Proyección …*» con enlace. Si es archivada: `Alert` gris «Archivada: solo lectura». Si `k' > k`: «Hay venta publicada hasta oct 2026; esta proyección se calculó con datos hasta set 2026». «Comparar con» (`Select`): por defecto la última aprobada (con el rótulo «la última aprobada»), cualquier otra, o «Sin comparar».
 
-Botón «Descargar Excel» (admin y planner), generado **en el navegador** con `descargarLibro` de `src/app/(app)/planificacion/proyeccion/descarga-libro.ts` (SheetJS bajo demanda, patrón de M11 y M7) sobre la respuesta ya cargada. Nombre `nombreArchivoProyeccion(Y, "direccion")` → `proyeccion-2026-2027-direccion.xlsx`. Hojas:
-- `RESUMEN`: proyección, estado, aprobación vigente (o «sin aprobación»), KPIs y comparativos (total y mismas).
-- `MENSUAL`: la tabla 1, con una columna `TIPO` (`real`/`proyectado`/`variacion`) y `EXACTITUD`.
-- `DESGLOSE`: la tabla 2 con la dimensión elegida.
-- `CRECIMIENTOS`: la tabla 3.
-- `ALERTAS`: código, nivel, texto.
-- `APROBACIONES`: el historial (fecha, quién, resultado, motivo, comentario, `invalidada`).
-- `FILTROS`: **todos los filtros, incluida la agrupación de marca y la marca**, las tiendas, el bloque, la comparada, `k`, `k'`, la huella y la fecha de descarga; y la nota de exactitud.
+**Estados vacíos y de error.** Sin ninguna proyección: `EmptyState` «No hay proyección calculada» con enlace a Proyección. `409 sin_calcular`: «Calcula la proyección para verla en el tablero». `409 calculo_en_curso`: «Se está recalculando; vuelve en unos minutos» con «Reintentar». Filtro sin datos: `EmptyState` «Sin venta ni proyección con estos filtros» con «Limpiar filtros». Error `500`: `Alert` rojo con «Reintentar».
 
-### 4.6 Decisión de dirección, historial y avisos en otras pantallas
+### 4.3 Resumen para decidir
 
-**Panel «Decisión de dirección» (solo admin; oculto en archivadas).**
-- Resumen fijo (no depende del filtro): «Vas a decidir sobre *Proyección 2026–2027 (cerrada)* completa: 2026 cierre 50 001 u · 2027 53 208 u (+6,4 %) · 3 alertas importantes» (cifras del caso sintético de §6).
-- Tres botones: **Aprobar** · **Aprobar con observaciones** · **Rechazar**. Cada uno abre un `Modal` con: el resumen, la lista de alertas «Bloquea el cierre» e «Importante», la casilla obligatoria «Revisé las alertas y las cifras de toda la proyección», y:
-  - Aprobar: comentario opcional.
-  - Con observaciones / Rechazar: `Select` de motivo y comentario obligatorios (≥ 10 caracteres; contador visible).
-- Al confirmar: `POST`; con `409 huella_distinta`, el modal dice «La proyección cambió mientras la mirabas (alguien decidió o recalculó). Vuelve a cargar el tablero y revisa de nuevo» con el botón «Recargar», y no registra nada.
-- Si la proyección está **en trabajo**: el modal añade «Esta proyección todavía no está cerrada. Si se cierra sin cambiar cifras, tu aprobación sigue vigente; si cambia una cifra, queda invalidada».
-- Si hay alertas «Bloquea el cierre» y la proyección está en trabajo: **se puede aprobar igual** (la aprobación es un juicio de dirección, no un control técnico), pero el modal las lista primero.
+Lo arma el servidor (`decidir.lineas`), siempre de la proyección entera, en frases completas (cifras del caso de §6.1):
+1. **Qué se compra:** «2027: 84 714 u, +7,9 % sobre el cierre 2026 y +13,7 % sobre 2025, el último año normal (2026 fue año del Niño)».
+2. **De dónde sale:** «El aumento de 6 213 u sale de: crecimiento declarado +4 670, decisiones a mano +1 343, aperturas +1 408, venta de 2027 de tiendas que cierran +1 000, corrección del Niño +753, menos 2 961 de tiendas que salen de la base».
+3. **Riesgo:** «5 alertas importantes; la primera: HOMBRE · URBANO declara +5,0 % con sus mismas tiendas a −5,9 % en lo que va del año». Sin alertas importantes: «Sin alertas importantes».
+4. **Frente a lo aprobado:** «Frente a lo aprobado el 03 nov (*Proyección seguimiento set*): 2027 +1 214 u (+1,5 %); el mayor cambio, MUJER · URBANO +1 006 u». O «Idéntica a lo aprobado el 03 nov». O «No hay aprobaciones anteriores».
+5. **Quién y cómo:** «Cerrada por *Planner P.* el 07 nov 2026; sin aprobación de dirección vigente». Si en trabajo: «En trabajo; 3 causas bloquearían el cierre» (cuando llega `/bloqueos`).
 
-**Historial** (`Card`, todos los que ven la página): fecha y hora (Lima), quién, rol, resultado (`Badge` con texto), motivo, comentario, «sobre: en trabajo / cerrada», y «**invalidada**: la proyección cambió después» cuando su huella no es la actual. Más reciente primero.
+Debajo, en letra chica: «Precisión del método: con el año anterior se habría desviado −3,2 % (dentro de muestra)» y «Objetivo global declarado: +6,0 %; implícito en mismas tiendas: +7,9 % sobre 2026 corregido (+9,0 % sobre real)». Si no hay dato, la línea no aparece.
 
-**Avisos en otras pantallas** (solo admin y planner; una línea, sin bloquear nada):
-- Cabecera de Proyección de unidades (`cabecera-proyeccion.tsx`): «Dirección: aprobada el 08 nov por *nombre*» / «sin aprobación» / «aprobación invalidada» con enlace al tablero.
-- Cabecera de Flujo mensual (`/compras/flujo`): **solo si el rol es admin o planner**, «La cerrada que usa el flujo no tiene aprobación de dirección vigente» con enlace. El comprador no ve el aviso (los datos de aprobación son de planificación, decisión 113).
-- Ambos leen `GET /api/direccion/estado`.
+### 4.4 De 2026 a 2027 (puente)
+
+Tabla de pasos (`DataTable`, cifras en unidades, con su acumulado y su % sobre el paso anterior), **total de la proyección** (caso de §6.1):
+
+| Paso | Unidades | Acumulado |
+|---|---|---|
+| 2026 cierre, todas las tiendas | | 78 501 |
+| − 2026 de tiendas que no forman la base de 2027 (aperturas de 2026 aún fuera, cierres de 2026) | 0 | 78 501 |
+| − 2026 de tiendas que cierran en 2027, filas sin base y diferencia | −2 961 | 75 540 |
+| **Base 2027 (`B`): 2026 de las mismas tiendas de 2027** | | **75 540** |
+| + Corrección del Niño (`B' − B`) | +753 | 76 293 |
+| + Crecimiento declarado aplicado (propuesta − `B'`) | +4 670 | 80 963 |
+| + Decisiones a mano (vigente − propuesta) | +1 343 | 82 306 |
+| + Filas de mismas tiendas sin base `B` (otro método) | 0 | 82 306 |
+| **Mismas tiendas 2027** | | **82 306** |
+| + Tiendas abiertas en 2026 (aún fuera de la base) | 0 | 82 306 |
+| + Aperturas de 2027 | +1 408 | 83 714 |
+| + Venta de 2027 de tiendas que cierran en 2027 | +1 000 | 84 714 |
+| **2027** | | **84 714** |
+
+- Cada línea con texto de ayuda (`title` y lector de pantalla). La tercera dice: «Incluye el 2026 que M7 resta de la base por las tiendas que cierran en 2027 y cualquier diferencia entre la base y el cierre de esas tiendas (por ejemplo, decisiones sobre 2026 tomadas después de calcular la base)». Si no hay tiendas que salgan y la línea no es 0, se marca «diferencia» y se explica (M8 del revisor).
+- **Por género × mundo:** la misma tabla en columnas, una fila por GM de HOMBRE y MUJER y una del Resto, con la del Total (`puente.por_gm`). Las celdas de un GM con Niño llevan «Niño».
+- Las líneas salen de lo guardado (`por_gm` de `tablero_proyeccion`): `B`, `B'`, propuesta y vigente de los registros con `B`, vigente sin `B`, bloques de tienda, cierre de `Y` y lo de tienda que queda fuera. La suma de los pasos es el total exacto (R4).
+
+### 4.5 Alertas para aprobar
+
+Lista con icono **y** palabra de nivel («Bloquea el cierre», «Importante», «Informativo»), con enlace a la pestaña de M7 donde se resuelve. Arriba, las de la proyección entera; las del recorte van en «Explorar» junto a las tarjetas.
+
+**Bloquearían el cierre** (solo en trabajo; de `GET /api/direccion/bloqueos`, §3.5; mientras carga: «Comprobando qué bloquearía el cierre…»): cada causa con el código y el mensaje de M7 tal cual (método anterior, crecimientos cambiados o sin aprobar, factores del Niño, desactualizada, filas sin decidir con su conteo por año y motivo —«2027: 37 filas sin decidir, 41 200 u; 12 de ellas de cola larga para revisión»—, tiendas sin decidir). Si no hay ninguna: «Nada bloquea el cierre».
+
+**Importantes e informativas** (`alertas.ts`, puras):
+
+| Código | Nivel | Alcance | Cuándo | Texto de ejemplo |
+|---|---|---|---|---|
+| `contra_tendencia` | importante | proyección | GM con `declarado − tendencia ≥ UMBRAL_TENDENCIA_PP` (5 pp) y tendencia < 0; tendencia = venta ene–`k'` de `Y` frente a ene–`k'` de `Y−1` en `M(Y)` | «HOMBRE · URBANO declara +5,0 % y sus mismas tiendas van −5,9 % en ene–oct» |
+| `desvio_crecimiento` | importante | proyección | GM con `|implícito − declarado| ≥ 2 pp` en la base del declarado | «MUJER · URBANO: declarado +8,0 %, implícito +12,3 % (+4,3 pp por decisiones a mano)» |
+| `factor_provisional` | importante | proyección | Un factor del Niño de `Y` con `estadoFactorY` ≠ `ok` (cerrada: importante; en trabajo además bloquea, en la lista de arriba) | «Invierno 2026 provisional (1 mes del periodo, escrito a mano 0,70): expone 13 300 u de 2027 (15,7 %) en filas de invierno» (de `por_temporada.Y1_con_factor_Y` de esa temporada; `todo_el_ano` se cuenta en ambas y se dice) |
+| `tienda_nueva_relevante` | importante | ambos | Una tienda que entra a la base pesa ≥ 5 % de `B`, o una nueva o apertura ≥ 5 % del 2027 | «T10 entra a mismas tiendas en 2027 y es el 5,4 % de la base: abrió en nov 2025 y su 2026 es real ene–set más proyectado oct–dic» |
+| `apertura_sin_historia` | importante | ambos | Apertura de `Y+1` proyectada por venta esperada | «T12 (abr 2027) se proyecta por venta esperada y su referente: no tiene venta propia» |
+| `anomalia_crecimiento` | importante si `sin_base`; si no, info | proyección | Versión vigente de un GM sin base (`Σ B = 0` o `base_valor` nulo), una versión reemplazada el mismo día que la vigente, o vigente sin nota | «MUJER · URBANO v4 reemplazó a v3 el mismo día (06 nov, *Planner P.*); sin nota» |
+| `origen_decisiones` | importante si lo aceptado en bloque o tal cual ≥ 80 % de las unidades de 2027 y el día pico tiene ≥ 50 % de los decididos; si no, info | proyección | Siempre que haya decisiones | «2027: 49 % aceptado en bloque, 15 % tal cual la propuesta, 36 % a mano; 6 de los 8 registros de 2027 decididos el 07 nov por *Planner P.*» |
+| `concentracion` | importante | recorte | Con ≥ 50 filas base: las 10 mayores ≥ 40 % del 2027 o una sola ≥ 5 % | «Las 10 filas mayores son el 46 % de 2027; una sola, el 7 %» |
+| `base_corregida_nino` | info | proyección | GM con `correccionMaterial` | «HOMBRE · URBANO: base 2027 corregida del Niño +1,6 % (47 040 → 47 793)» |
+| `metodo_anterior` | importante | proyección | `version_metodo < VERSION_METODO` | «Calculada con el método 4: sin base corregida del Niño» |
+| `sin_curva` | importante | recorte | `sin_meses > 0` | «1 240 u de 2027 sin reparto mensual: suman al total, no al gráfico» |
+| `propuesta_cambio` / `curva_cambio` | info | proyección | conteos > 0 | «112 filas decididas cuya propuesta cambió al recalcular» |
+| `datos_mas_nuevos` | info | proyección | `k' > k` | «Hay oct 2026 publicado: el gráfico muestra su real junto al proyectado» |
+| `meses_faltantes` | importante | recorte | Falta una carga en el rango | «Falta mar 2024: 2024 está incompleto» |
+| `atribucion_estimada` | info | recorte | Filtro de tienda o bloque con mismas tiendas | §3.4 E |
+| `atribucion_sin_mensual` | importante | recorte | §3.4 D | «El real de ene–set cambió desde el cálculo: el reparto mensual por tienda de oct–dic no se puede hacer; el total anual sí» |
+| `marca_estimada` | info | recorte | Filtro o desglose de marca | «Unidad de marca X: lo proyectado es estimado con su participación de los últimos 12 meses en cada fila (en esta fila, 63 %). Una marca nueva, en liquidación o al barrer puede estar sobre o subestimada»; con `sin_participacion_marca`: «N u de filas sin participación por marca quedan fuera» |
+| `comparada_distinta_k` | info | proyección | La comparada tiene otro `hasta_periodo` | «La comparada se calculó con datos hasta ago 2026» |
+| `distinta_de_aprobada` | info | proyección | Hay una aprobada anterior y la huella difiere | La línea 4 del resumen |
+
+Orden: «Bloquea el cierre», «Importante», «Informativo»; dentro de cada nivel, el orden de la tabla. Las informativas van plegadas («Ver 6 informativas»).
+
+### 4.6 Frente a lo aprobado
+
+`Card` con la diferencia contra la última aprobada (`decidir.diferencia`): fecha, quién, resultado, y una tabla por GM con `2027 aprobado`, `2027 actual`, `diferencia u` y `%`, ordenada por diferencia absoluta, más la fila Total y la de 2026 cierre. Sale del `resumen` guardado de esa aprobación (la foto exacta de lo aprobado) frente a `por_gm` de la mostrada. Casos: **misma proyección y misma huella** → no se muestra (el estado ya dice «Aprobada»); **misma huella, otra proyección** (una copia sin cambios) → «Idéntica a lo aprobado el 03 nov en *…*; esta copia aún no tiene aprobación propia»; **sin aprobaciones** → «Todavía no hay ninguna proyección aprobada».
+
+### 4.7 Filtros y cifras del recorte
+
+**Filtros** (barra; en móvil, un botón «Filtros (3)» que abre un `Modal` de pantalla completa). Todos en la URL (`?proyeccion=&comparar=&generos=&resto=&mundo=&linea=&temporadas=&am=&marca=&tiendas=&bloque=&desglose=`).
+- **Géneros** (`ChipsMultiples`; atajo **«Resto»** que marca de una vez los géneros fuera de HOMBRE y MUJER, el mismo conjunto que el Resto de M7).
+- **Mundo** y **Línea** (`Select`; línea solo con un género y un mundo, como la Matriz de M7).
+- **Temporada** (`ChipsMultiples`: Invierno · Verano · Todo el año · Sin temporada; la de la fila, como el filtro de M7).
+- **Agrupación de marca** (`ChipsMultiples`, primer nivel).
+- **Marca** (`Select` con búsqueda; **unidades de marca agrupadas por su AM**; una a la vez en `0.19.0`); ayuda: «Lo proyectado por marca es estimado con su participación de los últimos 12 meses en cada fila».
+- **Tiendas** (`ChipsMultiples` agrupado por su situación en 2027: «Mismas tiendas 2027», «Abiertas en 2026», «Aperturas 2027», «Cierres 2027», «Cerradas»; código y nombre).
+- **Bloque** (`Chips`: Todas · Mismas tiendas de 2027 · Tiendas nuevas · Cierres 2027).
+- «Limpiar filtros». Bajo la barra, el recorte en texto: «HOMBRE · URBANO · AM: AM-A · tiendas: T03 · cifras de T03 estimadas».
+
+**Conjunto de tiendas de cada línea (I4).** Con un bloque o tiendas elegidas, **todas las líneas del gráfico y de la tabla usan el mismo conjunto de tiendas**: el del bloque en 2027 (`M(2027)`, las nuevas o los cierres de 2027) intersectado con las tiendas elegidas. 2023, 2024, 2025 y el real de 2026 son la venta de esas tiendas; 2026 proyectado y 2027, su proyección (exacta o atribuida, §3.4). El rótulo lo dice: «Mismas tiendas de 2027 (4): T01, T02, T03, T10». Los **comparativos de mismas tiendas** usan, para «Z frente a Z−1», el conjunto `M(Z)` de cada par (R7).
+
+**Cifras del recorte (tarjetas)**, cuatro (dos por fila en móvil), cada una con el número y una frase (caso HOMBRE · URBANO de §6.1):
+- «**2027 proyectado** · 52 708 u · +5,4 % vs cierre 2026 · **+12,1 % vs 2025, último año normal**».
+- «**2026 cierre** · 50 001 u = real ene–set 34 000 + proyectado oct–dic 16 001 · +6,4 % vs 2025 · año del Niño».
+- «**2026 en lo que va** · ene–oct 38 300 u · ene–set +3,0 % vs 2025 ene–set».
+- «**Mismas tiendas** · 2027 vs 2026: +6,9 % sobre real, +5,2 % sobre corregido (4 tiendas) · total con nuevas, aperturas y cierres +5,4 %».
+
+Debajo, el **puente del recorte** en una línea («Base 47 040 → Niño +753 → crecimiento +2 390 → a mano +117 → mismas 50 300 → aperturas +1 408 → cierres +1 000 → 52 708»); con tiendas elegidas no se muestra (no se recorta por tienda). Y las alertas de alcance «recorte».
+
+### 4.8 Gráfico, tablas, crecimientos, decisiones, apoyo y mayores
+
+**Gráfico mensual** (SVG propio con `calcularGeometriaCurvas` y `lecturaMes` de `src/lib/curvas/grafico.ts`, como `grafico-mensual-fila.tsx` de M7). Eje X ene…dic; eje Y unidades.
+- Series, distinguidas por **trazo y grosor, no solo por color**: 2023, 2024 y 2025 reales (finas); **2023 y 2026 con guion y punto y la etiqueta «Niño»** en la leyenda (de `periodos_atipicos`, D14); 2026 real hasta `k'` (continuo, grueso) y proyectado desde `k+1` (discontinuo, grueso); si `k' > k`, en `k+1…k'` se ven los dos puntos y la lectura del mes da la diferencia; 2027 proyectado (discontinuo, el más grueso, color de acento); **«2026 sin Niño (derivado)»** (punteado fino; `meses_sin_nino`; solo con bloque «Todas» y sin tiendas elegidas; leyenda: «2026 dividido por el factor del Niño de cada mes, para ver qué parte del salto de 2027 es corrección»); la **comparada** (punteado, con su nombre y «aprobada» si lo es).
+- Línea vertical en `k` («datos hasta set 2026»). Conmutadores: «Mensual · Acumulado» y encendido por serie (por defecto 2025, 2026, 2026 sin Niño y 2027; 2023 y 2024 apagadas en móvil).
+- **Accesible:** `<figure aria-describedby="tabla-mensual">` con `<figcaption>` en texto («2027 proyecta 52 708 u, +5,4 % sobre el cierre 2026; el mes mayor es diciembre»); la tabla mensual es la alternativa exacta; flechas para recorrer meses, con la lectura en `aria-live="polite"`; contraste AA; < 640 px: ancho completo y leyenda debajo en dos columnas.
+- Con cifras atribuidas o de marca, la leyenda dice «(estimado)» y hay una nota debajo.
+
+**Tabla mensual** (`DataTable`, desplazamiento horizontal, primera columna fija): `2023`, `2024`, `2025`, `2026 real`, `2026 proyectado`, `2026 cierre`, `2026 sin Niño`, `2027`, la comparada, y variaciones «2027 vs 2026 cierre (%)», «2027 vs 2025 (%)» y «2026 vs 2025 (%)» mes a mes; columnas ene…dic, `Total`, `ene–k'`. Real en redonda, proyectado en cursiva **y** con «proy.» en `title` y lector de pantalla. Mes sin carga: «—» («sin carga publicada»). Años del Niño con «(Niño)» en la etiqueta.
+
+**Desglose** (`Select`: Género · Mundo · Línea · Temporada · Agrupación de marca · Marca · Tienda): una fila por elemento con `2023`, `2024`, `2025`, `2025 ene–k'`, `2026 ene–k'`, `2026 cierre`, `2027`, `% 27/26`, `% 27/25`, `% 26/25`, `% ene–k'`, `part. 2027`; total al pie que cuadra con las tarjetas (R5). Orden por 2027 descendente; paginación de 200 (`src/lib/reportes/paginacion.ts`). Filas estimadas con `Badge` «estimado». **Elegir una fila la aplica como filtro** (D11): la serie mensual de ese elemento se ve en el gráfico, sin pedir series por elemento. «Marca» se puede elegir sin AM (la AM se deduce de la unidad).
+
+**Crecimiento declarado, implícito y tendencia** (siempre la proyección entera; una fila por GM de HOMBRE y MUJER, el Resto y el Total):
+- Declarado (`pct`, «sobre 2026 corregido» o «sobre 2026 real»), versión, autor, fecha y nota.
+- Implícito: `Σ vigente 2027 de las filas base del GM ÷ Σ B − 1` («sobre real») y `÷ Σ B' − 1` («sobre corregido»); se compara en la base del declarado.
+- **Tendencia en mismas tiendas** (ene–`k'` de `Y` frente a ene–`k'` de `Y−1`, tiendas de `M(Y)`, sin filtros).
+- Semáforo **en texto**: «coincide» (< 2 pp) · «revisar: +4,3 pp» · «contra la tendencia: declara +5,0 %, la venta va −5,9 %» · «sin dato». Columna «Niño» si `correccionMaterial`. Anomalías como `Badge` («reemplazada el mismo día», «sin base», «sin nota»).
+
+**Cómo se decidió** (`decisiones` del recorte, sin filtro de tienda): por año, unidades y % por origen («en bloque», «IA», «aceptada tal cual», «a mano», «escalada por tienda», «sin decidir»), autores con cuántas filas y entre qué fechas, y el día con más decisiones.
+
+**Datos de apoyo: soles y cobertura** (`Card` con el rótulo «Datos de apoyo: estimados, no forman parte de lo que se aprueba»):
+- **Soles:** 2023, 2024 y 2025 reales; 2026 real ene–`k'`; **2026 cierre y 2027 estimados**, valorizando lo proyectado de cada línea × AM al **precio medio de sus últimos 12 meses** (soles netos de IGV ÷ unidades, de `k'−11` a `k'`; si un par no vendió, el precio medio del recorte, y se informa cuántas unidades se valorizaron así). Con tiendas elegidas, el precio de esas tiendas en el recorte. Cada cifra estimada lleva «estimado» al lado (no solo en el título).
+- **Cobertura:** stock del último mes publicado `k'` en tiendas y en el CD (sin tiendas elegidas), y **meses de cobertura** con la definición de M8 (decisión 42 del dueño): stock total ÷ venta media mensual **proyectada** de los 12 meses siguientes (`k'+1` en adelante), y al lado con la venta real de los últimos 12 meses. Con tiendas elegidas: solo el stock de esas tiendas, sin CD, con «estimado» si su proyección está atribuida. Nota: «El índice de cobertura con el que se compra es el de Flujo mensual; este es un dato de contexto del recorte».
+
+**Las 10 filas mayores** (GML × AM) del recorte en 2027, con participación y crecimiento sobre su `B`.
+
+### 4.9 Exportar a Excel
+
+«Descargar Excel» (admin y planner), generado **en el navegador** con `descargarLibro` de `src/app/(app)/planificacion/proyeccion/descarga-libro.ts` sobre la respuesta cargada. Nombre `nombreArchivoProyeccion(Y, "direccion")` → `proyeccion-2026-2027-direccion.xlsx`. Hojas:
+- `RESUMEN`: proyección, estado, quién cerró, aprobación vigente, las líneas de §4.3, comparativos (total y mismas) y una línea «Venta de filas que ya no se proyectan: 2023 3 100 u…» (`fuera_universo`, M6).
+- `PUENTE`: total y por GM.
+- `ALERTAS`: código, nivel, alcance, texto (incluidas las de bloqueo si es en trabajo).
+- `FRENTE_APROBADA`: la diferencia por GM.
+- `MENSUAL`: la tabla mensual con `TIPO` (`real`/`proyectado`/`sin_nino`/`variacion`) y `EXACTITUD`.
+- `DESGLOSE`: la dimensión elegida.
+- `CRECIMIENTOS`, `DECISIONES`, `APOYO` (soles y cobertura con «estimado» en su columna), `APROBACIONES` (historial con `invalidada`).
+- `FILTROS`: todos los filtros (géneros, Resto, mundo, línea, temporadas, AM, unidad de marca, tiendas, bloque), la comparada, `k`, `k'`, la huella, la fecha de descarga y la nota de exactitud.
+
+### 4.10 Decisión de dirección e historial
+
+**Botón «Decidir»** (solo admin; oculto en archivadas) abre un `Modal` con:
+- «Vas a decidir sobre *Proyección 2026–2027 (cerrada)* completa, no sobre el recorte que estás mirando», las líneas del resumen (§4.3) y las alertas «Bloquea el cierre» e «Importante».
+- Tres opciones: **Aprobar** · **Aprobar con observaciones** · **Rechazar**; casilla obligatoria «Revisé las alertas y las cifras de toda la proyección».
+- Aprobar: comentario opcional. Con observaciones o Rechazar: `Select` de motivo y comentario obligatorios (≥ 10 caracteres, contador visible).
+- En trabajo: «Si se cierra sin cambiar cifras, tu aprobación sigue vigente; si cambia una cifra, queda invalidada». Con causas que bloquearían el cierre: se puede aprobar igual (es un juicio, no un control), pero se listan primero.
+- `409 huella_distinta`: «La proyección cambió mientras la mirabas (alguien decidió o recalculó). Vuelve a cargar el tablero y revisa de nuevo», con «Recargar»; no se registra nada.
+- Los botones miden ≥ 44 px de alto.
+
+**Historial** (`Card`, todos los que ven la página): fecha y hora (Lima), quién, resultado (`Badge` con texto), motivo, comentario, «sobre: en trabajo / cerrada» e «**invalidada**: la proyección cambió después» cuando corresponde. Más reciente primero.
+
+### 4.11 Avisos en Proyección y en Flujo mensual (no bloquean nada)
+
+Ambos leen `GET /api/direccion/estado`; solo admin y planner (el comprador no ve datos de aprobación, decisión 113).
+- **Proyección** (`cabecera-proyeccion.tsx`): en una cerrada sin aprobación vigente, `Alert` **ámbar** «Cerrada por *Planner P.* el 07 nov 2026 · **sin aprobación de dirección vigente** · difiere de lo aprobado el 03 nov en +1 214 u en 2027 (+1,5 %)» (o «idéntica a lo aprobado el …», o «no hay aprobaciones anteriores»), con enlace al tablero. Con aprobación vigente, una línea en texto («Dirección: aprobada por *nombre* el 08 nov»). En trabajo: una línea con el estado.
+- **Flujo mensual** (`/compras/flujo`, `flujo-panel.tsx`): con `?para=compras`, el mismo `Alert` ámbar sobre la cerrada que usa el flujo: «El flujo usa *Proyección …*, cerrada por *Planner P.* el 07 nov, **sin aprobación de dirección vigente**…». Rechazada: `Alert` rojo «Dirección **rechazó** esta proyección el … (motivo)». Con aprobación vigente (aprobada o con observaciones): una línea en texto.
+- Ninguno cambia lo que el flujo calcula ni deja de mostrar datos.
 
 ## 5. Reglas de negocio
 
 ### 5.1 Qué significa «aprobar a nivel de dirección»
 
-**Qué es.** Un **juicio de dirección registrado** sobre una proyección entera, con su huella de cifras: «vi estas cifras, en esta fecha, y las apruebo / las apruebo con observaciones / las rechazo, por este motivo». No modifica la proyección, no cambia decisiones de filas y no es un paso técnico del cálculo.
+**Qué es.** Un **juicio de dirección registrado** sobre una proyección entera, atado a su huella de cifras: «vi estas cifras, en esta fecha, y las apruebo / las apruebo con observaciones / las rechazo, por este motivo». No modifica la proyección, no decide filas y no es un paso técnico del cálculo.
 
 **Estados** (derivados al leer; nada se actualiza):
-- `sin_aprobacion`: no hay ninguna aprobación de esa proyección.
-- `aprobada` / `con_observaciones` / `rechazada`: la **más reciente** de esa proyección y su huella **coincide** con la actual.
-- `invalidada`: la más reciente tiene otra huella (la proyección cambió después). Una aprobación anterior con la misma huella que la actual **no revive**: manda siempre la más reciente (R10).
+- `sin_aprobacion`: la proyección no tiene ninguna aprobación.
+- `aprobada` / `con_observaciones` / `rechazada`: la **más reciente** de esa proyección tiene la huella actual.
+- `invalidada`: la más reciente tiene otra huella. Una anterior con la huella actual **no revive**: manda siempre la más reciente.
+- **Aprobación vigente** = estado `aprobada` o `con_observaciones` (decisión del coordinador: «con observaciones» es un sí con comentarios). Los avisos de §4.11 se encienden cuando no hay vigente: `sin_aprobacion`, `rechazada` o `invalidada`.
 
-**Sobre qué se aprueba.** Sobre una proyección **en trabajo o cerrada** (no archivada). Recomendado: aprobar la en trabajo cuando el planner la da por lista, y cerrarla después; como la huella no incluye el estado, la aprobación sobrevive al cierre si no cambió ninguna cifra (R11). También se puede aprobar la cerrada directamente.
+**Sobre qué se aprueba.** Una proyección **en trabajo o cerrada**; nunca una archivada. Como la huella no incluye el estado, aprobar la en trabajo y cerrarla sin cambiar cifras deja la aprobación vigente. **La aprobación no se transfiere a una copia**: cada seguimiento mensual nace sin aprobación propia; si sus cifras son idénticas (misma huella), el tablero y los avisos lo dicen; si no, dicen cuánto difiere (D9).
 
-**¿Bloquea algo? Recomendación: no (opción A).**
+**No bloquea nada** (decisión de Javier, 2026-11-10). Ni cerrar ni M8 la exigen; una `rechazada` no reabre ni archiva. Descartadas: que cerrar exija aprobación (frena el cierre mensual y toca M7), que Compras solo lea una cerrada aprobada (cambia el contrato de M8 y puede dejar el flujo sin demanda) y que un rechazo reabra la proyección (una cerrada nunca se reabre). A cambio, los avisos son visibles y dicen quién cerró y cuándo (§4.11).
 
-| Opción | Qué haría | Veredicto |
-|---|---|---|
-| **A · Informativa con aviso** (recomendada) | La aprobación se registra y se ve en el tablero, en la cabecera de Proyección y, para admin y planner, en Flujo mensual. Ni cerrar ni M8 la exigen. | **Elegida.** No toca el contrato de M8 ni el cierre de M7 (ya validados por QA y pendientes de hito); Javier es a la vez quien decide filas y quien aprueba, así que un bloqueo sería un clic más sin control real; y un mes con la cerrada atascada en una aprobación dejaría Compras sin demanda. Se puede endurecer después (B o C) sin cambiar la tabla. |
-| B · Cerrar exige aprobación vigente | `POST …/cerrar` responde `409 sin_aprobacion_direccion` si la en trabajo no tiene una `aprobada` o `con_observaciones` vigente | Descartada por ahora: obliga al planner a esperar al admin para cada cierre mensual de seguimiento; toca `cerrar` de M7 y sus pruebas; y crea un orden rígido (aprobar en trabajo → cerrar) que no deja aprobar la cerrada. |
-| C · M8 solo lee una cerrada aprobada | `leerProyeccionCerrada` salta las cerradas sin aprobación vigente | Descartada: cambia el contrato de M8 (07 §7, «una cerrada nunca cambia»), puede dejar el flujo sin cerrada (`404 sin_cerrada`) y mezcla un permiso de dirección con una lectura técnica. |
-| D · Una `rechazada` reabre o archiva la proyección | El rechazo devuelve la cerrada a en trabajo | Descartada: una cerrada nunca se vuelve a abrir (07 paso 7); el planner copia y sigue. El rechazo queda como registro y como aviso. |
+**Quién aprueba: solo el `admin`** (`requireAdmin`; `rol = 'admin'` en la tabla). El planner prepara y no aprueba su propio trabajo; el comprador no ve Planificación. Un rol `direccion` sería un módulo de permisos aparte.
 
-**Quién aprueba. Recomendación: solo `admin`** (`requireAdmin` en el `POST`; la pantalla oculta el panel a los demás).
-- Hoy el admin es quien tiene «todo» (PLAN §3); el planner trabaja la proyección y no debería aprobar su propio trabajo; el comprador no ve Planificación.
-- **Sin rol nuevo en esta entrega.** Un rol `direccion` (ve Planificación en solo lectura y aprueba, sin administrar usuarios ni editar maestros) exigiría tocar `roles.ts`, el `check` de `perfiles.rol`, `nav.ts`, los guards y todas las pruebas de roles: es un módulo de permisos aparte. La tabla ya guarda `rol` para cuando exista. Si Javier quiere que una persona de dirección apruebe sin ser admin, es la decisión 2 de §10.
-- Descartado: que cualquier planner apruebe (se aprueba a sí mismo) y que aprobar requiera dos firmas (no hay dos personas de dirección en el sistema hoy).
+### 5.2 Invariantes (vitest; las de la base, también en el humo)
 
-### 5.2 Invariantes (vitest; las de la base, con el humo de la migración)
-
-**Cifras y cuadres**
-- **R1 · Proyectado = M7.** Sin filtros y bloque «Todas», el total por año del tablero es `Σ (decidido ?? propuesto)` de los registros activos de la proyección (incluidas las filas de tienda), y la suma de `meses` por mes coincide con los `totales` de `GET …/mensual` de M7 sobre la misma base falsa; `sin_meses` es la diferencia exacta entre total y `Σ meses`.
-- **R2 · Real = M5 sin CD.** Sin filtros, el real de cada mes es la suma de `unidades` de `venta_stock_vigente` de tiendas `tipo = 'Tienda'` de ese periodo. Una venta del CD en la base falsa no aparece en ninguna cifra.
-- **R3 · Totales que cuadran.** En el desglose, `Σ filas = total` por columna para toda dimensión (con filas exactas); los KPIs, la tabla mensual, el desglose y el gráfico dicen el mismo número para el mismo año. Con filas estimadas, la diferencia por redondeo es ≤ 12 u por año y se rotula.
-- **R4 · Cierre del año en curso.** `2026 cierre = real ene–k + proyectado (k+1)–dic` de la proyección; el real del gráfico usa `k'`, pero el cierre usa el `vendido` guardado hasta `k` (lo que la proyección usó), y si `k' > k` ambos se muestran sin sumarse dos veces.
-- **R5 · Comparativos.** Cada % se calcula sobre sumas (nunca promedio de %); `ene–k'` del año anterior usa los mismos `k'` meses; motivos `sin_base`, `incompleto` y `nueva` en los casos de §4.4.
-- **R6 · Mismas tiendas.** El comparativo «Z vs Z−1» de mismas tiendas usa el mismo conjunto `M(Z)` (de `parametros.bloques`) arriba y abajo; para 2027 vs 2026 coincide con `Σ vigente(Y+1, mismas) ÷ Σ B − 1`. Cambiar una fecha en M4 después de calcular no cambia el conjunto (sale de los bloques guardados, como 07f regla 4).
-- **R7 · Atribución por tienda.** Con todas las tiendas de `M(Z)` elegidas, `Σ atribuido = mismas_Z` exacto por mes; con una tienda sin venta en los 12 meses, su parte es 0; con `Σ venta = 0`, reparto por igual con aviso; las nuevas y cierres elegidos dan su cifra exacta.
-- **R8 · Marca.** Con una marca de participación 0,25 en su única fila base y una fila de tienda de la misma GML × AM, lo proyectado es `round(0,25 × vigente)` de las dos; una fila base sin `por_marca` suma a `sin_participacion_marca` y no a la serie; la venta de la marca es exacta (filtra `marca_id` real, no la cabeza).
-- **R9 · Filtros combinados.** GML × AM × marca × tienda × bloque se aplican **a la vez** a proyección y venta (propiedad: el total con filtro A ∧ B es ≤ el de A y el de B; la unión disjunta de las AM suma el total sin filtro de AM).
+**Cifras**
+- **R1 · Proyectado = M7.** Sin filtros y bloque «Todas», el total por año es `Σ (decidido ?? propuesto)` de los registros activos (incluidas las filas de tienda) y la suma de `meses` por mes coincide con los totales de `GET …/mensual` de M7 sobre la misma base falsa; `sin_meses` es la diferencia exacta entre total y `Σ meses`.
+- **R2 · Real = M5 sin CD.** Sin filtros, el real de cada mes es `Σ unidades` de `venta_stock_vigente` de tiendas `tipo = 'Tienda'`; una venta del CD en la base falsa no aparece en ninguna cifra (sí su stock, solo en cobertura).
+- **R3 · Misma tienda, misma cifra que 07f.** Para un GM (y para el Resto) sin más filtros, el «2026 cierre» de cada tienda *misma* en el tablero es igual, en enteros, al «2026 cierre vigente» de `armarVentaPorTienda` de 07f sobre la misma base falsa; el de cada tienda *entra*, a su vigente exacto.
+- **R4 · Puente exacto.** Los pasos de §4.4 suman exactamente el total de 2027 y parten exactamente del cierre de 2026; `B`, `B'`, propuesta y vigente son sumas de lo guardado; la suma del puente por GM es el puente total.
+- **R5 · Totales que cuadran.** En el desglose `Σ filas = total` por columna; tarjetas, tabla mensual, desglose y gráfico dicen el mismo número para el mismo año. Con marca (redondeo por mes) la diferencia es ≤ 12 u por año y se rotula.
+- **R6 · Cierre del año en curso.** `2026 cierre = vendido guardado (ene–k) + proyectado (k+1–dic)`; el real del gráfico llega a `k'`; si `k' > k`, ambos se muestran sin sumarse dos veces.
+- **R7 · Comparativos.** Cada % sobre sumas (nunca promedio de %); `ene–k'` del año anterior usa los mismos meses; «mismas» de «Z frente a Z−1» usa `M(Z)` arriba y abajo (de las claves guardadas: cambiar una fecha en M4 después de calcular no cambia el conjunto); para 2027 frente a 2026 coincide con `Σ vigente(base Y+1) ÷ Σ B − 1`; los pares con 2023 o 2026 llevan `nino = true`; motivos `sin_base`, `incompleto` y `nueva`.
+- **R8 · Atribución por tienda.** Se cumplen exactos en enteros: `Σ_{misma} A_t + sin_atribuir_07f + Σ_{sale} A_t + sin_atribuir_sale = base(Y).vigente`; el total de 2027 atribuido más su «sin atribuir» = `base(Y+1).vigente`; por mes, `Σ tiendas + sin atribuir = meses` del bloque; por tienda, `Σ meses = total anual`; enero a `k` del año en curso es el real exacto; con un bloque entero elegido, su total es exacto; una tienda sin historia completa en el año de referencia recibe su participación anual en todos los meses; con `A_t − real_t < 0` no hay reparto mensual de `k+1` a 12 y sale `atribucion_sin_mensual`. Prueba de propiedad de `atribuirMensual` (5 000 casos aleatorios).
+- **R9 · Marca (unidad de marca).** Con una unidad de participación 0,25 en su única fila base y una fila de tienda de la misma GML × AM, lo proyectado es `round(0,25 × vigente)` por mes de las dos; una fila base sin `por_marca` suma a `sin_participacion_marca`; la venta es la de **todas** las marcas de la unidad.
+- **R10 · Filtros combinados.** Géneros × mundo × línea × temporada × AM × marca × tiendas × bloque se aplican a la vez a proyección y venta. Propiedades: el total con A ∧ B es ≤ el de A y el de B; la unión disjunta de las AM suma el total sin filtro de AM; lo mismo con las temporadas; el atajo «Resto» da las mismas cifras que elegir uno a uno sus géneros; el filtro de tienda no cambia `por_tienda` de `tablero_venta`.
+- **R11 · Soles y cobertura de apoyo.** Nunca se guardan ni se envían a otro módulo. Soles estimados = `Σ pares (u proyectadas × precio medio de 12 meses del par)`, con el precio del recorte para los pares sin venta (contados en `u_sin_precio`). Cobertura = stock de `k'` ÷ (Σ proyectado de `k'+1` a `k'+12` ÷ 12); con tiendas elegidas, sin CD. Toda cifra estimada va con «estimado».
 
 **Aprobación**
-- **R10 · Estado.** El estado es el de la aprobación más reciente comparada con la huella actual; una más antigua con la huella actual no revive; sin aprobaciones, `sin_aprobacion`.
-- **R11 · Qué mueve la huella.** Cambian la huella: decidir o cambiar una fila (`decidido`), recalcular con otra propuesta en una fila sin decidir, aplicar curva nueva (`meses`), decidir una tienda, aplicar un lote de 07g, cambiar un crecimiento de GM o el Resto, cambiar `hasta_periodo`. **No** la cambian: cerrar, renombrar, editar la nota, recalcular sin cambiar ninguna cifra, una carga nueva de venta (no toca la proyección), archivar otra proyección. Probado en SQL con el humo (dos llamadas, mismo resultado) y en vitest con el falso.
-- **R12 · Siempre la proyección entera.** El `resumen` y la huella de una aprobación no dependen de los filtros con que se miraba (`filtros_vistos` es solo informativo); dos `POST` con filtros distintos sobre la misma proyección guardan la misma huella.
-- **R13 · Concurrencia.** Si entre el `GET` y el `POST` cambia una cifra, el `POST` responde `409 huella_distinta` y no inserta nada (la función recalcula la huella en la misma transacción). Dos `POST` simultáneos con la misma huella insertan dos filas (es historial; no hay único que lo impida, a propósito).
-- **R14 · Inmutable.** `update` y `delete` sobre `aprobaciones_direccion` fallan también con `service_role`, salvo poner `perfil_id` en `null`; `truncate` falla. `service_role` solo tiene `select, insert`.
-- **R15 · Motivo.** `con_observaciones` y `rechazada` exigen motivo del catálogo y comentario ≥ 10 caracteres (zod y `check`); `aprobada` los admite opcionales.
-- **R16 · Roles.** `POST /api/direccion/aprobaciones`: `401` sin sesión, `403` planner y comprador, `201` admin. Las tres rutas `GET`: `401`, `403` comprador, `200` admin y planner. La primera sentencia de cada handler es el guard (prueba estática).
-- **R17 · Una proyección con aprobaciones no se elimina.** `DELETE /api/proyeccion/proyecciones/[id]` responde `409 tiene_aprobaciones` (traducción de la FK `restrict`).
-- **R18 · Archivada.** Se ve en el tablero, no se aprueba (`409 archivada`, `puede_aprobar = false`).
+- **R12 · Qué mueve la huella.** La cambian: decidir o cambiar una fila, recalcular con otra propuesta (también en una fila decidida: cambia el puente), aplicar curva nueva (`meses`), cambiar `B` o `B'`, decidir una tienda, aplicar un lote de 07g, cambiar un crecimiento de GM o el Resto, cambiar `hasta_periodo` o la pertenencia de una tienda a un bloque. **No** la cambian: cerrar, renombrar, editar la nota, renombrar una tienda o cambiar su zona, recalcular sin que cambie ninguna cifra, una carga nueva de venta, archivar otra proyección. **Dos proyecciones con las mismas cifras tienen la misma huella** (copia sin cambios). Probado en SQL (humo) y en vitest.
+- **R13 · Estado.** Es el de la aprobación más reciente frente a la huella actual; una anterior no revive; `con_observaciones` cuenta como vigente; sin aprobaciones, `sin_aprobacion`; la aprobación de otra proyección nunca da estado a esta.
+- **R14 · Una sola huella para foto y registro.** El `POST` arma el `resumen` con `tablero_proyeccion(id, {})`, que trae su huella; si ≠ `huella_vista`, `409 huella_distinta` sin llamar a la función; la función vuelve a calcularla y la compara con `huella_vista` y con `resumen.huella`; la tabla exige `resumen.huella = huella` (`check`).
+- **R15 · Siempre la proyección entera.** `resumen` y huella no dependen de los filtros; dos `POST` con filtros distintos guardan la misma huella y el mismo `resumen` salvo `filtros_vistos`.
+- **R16 · Concurrencia.** Si entre el `GET` y el `POST` cambia una cifra, `409 huella_distinta` y ninguna fila nueva. Dos `POST` simultáneos con la misma huella insertan dos filas (es historial; a propósito no hay único).
+- **R17 · Inmutable.** `update` y `delete` sobre `aprobaciones_direccion` fallan también con `service_role`, salvo poner `perfil_id` en `null`; `truncate` falla; `service_role` solo tiene `select, insert`.
+- **R18 · Motivo.** `con_observaciones` y `rechazada` exigen motivo del catálogo y comentario ≥ 10 caracteres (zod y `check`); `aprobada` los admite opcionales; un `rol` distinto de `admin` lo rechaza el `check`.
+- **R19 · Roles.** `POST /api/direccion/aprobaciones`: `401` sin sesión, `403` planner y comprador, `201` admin. Las cinco rutas `GET`: `401`, `403` comprador, `200` admin y planner. La primera sentencia de cada handler es el guard (prueba estática).
+- **R20 · Sin borrar con aprobaciones.** `DELETE /api/proyeccion/proyecciones/[id]` de una proyección con aprobaciones responde `409 tiene_aprobaciones`.
+- **R21 · Archivada.** Se ve; no se aprueba (`409 archivada`, `puede_aprobar = false`).
+- **R22 · Por defecto.** La proyección por defecto es la que elige `planHorizonte(hastaPorDefecto(publicados, hoy))` (la misma que lee el flujo); en enero, con la del año anterior; «Comparar con» por defecto es la proyección de la última aprobación no rechazada, salvo que sea la mostrada.
+
+**Lo que bloquearía el cierre**
+- **R23 · Las reglas de M7, sin copia.** Para toda proyección en trabajo de la base falsa: si `POST …/cerrar` (sin `forzar`) respondería `409 X`, `GET /api/direccion/bloqueos` trae `X` con el mismo mensaje; si `bloqueos` está vacío, `cerrar` no responde `409` por ninguna regla de cierre. El conteo de filas usa `filaBloqueaCierre` y cuenta también las de `revision_cola_larga` con propuesta bajo el umbral (B2). Prueba estática: `src/lib/direccion/` no reimplementa el predicado.
 
 **Aislamiento**
-- **R19 · Solo lectura de M7.** Los servicios de `src/lib/direccion/` no llaman a `insert`, `update`, `upsert` ni `delete` sobre tablas, y el único `rpc` que escribe es `registrar_aprobacion_direccion`; no nombran `ia_*`, `venta_proyeccion`, `stock` ni `costo`. `tablero_venta` solo nombra `unidades` de `venta_stock_vigente` (prueba estática sobre el archivo de la migración).
-- **R20 · Cerrada intacta.** Abrir el tablero y aprobar no cambia ni un byte de `GET /api/proyeccion/cerrada` (comparación antes/después en la base falsa).
+- **R24 · Solo lectura.** `src/lib/direccion/` no llama a `insert`, `update`, `upsert` ni `delete` sobre tablas; el único `rpc` que escribe es `registrar_aprobacion_direccion`; no nombra `ia_*` ni `venta_proyeccion`. `tablero_venta` solo nombra `unidades`, `venta_soles` y `stock_unidades` de `venta_stock_vigente` (prueba estática sobre la migración).
+- **R25 · Cerrada intacta.** Abrir el tablero y aprobar no cambia ni un byte de `GET /api/proyeccion/cerrada` ni del flujo (comparación antes y después en la base falsa).
 
 ### 5.3 Casos borde
 
 | Caso | Comportamiento |
 |---|---|
-| No hay ninguna cerrada (enero, antes del primer cierre) | Se abre la en trabajo más reciente con su `Alert`; si no hay ninguna, `EmptyState` «No hay proyección calculada» con enlace a Proyección |
-| Dos proyecciones del mismo año (cerrada y «seguimiento sep» en trabajo) | Por defecto la cerrada vigente; el selector muestra las dos y «Comparar con» las superpone |
-| Proyección de método 4 o anterior | Se ve; alerta `metodo_anterior`; la tabla de crecimientos dice «sin base corregida» y no calcula implícito sobre corregida |
-| `k' > k` (venta más nueva que la proyección) | Real hasta `k'` en el gráfico y la tabla; el cierre usa `k`; alerta `datos_mas_nuevos` |
-| `k = 12` (proyección hecha en enero con todo el año anterior) | No hay «proyectado» del año en curso; la columna `ene–k` no se repite |
-| Año histórico incompleto (primer mes cargado no es enero, o un mes faltante) | `Badge` «faltan: mar 2024» en la cabecera de la columna; comparativos de ese año `incompleto` |
-| Tienda que abre en `Y+1` (apertura) elegida sola | Historia vacía, 2027 exacto por venta esperada; comparativos `nueva`; alerta `apertura_sin_historia` |
-| Tienda cerrada antes de `Y` elegida | Solo historia; proyección 0; texto «cerró el 31 ago 2024» |
-| CD | No aparece en filtros ni cifras |
-| Filtro que deja todo en cero | `EmptyState` «Sin venta ni proyección con estos filtros» y botón «Limpiar filtros» |
-| Marca sin participación en la cerrada (`por_marca` nulo, cerrada de `0.10.0`) | Venta exacta; proyección vacía con alerta `marca_estimada` «la proyección no trae participación por marca» |
-| Filas sin curva (`meses = null`) | Suman al total y a los KPIs, no al gráfico; alerta `sin_curva` con las unidades |
-| Fila inactiva (`activo = false`) | No cuenta (como M7) |
-| Cálculo en curso | `409 calculo_en_curso`: «Se está recalculando; vuelve en unos minutos» y botón «Reintentar» |
-| La proyección cambia mientras el admin tiene el modal abierto | `409 huella_distinta`, nada se registra |
-| Usuario aprobador eliminado después | `perfil_id` pasa a `null`; el historial conserva `usuario_nombre` y `rol` |
-| Comparada de otro año en curso | Permitida; se alinean los años por calendario (2027 con 2027); alerta si su `hasta_periodo` difiere |
-| Más de 30 tiendas o 40 AM en la URL | `400` con mensaje |
-| Pantalla de 360–390 px | Filtros en modal, KPIs en 2 × 2, gráfico al ancho con leyenda debajo, tablas con primera columna fija y desplazamiento horizontal, panel de decisión al final en una columna; los botones de decidir tienen ≥ 44 px de alto |
+| Enero, antes del primer cierre del año | Por defecto, la cerrada del año anterior (cubre el año como «siguiente», como M8); si no hay ninguna cerrada, la en trabajo más reciente con su aviso; si no hay ninguna, `EmptyState` |
+| Dos proyecciones del año (cerrada y «seguimiento» en trabajo) | Por defecto la cerrada; el selector muestra las dos y «Comparar con» las superpone |
+| Copia mensual sin cambios de una aprobada | Estado «Sin aprobación de dirección»; «Frente a lo aprobado» dice «idéntica»; los avisos también |
+| La última aprobada es la misma proyección y su huella cambió | Estado «invalidada»; «Frente a lo aprobado» compara contra la foto de esa aprobación |
+| Proyección de método anterior | Se ve; alerta `metodo_anterior`; sin base corregida en crecimientos ni en el puente (la línea del Niño sale «—») |
+| `k' > k` | Real hasta `k'`; el cierre usa `k`; alerta `datos_mas_nuevos` |
+| `k = 12` | No hay proyectado del año en curso; la atribución solo reparte el año siguiente |
+| Año histórico incompleto | «faltan: mar 2024» en la columna; comparativos de ese año `incompleto`; si es el año de referencia de las semillas, ese mes se toma de `Y−2` |
+| Una apertura de `Y+1` sola | Historia vacía; 2027 exacto; comparativos «nueva»; `apertura_sin_historia` |
+| Una tienda cerrada antes de `Y` | Solo historia; proyección 0; «cerró el 31 ago 2024» |
+| Una tienda que cierra en `Y+1` sola | 2026 estimado (su parte de la base que sale, §3.4 A2); 2027 exacto hasta su cierre |
+| Tienda sin venta en el recorte | Su parte es 0; si todas pesan 0, todo a «sin atribuir» |
+| Venta de una tienda negativa en el periodo | Pesa 0 en la atribución (como 07f); el real se muestra tal cual |
+| Marca sin participación (`por_marca` nulo) | Venta exacta; proyección vacía y `marca_estimada` «la proyección no trae participación por marca» |
+| Filas sin curva | Suman al total, no al gráfico; `sin_curva` |
+| Cálculo en curso | `409 calculo_en_curso` con «Reintentar» |
+| La proyección cambia con el modal abierto | `409 huella_distinta`; nada se registra |
+| Usuario aprobador eliminado | `perfil_id` pasa a `null`; quedan nombre y rol |
+| Comparada de otro año | Permitida; se alinea por calendario; alerta si su `k` difiere |
+| Más de 30 tiendas, 40 AM o 20 géneros | `400` con mensaje |
+| CD | No aparece en filtros ni en venta; su stock solo en cobertura sin tiendas elegidas |
+| Pantalla de 360–390 px | Filtros en modal, tarjetas 2 × 2, gráfico al ancho, tablas con primera columna fija, botón «Decidir» fijo abajo |
 
 ## 6. Criterios de aceptación / hito de prueba
 
 ### 6.1 Caso sintético (`tests/direccion.fixture.ts`)
 
-`Y = 2026`, `k = 9` (set), `k' = 10` (oct 2026 publicado después de cerrar). Recorte HOMBRE · URBANO. Tiendas: T01, T02, T03 (mismas siempre); T04 (misma en 2026, cierra el 2027-06-30); T10 (abrió el 2025-11-15: nueva del año anterior en 2026, entra a mismas en 2027); T12 (apertura abr 2027); T09 (cerró el 2024-08-31); CD1 con venta (no debe aparecer).
+**Proyección mostrada:** «Proyección 2026–2027», cerrada el 2026-11-07 por *Planner P.*; `Y = 2026`, `k = 9` (set); venta publicada hasta oct 2026 (`k' = 10`). `periodos_atipicos`: 2023 y 2026. Dos GM con filas: **HOMBRE · URBANO** (detallado) y **MUJER · URBANO** (solo totales). `resumen.desvio_prueba_anterior_pct = −3,2`; `crecimiento_objetivo_pct = 6,0`.
 
-| Cifra | Valor | De dónde |
+**Tiendas.** T01, T02, T03 (mismas siempre); T04 (misma en 2026, cierra el 2027-06-30); T10 (abrió el 2025-11-15: nueva del año anterior en 2026, entra a la base de 2027); T12 (apertura 2027-04-01); T09 (cerró el 2024-08-31); CD1 (con venta y stock; no debe aparecer en venta). `bloques[2026]`: mismas T01–T04, nuevas T10, fuera T09. `bloques[2027]`: mismas T01, T02, T03, T10; nuevas T12 (aperturas); cierres T04.
+
+**Venta de HOMBRE · URBANO (unidades).** 2023: T01 19 000, T02 12 000, T03 6 000, T04 2 500, T09 500 (40 000). 2024: T01 20 000, T02 12 500, T03 6 500, T04 2 700, T09 300 (42 000). 2025 y 2026, por mes:
+
+| Tienda | ene | feb | mar | abr | may | jun | jul | ago | set | oct | nov | dic | Total |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T01 2025 | 1 607 | 1 378 | 1 493 | 1 607 | 1 952 | 1 837 | 2 182 | 1 722 | 1 722 | 1 600 | 1 800 | 3 100 | 22 000 |
+| T02 2025 | 996 | 853 | 924 | 995 | 1 209 | 1 138 | 1 351 | 1 067 | 1 067 | 1 083 | 1 219 | 2 098 | 14 000 |
+| T03 2025 | 338 | 304 | 371 | 608 | 810 | 877 | 911 | 742 | 439 | 600 | 600 | 900 | 7 500 |
+| T04 2025 | 259 | 222 | 241 | 259 | 315 | 296 | 352 | 278 | 278 | 172 | 194 | 334 | 3 200 |
+| T10 2025 | — | — | — | — | — | — | — | — | — | — | 100 | 200 | 300 |
+| T01 2026 | 1 556 | 1 333 | 1 444 | 1 555 | 1 889 | 1 778 | 2 111 | 1 667 | 1 667 | 1 650 | | | |
+| T02 2026 | 933 | 800 | 867 | 933 | 1 133 | 1 067 | 1 267 | 1 000 | 1 000 | 1 000 | | | |
+| T03 2026 | 313 | 281 | 344 | 563 | 750 | 812 | 844 | 687 | 406 | 400 | | | |
+| T04 2026 | 207 | 178 | 193 | 207 | 252 | 237 | 282 | 222 | 222 | 240 | | | |
+| T10 2026 | 334 | 334 | 334 | 333 | 333 | 333 | 333 | 333 | 333 | 1 010 | | | |
+
+Totales: 2025 = 47 000 (ene–set 33 000; ene–oct 36 455, todo de T01–T04); 2026 ene–set = 34 000 (T01 15 000, T02 9 000, T03 5 000, T04 2 000, T10 3 000); oct 2026 = 4 300. CD1 vende 900 u en 2025 (no debe aparecer). Soles: el precio medio de los últimos 12 meses (nov 2025–oct 2026: 48 845 u) es **S/ 52,00** en todas las filas del recorte; 2023 S/ 1 880 000, 2024 S/ 2 016 000, 2025 S/ 2 350 000, 2026 ene–set S/ 1 768 000, ene–oct S/ 1 991 600. Stock de oct 2026: T01 8 000, T02 5 000, T03 2 500, T04 1 000, T10 1 500 (18 000 en tiendas) y CD1 12 000.
+
+**Proyección de HOMBRE · URBANO.** Cuatro filas base: L1 · AM-A (todo el año), L1 · AM-B (todo el año), L2 · AM-A (invierno, con `factores_mes[2026]` de 0,70 en jun–ago) y L2 · AM-B (invierno, ídem).
+- 2026, base (T01–T04): vigente **45 901** = vendido ene–set 31 000 + oct 3 600, nov 4 050, dic 7 251. Fila de tienda T10 (nuevas del año anterior, su fila base tiene `B`): vigente **4 100** = real 3 000 + oct 300, nov 330, dic 470. **2026 cierre = 50 001.**
+- 2027, base (M(2027)): **`B` = 47 040**, **`B'` = 47 793**, propuesta 50 183 (+5,0 % sobre `B'`), vigente **50 300**; por fila: L1 · AM-A 25 000 (lote), L1 · AM-B 12 000 (aceptada tal cual), L2 · AM-A 9 000 (a mano; propuesta 8 883), L2 · AM-B 4 300 (lote). Meses: 3 521, 3 018, 3 270, 3 521, 4 276, 4 024, 4 779, 3 772, 3 772, 4 024, 4 527, 7 796. Fila de tienda T04 (cierre, L1 · AM-B, aceptada tal cual): 150, 140, 150, 160, 200, 200 de ene a jun (**1 000**). Fila de tienda T12 (apertura, L1 · AM-A, a mano por *Admin A.* el 06 nov): 100, 120, 130, 150, 160, 150, 170, 180, 248 de abr a dic (**1 408**). **2027 = 52 708.**
+- Decisiones del 07 nov por *Planner P.* salvo T12. Crecimiento declarado v2 +5,0 % sobre corregida, de *Planner P.*, sin nota.
+- Unidad de marca X (en AM-A): participación 0,63 en L1 · AM-A y 0,40 en L2 · AM-A.
+
+**MUJER · URBANO (solo totales; vende solo en T01–T03).** 2025 27 500; 2026 cierre 28 500 (vendido ene–set 20 000 + proyectado 8 500); ene–oct 2026 22 300 frente a 21 000 en 2025; `B = B' = 28 500`; propuesta 30 780 (+8,0 %), vigente **32 006**: una fila a mano (propuesta 18 780, vigente 20 006, *Admin A.*, 05 nov) y una en lote (12 000, 07 nov). Crecimiento v4 +8,0 % aprobado el 06 nov, que reemplazó a v3 el mismo día.
+
+**Aprobación anterior:** sobre «Proyección 2026–2027 seguimiento set» (hoy archivada), *Admin A.*, 03 nov, `aprobada`, con `resumen.por_gm`: HOMBRE · URBANO 2027 52 500, MUJER · URBANO 31 000 (total 83 500); 2026 cierre total 78 300.
+
+**Resultados esperados:**
+
+| Cifra | Valor | Regla |
 |---|---|---|
-| Real 2023 / 2024 / 2025 | 40 000 / 42 000 / 47 000 (T10: 300 en 2025) | venta |
-| Real 2025 ene–set / 2026 ene–set | 33 000 / 34 000 → **+3,0 %** | venta |
-| 2026 cierre | 50 001 = real 34 000 + proyectado oct–dic 16 001 → **+6,4 % vs 2025**, +19,0 % vs 2024 | proyección |
-| 2026 por bloque | mismas (T01–T04) 45 901 · T10 4 100 (real 3 000 + proy. 1 100) | proyección |
-| Mismas tiendas 2026 vs 2025 (`M(2026)` = T01–T04) | 45 901 ÷ 46 700 − 1 = **−1,7 %** frente a **+6,4 %** total | R6 |
-| Base `B` 2027 | (45 901 − 2 401 de T04) + 4 100 de T10 = **47 600**; `B'` corregida del Niño = 48 380 | proyección |
-| 2027 | **53 208** = mismas 50 800 + apertura T12 1 408 + cierre T04 1 000 → **+6,4 % vs cierre 2026**, **+13,2 % vs 2025** | proyección |
-| Crecimiento HOMBRE · URBANO | declarado +5,0 % sobre corregida; implícito 50 800 ÷ 48 380 − 1 = **+5,0 %** («coincide»); sobre real 50 800 ÷ 47 600 − 1 = +6,7 % | R6, tabla 3 |
-| MUJER · URBANO (otra celda) | declarado +8,0 %, implícito +12,3 % → «revisar: +4,3 pp» y alerta `desvio_crecimiento` | tabla 3 |
-| Filtro T03 | venta T03 oct 2025–set 2026 = 8 400 de 45 650 en `M(2027)` → `s = 18,4 %` → 2027 de T03 **≈ 9 348 u (estimado)** | R7 |
-| Filtro T12 | historia vacía; 2027 = 1 408 exacto; comparativos «nueva»; alerta `apertura_sin_historia` | §5.3 |
-| Filtro AM RECONOCIDO + marca X (participación 0,63 en su fila) | venta exacta de X; 2027 = `round(0,63 × vigente)` por mes, rotulado «estimado» | R8 |
-| Mes oct 2026 | real 4 300 y proyectado 4 053 a la vez en el gráfico; el cierre sigue siendo 50 001 | R4 |
+| Proyección entera: 2026 cierre / 2027 | 78 501 / **84 714** → **+7,9 %**; 2025 74 500 → **+13,7 % (último año normal)** | R1, §4.3 |
+| Puente total | 78 501 − 0 − 2 961 = **75 540 (B)** + 753 + 4 670 + 1 343 + 0 = **82 306** + 0 + 1 408 + 1 000 = **84 714** | R4, §4.4 |
+| Frente a lo aprobado | 2027 +1 214 u (+1,5 %); HOMBRE · URBANO +208, MUJER · URBANO +1 006; 2026 cierre +201 | §4.6 |
+| HOMBRE · URBANO: real 2023 / 2024 / 2025 | 40 000 / 42 000 / 47 000 (CD1 no suma) | R2 |
+| 2025 ene–set / 2026 ene–set | 33 000 / 34 000 → **+3,0 %** | R7 |
+| 2026 cierre | 50 001 = 34 000 + 16 001 → **+6,4 % vs 2025** (Niño), +19,0 % vs 2024 | R6 |
+| Mismas 2026 vs 2025 (`M(2026)` = T01–T04) | 45 901 ÷ 46 700 − 1 = **−1,7 %** frente a +6,4 % total | R7 |
+| 2027 | **52 708** → **+5,4 % vs cierre 2026**, **+12,1 % vs 2025** | R1 |
+| Mismas 2027 vs 2026 | 50 300 ÷ 47 040 − 1 = **+6,9 %** sobre real; ÷ 47 793 → **+5,2 %** sobre corregido | R7 |
+| Crecimientos | HU: declarado +5,0 %, implícito +5,2 % → «coincide»; tendencia −5,9 % (ene–oct `M(2026)`: 34 290 frente a 36 455) → **«contra la tendencia»**. MU: +8,0 % frente a +12,3 % → «revisar: +4,3 pp»; tendencia +6,2 % | §4.8 |
+| Alertas importantes (proyección) | `contra_tendencia` (HU), `desvio_crecimiento` (MU), `factor_provisional` (invierno 2026: **13 300 u de 2027, 15,7 %**), `tienda_nueva_relevante` (T10, **5,4 % de la base**), `apertura_sin_historia` (T12) → **5** | §4.5 |
+| Otras | `anomalia_crecimiento` (MU reemplazada el mismo día; HU sin nota) info; `origen_decisiones` info (49 % en bloque, 15 % tal cual, 36 % a mano; 6 de 8 el 07 nov); `datos_mas_nuevos`; `base_corregida_nino` (HU +1,6 %); sin `concentracion` (menos de 50 filas) | §4.5 |
+| Bloque «Mismas tiendas de 2027» | Tiendas T01, T02, T03, T10. 2025 43 800; 2026 ene–set 32 000; 2026 cierre **47 040** (= `B`); 2027 **50 300** | §4.7, R8 |
+| Filtro T03 | 2025 7 500; 2026 ene–set 5 000; **2026 cierre 7 404 (estimado; idéntico al de 07f)**: real ene–set + oct 659, nov 673, dic 1 072; **2027 7 917 (estimado)**: 374, 334, 401, 616, 804, 845, 903, 731, 474, 679, 693, 1 063; participación anual 15,7 %, por mes de 11,5 % (ene) a 22,8 % (jun) | R3, R8 |
+| Atribución de 2026 (07f) | `R = 47 040 − 4 100 = 42 940` repartido 15 000 : 9 000 : 5 000 → T01 22 210, T02 13 326, T03 7 404; T04 (sale) `L = 45 901 − 42 940` = **2 961** (oct–dic 226, 260, 475) | R3, R8 |
+| Atribución de 2027 | 50 300 en proporción a 22 210 : 13 326 : 7 404 : 4 100 → T01 23 749, T02 14 250, T03 7 917, T10 4 384; cada mes suma la columna de la base; T10 (sin historia completa en 2025) con su participación anual en todos los meses | R8 |
+| Filtro T04 | 2026 **2 961 (estimado)**; 2027 **1 000 (exacto)** | §5.3 |
+| Filtro T12 | Historia vacía; 2027 **1 408** exacto; comparativos «nueva»; `apertura_sin_historia` | §5.3 |
+| Unidad de marca X (con AM-A) | Venta de todas las marcas de X; 2027 ≈ 0,63 × (25 000 + 1 408) + 0,40 × 9 000 ≈ **20 237** (± 12 por redondeo mensual), «estimado» | R9 |
+| Mes de oct 2026 | Real 4 300 y proyectado 3 900 a la vez; el cierre sigue en 50 001 | R6 |
+| Soles (HU) | 2025 S/ 2 350 000 (real); 2026 cierre **S/ 2 600 052** (= 1 768 000 + 16 001 × 52, estimado); 2027 **S/ 2 740 816** (estimado) | R11 |
+| Cobertura (HU) | Stock 30 000 (18 000 + 12 000); proyectado nov 2026–oct 2027 = 52 058 → **6,9 meses**; con real de los últimos 12 meses (48 845) → **7,4 meses**. Con T03: 2 500 sin CD ÷ (7 906 ÷ 12) → **3,8 meses (estimado)** | R11 |
 
-**Aprobación (secuencia del humo y de `tests/direccion.aprobacion.test.ts`):** (1) el admin aprueba la en trabajo con huella `h1` → `aprobada`; (2) el planner cambia una fila de 4 300 a 4 400 → huella `h2` → estado `invalidada`; (3) el admin aprueba con observaciones (motivo `crecimiento_alto`, comentario) → `con_observaciones`; (4) el planner cierra sin tocar cifras → la huella sigue en `h2` y el estado sigue `con_observaciones`; (5) un `POST` con `h1` → `409 huella_distinta` y sin fila nueva; (6) un `update` directo de la fila → error de inmutabilidad.
+**Aprobación (humo y `tests/direccion.aprobacion.test.ts`):** (1) el admin aprueba una proyección en trabajo con huella `h1` → `aprobada`; (2) el planner cambia una fila de 4 300 a 4 400 → huella `h2` → `invalidada`; (3) el admin aprueba con observaciones (motivo `crecimiento_alto`, comentario) → `con_observaciones` (vigente); (4) el planner la cierra sin tocar cifras → huella `h2`, sigue `con_observaciones`; (5) un `POST` con `h1` → `409 huella_distinta` sin fila nueva; (6) un `update` directo → error de inmutabilidad; (7) una copia sin cambios → misma huella `h2`, estado `sin_aprobacion`, «idéntica a lo aprobado»; (8) un `POST` cuyo `resumen` trae otra huella → la función responde `huella_distinta`; (9) el comprador → `403`; el planner → `403`.
 
 ### 6.2 Hito (Javier y Cowork; sección **S** de `docs/pruebas/cowork-checklist.md`)
 
-1. Como admin, Planificación → «Aprobación de dirección» abre por defecto la **cerrada** del 7 nov con el estado «Sin aprobación de dirección» en texto; el selector deja abrir «seguimiento sep» (en trabajo, con su aviso ámbar) y «Comparar con» superpone las dos.
-2. Sin filtros, el **2027** del tablero es el mismo número que el Total 2027 de la Matriz de M7 de esa proyección, y el **2026 cierre** el mismo que el Total 2026; el gráfico muestra 2023, 2024 y 2025 reales, 2026 real hasta el último mes publicado y proyectado desde octubre, y 2027 proyectado.
-3. Filtrar por **género, mundo, línea, agrupación de marca, marca y tienda** (una a la vez y combinadas) cambia gráfico, KPIs, tablas y comparativos; la AM y la marca afectan a lo proyectado **y** a la venta de 2023–2026; una marca y una tienda «misma» se rotulan «estimado»; una apertura sola muestra solo 2027.
-4. Los comparativos dicen «vs 2026», «vs 2025» y «mismas tiendas» con sus tiendas; el de mismas tiendas 2027 vs 2026 coincide con el crecimiento implícito de mismas tiendas de la tabla de crecimientos.
-5. La tabla de crecimientos muestra, por GM, el % declarado y el implícito en la misma base, con el desvío en texto, y la base corregida del Niño cuando aplica.
-6. Las alertas listan, con su nivel en palabras: factores provisionales, filas y tiendas sin decidir, base corregida del Niño, la tienda nueva grande que entra a la base de 2027, concentración y desvíos; cada una lleva a la pestaña de M7 donde se arregla.
-7. **Aprobar**: como admin, aprobar con un comentario; el estado pasa a «Aprobada por *nombre*». Como planner, la página se ve igual pero sin botones de decidir; como comprador, el menú no tiene el item y la URL directa redirige.
-8. Con la en trabajo aprobada, cambiar una fila en M7 y volver: el estado dice «Aprobación invalidada». Rechazar o aprobar con observaciones exige motivo y comentario.
-9. Con dos pestañas: abrir el modal de aprobar en una, cambiar una fila en otra, confirmar en la primera → mensaje «La proyección cambió mientras la mirabas» y el historial no gana fila.
-10. La cabecera de Proyección y la de Flujo mensual (como admin o planner) muestran el estado de dirección de la cerrada; Compras y el flujo funcionan igual con o sin aprobación.
-11. «Descargar Excel» baja `proyeccion-2026-2027-direccion.xlsx` con las hojas de §4.5 y la hoja `FILTROS` con la agrupación de marca y la marca usadas.
-12. En un teléfono (390 px): filtros en el modal, gráfico legible, tablas desplazables, panel de decisión usable.
-13. Rendimiento: la primera carga del tablero tarda ≤ 3 s y un cambio de filtro ≤ 2 s (cronómetro a mano en producción; `datos` deja las mediciones SQL al pie de la migración).
-14. Pasan `npm run lint`, `npx tsc --noEmit`, `npx vitest run` y `npm run build`, y `APP_VERSION = "0.19.0 · M14"`.
+1. Como admin, Planificación → «Aprobación de dirección» abre la **cerrada que usa Compras** con su estado en texto y «cerrada por *nombre* el *fecha*»; «Comparar con» trae por defecto la última aprobada.
+2. Arriba se lee, sin bajar: el resumen para decidir (3 a 5 líneas), el puente de 2026 a 2027 (total y por GM), las alertas y la diferencia con lo aprobado. El botón «Decidir» está siempre a la vista.
+3. Sin filtros, el **2027** es el Total 2027 de la Matriz de M7 de esa proyección y el **2026 cierre**, el Total 2026; el puente suma exacto.
+4. Filtrar por **varios géneros y el atajo «Resto»**, mundo, línea, **temporada**, agrupación de marca, marca y tiendas (solos y combinados) cambia gráfico, tarjetas, tablas y comparativos; la AM y la marca afectan lo proyectado **y** la venta de 2023 a 2026.
+5. Elegir una tienda misma: su **2026 cierre es el mismo número que muestra «Ver por tienda»** en Crecimientos para su GM; mes a mes se ve real hasta set y estimado después; la participación usada está escrita.
+6. 2023 y 2026 se ven como años del Niño; hay una línea «2026 sin Niño (derivado)»; la tarjeta de 2027 destaca el % frente a 2025.
+7. La tabla de crecimientos muestra declarado, implícito, **tendencia** y anomalías; «Cómo se decidió» dice quién decidió, cómo y cuándo.
+8. Datos de apoyo: soles reales y estimados (con la palabra «estimado» en cada cifra estimada) y meses de cobertura.
+9. **Aprobar** como admin; el estado pasa a «Aprobada por *nombre*». Como planner, la página se ve igual sin «Decidir»; como comprador, el menú no tiene el item y la URL redirige.
+10. Con la en trabajo aprobada, cambiar una fila en M7 y volver: «Aprobación invalidada». Con observaciones o rechazar exige motivo y comentario.
+11. Dos pestañas: abrir «Decidir» en una, cambiar una fila en otra, confirmar en la primera → «La proyección cambió mientras la mirabas» y el historial no gana fila.
+12. En Proyección y en Flujo mensual (admin o planner) se ve el `Alert` ámbar con quién cerró, cuándo, «sin aprobación de dirección vigente» y la diferencia con lo aprobado; Compras y el flujo funcionan igual con o sin aprobación.
+13. Con una proyección en trabajo, «Bloquearían el cierre» lista lo mismo que respondería «Cerrar».
+14. «Descargar Excel» baja `proyeccion-2026-2027-direccion.xlsx` con las hojas de §4.9.
+15. En un teléfono (390 px): filtros en modal, gráfico legible, tablas desplazables, «Decidir» usable.
+16. Rendimiento: primera carga ≤ 3 s y cambio de filtro ≤ 2,5 s (cronómetro en producción; las mediciones SQL al pie de la migración).
+17. Pasan `npm run lint`, `npx tsc --noEmit`, `npx vitest run` y `npm run build`; `APP_VERSION = "0.19.0 · M14"`.
 
-### 6.3 Seguridad (lo revisa `seguridad`, sonnet, solo lectura)
+### 6.3 Seguridad (la revisa `seguridad`, sonnet, solo lectura)
 
-- Cada handler de `src/app/api/direccion/` empieza con su guard; `POST /aprobaciones` con `requireAdmin`; ninguna ruta usa `requireUser` (el comprador no ve datos de proyección, decisión 113).
-- `perfil_id`, `usuario_nombre` y `rol` salen de la sesión, nunca del cuerpo; la huella guardada es la recalculada en la base, no la del cliente.
-- `aprobaciones_direccion`: RLS activo sin políticas; `anon` y `authenticated` sin privilegios; `service_role` solo `select, insert`; triggers de inmutabilidad (también `truncate`); FK `restrict` a `proyecciones`.
-- Funciones: `security invoker`, `search_path = ''`, todo calificado; `execute` solo para `service_role`; `tablero_venta` y `tablero_proyeccion` `stable` sin escrituras; `registrar_aprobacion_direccion` solo inserta en su tabla. Las listas de ids entran como `uuid[]` dentro del `jsonb` (sin SQL dinámico, sin `format`/`execute`).
-- Límites de entrada: ≤ 30 tiendas, ≤ 40 AM, comentario ≤ 1 000, `resumen` ≤ 64 KB, cuerpo ≤ `MAX_BYTES_CUERPO`.
-- Errores `500` sin detalles de la base; los `409` con código y mensaje en castellano.
-- El Excel se arma en el navegador con datos ya autorizados; no hay ruta de descarga.
+- Cada handler de `src/app/api/direccion/` empieza con su guard; `POST /aprobaciones` con `requireAdmin`; ninguna ruta usa `requireUser` (decisión 113).
+- `perfil_id`, `usuario_nombre` y `rol` salen de la sesión; la huella guardada es la recalculada en la base; `resumen` lo arma el servidor.
+- `aprobaciones_direccion`: RLS activo sin políticas; `anon` y `authenticated` sin privilegios; `service_role` solo `select, insert`; triggers de inmutabilidad (también `truncate`); FK `restrict`; `check (rol = 'admin')` y `check (resumen->>'huella' = huella)`.
+- Funciones: `security invoker`, `search_path = ''`, todo calificado; `execute` solo `service_role`; `tablero_*` y `huella_proyeccion` `stable` sin escrituras; `registrar_aprobacion_direccion` solo inserta en su tabla. Listas como arreglos dentro del `jsonb` (sin `format`/`execute`).
+- `tablero_venta` no lee `costo_vendido` ni `stock_valorizado`; los soles solo llegan a admin y planner.
+- Límites: ≤ 30 tiendas, ≤ 40 AM, ≤ 20 géneros, comentario ≤ 1 000, `resumen` ≤ 64 KB, cuerpo ≤ `MAX_BYTES_CUERPO`.
+- `500` sin detalles de la base; `409` con código y mensaje en castellano. El Excel se arma en el navegador con datos ya autorizados.
 - Nada de datos reales en fixtures, pruebas ni ficha.
 
 ### 6.4 Pruebas (vitest; cada archivo con un solo dueño)
 
-- `tests/direccion.fixture.ts` y `tests/direccion.fake-db.ts` (rpc falsos de las cuatro funciones sobre la base falsa de M7) — `backend`.
-- `tests/direccion.tablero.test.ts` (R1 a R9), `tests/direccion.atribucion.test.ts` (R7, propiedad con 5 000 casos aleatorios: suma exacta), `tests/direccion.comparativos.test.ts` (R5, R6), `tests/direccion.alertas.test.ts` (cada código de §4.4), `tests/direccion.aprobacion.test.ts` (R10 a R13, R15, R18, la secuencia de §6.1), `tests/direccion.rutas.test.ts` (R16, R17, errores de §3.1), `tests/direccion.estatico.test.ts` (R19: guard primero, único archivo que nombra las funciones, sin escrituras, la migración solo nombra `unidades`) — `backend`.
-- `tests/direccion.vista.test.ts` (filas, textos, exactitud, hojas de Excel con `FILTROS` que trae AM y marca) y `tests/direccion.render.test.ts` (roles: panel solo admin; estado en texto; aviso de en trabajo; `409 huella_distinta`; móvil con filtros en modal) — `frontend`.
-- `tests/api.guards.roles.test.ts` (añadir las cinco rutas) — `backend`.
-- `scripts/humo-00D1.sql` (R11, R13, R14, R20 y los cuadres R1–R2 en SQL; dos aplicaciones de la migración sin error) — `datos`.
+- `tests/direccion.fixture.ts` y `tests/direccion.fake-db.ts` (rpc falsos de las cuatro funciones sobre la base falsa de M7, con el caso de §6.1) — `backend`.
+- `tests/direccion.atribucion.test.ts` (R3 contra `armarVentaPorTienda`, R8, propiedad de `atribuirMensual` con 5 000 casos), `tests/direccion.puente.test.ts` (R4), `tests/direccion.tablero.test.ts` (R1, R2, R5, R6, R9, R10, R22), `tests/direccion.comparativos.test.ts` (R7), `tests/direccion.apoyo.test.ts` (R11), `tests/direccion.alertas.test.ts` (cada código de §4.5), `tests/direccion.cierre.test.ts` (R23 contra `cerrarProyeccion` sobre la base falsa), `tests/direccion.aprobacion.test.ts` (R12 a R18, R21, la secuencia de §6.1), `tests/direccion.rutas.test.ts` (R19, R20, errores de §3.1), `tests/direccion.estatico.test.ts` (guard primero, único archivo que nombra las funciones y la tabla, sin escrituras, sin copia del predicado de cierre, columnas que nombra la migración) — `backend`.
+- `tests/direccion.vista.test.ts` (filas, textos, exactitud, hojas del Excel) y `tests/direccion.render.test.ts` (roles; «Decidir» solo admin; estado en texto; avisos en Proyección y Flujo solo para admin y planner; `409 huella_distinta`; móvil) — `frontend`.
+- `tests/api.guards.roles.test.ts` (añadir las seis rutas) — `backend`.
+- `scripts/humo-0041.sql` (R12, R14, R16, R17, R25 y los cuadres R1, R2 y R4 en SQL; dos aplicaciones de la migración sin error) — `datos`.
 - `tests/direccion.qa.test.ts` (casos borde de §5.3 que falten) — `qa`.
 
 ## 7. Fuera de alcance
 
-- **Soles** en el tablero (la proyección no proyecta soles; decisión 110) y precio medio proyectado.
-- Rol nuevo `direccion` y abrir Planificación a otros roles (decisión 2 de §10 si Javier lo pide; es un módulo de permisos).
-- Que la aprobación **bloquee** el cierre o el flujo (opciones B y C de §5.1), y que un rechazo reabra o archive la proyección.
-- Aprobar **por GM o por recorte** (la aprobación es de la proyección entera; las observaciones por GM van en el comentario).
-- Editar cifras desde el tablero: es de solo lectura; las decisiones se toman en M7.
-- Notificaciones (correo, aviso al planner) de una aprobación o un rechazo.
-- Stock, cobertura, compras o IMI en el tablero (eso es M8).
-- Proyección por tienda «misma» exacta (cambiaría M7 y el contrato de M8) y por marca exacta.
-- Datos de la IA (07e) en el tablero.
-- Firmas dobles o aprobación por varios niveles.
+- Que la aprobación **bloquee** el cierre o el flujo, o que un rechazo reabra o archive una proyección (decisión de Javier, §5.1).
+- Rol nuevo `direccion` y abrir Planificación a otros roles (módulo de permisos aparte).
+- Aprobar **por GM o por recorte**: la aprobación es de la proyección entera. Las observaciones por GM con marca de «atendida» son de `0.19.1` (§8).
+- Editar cifras desde el tablero: las decisiones se toman en M7.
+- Guardar o proyectar soles: los soles del tablero se calculan al mostrar, rotulados, y no salen del tablero (decisión 110 sigue vigente para M7 y 07f).
+- El índice de cobertura con que se compra (es el de M8); el tablero solo muestra el del recorte como contexto.
+- La **tabla de agregados de venta** (`venta_agregada_carga` o similar): tendrá su propia ficha y tomará la siguiente migración libre cuando se construya (decisión 140).
+- Proyección exacta por tienda «misma» o por marca (cambiaría M7 y el contrato de M8).
+- Datos de la IA (07e), notificaciones por correo y firmas dobles.
+- Cambios en 07f, M7 o M8 más allá de la traducción `409 tiene_aprobaciones` y los dos avisos de §4.11.
 
-## 8. Plan por tandas (cada archivo con un solo dueño)
+## 8. Segunda entrega `0.19.1 · M14` (opcional; la primera no depende de ella)
 
-**T0 · Revisión.** `arquitecto-revisor` (opus) revisa esta ficha; el `arquitecto` (opus) la ajusta; Javier responde §10 (o se construye con los defaults).
+Se abre solo si Javier la pide después del hito de `0.19.0`. Nada de `0.19.0` cambia de forma: lo de aquí se **añade**.
+
+1. **Observaciones estructuradas por GM con «atendida».** Migración propia (la siguiente libre al construir, no la `0041`): `observaciones_direccion` (solo inserción: `aprobacion_id → aprobaciones_direccion on delete restrict`, `genero_id` y `mundo_id` nulos para el Resto o el total, `texto` 10–500, `created_at`) y `observacion_direccion_atenciones` (solo inserción: `observacion_id`, `perfil_id`, `usuario_nombre`, `nota`, `created_at`); «atendida» se deriva (existe una atención). Mismo trigger de inmutabilidad y privilegios `select, insert`. Rutas: `POST /api/direccion/aprobaciones` acepta `observaciones: { gm_clave, texto }[]` (≤ 30) solo con `con_observaciones` o `rechazada`; `POST /api/direccion/observaciones/[id]/atender` con `requirePlanner`. Pantalla: en el modal, una fila por GM del puente con su caja de texto; en el tablero y en Proyección, la lista de observaciones abiertas con «Marcar atendida» (planner y admin). Regla: atender no cambia el estado de la aprobación ni la huella.
+2. **Varias unidades de marca a la vez.** `marcas: listaQuery(uuid, 20)` en la query (se mantiene `marca` como sinónimo de una); `unidad_marca_ids uuid[]` en las dos funciones (en la proyección, la participación de la fila es la suma de las elegidas); la función se reemplaza con `create or replace` en la misma migración de la entrega.
+3. **Hoja de Excel con el detalle por fila.** Ruta `GET /api/direccion/filas` (`requirePlanner`, mismos filtros salvo tiendas) que pagina `leerFilasConAnios` y devuelve por fila: clave legible, GML, AM, temporada, bloque, tienda, 2026 y 2027 (vigente y propuesta), `B`, `B'`, origen, autor y fecha; el navegador agrega la hoja `FILAS`. Presupuesto: ≤ 2 MB y ≤ 4 s.
+
+## 9. Plan por tandas (cada archivo con un solo dueño)
+
+**T0 · Revisión** (hecha): `arquitecto-revisor` y coordinador; decisiones de Javier del 2026-11-10; esta ficha ajustada.
 
 **T1 (en paralelo).**
-- **`datos`:** `supabase/migrations/00D1_tablero_direccion.sql` → la siguiente libre (hoy `0041`), `scripts/humo-00D1.sql`, `src/lib/supabase/database.types.ts` regenerado. Aplica en **`vector-two`** (nunca `lukers-compras`) con el MCP, corre el humo dos veces y **la puerta de medición de §2.4** (cuatro casos, dos pasadas, frío y caliente, tamaño); si se pasa del umbral, añade el plan B en la misma migración y lo anota. Actualiza la tabla de reservas de `docs/PLAN.md` §5 en el mismo commit (la `0041` deja de ser «reservada sin ficha»).
-- **`backend` · contratos:** `src/lib/direccion/tipos-api.ts` y `src/lib/direccion/esquemas.ts`, commit solo, para desbloquear a `frontend`.
+- **`datos`** (≈ 700 líneas de SQL + humo de ≈ 60 comprobaciones): `supabase/migrations/0041_tablero_direccion.sql` (§2), `scripts/humo-0041.sql`, `src/lib/supabase/database.types.ts` regenerado. Prueba en local dos veces; aplica en **`vector-two`** (nunca `lukers-compras`) con el MCP (autorizado por Javier); corre el humo y **la puerta de medición de §2.4**, y anota los resultados al pie de la migración. Si el criterio de tiempo falla, aplica la salida de §2.4 en la misma migración (antes de aplicarla en `vector-two`, o con `create or replace` registrado en el mismo archivo).
+- **`backend` · contratos** (≈ 350 líneas): `src/lib/direccion/tipos-api.ts` y `src/lib/direccion/esquemas.ts`, commit solo, para desbloquear a `frontend`.
 
 **T2 (en paralelo, tras T1).**
-- **`backend`:** `src/lib/direccion/consultas.ts`, `cache.ts`, `tablero.ts`, `atribucion.ts`, `comparativos.ts`, `alertas.ts`, `aprobacion.ts`, `servicio.ts`; rutas `src/app/api/direccion/{opciones,tablero,aprobaciones,estado}/route.ts`; en M7, solo la traducción `409 tiene_aprobaciones` del `DELETE` de proyecciones (`src/app/api/proyeccion/proyecciones/[id]/route.ts` y `traducirErrorDb` si hace falta); pruebas de §6.4 de su dueño. Importa sin modificar `src/lib/proyeccion/` y `src/lib/curvas/grafico.ts`.
-- **`frontend`:** `src/app/(app)/planificacion/aprobacion-direccion/*` (§4.1), `src/lib/direccion/excel.ts` (hojas, puro), el item en `src/lib/nav.ts`, la línea de estado en `cabecera-proyeccion.tsx` y en la cabecera de Flujo mensual (solo admin y planner); pruebas de §6.4 de su dueño. Importa sin modificar el kit de UI, `descarga-libro.ts`, `formato.ts`, `grafico-mensual-fila.tsx` como referencia.
+- **`backend`** (≈ 2 500 líneas de código + ≈ 2 000 de pruebas; la tanda más grande): `consultas.ts`, `cache.ts`, `atribucion.ts`, `puente.ts`, `comparativos.ts`, `apoyo.ts`, `alertas.ts`, `aprobacion.ts`, `tablero.ts`, `cierre.ts`, `servicio.ts`; rutas `src/app/api/direccion/{opciones,tablero,bloqueos,aprobaciones,estado}/route.ts`; en M7, solo la traducción `409 tiene_aprobaciones` del `DELETE` de proyecciones; pruebas de §6.4 de su dueño. Orden interno sugerido: atribución y su propiedad primero (es lo que más riesgo tiene), luego puente y comparativos, luego rutas.
+- **`frontend`** (≈ 2 000 líneas + ≈ 600 de pruebas): `src/app/(app)/planificacion/aprobacion-direccion/*` (§4.1), `src/lib/direccion/excel.ts` (hojas, puro), el item en `src/lib/nav.ts`, el `Alert` en `cabecera-proyeccion.tsx` y en `flujo-panel.tsx` (solo admin y planner); pruebas de §6.4 de su dueño.
 
-**T3 · `qa`:** las cuatro verificaciones, §6.2 con la base falsa, casos borde de §5.3 en `tests/direccion.qa.test.ts`; mide en local el tamaño de las respuestas.
+**T3 · `qa`** (≈ 400 líneas de pruebas): las cuatro verificaciones; §6.1 y §6.2 con la base falsa; casos borde de §5.3; mide en local el tamaño de las respuestas y el tiempo de `/bloqueos`.
 
-**T4 · `seguridad` (sonnet):** §6.3, solo lectura; hallazgos a `backend` y `datos`, que corrigen (si hace falta una migración de corrección, toma la siguiente libre y se registra dentro de la `0.19.0`, como la `0040`).
+**T4 · `seguridad`** (sonnet, solo lectura): §6.3; hallazgos a `backend` y `datos` (una migración de corrección, si hace falta, toma la siguiente libre y se registra dentro de `0.19.0`, como la `0040`).
 
-**T5 · `documentador`:** `CHANGELOG.md`, `docs/PLAN.md` (estado de módulos, reservas, lista de tablas de solo inserción, versión), `docs/DECISIONES.md` (§9 de propuestas a vigentes), esta ficha (sección «Construido»), `docs/pruebas/cowork-checklist.md` (sección S) y `src/lib/version.ts` → **`0.19.0 · M14`**. Luego, hito con Javier.
+**T5 · `documentador`:** `CHANGELOG.md`; `docs/PLAN.md` (estado de módulos, fila de la `0041` en §5 —ver §10, decisión 140—, lista de tablas de solo inserción, versión); `docs/DECISIONES.md` (§10 de propuestas a vigentes); esta ficha (sección «Construido»); 07 §6.3 (eliminar con aprobaciones → `409 tiene_aprobaciones`) y 08 §0.2 (aviso de dirección en Flujo, sin cambio de contrato); `docs/pruebas/cowork-checklist.md` (sección S); `src/lib/version.ts` → **`0.19.0 · M14`**. Luego, hito con Javier.
 
-## 9. Propuestas para `docs/DECISIONES.md` (numeración siguiente: 134 en adelante)
+## 10. Propuestas para `docs/DECISIONES.md` (desde la 134)
 
-- **134 · El tablero de dirección es de solo lectura, en unidades, sobre lo guardado.** Suma `meses` de la proyección y la venta publicada sin CD; nunca reparte ni proyecta soles. Descartado: soles estimados (decisión 110).
-- **135 · La agrupación de marca es filtro de primer nivel; la marca individual se estima en lo proyectado** con `participaciones.por_marca` y es exacta en la venta. Descartado: releer venta por marca para cada fila.
-- **136 · Lo proyectado de una tienda «misma» es una atribución informativa** por su participación en los 12 meses cerrados del mismo recorte, que cuadra con el bloque; nuevas, aperturas y cierres son exactos (extiende la 111).
-- **137 · La aprobación de dirección es un registro de solo inserción con huella de cifras;** su estado (incluido «invalidada») se deriva al leer y manda la más reciente; la huella no incluye el estado, así que cerrar sin cambios no la invalida.
-- **138 · La aprobación no bloquea el cierre ni el flujo** (opción A de §5.1); se ve como aviso para admin y planner.
-- **139 · Solo el admin aprueba; no hay rol nuevo en `0.19.0`.**
-- **140 · La migración reservada `0041` («tabla de agregados de venta») la toma M14:** funciones de lectura del tablero, la tabla de aprobaciones y, solo si la medición lo exige, `venta_agregada_carga` (solo inserción por carga, sin nodo ni AM desnormalizados).
+- **134 · El tablero de dirección es de solo lectura sobre lo guardado, en unidades, con soles y cobertura de apoyo.** Suma `meses` de la proyección y la venta publicada sin CD; nunca reparte. Soles reales de años vendidos; lo proyectado valorizado al precio medio de 12 meses de cada línea × AM, rotulado «estimado», calculado al mostrar y sin salir del tablero; stock y meses de cobertura del recorte como contexto (la definición es la de M8). Amplía la decisión 110 solo para este tablero.
+- **135 · La agrupación de marca es filtro de primer nivel; la «marca» del tablero es la unidad de marca**, exacta en la venta y estimada en lo proyectado con `participaciones.por_marca`. Descartado: filtrar por la marca real (la proyección no guarda participación por marca real).
+- **136 · Atribución por tienda compartida con 07f.** Total anual del año en curso: la regla 111 con la misma función (`atribuirBase`) y las mismas entradas; lo que la base resta por las tiendas que salen se les atribuye a ellas. Año siguiente: en proporción a esa base atribuida. Mes a mes: real exacto de enero a `k`; de `k+1` en adelante, ajuste biproporcional con la participación del mismo mes del último año completo (las tiendas sin año completo siguen la forma de la red), en enteros, cuadrando con el mes del bloque y con el total de la tienda. Siempre rotulado «estimado» y con la participación a la vista. Extiende la 111; 07f no cambia.
+- **137 · La aprobación de dirección es un registro de solo inserción atado a una huella de cifras por contenido.** El estado se deriva al leer y manda la más reciente; «con observaciones» cuenta como vigente; cerrar sin cambios no invalida; dos proyecciones con las mismas cifras tienen la misma huella, pero la aprobación no se transfiere a una copia (el tablero dice «idéntica a lo aprobado»). El `resumen` guardado y la huella son del mismo estado.
+- **138 · La aprobación no bloquea el cierre ni el flujo** (Javier, 2026-11-10): avisa en Proyección y en Flujo mensual, para admin y planner, con quién cerró, cuándo, el estado y la diferencia con lo último aprobado.
+- **139 · Solo el admin aprueba; sin rol nuevo; la tabla exige `rol = 'admin'`.**
+- **140 · La migración `0041` es de M14 (`0041_tablero_direccion.sql`) y se retira su reserva para la tabla de agregados de venta**, que sale de M14, tendrá su propia ficha (grano `carga × tienda × equivalencia`, llenado dentro de `publicar_carga_venta_stock`) y tomará la siguiente libre al construirse. Corrige `docs/PLAN.md` §5, fila `0041` (línea 151).
+- **141 · Lo que bloquearía el cierre se muestra con las reglas de M7, nunca con una copia**: `filaBloqueaCierre` para contar y `motivoRechazoCerrar` en modo comprobación (vía `bloqueosDeLote`) para las causas.
+- **142 · El tablero abre la proyección que usa Compras (misma regla que M8) y compara por defecto con la última aprobada.**
+- **143 · El desglose del tablero trae totales por elemento; la serie mensual de un elemento se ve eligiéndolo como filtro.** Descartado: series mensuales por elemento (1,15 MB por línea medido).
+- **144 · 2023 y 2026 se rotulan años del Niño desde `periodos_atipicos`; el tablero destaca 2027 frente a 2025 (último año normal) y dibuja «2026 sin Niño» derivado.**
 
-Cambios en otros documentos (los hace `documentador` en T5): `docs/PLAN.md` §3 (el admin aprueba en dirección), §5 (fila M14 y reservas); 07 §6.3 (eliminar una proyección con aprobaciones → `409 tiene_aprobaciones`); 08 §0.2 (aviso informativo de dirección en Flujo, sin cambio de contrato).
+## 11. Preguntas abiertas para Javier
 
-## 10. Decisiones que necesita Javier
+Ninguna bloquea la construcción; si no respondes, se construye con lo indicado:
+1. **Umbrales de las alertas:** desvío de crecimiento 2 pp, contra la tendencia 5 pp, decisión masiva 80 %, tienda relevante 5 %. Se pueden ajustar después sin migración (son constantes).
+2. **Ventana del precio medio para los soles estimados:** últimos 12 meses publicados. La alternativa es el precio del mismo mes del año anterior (capta la estacionalidad del precio, pero mezcla liquidaciones).
 
-*Si no respondes, se construye con la recomendación de cada una.*
+## 12. Qué cambió respecto a la versión anterior (`acddbcc`)
 
-1. **¿La aprobación de dirección bloquea algo?** Opciones: A, que solo informe (estado y aviso en Proyección y Flujo); B, que no se pueda cerrar sin aprobación; C, que Compras solo use una cerrada aprobada. **Recomendación: A.** No frena el cierre mensual ni deja Compras sin demanda. Se puede endurecer después sin perder el historial.
-2. **¿Quién aprueba?** **Recomendación: solo el admin**, sin rol nuevo. Si quieres que apruebe alguien de dirección que no sea admin, hace falta un rol `direccion` (solo lectura de Planificación más aprobar). Sería un cambio de permisos aparte, posterior a este módulo.
-3. **¿Qué proyección abre el tablero por defecto?** **Recomendación: la cerrada vigente**, que es la que usa Compras, con un selector y «Comparar con» para ver la en trabajo («seguimiento sep»). La alternativa es abrir la en trabajo más reciente.
-4. **¿Aceptas cifras estimadas al filtrar una tienda «misma» o una marca?** La proyección no se guarda por tienda (mismas tiendas) ni por marca. **Recomendación: sí, rotuladas «estimado».** La tienda se estima con su participación de los últimos 12 meses y la marca con su participación histórica en la fila. La alternativa es mostrar en esos filtros solo la venta, y lo proyectado del bloque entero sin recortar.
+| Hallazgo | Dónde quedó |
+|---|---|
+| **B1** atribución distinta de 07f y con sesgos | §3.4 (regla 111 con `atribuirBase` tal cual; tienda que entra exacta; reparto mensual por mes calendario con IPF; tiendas sin año completo normalizadas); R3 y R8; caso §6.1 recalculado (T03: 7 404 y 7 917); decisión 136 |
+| **B2** conteo de bloqueo incompleto | §3.5 y `GET /bloqueos`; R23; decisión 141 |
+| **B3** tamaño | §2.3 b y c (totales por elemento, índices); D11; §2.4 separa tiempo de tamaño; decisión 143 |
+| **I1** plan B no construible | Fuera de M14 (D13, §2.4, §7); salida: sin marca cuando no hace falta + caché |
+| **I2** `0041` reservada | M14 toma la `0041`; la reserva se retira (decisión 140; corregida la fila de `docs/PLAN.md` §5) |
+| **I3** `resumen` y huella de estados distintos | D10; §2.1 `check`; §2.3 d; §3.1 POST; R14 |
+| **I4** bloque en la venta histórica | §4.7 «Conjunto de tiendas de cada línea»; R7 |
+| **I5** ene–`k` con tienda misma | §3.4 D (real exacto hasta `k`) |
+| **I6** qué cambió y qué riesgo | Puente (§4.4), frente a lo aprobado (§4.6), precisión del método (§4.3), resumen para decidir (§4.3) |
+| **I7** 2026 también Niño | D14; §4.8; `ComparativoApi.nino`; decisión 144 |
+| **I8** proyección por defecto en enero | D6; §3.1 `/opciones`; R22 |
+| **M1** `.partial()` y listas en JSON | §3.2 (objeto sin refinar; `filtrosVistosSchema` con arreglos) |
+| **M2** cita de `aplicar_lote_proyeccion` | §2.3 d (se aparta a propósito y lo dice) |
+| **M3** cifras de la base | §2.3 y §2.4 (≈ 6 130 registros, 567 y 576 nodos, 31 ms y 75 ms) |
+| **M4** huella con nombres y crecimientos inactivos | §2.3 a (solo pertenencia; `activo`) |
+| **M5** venta negativa | §3.4 (peso 0, como 07f); §5.3 |
+| **M6** `fuera_universo` | Una línea en el Excel (`RESUMEN`), fuera de la pantalla |
+| **M7** marca de conjunto, marcas nuevas, filas sin participación | D4 (unidad de marca), texto de `marca_estimada`, `sin_participacion_marca` |
+| **M8** diferencia de `B` con el cierre | Línea «… y diferencia» del puente (§4.4) |
+| **M9** aviso que se vuelve ruido | §4.11 con la diferencia con lo aprobado o «idéntica» |
+| **M10** `clave` dentro de cada tienda | §2.2 y §2.3 a |
+| **1** puente | §4.4 (total y por GM) |
+| **2** bloquear el cierre | No bloquea (Javier); avisos visibles con quién cerró (§4.11, decisión 138) |
+| **3** tienda estimada y con sesgo | = B1 |
+| **4** «Resto», varios géneros, temporada | §3.2 y §4.7 (géneros múltiples, atajo «Resto», temporada como filtro y desglose); exposición a factores en `factor_provisional` |
+| **5** «2026 sin Niño» | §2.3 b `meses_sin_nino`; §4.8 |
+| **6** alertas nuevas | `contra_tendencia`, `origen_decisiones`, `anomalia_crecimiento`, exposición en `factor_provisional` (§4.5) |
+| **7** soles y cobertura | D2, §4.8 «Datos de apoyo», R11 |
+| **8** qué cambió desde lo aprobado | §4.6 |
+| **9** observaciones estructuradas | `0.19.1` (§8); en `0.19.0`, texto libre y «con observaciones» cuenta como vigente (§5.1) |
+| **10** la aprobación no viaja a una copia | Huella por contenido (D9), sin transferir; «idéntica a lo aprobado» |
+| **11** precisión y objetivo | §4.3 |
+| **12** orden de la página | §4.2 (para decidir arriba; «Decidir» fijo) |
+| **13** proyección por defecto | = I8 |
+| Menores del coordinador | Separador y nulos en la huella (§2.3 a); `check (rol = 'admin')`, más estricto que «sin comprador» porque el planner tampoco aprueba (§2.1); cifras corregidas (M3); varias marcas y hoja por fila en `0.19.1` (§8); la tabla de agregados, con su propia ficha (I1) |
