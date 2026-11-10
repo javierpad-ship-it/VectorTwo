@@ -165,24 +165,24 @@ insert into r (caso, ok) values
     and (select count(*) from unnest(array['ia_evaluaciones', 'ia_corridas', 'ia_corrida_gms']) t(n), unnest(array['select', 'insert', 'update', 'delete', 'truncate', 'references', 'trigger']) p(priv)
       where has_table_privilege('anon', 'public.' || t.n, p.priv) or has_table_privilege('authenticated', 'public.' || t.n, p.priv)) = 0),
   -- Sin daños colaterales: el conjunto de tablas SIN delete (o sin truncate) para service_role es exactamente el esperado.
-  ('sin daños colaterales: las tablas sin DELETE para service_role son las 8 de solo insercion, el registro, los 3 agrupadores sin borrado (viajes, embarques, paquetes) y, desde la 0039, proveedor_eventos y compra_linea_fotos',
+  ('sin daños colaterales: las tablas sin DELETE para service_role son las 8 de solo insercion, el registro, los 3 agrupadores sin borrado (viajes, embarques, paquetes), desde la 0039 proveedor_eventos y compra_linea_fotos y, desde la 0041, aprobaciones_direccion',
     (select array_agg(c.relname::text order by c.relname) from pg_class c
       where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not has_table_privilege('service_role', c.oid, 'delete'))
     = (select array_agg(x order by x) from unnest(array['compra_eventos', 'compra_agrupador_eventos', 'ia_entradas', 'ia_llamadas', 'ia_propuestas_gm',
          'ia_propuestas_filas', 'proyeccion_lotes', 'proyeccion_lote_filas', 'migraciones_aplicadas', 'compra_viajes', 'compra_embarques', 'compra_paquetes',
-         'proveedor_eventos', 'compra_linea_fotos']) x)),
-  ('sin daños colaterales: las tablas sin UPDATE para service_role son solo las 8, el registro y, desde la 0039, proveedor_eventos',
+         'proveedor_eventos', 'compra_linea_fotos', 'aprobaciones_direccion']) x)),
+  ('sin daños colaterales: las tablas sin UPDATE para service_role son solo las 8, el registro, desde la 0039 proveedor_eventos y, desde la 0041, aprobaciones_direccion',
     (select array_agg(c.relname::text order by c.relname) from pg_class c
       where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not has_table_privilege('service_role', c.oid, 'update'))
     = (select array_agg(x order by x) from unnest(array['compra_eventos', 'compra_agrupador_eventos', 'ia_entradas', 'ia_llamadas', 'ia_propuestas_gm',
-         'ia_propuestas_filas', 'proyeccion_lotes', 'proyeccion_lote_filas', 'migraciones_aplicadas', 'proveedor_eventos']) x)),
-  ('sin daños colaterales: las tablas sin TRUNCATE para service_role son las 8, el registro, los 3 terminales de la IA, las que ya lo tenian quitado (0032) y las 3 de la 0039 (proveedor_eventos, proveedor_contactos y compra_linea_fotos)',
+         'ia_propuestas_filas', 'proyeccion_lotes', 'proyeccion_lote_filas', 'migraciones_aplicadas', 'proveedor_eventos', 'aprobaciones_direccion']) x)),
+  ('sin daños colaterales: las tablas sin TRUNCATE para service_role son las 8, el registro, los 3 terminales de la IA, las que ya lo tenian quitado (0032), las 3 de la 0039 (proveedor_eventos, proveedor_contactos y compra_linea_fotos), proveedores (0040) y aprobaciones_direccion (0041)',
     (select array_agg(c.relname::text order by c.relname) from pg_class c
       where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not has_table_privilege('service_role', c.oid, 'truncate'))
     = (select array_agg(x order by x) from unnest(array['compra_eventos', 'compra_agrupador_eventos', 'ia_entradas', 'ia_llamadas', 'ia_propuestas_gm',
          'ia_propuestas_filas', 'proyeccion_lotes', 'proyeccion_lote_filas', 'migraciones_aplicadas', 'ia_evaluaciones', 'ia_corridas', 'ia_corrida_gms',
          'compra_viajes', 'compra_embarques', 'compra_paquetes', 'compra_entrega_asignaciones',
-         'proveedor_eventos', 'proveedor_contactos', 'compra_linea_fotos']) x)),
+         'proveedor_eventos', 'proveedor_contactos', 'compra_linea_fotos', 'proveedores', 'aprobaciones_direccion']) x)),
   ('sin daños colaterales: anon y authenticated no tienen NINGUN permiso sobre NINGUNA tabla de public',
     (select count(*) from pg_class c cross join privs cross join unnest(array['anon', 'authenticated']) ro(rol)
       where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and has_table_privilege(ro.rol, c.oid, privs.p)) = 0);
