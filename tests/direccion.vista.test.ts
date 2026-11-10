@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { fechaCorta, fechaHora, mesAnio, participacion, porcentaje, puntos, rangoMeses, textoEstadoDireccion, unidades, unidadesConSigno } from "../src/components/direccion/formato";
-import { textoDiferenciaAprobada, urlEstadoDireccion, vistaAvisoDireccion } from "../src/components/direccion/vista-aviso";
+import { fechaCorta, fechaHora, MENOS, mesAnio, mesesCobertura, participacion, porcentaje, puntos, rangoMeses, soles, textoEstadoDireccion, unidades, unidadesConSigno } from "../src/components/direccion/formato";
+import { textoDiferenciaAprobada, tonoAviso, urlEstadoDireccion, vistaAvisoDireccion } from "../src/components/direccion/vista-aviso";
 import { aprobarDireccionSchema, tableroQuerySchema } from "../src/lib/direccion/esquemas";
-import { HOJAS_DIRECCION } from "../src/lib/direccion/excel";
+import { HOJAS_DIRECCION, tipoMensual } from "../src/lib/direccion/excel";
 import {
   acumularSeries,
   admiteLinea,
   alertasDe,
   aplicarCambio,
   AYUDA_PUENTE,
+  ayudaFilaDesglose,
   cambioPorFilaDesglose,
   clavesPorDefecto,
   columnasDesglose,
@@ -18,6 +19,8 @@ import {
   cuerpoDecision,
   datosCobertura,
   descripcionGrafico,
+  esEnlaceInterno,
+  esFilaCierre,
   filasHistorial,
   filasMayores,
   filasPuente,
@@ -32,11 +35,14 @@ import {
   leerFiltrosUrl,
   limpiarRecorte,
   lineaResumenBloqueos,
+  lineasResumen,
   mismasSobreCorregido,
   motivoNoEnviar,
   nombreArchivoDireccion,
+  notaTablaMensual,
   notasAtribucion,
   ordenarDesglose,
+  pctMismasCorregido,
   puenteEnLinea,
   puenteTotal,
   recorteVacio,
@@ -44,6 +50,8 @@ import {
   tablaPuenteGm,
   tarjetas,
   textoCabecera,
+  textoComparando,
+  textoCompararPorDefecto,
   textoDatosMasNuevos,
   textoDeclarado,
   textoImplicito,
@@ -51,6 +59,7 @@ import {
   textoSemaforo,
   textoTendencia,
   textoVersion,
+  totalDesgloseCuadra,
   urlAprobaciones,
   urlBloqueos,
   urlTablero,
@@ -60,22 +69,28 @@ import {
   type FiltrosVista,
 } from "../src/app/(app)/planificacion/aprobacion-direccion/vista-tablero";
 import {
+  ADVERTENCIA_MARCA,
   aprobacion,
   bloqueos,
   bloqueosNinguno,
   bloqueosSoloDesactualizada,
   crecimientos,
+  desgloseMarca,
   diferencia,
   estadoDireccion,
   GM_HU,
   historial,
   HUELLA,
   ID,
+  LINEAS_DECIDIR,
+  M2026_REAL,
+  NOTA_SIN_ATRIBUIR,
   opciones,
   proyeccion,
   proyeccionEnTrabajo,
   puenteHU,
   tablero,
+  tableroConMarca,
   tableroConTienda,
   tableroEnTrabajo,
 } from "./direccion.pantalla.fixture";
@@ -89,10 +104,10 @@ describe("formatos es-PE (miles con coma, decimal con punto, mes «set»)", () =
     expect(unidades(52708)).toBe("52,708");
     expect(unidades(null)).toBe("—");
     expect(unidadesConSigno(1408)).toBe("+1,408");
-    expect(unidadesConSigno(-2961)).toBe("-2,961");
+    expect(unidadesConSigno(-2961)).toBe("−2,961");
     expect(unidadesConSigno(0)).toBe("0");
     expect(porcentaje(7.94)).toBe("+7.9 %");
-    expect(porcentaje(-3.94)).toBe("-3.9 %");
+    expect(porcentaje(-3.94)).toBe("−3.9 %");
     expect(porcentaje(0.01)).toBe("0.0 %");
     expect(porcentaje(null)).toBe("—");
     expect(puntos(4.3)).toBe("+4.3 pp");
@@ -286,7 +301,7 @@ describe("puente de 2026 a 2027", () => {
     const filas = filasPuente(total!, { hayCierres: true });
     const de = (clave: string) => filas.find((f) => f.clave === clave)!;
     expect(de("cierre_en_curso")).toMatchObject({ unidades: "", acumulado: "78,501", subtotal: true });
-    expect(de("ajuste_base")).toMatchObject({ unidades: "-2,961", acumulado: "75,540", pct: "-3.8 %", diferencia: false });
+    expect(de("ajuste_base")).toMatchObject({ unidades: "−2,961", acumulado: "75,540", pct: "−3.8 %", diferencia: false });
     expect(de("base")).toMatchObject({ acumulado: "75,540", subtotal: true });
     expect(de("nino")).toMatchObject({ unidades: "+753", acumulado: "76,293", pct: "+1.0 %" });
     expect(de("crecimiento")).toMatchObject({ unidades: "+4,670", acumulado: "80,963" });
@@ -302,7 +317,7 @@ describe("puente de 2026 a 2027", () => {
     const filas = filasPuente(puenteHU());
     expect(filas.find((f) => f.clave === "manual")).toMatchObject({ etiqueta: "+ Cifras fijadas (a mano o sugeridas por IA)", ayuda: "Lo que el planner o el admin fijaron por encima o por debajo de la propuesta, a mano o aceptando una cifra sugerida por la IA." });
     expect(filas.find((f) => f.clave === "otras")).toMatchObject({ etiqueta: "+ Otras diferencias con la propuesta", ayuda: "Filas aceptadas en bloque, por IA o tal cual cuya propuesta cambió después al recalcular, y filas escaladas por tienda." });
-    expect(filas.find((f) => f.clave === "base")).toMatchObject({ etiqueta: "Base 2027 (B): 2026 de las mismas tiendas de 2027", ayuda: AYUDA_PUENTE.base, pct: "-5.9 % vs cierre" });
+    expect(filas.find((f) => f.clave === "base")).toMatchObject({ etiqueta: "Base 2027 (B): 2026 de las mismas tiendas de 2027", ayuda: AYUDA_PUENTE.base, pct: "−5.9 % vs cierre" });
     // Si el servidor cambia el rótulo (p. ej. «Fijado a mano»), la pantalla pinta ese.
     const otro = { ...puenteHU(), lineas: puenteHU().lineas.map((l) => (l.clave === "manual" ? { ...l, etiqueta: "+ Fijado a mano", ayuda: undefined } : l)) };
     expect(filasPuente(otro).find((f) => f.clave === "manual")).toMatchObject({ etiqueta: "+ Fijado a mano", ayuda: AYUDA_PUENTE.manual });
@@ -328,7 +343,7 @@ describe("puente de 2026 a 2027", () => {
     expect(tabla.filas.map((f) => f.nombre)).toEqual(["HOMBRE · URBANO", "MUJER · URBANO", "Resto", "Total"]);
     const hu = tabla.filas[0];
     expect(hu.nino).toBe(true);
-    expect(hu.celdas).toEqual(["50,001", "0", "-2,961", "47,040", "+753", "+2,390", "+117", "0", "0", "50,300", "0", "+1,408", "+1,000", "52,708"]);
+    expect(hu.celdas).toEqual(["50,001", "0", "−2,961", "47,040", "+753", "+2,390", "+117", "0", "0", "50,300", "0", "+1,408", "+1,000", "52,708"]);
     expect(tabla.filas[1].nino).toBe(false);
     expect(tabla.filas[1].celdas[4]).toBe("—");
     expect(tabla.filas[3]).toMatchObject({ total: true });
@@ -368,7 +383,7 @@ describe("cifras del recorte (tarjetas)", () => {
     expect(enCurso).toMatchObject({ titulo: "2026 en lo que va (ene–oct)", valor: "38,300 u" });
     expect(enCurso.lineas.map((l) => l.texto)).toEqual(["+3.0 % · 2026 ene–set vs 2025 ene–set"]);
     expect(mismas).toMatchObject({ titulo: "Mismas tiendas", valor: "+6.9 %" });
-    expect(mismas.lineas.map((l) => l.texto)).toEqual(["2027 vs 2026: +6.9 % sobre real, +5.2 % sobre corregido (4 tiendas)", "total con nuevas, aperturas y cierres +5.4 %", "2026 vs 2025: -1.7 % (4 tiendas)"]);
+    expect(mismas.lineas.map((l) => l.texto)).toEqual(["2027 vs 2026: +6.9 % sobre real, +5.2 % sobre corregido (4 tiendas)", "total con nuevas, aperturas y cierres +5.4 %", "2026 vs 2025: −1.7 % (4 tiendas)"]);
   });
 
   it("el % sobre corregido sale del puente del recorte y no se inventa sin él", () => {
@@ -384,7 +399,7 @@ describe("cifras del recorte (tarjetas)", () => {
     expect(mismas.lineas[0].texto).not.toContain("sobre corregido");
     expect(notasAtribucion(t)).toEqual([
       "T03: 2027 estimado con su parte de la base 2026 (15.7 %) y, mes a mes, con su participación de cada mes del año de referencia (de 11.5 % en enero a 22.8 % en junio).",
-      "Sin atribuir en 2027: -12 u: lo atribuido a las tiendas supera lo proyectado para el bloque (la base anual y la curva guardada difieren; ver la línea «diferencia» del puente). Nunca se resta de una tienda.",
+      "Sin atribuir en 2027: −12 u: lo atribuido a las tiendas supera lo proyectado para el bloque (la base anual y la curva guardada difieren; ver la línea «diferencia» del puente). Nunca se resta de una tienda.",
     ]);
     expect(notasAtribucion(tablero())).toEqual([]);
   });
@@ -480,8 +495,8 @@ describe("tabla mensual", () => {
 
   it("«Sin atribuir» por mes se muestra con su signo", () => {
     const f = filasTablaMensual(tableroConTienda()).find((x) => x.clave === "sin-atribuir-2027")!;
-    expect(f.celdas[9]).toBe("-12");
-    expect(f.total).toBe("-12");
+    expect(f.celdas[9]).toBe("−12");
+    expect(f.total).toBe("−12");
     expect(filasTablaMensual(tableroConTienda())[0].estimado).toBe(true);
   });
 });
@@ -529,8 +544,8 @@ describe("crecimiento declarado, implícito y tendencia", () => {
     expect(textoDeclarado(hu, 2026)).toBe("+5.0 % sobre 2026 corregido");
     expect(textoVersion(hu)).toBe("v2 · Planner P. · 06 nov 2026");
     expect(textoImplicito(hu)).toBe("+5.2 % sobre corregido (+6.9 % sobre real)");
-    expect(textoTendencia(hu)).toBe("-3.9 % corregida del Niño (-5.9 % en bruto)");
-    expect(textoSemaforo(hu)).toBe("contra la tendencia: declara +5.0 %, la venta va -3.9 % corregida del Niño");
+    expect(textoTendencia(hu)).toBe("−3.9 % corregida del Niño (−5.9 % en bruto)");
+    expect(textoSemaforo(hu)).toBe("contra la tendencia: declara +5.0 %, la venta va −3.9 % corregida del Niño");
     expect(textoTendencia(hu, true)).toContain("el año anterior también fue del Niño: sin corregir");
   });
 
@@ -652,7 +667,8 @@ describe("Excel", () => {
     expect(textos.some((x) => x.includes("Proyección 2026–2027 seguimiento oct · en trabajo · datos hasta set 2026"))).toBe(true);
     expect(textos.some((x) => x.includes("Estado de dirección | Sin aprobación de dirección"))).toBe(true);
     expect(textos.some((x) => x.includes("2027: 84,714 u, +7.9 % sobre el cierre 2026"))).toBe(true);
-    expect(textos.some((x) => x.includes("En trabajo; 2 causas bloquearían el cierre"))).toBe(true);
+    expect(textos.some((x) => x.includes("En trabajo: las cifras pueden cambiar; sin aprobación de dirección vigente; 2 causas bloquearían el cierre."))).toBe(true);
+    expect(hojas.RESUMEN.filter((f) => f[0] === "RESUMEN PARA DECIDIR")).toHaveLength(5);
     const comp = hojas.RESUMEN.find((f) => f[1] === "2027 vs 2026 cierre")!;
     expect(comp.slice(2, 4)).toEqual([5.4, 6.9]);
     expect(hojas.RESUMEN.find((f) => f[0] === "FUERA DE LA PROYECCIÓN")).toEqual(["FUERA DE LA PROYECCIÓN", "Venta de filas que ya no se proyectan: 2023", 3100, null, "unidades del recorte sin fila en la proyección"]);
@@ -669,7 +685,8 @@ describe("Excel", () => {
     expect(hojas.ALERTAS.find((f) => f[0] === "desactualizada")?.[1]).toBe("Se puede cerrar igual");
     expect(hojas.ALERTAS.filter((f) => f[1] === "Importante")).toHaveLength(6);
     expect(hojas.MENSUAL[0]).toEqual(["FILA", "TIPO", "EXACTITUD", "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic", "TOTAL"]);
-    expect(new Set(hojas.MENSUAL.slice(1).map((f) => f[1]))).toEqual(new Set(["real", "proyectado", "sin_nino", "variacion", "comparada"]));
+    expect(new Set(hojas.MENSUAL.slice(1).map((f) => f[1]))).toEqual(new Set(["real", "proyectado", "real ene–set + proyectado oct–dic", "sin_nino", "variacion", "comparada"]));
+    expect(hojas.MENSUAL.find((f) => f[0] === "2026 cierre")?.[1]).toBe("real ene–set + proyectado oct–dic");
     expect(hojas.MENSUAL.find((f) => f[0] === "2027")?.at(-1)).toBe(52708);
     expect(hojas.MENSUAL.find((f) => f[0] === "2026 real")?.slice(12, 15)).toEqual([4300, null, null]);
   });
@@ -679,7 +696,7 @@ describe("Excel", () => {
     expect(hojas.FRENTE_APROBADA.at(-2)?.slice(0, 5)).toEqual(["Total 2027", 83500, 84714, 1214, 1.5]);
     expect(hojas.DESGLOSE.at(-1)?.slice(0, 8)).toEqual(["linea", "TOTAL", "exacto", 40000, 42000, 47000, 50001, 52708]);
     expect(hojas.CRECIMIENTOS[1].slice(0, 3)).toEqual(["HOMBRE · URBANO", 5, "+5.0 % sobre 2026 corregido"]);
-    expect(hojas.CRECIMIENTOS[1].at(-3)).toBe("-3.9 % corregida del Niño (-5.9 % en bruto)");
+    expect(hojas.CRECIMIENTOS[1].at(-3)).toBe("−3.9 % corregida del Niño (−5.9 % en bruto)");
     expect(hojas.CRECIMIENTOS[3][2]).toBe("sin dato");
     expect(hojas.DECISIONES[1]).toEqual([2027, "origen", "En bloque", 2, 29300, null, null]);
     expect(hojas.APROBACIONES[2]).toEqual(["05 nov 2026, 09:00", "Admin A.", "Aprobada con observaciones", "Crecimiento alto", "Revisar el crecimiento de MUJER · URBANO antes de comprar.", "en trabajo", "invalidada: la proyección cambió después"]);
@@ -762,5 +779,197 @@ describe("avisos en Proyección y en Flujo mensual", () => {
 
   it("GM_HU es la clave de género × mundo del fixture", () => {
     expect(GM_HU).toBe(`${ID.hombre}|${ID.urbano}`);
+  });
+});
+
+describe("T3 · arreglos de qa y seguridad", () => {
+  const conComparativo = (t: ReturnType<typeof tablero>, clave: string, cambio: (c: ReturnType<typeof tablero>["kpis"]["comparativos"][number]) => ReturnType<typeof tablero>["kpis"]["comparativos"][number]) => ({
+    ...t,
+    kpis: { ...t.kpis, comparativos: t.kpis.comparativos.map((c) => (c.clave === clave ? cambio(c) : c)) },
+  });
+
+  it("«sobre corregido» sale de `mismas.pct_corregido` del servidor, también con tiendas (sin puente); el puente es solo el respaldo", () => {
+    const conTienda = conComparativo(tableroConTienda(), "sig_vs_cierre", (c) => ({ ...c, mismas: { ...c.mismas, pct_corregido: 4.1 } }));
+    expect(conTienda.puente.recorte).toBeNull();
+    expect(tarjetas(conTienda)[3].lineas[0].texto).toBe("2027 vs 2026: +6.9 % sobre real, +4.1 % sobre corregido (4 tiendas)");
+    // `null` del servidor: no hay base corregida; NO se deriva del puente.
+    const sinCorregida = conComparativo(tablero(), "sig_vs_cierre", (c) => ({ ...c, mismas: { ...c.mismas, pct_corregido: null } }));
+    expect(tarjetas(sinCorregida)[3].lineas[0].texto).toBe("2027 vs 2026: +6.9 % sobre real (4 tiendas)");
+    // Campo ausente (servidor anterior): respaldo con el puente.
+    expect(pctMismasCorregido(tablero().kpis.comparativos[0], puenteHU())).toBeCloseTo(mismasSobreCorregido(puenteHU())!, 9);
+    expect(pctMismasCorregido(undefined, puenteHU())).toBeNull();
+  });
+
+  it("«en lo que va» usa `kpis.real_ac_k_prima`; sin el campo, la serie real; con `null`, sin dato", () => {
+    const t = tablero();
+    const con = tarjetas({ ...t, kpis: { ...t.kpis, real_ac_k_prima: 37777 } })[2];
+    expect(con).toMatchObject({ titulo: "2026 en lo que va (ene–oct)", valor: "37,777 u", estimado: false });
+    expect(tarjetas({ ...t, kpis: { ...t.kpis, real_ac_k_prima: null } })[2].valor).toBe("— u");
+    expect(tarjetas(t)[2].valor).toBe(`${unidades(M2026_REAL.reduce<number>((a, m) => a + (m ?? 0), 0))} u`);
+  });
+
+  it("con unidad de marca, el cierre no dice «= real ene–set»: lo rotula «estimado por participación de la marca»; las advertencias van junto al comparativo", () => {
+    const [siguiente, cierre, enCurso, mismas] = tarjetas(tableroConMarca());
+    expect(cierre.lineas[0].texto).toBe("= ene–set 6,000 (estimado por participación de la marca) + proyectado oct–dic 2,500");
+    expect(cierre.lineas[0].texto).not.toContain("real");
+    expect(cierre.estimado).toBe(true);
+    expect(siguiente.avisos).toEqual([ADVERTENCIA_MARCA]);
+    expect(cierre.avisos).toEqual([ADVERTENCIA_MARCA]);
+    expect(mismas.avisos).toEqual([ADVERTENCIA_MARCA]);
+    expect(enCurso.avisos).toEqual([]);
+    expect(enCurso.valor).toBe("6,650 u");
+    // Sin marca (exacto): la línea de siempre, sin avisos.
+    expect(tarjetas(tablero())[1].lineas[0].texto).toBe("= real ene–set 34,000 + proyectado oct–dic 16,001");
+    expect(tarjetas(tablero()).flatMap((x) => x.avisos)).toEqual([]);
+  });
+
+  it("tabla mensual: en la fila del cierre, de enero a k es real y de k+1 a diciembre proyectado; cada fila con su exactitud", () => {
+    const filas = filasTablaMensual(tablero());
+    const cierre = filas.find((f) => f.clave === "cierre-2026")!;
+    expect(cierre.proyectado).toBe(false);
+    expect(cierre.mesProyectado).toEqual([false, false, false, false, false, false, false, false, false, true, true, true]);
+    expect(cierre.totalProyectado).toBe(false);
+    expect(cierre.composicion).toBe("real ene–set + proyectado oct–dic");
+    const sig = filas.find((f) => f.clave === "proyectado-2027")!;
+    expect(sig).toMatchObject({ proyectado: true, totalProyectado: true, composicion: null });
+    expect(sig.mesProyectado.every(Boolean)).toBe(true);
+    expect(filas.find((f) => f.clave === "real-2025")!.mesProyectado.some(Boolean)).toBe(false);
+    expect(esFilaCierre("cierre_2026")).toBe(true);
+    expect(esFilaCierre("comparada_2026")).toBe(false);
+    const marca = filasTablaMensual(tableroConMarca());
+    expect(marca.map((f) => [f.clave, f.estimado])).toEqual([
+      ["real_2025", false],
+      ["cierre_2026", true],
+      ["proyectado_2027", true],
+    ]);
+  });
+
+  it("la nota del servidor bajo la tabla mensual; sin filas «Sin atribuir» no pasa nada", () => {
+    expect(notaTablaMensual(tableroConTienda())).toBe(NOTA_SIN_ATRIBUIR);
+    expect(notaTablaMensual(tablero())).toBeNull();
+    const t = tablero();
+    expect(notaTablaMensual({ tabla_mensual: { ...t.tabla_mensual, nota: "  " } })).toBeNull();
+    const sinAtribuir = { ...tableroConTienda(), tabla_mensual: { filas: tableroConTienda().tabla_mensual.filas.filter((f) => !/sin.atribuir/.test(f.clave)), nota: null } };
+    expect(filasTablaMensual(sinAtribuir).map((f) => f.clave)).toEqual(["proyectado-2027"]);
+  });
+
+  it("desglose: «Sin participación por marca» (y «Sin atribuir», «Fuera de la proyección») no se aplica como filtro, va al final y lleva su ayuda", () => {
+    const d = desgloseMarca();
+    expect(cambioPorFilaDesglose("marca", d.filas[0], opciones())).toBeNull();
+    expect(cambioPorFilaDesglose("marca", { id: "sin_marca", filtrable: true }, opciones())).toBeNull();
+    expect(cambioPorFilaDesglose("tienda", { id: "sin_atribuir", filtrable: true }, opciones())).toBeNull();
+    expect(cambioPorFilaDesglose("temporada", { id: "fuera_universo", filtrable: true }, opciones())).toBeNull();
+    expect(cambioPorFilaDesglose("marca", d.filas[1], opciones())).toEqual({ marca: ID.marcaX });
+    expect(ordenarDesglose(d.filas, 2027).map((f) => f.id)).toEqual([ID.marcaX, ID.marcaZ, "sin_marca"]);
+    expect(ayudaFilaDesglose("sin_marca")).toBe("Unidades de filas sin participación por marca.");
+    expect(ayudaFilaDesglose(ID.marcaX)).toBeNull();
+  });
+
+  it("«el total cuadra con las tarjetas» solo se dice si es cierto en este desglose", () => {
+    expect(totalDesgloseCuadra(tablero())).toBe(true);
+    expect(totalDesgloseCuadra({ ...tablero(), desglose: desgloseMarca() })).toBe(true);
+    const t = tablero();
+    expect(totalDesgloseCuadra({ ...t, kpis: { ...t.kpis, siguiente: 52000 } })).toBe(false);
+    expect(totalDesgloseCuadra({ ...t, kpis: { ...t.kpis, cierre: 49000 } })).toBe(false);
+    expect(totalDesgloseCuadra({ ...t, desglose: { ...t.desglose, filas: [] } })).toBe(false);
+  });
+
+  it("«Comparar con»: la primera opción sale de la comparada real de la proyección mostrada", () => {
+    const aprobada = { ...proyeccion(), motivo: "aprobada" as const, huella_igual_a_aprobada: true };
+    // El caso de qa: se mira una en trabajo; `opciones.comparar_por_defecto` (relativa a la por defecto) no tiene otra aprobada, pero la mostrada sí compara con una.
+    const enTrabajo = { ...tableroEnTrabajo(), comparada: aprobada };
+    expect(textoCompararPorDefecto({ comparar: null }, enTrabajo)).toBe("La última aprobada: Proyección 2026–2027");
+    expect(textoComparando(enTrabajo)).toBe("Comparando con «Proyección 2026–2027» (la última aprobada) · datos hasta set 2026");
+    expect(textoCompararPorDefecto({ comparar: null }, { comparada: null })).toBe("La última aprobada (no hay otra aprobada)");
+    expect(textoComparando({ comparada: null })).toBeNull();
+    // Con otra elegida o sin tablero, la opción no afirma nada.
+    expect(textoCompararPorDefecto({ comparar: ID.seguimiento }, enTrabajo)).toBe("La última aprobada");
+    expect(textoCompararPorDefecto({ comparar: null }, null)).toBe("La última aprobada");
+  });
+
+  it("resumen: la causa del cierre se funde con la 5.ª línea del servidor (3 a 5 líneas, nunca 6)", () => {
+    const v = vistaBloqueos({ enTrabajo: true, datos: bloqueos(), cargando: false, error: null });
+    const r = lineasResumen(tableroEnTrabajo().decidir.lineas, v);
+    expect(r.lineas).toHaveLength(5);
+    expect(r.viva).toBe(4);
+    expect(r.lineas[4]).toBe("En trabajo: las cifras pueden cambiar; sin aprobación de dirección vigente; 2 causas bloquearían el cierre.");
+    expect(lineasResumen(tableroEnTrabajo().decidir.lineas, { estado: "cargando" }).lineas[4]).toBe("En trabajo: las cifras pueden cambiar; sin aprobación de dirección vigente; comprobando qué bloquearía el cierre…");
+    // Cerrada: las del servidor, tal cual.
+    expect(lineasResumen(LINEAS_DECIDIR, { estado: "no_aplica" })).toEqual({ lineas: LINEAS_DECIDIR, viva: null });
+    // Pocas líneas y ninguna de «En trabajo»: va como línea propia.
+    expect(lineasResumen(LINEAS_DECIDIR.slice(0, 3), v)).toEqual({ lineas: [...LINEAS_DECIDIR.slice(0, 3), "En trabajo; 2 causas bloquearían el cierre"], viva: 3 });
+    // Cinco sin «En trabajo»: se suma a la última.
+    expect(lineasResumen(LINEAS_DECIDIR, v).lineas).toHaveLength(5);
+  });
+
+  it("enlaces de las alertas: solo rutas internas de verdad (no «//host» ni «/\\host»)", () => {
+    expect(esEnlaceInterno("/planificacion/proyeccion?pestana=crecimientos")).toBe(true);
+    expect(esEnlaceInterno("/maestros/tiendas")).toBe(true);
+    for (const malo of ["//evil.example", "/\\evil.example", "https://evil.example", "javascript:alert(1)", "planificacion", "", null, undefined]) expect(esEnlaceInterno(malo)).toBe(false);
+  });
+
+  it("signo menos «−» (U+2212) en todos los negativos que formatea la pantalla de M14", () => {
+    expect(unidades(-12)).toBe("−12");
+    expect(unidades(-0.4)).toBe("0");
+    expect(unidadesConSigno(-1214)).toBe("−1,214");
+    expect(porcentaje(-3.94)).toBe("−3.9 %");
+    expect(porcentaje(-0.04)).toBe("0.0 %");
+    expect(puntos(-4.3)).toBe("−4.3 pp");
+    expect(participacion(-0.05)).toBe("−5.0 %");
+    expect(soles(-1500)).toBe("S/ −1,500");
+    expect(mesesCobertura(-1)).toBe("−1.0 meses");
+    expect(MENOS).toBe("−");
+    for (const t of [unidades(-5), unidadesConSigno(-5), porcentaje(-5), puntos(-5)]) expect(t).not.toContain("-");
+  });
+
+  it("aviso de Proyección y Flujo: ámbar sin aprobación vigente o invalidada; rojo solo si dirección rechazó", () => {
+    const ultima = { resultado: "aprobada" as const, motivo: null, usuario_nombre: "Admin A.", created_at: "2026-11-08T15:30:00Z" };
+    const sin = vistaAvisoDireccion(estadoDireccion(), "proyeccion");
+    const invalidada = vistaAvisoDireccion(estadoDireccion({ estado: "invalidada", ultima }), "proyeccion");
+    const rechazada = vistaAvisoDireccion(estadoDireccion({ estado: "rechazada", ultima: { ...ultima, resultado: "rechazada" } }), "flujo");
+    if (sin.tipo !== "alerta" || invalidada.tipo !== "alerta" || rechazada.tipo !== "alerta") throw new Error("se esperaban alertas");
+    expect(tonoAviso(sin)).toBe("aviso");
+    expect(tonoAviso(invalidada)).toBe("aviso");
+    expect(tonoAviso(rechazada)).toBe("alerta");
+  });
+
+  it("Excel: TIPO del cierre con sus meses reales y proyectados, EXACTITUD de cada fila, la nota de la tabla mensual y las advertencias", () => {
+    const h = hojasTablero({ tablero: tableroConMarca(), opciones: opciones(), filtros: FILTROS_VACIOS, bloqueos: { estado: "no_aplica" }, historial: [], ahora: "2026-11-10T15:00:00Z" });
+    expect(h.MENSUAL.slice(1).map((f) => f.slice(0, 3))).toEqual([
+      ["2025", "real", "exacto"],
+      ["2026 cierre", "real ene–set + proyectado oct–dic", "estimado"],
+      ["2027", "proyectado", "estimado"],
+    ]);
+    const comp = h.RESUMEN.find((f) => f[1] === "2027 vs 2025 (último año normal)")!;
+    expect(String(comp[4])).toContain(ADVERTENCIA_MARCA);
+    expect(String(h.RESUMEN.find((f) => f[1] === "2027 vs 2026 cierre")![4])).not.toContain(ADVERTENCIA_MARCA);
+    const conNota = hojasTablero({ tablero: tableroConTienda(), opciones: opciones(), filtros: FILTROS_VACIOS, bloqueos: { estado: "no_aplica" }, historial: [], ahora: "2026-11-10T15:00:00Z" });
+    const nota = conNota.MENSUAL.at(-1)!;
+    expect(nota[0]).toBe("NOTA");
+    expect(nota[3]).toBe(NOTA_SIN_ATRIBUIR);
+    expect(nota).toHaveLength(conNota.MENSUAL[0].length);
+    expect(h.MENSUAL.some((f) => f[0] === "NOTA")).toBe(false);
+    expect(tipoMensual("proyectado", { clave: "cierre_2026", k: 12 })).toBe("real");
+    expect(tipoMensual("proyectado", { clave: "proyectado_2027", k: 9 })).toBe("proyectado");
+    expect(tipoMensual("proyectado")).toBe("proyectado");
+  });
+});
+
+describe("T3 · aviso del reparto estimado por marca con tiendas o bloque", () => {
+  it("solo avisa por marca y con un conjunto de tiendas recortado", async () => {
+    const { descripcionDesglose } = await import("@/app/(app)/planificacion/aprobacion-direccion/vista-tablero");
+    type T = Parameters<typeof descripcionDesglose>[0];
+    const total = { anios: [] } as unknown as T["desglose"]["total"];
+    const con = (dimension: T["desglose"]["dimension"], conjunto: T["filtros"]["conjunto_tiendas"]): T =>
+      ({
+        desglose: { dimension, filas: [], total },
+        kpis: { siguiente: 0, cierre: 0 },
+        proyeccion: { anio_en_curso: 2026, anio_siguiente: 2027 },
+        filtros: { texto: "", exactitud: "estimado", conjunto_tiendas: conjunto },
+      }) as unknown as T;
+    const conjunto = { etiqueta: "Tiendas elegidas (1): T03", codigos: ["T03"] };
+    expect(descripcionDesglose(con("marca", conjunto))).toContain("el reparto por marca es estimado");
+    expect(descripcionDesglose(con("marca", null))).not.toContain("estimado");
+    expect(descripcionDesglose(con("linea", conjunto))).not.toContain("estimado");
   });
 });

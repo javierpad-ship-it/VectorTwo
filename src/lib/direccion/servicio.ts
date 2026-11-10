@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { errorConDetalle } from "@/lib/api/respuestas";
+import { errorConCodigo, errorConDetalle } from "@/lib/api/respuestas";
+import { CODIGO_LECTURA_LENTA } from "@/lib/api/plazos";
 import { leerVersionesDeAnio } from "@/lib/crecimientos/consultas";
 import { hastaPorDefecto } from "@/lib/curvas/anios";
 import { leerCargasPublicadas } from "@/lib/curvas/consultas";
@@ -12,6 +13,7 @@ import type { ResumenProyeccion } from "@/lib/proyeccion/tipos-api";
 import { hoyLima } from "@/lib/tiendas/estado";
 import { aAprobacionApi, aBreve, armarResumen, diferenciaConAprobada, estadoBreve, estadoDeProyeccion } from "./aprobacion";
 import { CacheDireccion, claveCanonica } from "./cache";
+import { MAX_LECTURAS_VENTA, MENSAJE_COLA_LLENA, PLAZO_COLA_VENTA_MS, REINTENTAR_TRAS_S, Semaforo } from "./semaforo";
 import {
   leerAprobacionesDeProyeccion,
   leerAprobacionesLigeras,
@@ -76,11 +78,36 @@ const cacheProyeccion = new CacheDireccion<TableroProyeccionSql>();
 const cacheVenta = new CacheDireccion<TableroVentaSql>();
 const cacheTendencia = new CacheDireccion<TableroVentaTendenciaSql>();
 
+/**
+ * T3 (seguridad): a lo sumo `MAX_LECTURAS_VENTA` lecturas de `tablero_venta` a la vez en el proceso (venta del recorte, venta sin filtros y
+ * tendencia). El permiso se pide DENTRO del cargador de la caché: las peticiones con la misma clave comparten el vuelo único y cuentan una vez, y lo
+ * que sale de la caché no pide permiso.
+ */
+export const semaforoVenta = new Semaforo(MAX_LECTURAS_VENTA);
+
+/** Marca de «la cola no dejó entrar a tiempo» (no es un error de la base). */
+const COLA_LLENA = { cola_llena: true } as const;
+const esColaLlena = (e: unknown): e is typeof COLA_LLENA => e === COLA_LLENA;
+
+/** Una lectura de venta con permiso del semáforo; si no hay cupo a tiempo, `error = COLA_LLENA` sin llamar a la base. */
+async function conCupoVenta<T, E>(leer: () => PromiseLike<{ data: T | null; error: E | null }>): Promise<{ data: T | null; error: E | typeof COLA_LLENA | null }> {
+  const r = await semaforoVenta.conPermiso(PLAZO_COLA_VENTA_MS, leer);
+  return r.cupo ? r.valor : { data: null, error: COLA_LLENA };
+}
+
+/** `503 lectura_lenta` con `Retry-After`: la misma respuesta que una lectura que se cortó por tiempo, para que la pantalla ofrezca reintentar. */
+export function respuestaColaLlena() {
+  const r = errorConCodigo(MENSAJE_COLA_LLENA, 503, CODIGO_LECTURA_LENTA);
+  r.headers.set("Retry-After", String(REINTENTAR_TRAS_S));
+  return r;
+}
+
 /** Solo para pruebas. */
 export function vaciarCachesDireccion(): void {
   cacheProyeccion.vaciar();
   cacheVenta.vaciar();
   cacheTendencia.vaciar();
+  semaforoVenta.reiniciar();
 }
 
 // ─── Proyecciones y la que usa Compras ───
@@ -180,7 +207,8 @@ async function docProyeccion(d: Db, id: string, params: ParamsTableroProyeccionS
 /** `tablero_venta` con caché por cargas publicadas + maestros + proyección calculada + filtros. */
 async function docVenta(d: Db, params: ParamsTableroVentaSql, llaves: { cargas: string; maestros: string; calculado: string }): Promise<Salida<TableroVentaSql>> {
   const clave = `${llaves.cargas}|${llaves.maestros}|${llaves.calculado}|${claveCanonica(params)}`;
-  const r = await cacheVenta.obtener(clave, () => leerTableroVenta(d, params));
+  const r = await cacheVenta.obtener(clave, () => conCupoVenta(() => leerTableroVenta(d, params)));
+  if (esColaLlena(r.error)) return falla(respuestaColaLlena());
   if (r.error) return fallaDb(r.error, "dirección: leer la venta");
   if (r.data === null) return fallaMensaje("No se pudo leer la venta publicada. Vuelve a intentarlo.", 500);
   return listo(r.data);
@@ -188,7 +216,8 @@ async function docVenta(d: Db, params: ParamsTableroVentaSql, llaves: { cargas: 
 
 async function docTendencia(d: Db, params: Pick<ParamsTableroVentaSql, "desde" | "hasta" | "k_prima">, llaves: { cargas: string; maestros: string }): Promise<Salida<TableroVentaTendenciaSql | null>> {
   const clave = `${llaves.cargas}|${llaves.maestros}|${claveCanonica(params)}`;
-  const r = await cacheTendencia.obtener(clave, () => leerTendenciaVenta(d, params));
+  const r = await cacheTendencia.obtener(clave, () => conCupoVenta(() => leerTendenciaVenta(d, params)));
+  if (esColaLlena(r.error)) return falla(respuestaColaLlena());
   if (r.error) return fallaDb(r.error, "dirección: leer la tendencia de venta");
   return listo(r.data);
 }

@@ -45,9 +45,9 @@ export function Puente({ tablero }: { tablero: TableroApi }) {
   ];
 
   return (
-    <Card titulo={`De ${p.anio_en_curso} a ${p.anio_siguiente}: de dónde sale el aumento`} descripcion="Total de la proyección y por género × mundo. La suma de los pasos es el total exacto.">
+    <Card nivel={3} titulo={`De ${p.anio_en_curso} a ${p.anio_siguiente}: de dónde sale el aumento`} descripcion="Total de la proyección y por género × mundo. La suma de los pasos es el total exacto.">
       <div className="space-y-5">
-        <DataTable columnas={columnas} filas={filas} claveFila={(f) => f.clave} claseFila={(f) => (f.subtotal ? "bg-neutro-suave/60 font-semibold" : undefined)} />
+        <DataTable etiqueta="Puente del año en curso al siguiente, total de la proyección" columnas={columnas} filas={filas} claveFila={(f) => f.clave} claseFila={(f) => (f.subtotal ? "bg-neutro-suave/60 font-semibold" : undefined)} />
         <PuentePorGm tabla={porGm} />
       </div>
     </Card>
@@ -81,8 +81,8 @@ export function PuentePorGm({ tabla }: { tabla: TablaPuenteGm }) {
   ];
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-tinta">Por género × mundo</h3>
-      <DataTable columnas={columnas} filas={tabla.filas} claveFila={(f) => f.gm_clave} claseFila={(f) => (f.total ? "bg-neutro-suave/60 font-semibold" : undefined)} />
+      <h4 className="text-sm font-semibold text-tinta">Por género × mundo</h4>
+      <DataTable etiqueta="Puente por género × mundo" columnas={columnas} filas={tabla.filas} claveFila={(f) => f.gm_clave} claseFila={(f) => (f.total ? "bg-neutro-suave/60 font-semibold" : undefined)} />
       <p className="text-xs text-tinta-suave">Los subtotales (cierre, base, mismas tiendas y total) son acumulados; los demás, lo que suma o resta cada paso. «Niño»: el género × mundo tiene base corregida del Niño.</p>
     </div>
   );

@@ -24,17 +24,21 @@ import { FILTROS_VACIOS, vistaBloqueos, type FiltrosVista, type FormularioDecisi
 import { AvisoDireccion, AvisoDireccionVista } from "../src/components/direccion/aviso-direccion";
 import { NAV_SECTIONS, puedeVerRuta, seccionesVisibles } from "../src/lib/nav";
 import {
+  ADVERTENCIA_MARCA,
   aprobacion,
   bloqueos,
   bloqueosNinguno,
   bloqueosSoloDesactualizada,
+  desgloseMarca,
   estadoDireccion,
   historial,
   ID,
+  NOTA_SIN_ATRIBUIR,
   opciones,
   proyeccionEnTrabajo,
   tablero,
   tableroArchivada,
+  tableroConMarca,
   tableroConTienda,
   tableroEnTrabajo,
 } from "./direccion.pantalla.fixture";
@@ -200,14 +204,14 @@ describe("el tablero completo, por rol", () => {
     servir(tableroEnTrabajo());
     const s = html(createElement(TableroPanel, { esAdmin: true }));
     expect(lecturas.pedidas).toContain(`/api/direccion/bloqueos?proyeccion_id=${ID.enTrabajo}`);
-    expect(s).toContain("En trabajo; 2 causas bloquearían el cierre");
-    expect(s).toContain("En trabajo: las cifras pueden cambiar");
+    expect(s).toContain("En trabajo: las cifras pueden cambiar; sin aprobación de dirección vigente; 2 causas bloquearían el cierre.");
+    expect(s).not.toContain("En trabajo; 2 causas");
   });
 
   it("el resto del tablero no espera a /bloqueos: mientras llega, dice «comprobando»", () => {
     servir(tableroEnTrabajo(), { "/api/direccion/bloqueos": { datos: null, cargando: true, error: null, codigo: null } });
     const s = html(createElement(TableroPanel, { esAdmin: true }));
-    expect(s).toContain("En trabajo; comprobando qué bloquearía el cierre…");
+    expect(s).toContain("sin aprobación de dirección vigente; comprobando qué bloquearía el cierre…");
     expect(s).toContain("Comprobando qué bloquearía el cierre…");
     expect(s).toContain("2027: 84,714 u, +7.9 % sobre el cierre 2026");
     expect(s).toContain("52,708 u");
@@ -255,7 +259,9 @@ describe("estados vacíos y de error", () => {
     expect(calcular).toContain("Calcula la proyección para verla en el tablero");
     expect(calcular).toContain("Ir a Proyección");
     const curso = render("La proyección se está calculando.", "calculo_en_curso");
-    expect(curso).toContain("Se está recalculando; vuelve en unos minutos. La proyección se está calculando.");
+    // Un solo mensaje: el del servidor (antes salía duplicado con «Se está recalculando; vuelve en unos minutos.»).
+    expect(curso).toContain("La proyección se está calculando.");
+    expect(curso).not.toContain("Se está recalculando");
     expect(curso).toContain("Reintentar");
     const error = render("No se pudo leer el tablero.", null, true);
     expect(error).toContain('role="alert"');
@@ -272,7 +278,7 @@ describe("estados vacíos y de error", () => {
       ["/api/direccion/tablero", { datos: tablero(), cargando: false, error: "La proyección se está calculando.", codigo: "calculo_en_curso" }],
     ]);
     const s = html(createElement(TableroPanel, { esAdmin: true }));
-    expect(s).toContain("Se está recalculando; vuelve en unos minutos.");
+    expect(s).toContain("La proyección se está calculando.");
     expect(s).not.toContain("Resumen para decidir");
     expect(s).not.toContain(">Decidir</button>");
     // El selector de proyección sigue disponible para abrir otra.
@@ -340,7 +346,7 @@ describe("para decidir: resumen, puente, alertas y frente a lo aprobado", () => 
     const s = html(createElement(ResumenDecidir, { tablero: tablero(), bloqueos: sinBloqueos }));
     expect(cuenta(s, "<li")).toBe(5);
     expect(s).toContain("2027: 84,714 u, +7.9 % sobre el cierre 2026 y +13.7 % sobre 2025, el último año normal (2026 fue año del Niño).");
-    expect(s).toContain("Precisión del método: con el año anterior se habría desviado -3.2 % (dentro de muestra).");
+    expect(s).toContain("Precisión del método: con el año anterior se habría desviado −3.2 % (dentro de muestra).");
     expect(s).toContain("Objetivo global declarado: +6.0 %");
     expect(s).toContain("implícito en mismas tiendas: +7.9 % sobre 2026 corregido (+9.0 % sobre real)");
     const t = tablero();
@@ -351,16 +357,18 @@ describe("para decidir: resumen, puente, alertas y frente a lo aprobado", () => 
 
   it("en trabajo, la línea del cierre la completa la pantalla con /bloqueos", () => {
     const con = (b: ReturnType<typeof conBloqueos>) => html(createElement(ResumenDecidir, { tablero: tableroEnTrabajo(), bloqueos: b }));
-    expect(con(conBloqueos())).toContain("En trabajo; 2 causas bloquearían el cierre");
-    expect(con(conBloqueos(bloqueosSoloDesactualizada()))).toContain("En trabajo; está desactualizada, pero se puede cerrar igual");
-    expect(con(conBloqueos(bloqueosNinguno()))).toContain("En trabajo; nada bloquea el cierre");
-    expect(cuenta(con(conBloqueos()), "<li")).toBe(6);
+    // Fundida con la 5.ª del servidor: un solo punto de la lista (3 a 5 líneas), con `aria-live` para cuando llega `/bloqueos`.
+    expect(con(conBloqueos())).toContain('<li aria-live="polite">En trabajo: las cifras pueden cambiar; sin aprobación de dirección vigente; 2 causas bloquearían el cierre.</li>');
+    expect(con(conBloqueos(bloqueosSoloDesactualizada()))).toContain("vigente; está desactualizada, pero se puede cerrar igual.");
+    expect(con(conBloqueos(bloqueosNinguno()))).toContain("vigente; nada bloquea el cierre.");
+    expect(cuenta(con(conBloqueos()), "<li")).toBe(5);
+    expect(cuenta(con({ estado: "cargando" }), "<li")).toBe(5);
   });
 
   it("el puente: total con sus pasos, ayuda en cada línea y la tabla por género × mundo", () => {
     const s = html(createElement(Puente, { tablero: tablero() }));
     expect(s).toContain("De 2026 a 2027: de dónde sale el aumento");
-    for (const t of ["78,501", "-2,961", "75,540", "+753", "+4,670", "+1,343", "82,306", "+1,408", "+1,000", "84,714", "+7.9 % vs cierre"]) expect(s).toContain(t);
+    for (const t of ["78,501", "−2,961", "75,540", "+753", "+4,670", "+1,343", "82,306", "+1,408", "+1,000", "84,714", "+7.9 % vs cierre"]) expect(s).toContain(t);
     expect(s).toContain("+ Cifras fijadas (a mano o sugeridas por IA)");
     expect(s).toContain("+ Otras diferencias con la propuesta");
     expect(s).toContain('title="Filas aceptadas en bloque, por IA o tal cual cuya propuesta cambió después al recalcular, y filas escaladas por tienda."');
@@ -458,7 +466,7 @@ describe("explorar: filtros, tarjetas, gráfico y tablas", () => {
     expect(s).toContain("Mismas tiendas de 2027 (1): T03");
     expect(s).toContain("T03: 2027 estimado con su parte de la base 2026 (15.7 %)");
     expect(s).toContain("de 11.5 % en enero a 22.8 % en junio");
-    expect(s).toContain("Sin atribuir en 2027: -12 u");
+    expect(s).toContain("Sin atribuir en 2027: −12 u");
     expect(s).not.toContain("Puente del recorte");
   });
 
@@ -503,7 +511,7 @@ describe("explorar: filtros, tarjetas, gráfico y tablas", () => {
     expect(s).toContain("+5.4 %");
     const t03 = html(createElement(TablaMensual, { tablero: tableroConTienda() }));
     expect(t03).toContain(">estimado</span>");
-    expect(t03).toContain("-12");
+    expect(t03).toContain("−12");
   });
 
   it("el desglose: selector de dimensión, filas elegibles como filtro, total al pie y desplazamiento dentro de la tabla", () => {
@@ -521,7 +529,7 @@ describe("explorar: filtros, tarjetas, gráfico y tablas", () => {
   it("crecimientos: declarado, implícito, las dos tendencias, la lectura en texto y las anomalías; el Resto sin crecimiento dice «sin dato»", () => {
     const s = html(createElement(CrecimientosGm, { tablero: tablero() }));
     expect(s).toContain("De la proyección entera (no cambia con los filtros). Tendencia: ene–oct de 2026 frente a ene–oct de 2025 en las mismas tiendas de 2026.");
-    for (const t of ["+5.0 % sobre 2026 corregido", "v2 · Planner P. · 06 nov 2026", "+5.2 % sobre corregido (+6.9 % sobre real)", "-3.9 % corregida del Niño (-5.9 % en bruto)", "contra la tendencia: declara +5.0 %, la venta va -3.9 % corregida del Niño", "revisar: +4.3 pp", "+6.2 %", "reemplazada el mismo día", "sin nota", "Nota: Ajuste por campaña", "47,040", "47,793", "50,300"]) expect(s).toContain(t);
+    for (const t of ["+5.0 % sobre 2026 corregido", "v2 · Planner P. · 06 nov 2026", "+5.2 % sobre corregido (+6.9 % sobre real)", "−3.9 % corregida del Niño (−5.9 % en bruto)", "contra la tendencia: declara +5.0 %, la venta va −3.9 % corregida del Niño", "revisar: +4.3 pp", "+6.2 %", "reemplazada el mismo día", "sin nota", "Nota: Ajuste por campaña", "47,040", "47,793", "50,300"]) expect(s).toContain(t);
     const resto = s.slice(s.indexOf(">Resto<"), s.indexOf(">Total<"));
     expect(cuenta(resto, "sin dato")).toBe(4);
     expect(s).toContain("+7.9 % sobre corregido (+9.0 % sobre real)");
@@ -687,5 +695,120 @@ describe("móvil (390 px): una columna, sin desplazamiento horizontal de la pág
     const conDiferencia = html(createElement(Puente, { tablero: { ...tablero(), datos: { ...tablero().datos, tiendas: tablero().datos.tiendas.filter((t) => t.situacion !== "cierres") } } }));
     expect(conDiferencia).toContain(">diferencia<");
     expect((conDiferencia.match(/<span [^>]*class="relative[^"]*"[^>]*>[^<]*<span class="sr-only">/g) ?? []).length).toBe(cuenta(conDiferencia, 'class="sr-only"'));
+  });
+});
+
+describe("T3 · arreglos de qa y seguridad", () => {
+  const filaDeTabla = (s: string, rotulo: string) => s.split("<tr").find((tr) => tr.includes(rotulo)) ?? "";
+
+  it("«Comparar con» viendo una en trabajo: la opción y el texto de debajo dicen lo mismo (la comparada real de la mostrada)", () => {
+    const t = { ...tableroEnTrabajo(), comparada: { ...tablero().proyeccion, motivo: "aprobada" as const, huella_igual_a_aprobada: true } };
+    const s = html(createElement(BarraDecision, { opciones: opciones({ comparar_por_defecto: null }), tablero: t, filtros: filtros({ proyeccion: ID.enTrabajo }), esAdmin: true, cargando: false, exportando: false, onProyeccion: noop, onComparar: noop, onDecidir: noop, onExcel: noop }));
+    expect(s).toContain('<option value="" selected="">La última aprobada: Proyección 2026–2027</option>');
+    expect(s).not.toContain("no hay otra aprobada");
+    expect(s).toContain("Comparando con «Proyección 2026–2027» (la última aprobada)");
+    const sinComparada = html(createElement(BarraDecision, { opciones: opciones(), tablero: { ...tableroEnTrabajo(), comparada: null }, filtros: filtros({ proyeccion: ID.enTrabajo }), esAdmin: true, cargando: false, exportando: false, onProyeccion: noop, onComparar: noop, onDecidir: noop, onExcel: noop }));
+    expect(sinComparada).toContain("La última aprobada (no hay otra aprobada)");
+    expect(sinComparada).not.toContain("Comparando con");
+  });
+
+  it("con unidad de marca: el cierre rotula lo de enero a k como estimado por participación y la advertencia va junto al comparativo", () => {
+    const s = html(createElement(Kpis, { tablero: tableroConMarca() }));
+    expect(s).toContain("= ene–set 6,000 (estimado por participación de la marca) + proyectado oct–dic 2,500");
+    expect(s).not.toContain("= real ene–set");
+    expect(cuenta(s, ADVERTENCIA_MARCA)).toBe(3);
+    expect(html(createElement(Kpis, { tablero: tablero() }))).not.toContain(ADVERTENCIA_MARCA);
+  });
+
+  it("tabla mensual: en «2026 cierre» los meses reales van en redonda y solo oct–dic en cursiva con «proy.»; la nota del servidor al pie", () => {
+    const s = html(createElement(TablaMensual, { tablero: tablero() }));
+    const cierre = filaDeTabla(s, "2026 cierre");
+    expect(cierre).toContain('title="real ene–set + proyectado oct–dic"');
+    expect(cierre).not.toContain('class="relative italic" title="real');
+    expect(cuenta(cierre, 'title="proy."')).toBe(3);
+    expect(cierre).toContain(">3,343</td>");
+    expect(cierre).toContain('<span class="sr-only">proy. </span>3,900</span>');
+    expect(cuenta(filaDeTabla(s, ">2027<"), 'title="proy."')).toBe(14);
+    expect(s).toContain('<table class="w-full text-sm" aria-label="Mes a mes, en unidades">');
+    expect(s).not.toContain(NOTA_SIN_ATRIBUIR);
+    expect(html(createElement(TablaMensual, { tablero: tableroConTienda() }))).toContain(NOTA_SIN_ATRIBUIR);
+  });
+
+  it("desglose por marca: «Sin participación por marca» sin enlace, al final y con su ayuda", () => {
+    const s = html(createElement(TablaDesglose, { tablero: { ...tablero(), desglose: desgloseMarca() }, opciones: opciones(), actualizando: false, onDimension: noop, onFiltrar: noop }));
+    expect(s).toContain("Unidades de filas sin participación por marca.");
+    expect(s).not.toMatch(/<button[^>]*>Sin participación por marca<\/button>/);
+    expect(s).toMatch(/<button[^>]*>MARCA X<\/button>/);
+    expect(s.indexOf("Sin participación por marca")).toBeGreaterThan(s.indexOf("MARCA Z"));
+    expect(s).toContain('aria-label="Desglose por marca"');
+    expect(s).toMatch(/<select[^>]*aria-label="Desglosar por"/);
+  });
+
+  it("«el total cuadra con las tarjetas» solo si es cierto", () => {
+    servir();
+    expect(html(createElement(TableroPanel, { esAdmin: true }))).toContain("el total cuadra con las tarjetas");
+    const t = tablero();
+    servir({ ...t, kpis: { ...t.kpis, siguiente: 52000 } });
+    const s = html(createElement(TableroPanel, { esAdmin: true }));
+    expect(s).toContain("Totales por elemento de la dimensión elegida.");
+    expect(s).not.toContain("el total cuadra con las tarjetas");
+  });
+
+  it("aviso en Proyección y Flujo: ámbar para «sin aprobación vigente» e «invalidada», rojo para «rechazó»", () => {
+    const ultima = { resultado: "aprobada" as const, motivo: null, usuario_nombre: "Admin A.", created_at: "2026-11-08T15:30:00Z" };
+    const ambar = 'class="flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm border-aviso/40 border-l-4';
+    const rojo = 'class="flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm border-alerta/30 bg-alerta-suave text-alerta"';
+    expect(html(createElement(AvisoDireccionVista, { estado: estadoDireccion(), contexto: "proyeccion" }))).toContain(ambar);
+    expect(html(createElement(AvisoDireccionVista, { estado: estadoDireccion({ estado: "invalidada", ultima }), contexto: "flujo" }))).toContain(ambar);
+    const rechazada = html(createElement(AvisoDireccionVista, { estado: estadoDireccion({ estado: "rechazada", ultima: { ...ultima, resultado: "rechazada" } }), contexto: "flujo" }));
+    expect(rechazada).toContain(rojo);
+    expect(rechazada).not.toContain("border-l-4");
+  });
+
+  it("el enlace de una alerta solo se pinta si es una ruta interna de verdad", () => {
+    const a = tablero().alertas[0];
+    const con = (enlace: string | null) => html(createElement(ListaAlertas, { alertas: [{ ...a, enlace }], alcance: "proyeccion" }));
+    expect(con("/planificacion/proyeccion?pestana=crecimientos")).toContain('href="/planificacion/proyeccion?pestana=crecimientos"');
+    for (const malo of ["//evil.example/x", "/\\evil.example", "https://evil.example", "javascript:alert(1)"]) {
+      const s = con(malo);
+      expect(s).not.toContain("<a ");
+      expect(s).not.toContain("Ir a donde se resuelve");
+    }
+    expect(fuente(`${DIR}/alertas-tablero.tsx`)).toContain("esEnlaceInterno(enlace)");
+  });
+
+  it("accesibilidad: cada tabla con nombre, encabezados en orden y selects sin arrastrar el texto de sus opciones", () => {
+    servir(tableroEnTrabajo());
+    const s = html(createElement(TableroPanel, { esAdmin: true }));
+    const tablas = s.match(/<table[^>]*>/g) ?? [];
+    expect(tablas.length).toBeGreaterThan(5);
+    for (const t of tablas) expect(t).toMatch(/aria-label="[^"]+"/);
+    for (const sel of s.match(/<select[^>]*>/g) ?? []) expect(sel).toMatch(/aria-label="[^"]+"/);
+    // Solo «Para decidir», «Explorar» e «Historial de aprobaciones» son h2: las tarjetas de dentro, h3; sus apartados, h4.
+    expect((s.match(/<h2[^>]*>([^<]*)<\/h2>/g) ?? []).map((h) => h.replace(/<[^>]+>/g, ""))).toEqual(["Para decidir", "Explorar", "Historial de aprobaciones"]);
+    for (const titulo of ["Resumen para decidir", "Alertas para aprobar", "Frente a lo aprobado", "Mes a mes", "Desglose", "Cómo se decidió", "Las 10 filas mayores"]) expect(s).toMatch(new RegExp(`<h3[^>]*>${titulo}</h3>`));
+    expect(s).toMatch(/<h4[^>]*>Por género × mundo<\/h4>/);
+    const niveles = (s.match(/<h([1-6])/g) ?? []).map((h) => Number(h.slice(2)));
+    niveles.forEach((n, i) => {
+      if (i > 0) expect(n - niveles[i - 1]).toBeLessThanOrEqual(1);
+    });
+  });
+
+  it("cálculo en curso: un solo mensaje (el del servidor)", () => {
+    const s = html(createElement(ErrorTablero, { mensaje: "La proyección se está calculando. Espera unos minutos.", codigo: "calculo_en_curso", hayFiltros: false, onReintentar: noop, onPorDefecto: noop, onLimpiar: noop }));
+    expect(cuenta(s, "calcul")).toBe(1);
+  });
+
+  it("el signo menos de la pantalla es «−» (puente y tarjetas)", () => {
+    const s = html(createElement(Puente, { tablero: tablero() }));
+    expect(s).toContain("−2,961");
+    expect(s).not.toMatch(/>-\d/);
+  });
+
+  it("M7: la página de Proyección no revienta sin `perfiles_apertura` y el confirm de eliminar menciona las aprobaciones de dirección", () => {
+    const c = fuente("src/app/(app)/planificacion/proyeccion/proyeccion-panel.tsx");
+    expect(c).toContain("p.resumen?.perfiles_apertura?.length ?? 0");
+    expect(c).not.toContain("perfiles_apertura.length");
+    expect(c).toContain("Solo se puede si no tiene decisiones ni aprobaciones de dirección");
   });
 });

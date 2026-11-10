@@ -11,49 +11,60 @@ export const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "juni
 
 const SIN_DATO = "—";
 
-/** Unidades: `52,708`; `—` si no hay dato. */
+/**
+ * El signo menos tipográfico (U+2212), el mismo que usan los textos del servidor de M14: todos los negativos que formatea la pantalla del tablero y
+ * de sus avisos lo llevan (no el guion). Solo en M14: el resto de la app sigue con su formato.
+ */
+export const MENOS = "\u2212";
+
+/** Cambia el guion inicial de un número ya formateado por el signo menos. */
+const conMenos = (texto: string): string => texto.replace(/^-/, MENOS);
+
+/** Unidades: `52,708`, `−12`; `—` si no hay dato. */
 export function unidades(n: number | null | undefined): string {
-  return n === null || n === undefined || !Number.isFinite(n) ? SIN_DATO : formatearNumero(Math.round(n));
+  if (n === null || n === undefined || !Number.isFinite(n)) return SIN_DATO;
+  const r = Math.round(n);
+  return r === 0 ? "0" : conMenos(formatearNumero(r));
 }
 
-/** Unidades con signo: `+1,408`, `-2,961`, `0`; `—` si no hay dato. */
+/** Unidades con signo: `+1,408`, `−2,961`, `0`; `—` si no hay dato. */
 export function unidadesConSigno(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return SIN_DATO;
   const r = Math.round(n);
   if (r === 0) return "0";
-  return `${r > 0 ? "+" : "-"}${formatearNumero(Math.abs(r))}`;
+  return `${r > 0 ? "+" : MENOS}${formatearNumero(Math.abs(r))}`;
 }
 
-/** Porcentaje con signo (7.9 = 7,9 %): `+7.9 %`, `-3.9 %`, `0.0 %`; `—` si no hay dato. */
+/** Porcentaje con signo (7.9 = 7,9 %): `+7.9 %`, `−3.9 %`, `0.0 %`; `—` si no hay dato. */
 export function porcentaje(n: number | null | undefined, decimales = 1): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return SIN_DATO;
   const factor = 10 ** decimales;
   const r = Math.round(n * factor) / factor;
   const texto = formatearDecimal(Math.abs(r), decimales);
   if (r === 0) return `${texto} %`;
-  return `${r > 0 ? "+" : "-"}${texto} %`;
+  return `${r > 0 ? "+" : MENOS}${texto} %`;
 }
 
 /** Puntos porcentuales con signo: `+4.3 pp`. */
 export function puntos(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return SIN_DATO;
   const r = Math.round(n * 10) / 10;
-  return `${r > 0 ? "+" : r < 0 ? "-" : ""}${formatearDecimal(Math.abs(r), 1)} pp`;
+  return `${r > 0 ? "+" : r < 0 ? MENOS : ""}${formatearDecimal(Math.abs(r), 1)} pp`;
 }
 
-/** Participación (fracción, 0.157 = 15,7 %): `15.7 %`, sin signo. */
+/** Participación (fracción, 0.157 = 15,7 %): `15.7 %`, sin signo (una negativa, con «−»). */
 export function participacion(fraccion: number | null | undefined, decimales = 1): string {
-  return fraccion === null || fraccion === undefined || !Number.isFinite(fraccion) ? SIN_DATO : `${formatearDecimal(fraccion * 100, decimales)} %`;
+  return fraccion === null || fraccion === undefined || !Number.isFinite(fraccion) ? SIN_DATO : `${conMenos(formatearDecimal(fraccion * 100, decimales))} %`;
 }
 
 /** Soles sin decimales: `S/ 2,350,000`. */
 export function soles(n: number | null | undefined): string {
-  return n === null || n === undefined || !Number.isFinite(n) ? SIN_DATO : `S/ ${formatearNumero(Math.round(n))}`;
+  return n === null || n === undefined || !Number.isFinite(n) ? SIN_DATO : `S/ ${conMenos(formatearNumero(Math.round(n)))}`;
 }
 
 /** Meses de cobertura: `6.9 meses`. */
 export function mesesCobertura(n: number | null | undefined): string {
-  return n === null || n === undefined || !Number.isFinite(n) ? SIN_DATO : `${formatearDecimal(n, 1)} meses`;
+  return n === null || n === undefined || !Number.isFinite(n) ? SIN_DATO : `${conMenos(formatearDecimal(n, 1))} meses`;
 }
 
 /** 1 a 12 → `ene` … `dic`. */

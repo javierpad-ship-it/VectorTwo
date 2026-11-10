@@ -108,7 +108,7 @@ export function ContenidoDecision({ tablero, bloqueos, formulario, onFormulario,
 
       {exigeMotivo && (
         <Field label="Motivo">
-          <Select className="h-11" value={formulario.motivo} disabled={ocupado || huellaDistinta} onChange={(e) => onFormulario({ motivo: e.target.value as MotivoDireccion | "" })}>
+          <Select aria-label="Motivo" className="h-11" value={formulario.motivo} disabled={ocupado || huellaDistinta} onChange={(e) => onFormulario({ motivo: e.target.value as MotivoDireccion | "" })}>
             <option value="">Elige un motivo</option>
             {MOTIVOS_DIRECCION.map((m) => (
               <option key={m} value={m}>

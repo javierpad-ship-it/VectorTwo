@@ -19,6 +19,11 @@ function TarjetaCifra({ t }: { t: Tarjeta }) {
           </li>
         ))}
       </ul>
+      {t.avisos.map((a, i) => (
+        <p key={i} className="mt-1.5 rounded border border-alerta/25 bg-alerta-suave/50 px-2 py-1 text-xs leading-snug text-tinta">
+          {a}
+        </p>
+      ))}
     </section>
   );
 }

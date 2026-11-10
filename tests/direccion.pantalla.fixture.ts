@@ -514,6 +514,9 @@ export function tablero(extra: Partial<TableroApi> = {}): TableroApi {
   };
 }
 
+/** La nota del servidor bajo la tabla mensual cuando «Sin atribuir a tienda» trae negativos (T3; texto de §3.4 C). */
+export const NOTA_SIN_ATRIBUIR = "−12 u en oct 2027: lo atribuido a las tiendas ese mes supera lo proyectado para el bloque; nunca se resta de una tienda.";
+
 /** El mismo recorte con la tienda T03 elegida: cifras estimadas (atribución), sin puente del recorte y con la participación usada. */
 export function tableroConTienda(): TableroApi {
   const base = tablero();
@@ -530,16 +533,20 @@ export function tableroConTienda(): TableroApi {
         { ...fila("proyectado-2027", "2027", "proyectado", m2027), exactitud: "estimado" },
         fila("sin-atribuir-2027", "Sin atribuir 2027", "proyectado", [0, 0, 0, 0, 0, 0, 0, 0, 0, -12, 0, 0], -12),
       ],
+      nota: NOTA_SIN_ATRIBUIR,
     },
     atribucion: { tiendas: [{ tienda_id: ID.t03, codigo: "T03", participacion_anual: 7404 / 47040, participacion_mes: parte2025 }], sin_atribuir: { en_curso: 0, siguiente: -12 }, mensual: true },
     apoyo: { ...base.apoyo, cobertura: { periodo: "2026-10", stock_tiendas: 2500, stock_cd: null, imi_proyectado: 2500 / (7906 / 12), imi_real: null, exactitud: "estimado" } },
   };
 }
 
+/** La 5.ª línea del servidor en trabajo (`tablero.ts`): la pantalla le suma lo que bloquearía el cierre, sin añadir una 6.ª. */
+export const LINEA_EN_TRABAJO = "En trabajo: las cifras pueden cambiar; sin aprobación de dirección vigente.";
+
 /** Una proyección en trabajo (lo que bloquearía el cierre aplica). */
 export function tableroEnTrabajo(): TableroApi {
   const base = tablero();
-  return { ...base, proyeccion: proyeccionEnTrabajo(), decidir: { ...base.decidir, lineas: [...LINEAS_DECIDIR.slice(0, 4), "Sin aprobación de dirección vigente."] } };
+  return { ...base, proyeccion: proyeccionEnTrabajo(), decidir: { ...base.decidir, lineas: [...LINEAS_DECIDIR.slice(0, 4), LINEA_EN_TRABAJO] } };
 }
 
 export function tableroArchivada(): TableroApi {
@@ -623,4 +630,52 @@ export function historial(): AprobacionApi[] {
 // ─── Estado para los avisos de Proyección y de Flujo mensual ───
 export function estadoDireccion(extra: Partial<EstadoDireccionApi> = {}): EstadoDireccionApi {
   return { proyeccion: proyeccion(), estado: "sin_aprobacion", vigente: null, ultima: null, diferencia: diferencia(), ...extra };
+}
+
+/** La advertencia (T3) de los comparativos que mezclan venta real de la marca con cifras estimadas por participación. */
+export const ADVERTENCIA_MARCA = "Compara lo estimado por participación de la marca con su venta real.";
+
+/**
+ * El recorte con la unidad de marca MARCA X (T3): lo de enero a `k` es lo vendido guardado por la participación de la marca (`real_ac_exactitud =
+ * "estimado"`), los comparativos que mezclan real y estimado traen `advertencia`, y la tabla mensual tiene filas reales exactas y proyectadas estimadas.
+ */
+export function tableroConMarca(): TableroApi {
+  const base = tablero();
+  const conAviso = new Set<ComparativoApi["clave"]>(["sig_vs_anterior", "cierre_vs_anterior", "cierre_vs_hace_dos"]);
+  return {
+    ...base,
+    filtros: { texto: "HOMBRE · URBANO · marca: MARCA X · lo proyectado por marca es estimado", exactitud: "estimado", conjunto_tiendas: null },
+    kpis: {
+      ...base.kpis,
+      siguiente: 9000,
+      cierre: 8500,
+      real_ac: 6000,
+      real_ac_exactitud: "estimado",
+      real_ac_k_prima: 6650,
+      proyectado_resto: 2500,
+      exactitud: "estimado",
+      comparativos: base.kpis.comparativos.map((c) => ({ ...c, advertencia: conAviso.has(c.clave) ? ADVERTENCIA_MARCA : null })),
+    },
+    tabla_mensual: {
+      filas: [
+        fila("real_2025", "2025", "real", M2025),
+        { ...fila("cierre_2026", "2026 cierre", "proyectado", M2026_CIERRE), exactitud: "estimado" },
+        { ...fila("proyectado_2027", "2027", "proyectado", M2027), exactitud: "estimado" },
+      ],
+    },
+  };
+}
+
+/** Desglose por marca con la fila «Sin participación por marca» (T3, `sin_marca`): con ella el total cuadra con las tarjetas. */
+export function desgloseMarca(): TableroApi["desglose"] {
+  const v = (sig: number, cierre: number) => ({ a2023: 0, a2024: 0, a2025: 0, acAnt: 0, acCur: 0, cierre, sig });
+  return {
+    dimension: "marca",
+    filas: [
+      filaDesglose("sin_marca", "Sin participación por marca", v(700, 650), 52708, { filtrable: false, exactitud: "estimado" }),
+      filaDesglose(ID.marcaX, "MARCA X", v(30000, 28000), 52708, { exactitud: "estimado" }),
+      filaDesglose(ID.marcaZ, "MARCA Z", v(22008, 21351), 52708, { exactitud: "estimado" }),
+    ],
+    total: filaDesglose("total", "Total", { a2023: 40000, a2024: 42000, a2025: 47000, acAnt: 36455, acCur: 38300, cierre: 50001, sig: 52708 }, 52708, { filtrable: false, exactitud: "estimado" }),
+  };
 }

@@ -237,6 +237,11 @@ export type ComparativoApi = {
    * si la proyección no tiene base corregida o `pct` es `null`.
    */
   mismas: { pct: number | null; tiendas: string[]; motivo: null | "sin_base" | "incompleto"; pct_corregido?: number | null };
+  /**
+   * T3 (añadido, opcional): texto corto para mostrar junto al % cuando el par mezcla una cifra estimada por participación de marca con venta real de
+   * la marca (con `marca` elegida: «2027 vs 2025», «2026 cierre vs 2025» y «2026 cierre vs 2024»). `null` en los demás casos.
+   */
+  advertencia?: string | null;
 };
 
 // ─── Crecimientos, decisiones y alertas ───
@@ -529,6 +534,11 @@ export type TableroApi = {
      * mensual). Sin tiendas ni bloque es lo vendido guardado; con ellos, la venta publicada de esas tiendas.
      */
     real_ac: number;
+    /**
+     * T3 (añadido, opcional): exactitud de `real_ac`. `"estimado"` con una unidad de marca elegida (es lo vendido guardado de enero a `k` por la
+     * participación de la marca en cada fila, no su venta real; rotularlo «estimado», no «real»); `"exacto"` en los demás casos.
+     */
+    real_ac_exactitud?: Exactitud;
     /** T2 (añadido, opcional): real de enero a `k'` (el último mes publicado, `datos.k_prima`), para «en lo que va»; `null` si no hay venta publicada. */
     real_ac_k_prima?: number | null;
     proyectado_resto: number;
@@ -540,7 +550,17 @@ export type TableroApi = {
   };
   series: SerieMensualApi[];
   tabla_mensual: {
+    /**
+     * T3 (precisión): las filas `sin_atribuir_<año>` llevan como `total` la SUMA DE SUS MESES y solo salen si algún mes no es cero (el «sin atribuir»
+     * anual sigue en `atribucion.sin_atribuir`).
+     */
     filas: { clave: string; etiqueta: string; meses: (number | null)[]; total: number | null; tipo: SerieMensualApi["tipo"] | "variacion"; exactitud: Exactitud }[];
+    /**
+     * T3 (añadido, opcional): nota al pie de la tabla, o `null`. Sale cuando alguna fila `sin_atribuir_*` tiene meses negativos (texto de §3.4 C:
+     * «−1 u en jul 2027: lo atribuido a las tiendas ese mes supera lo proyectado para el bloque (…)») y/o cuando el «sin atribuir» anual no es la
+     * suma de sus meses (dice por qué: unidades sin curva mensual; en el año en curso, los meses de enero a `k`). Pintarla tal cual.
+     */
+    nota?: string | null;
   };
   desglose: { dimension: Desglose; filas: FilaDesgloseApi[]; total: FilaDesgloseApi };
   /** Siempre de toda la proyección: los GM de la matriz, el Resto y el Total. */
@@ -780,6 +800,11 @@ export type FueraUniversoSql = [anio: number, u: number];
 
 /** Texto de `por_dim.ids` (desglose por temporada) para la venta cuya (nodo, equivalencia, AM) no tiene fila base en la proyección. */
 export const DIM_FUERA_UNIVERSO = "fuera_universo";
+/**
+ * T3 (añadido): `id` de la fila del desglose por marca con lo proyectado que no es de ninguna marca (filas cuya fila base no trae `por_marca`, más el
+ * redondeo de repartir por participación). `filtrable: false`, `exactitud: "estimado"`, venta en 0; solo sale si no es cero.
+ */
+export const DIM_SIN_MARCA = "sin_marca";
 
 type VentaComunSql = {
   /** Meses publicados en `[desde, hasta]`: `aaaa-mm` → `carga_id`. */

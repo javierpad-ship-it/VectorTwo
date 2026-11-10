@@ -4,8 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import type { OpcionesTableroApi, TableroApi } from "@/lib/direccion/tipos-api";
-import { enlaceTablero, mesAnio, textoEstadoDireccion, tonoEstadoDireccion } from "@/components/direccion/formato";
-import { etiquetaProyeccion, textoCabecera, textoDatosMasNuevos, type FiltrosVista } from "./vista-tablero";
+import { enlaceTablero, textoEstadoDireccion, tonoEstadoDireccion } from "@/components/direccion/formato";
+import { etiquetaProyeccion, textoCabecera, textoComparando, textoCompararPorDefecto, textoDatosMasNuevos, type FiltrosVista } from "./vista-tablero";
 
 /** El estado de dirección de la proyección mostrada, en texto (nunca solo un color). */
 export function EstadoDireccion({ tablero }: { tablero: Pick<TableroApi, "decidir"> }) {
@@ -40,8 +40,8 @@ export function muestraDecidir(esAdmin: boolean, tablero: Pick<TableroApi, "proy
 export function BarraDecision({ opciones, tablero, filtros, esAdmin, cargando, exportando, onProyeccion, onComparar, onDecidir, onExcel }: Props) {
   const idMostrada = tablero?.proyeccion.id ?? filtros.proyeccion ?? opciones?.por_defecto?.proyeccion_id ?? "";
   const proyecciones = opciones?.proyecciones ?? [];
-  const porDefecto = opciones?.comparar_por_defecto && opciones.comparar_por_defecto.proyeccion_id !== idMostrada ? proyecciones.find((p) => p.id === opciones.comparar_por_defecto?.proyeccion_id) : undefined;
-  const comparada = tablero?.comparada ?? null;
+  // La comparada por defecto es la de la proyección MOSTRADA (`tablero.comparada`), no `opciones.comparar_por_defecto` (relativa a la por defecto).
+  const comparando = textoComparando(tablero);
   return (
     <>
       {/* Solo esta franja queda pegada arriba en escritorio (qué se mira, su estado y «Decidir»): los selectores van debajo, sin robar alto a lo que hay que leer. */}
@@ -73,7 +73,7 @@ export function BarraDecision({ opciones, tablero, filtros, esAdmin, cargando, e
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block min-w-0">
             <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-tinta-suave">Proyección</span>
-            <Select value={idMostrada} onChange={(e) => e.target.value && onProyeccion(e.target.value)} disabled={proyecciones.length === 0}>
+            <Select aria-label="Proyección" value={idMostrada} onChange={(e) => e.target.value && onProyeccion(e.target.value)} disabled={proyecciones.length === 0}>
               {idMostrada === "" && <option value="">Elige una proyección</option>}
               {idMostrada !== "" && !proyecciones.some((p) => p.id === idMostrada) && <option value={idMostrada}>{tablero?.proyeccion.nombre ?? "Proyección elegida"}</option>}
               {proyecciones.map((p) => (
@@ -85,8 +85,8 @@ export function BarraDecision({ opciones, tablero, filtros, esAdmin, cargando, e
           </label>
           <label className="block min-w-0">
             <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-tinta-suave">Comparar con</span>
-            <Select value={filtros.comparar ?? ""} onChange={(e) => onComparar(e.target.value || null)} disabled={opciones === null}>
-              <option value="">{porDefecto ? `La última aprobada: ${porDefecto.nombre}` : "La última aprobada (no hay otra aprobada)"}</option>
+            <Select aria-label="Comparar con" value={filtros.comparar ?? ""} onChange={(e) => onComparar(e.target.value || null)} disabled={opciones === null}>
+              <option value="">{textoCompararPorDefecto(filtros, tablero)}</option>
               {proyecciones
                 .filter((p) => p.id !== idMostrada)
                 .map((p) => (
@@ -98,11 +98,7 @@ export function BarraDecision({ opciones, tablero, filtros, esAdmin, cargando, e
             </Select>
           </label>
         </div>
-        {comparada && (
-          <p className="text-xs text-tinta-suave">
-            Comparando con «{comparada.nombre}»{comparada.motivo === "aprobada" ? " (la última aprobada)" : comparada.huella_igual_a_aprobada ? " (sus cifras son las de una aprobada)" : ""} · datos hasta {mesAnio(comparada.hasta_periodo)}
-          </p>
-        )}
+        {comparando && <p className="text-xs text-tinta-suave">{comparando}</p>}
       </div>
     </>
   );

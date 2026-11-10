@@ -71,10 +71,11 @@ export function CrecimientosGm({ tablero }: { tablero: TableroApi }) {
 
   return (
     <Card
+      nivel={3}
       titulo="Crecimiento declarado, implícito y tendencia"
       descripcion={`De la proyección entera (no cambia con los filtros). Tendencia: ${ene} de ${y} frente a ${ene} de ${y - 1} en las mismas tiendas de ${y}.`}
     >
-      <DataTable columnas={columnas} filas={tablero.crecimientos} claveFila={(c) => c.gm_clave} claseFila={(c) => (c.gm_clave === GM_CLAVE_TOTAL ? "bg-neutro-suave/60 font-semibold" : undefined)} vacio="Sin crecimientos por género × mundo." />
+      <DataTable etiqueta="Crecimiento declarado, implícito y tendencia por género × mundo" columnas={columnas} filas={tablero.crecimientos} claveFila={(c) => c.gm_clave} claseFila={(c) => (c.gm_clave === GM_CLAVE_TOTAL ? "bg-neutro-suave/60 font-semibold" : undefined)} vacio="Sin crecimientos por género × mundo." />
       <p className="mt-2 text-xs leading-relaxed text-tinta-suave">
         «Implícito»: lo proyectado para {y1} en las mismas tiendas frente a su base. La lectura compara declarado e implícito en la base del declarado, y el declarado con la tendencia de venta corregida del
         Niño (en los género × mundo con corrección se muestran las dos cifras).

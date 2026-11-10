@@ -3,7 +3,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import type { AlertaApi } from "@/lib/direccion/tipos-api";
-import { alertasDe, ROTULO_NIVEL, textoVerInformativas, type ItemBloqueo, type NivelVisual, type VistaBloqueos } from "./vista-tablero";
+import { alertasDe, esEnlaceInterno, ROTULO_NIVEL, textoVerInformativas, type ItemBloqueo, type NivelVisual, type VistaBloqueos } from "./vista-tablero";
 
 /** Icono Y palabra de nivel: nunca solo color (ficha 14, §4.5). */
 export function RotuloNivel({ nivel }: { nivel: NivelVisual }) {
@@ -33,7 +33,7 @@ function ItemAlerta({ nivel, titulo, detalle, detalles, enlace, codigo }: { nive
           ))}
         </ul>
       )}
-      {enlace && enlace.startsWith("/") && (
+      {esEnlaceInterno(enlace) && (
         <p className="mt-1 text-sm">
           <Link href={enlace} className="font-medium text-marca-oscura underline underline-offset-2">
             Ir a donde se resuelve
@@ -114,7 +114,7 @@ export function ListaAlertas({ alertas, alcance, vacio }: { alertas: readonly Al
  */
 export function AlertasTablero({ alertas, bloqueos, onReintentarBloqueos }: { alertas: readonly AlertaApi[]; bloqueos: VistaBloqueos; onReintentarBloqueos?: () => void }) {
   return (
-    <Card titulo="Alertas para aprobar" descripcion="De la proyección entera. Cada alerta lleva a la pestaña de Proyección donde se resuelve.">
+    <Card nivel={3} titulo="Alertas para aprobar" descripcion="De la proyección entera. Cada alerta lleva a la pestaña de Proyección donde se resuelve.">
       <div className="space-y-4">
         <BloqueosCierre bloqueos={bloqueos} onReintentar={onReintentarBloqueos} />
         <ListaAlertas alertas={alertas} alcance="proyeccion" vacio="Sin alertas importantes." />

@@ -7,25 +7,37 @@ import { formatearDecimal, formatearNumero } from "@/lib/formato";
 
 export const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"] as const;
 
-/** `12 345` → «12,345». */
-export const miles = (n: number): string => formatearNumero(Math.round(n));
+/** Signo menos tipográfico («−», U+2212): el mismo en todos los textos que arma el servidor (nunca el guion «-»). */
+export const MENOS = "−";
+
+/** `12 345` → «12,345»; `−2 961` → «−2,961» (con el signo menos tipográfico, no con guion). */
+export const miles = (n: number): string => {
+  const r = Math.round(n);
+  return r < 0 ? `${MENOS}${formatearNumero(-r)}` : formatearNumero(r);
+};
+
+/**
+ * T3: una frase del servidor con un solo punto final y sin «..» tras una abreviatura: un nombre puede terminar en punto («Admin A.») y la frase
+ * le añade el suyo. Respeta los puntos suspensivos («…» y «...»).
+ */
+export const frase = (texto: string): string => texto.replace(/(?<!\.)\.\.(?!\.)/g, ".");
 
 /** Unidades con signo: «+1,214» o «−2,961» (signo menos tipográfico, como el resto de la aplicación). */
-export const conSigno = (n: number): string => `${n < 0 ? "−" : "+"}${miles(Math.abs(n))}`;
+export const conSigno = (n: number): string => `${n < 0 ? MENOS : "+"}${miles(Math.abs(n))}`;
 
 /** Porcentaje con signo y un decimal: «+7.9 %», «−3.9 %». `null` → «—». */
 export function pct(x: number | null, decimales = 1): string {
   if (x === null || !Number.isFinite(x)) return "—";
   // Un −0,04 no debe leerse «−0.0 %».
   const redondo = Number(x.toFixed(decimales));
-  return `${redondo < 0 ? "−" : "+"}${formatearDecimal(Math.abs(redondo), decimales)} %`;
+  return `${redondo < 0 ? MENOS : "+"}${formatearDecimal(Math.abs(redondo), decimales)} %`;
 }
 
 /** Participación (fracción) como porcentaje sin signo: `0.157` → «15.7 %». */
-export const parte = (x: number, decimales = 1): string => `${formatearDecimal(x * 100, decimales)} %`;
+export const parte = (x: number, decimales = 1): string => `${x < 0 ? MENOS : ""}${formatearDecimal(Math.abs(x) * 100, decimales)} %`;
 
 /** Puntos porcentuales con signo: «+4.3 pp». */
-export const pp = (x: number): string => `${x < 0 ? "−" : "+"}${formatearDecimal(Math.abs(Number(x.toFixed(1))), 1)} pp`;
+export const pp = (x: number): string => `${x < 0 ? MENOS : "+"}${formatearDecimal(Math.abs(Number(x.toFixed(1))), 1)} pp`;
 
 /** `2026-09` (o `2026-09-01`) → «set 2026». */
 export function mesAnio(periodo: string): string {

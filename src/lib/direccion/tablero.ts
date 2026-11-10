@@ -27,6 +27,7 @@ import { aAprobacionApi, diferenciaConAprobada, estadoDeProyeccion, type EstadoD
 import { atribuirTiendas, repartirMayorResto, type HistoriaVenta, type SalidaTiendas, type TiendaAtribuible } from "./atribucion";
 import {
   CLAVES_COMPARATIVO,
+  advertenciaMarca,
   claseTienda,
   comparativo,
   etiquetaComparativo,
@@ -38,9 +39,10 @@ import {
 } from "./comparativos";
 import { armarCrecimientos, type DeclaradoGm, type RestoDeclarado, type VersionCrecimiento } from "./crecimientos";
 import { ROTULO_MANUAL_EN_FRASE, armarPuente, cifrasDeRecorte, lineaPuente, puentesPorGm } from "./puente";
-import { conSigno, fechaCorta, lista, mesAnio, miles, pct, rangoMeses, sumar, variacionPct } from "./textos";
+import { MESES_CORTOS, conSigno, fechaCorta, frase, lista, mesAnio, miles, pct, rangoMeses, sumar, variacionPct } from "./textos";
 import {
   DIM_FUERA_UNIVERSO,
+  DIM_SIN_MARCA,
   FILAS_MAYORES,
   GM_CLAVE_TOTAL,
   type AlertaApi,
@@ -574,7 +576,7 @@ export function lineasParaDecidir(o: {
   if (p.estado === "cerrada") lineas.push(`Cerrada por ${p.cerrada_por_nombre ?? "—"}${p.cerrada_at ? ` el ${fechaCorta(p.cerrada_at)}` : ""}; ${direccion}.`);
   else if (p.estado === "archivada") lineas.push(`Archivada: solo lectura; ${direccion}.`);
   else lineas.push(`En trabajo: las cifras pueden cambiar; ${direccion}.`);
-  return lineas;
+  return lineas.map(frase);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -608,6 +610,16 @@ function nombreDeDimension(dim: Desglose, id: string, m: MaestrosTablero): strin
       return t ? `${t.codigo} · ${t.nombre}` : "—";
     }
   }
+}
+
+/**
+ * T3 (R5): en el desglose por marca, de lo atribuido a las mismas tiendas del conjunto solo se reparte entre las marcas la parte de la base que tiene
+ * participación por marca (`Σ bases de las marcas ÷ base del recorte`); el resto va a la fila «Sin participación por marca». Puro.
+ */
+export function parteConMarca(atribuido: number, basesMarca: readonly number[], baseRecorte: number): number {
+  if (!(atribuido > 0) || !(baseRecorte > 0)) return 0;
+  const conMarca = sumar(basesMarca.map((x) => (x > 0 ? x : 0)));
+  return Math.round(atribuido * Math.min(1, conMarca / baseRecorte));
 }
 
 type CrudoDesglose = { id: string; nombre: string; exactitud: Exactitud; filtrable: boolean; hace_tres: number; hace_dos: number; anterior: number; cierre: number; siguiente: number; ac_anterior: number; ac_en_curso: number };
@@ -689,15 +701,13 @@ function armarDesglose(o: {
     // §3.4 F: con tiendas elegidas, lo de mismas tiendas de cada elemento se estima con UNA tasa (la parte atribuida al conjunto), por mayor resto.
     let basesY = ids.map((id) => porDim.get(id)?.Y.base ?? 0);
     let basesS = ids.map((id) => porDim.get(id)?.Y1.base ?? 0);
-    let estimado = dim === "marca" || e.filtros.unidadMarcaId !== null;
     if (conjunto.recortado) {
       const exactoY = sumar(enCurso.tiendas.filter((t) => conjunto.ids?.has(t.t)).map((t) => t.vigente));
       const exactoS = sumar(siguiente.tiendas.filter((t) => conjunto.ids?.has(t.t)).map((t) => t.vigente));
-      const atribuidoY = proyectado.enCurso.total - exactoY;
-      const atribuidoS = proyectado.siguiente.total - exactoS;
-      basesY = repartirMayorResto(Math.max(0, atribuidoY), basesY);
-      basesS = repartirMayorResto(Math.max(0, atribuidoS), basesS);
-      estimado = estimado || atribuidoY !== 0 || atribuidoS !== 0;
+      const atribuidoY = Math.max(0, proyectado.enCurso.total - exactoY);
+      const atribuidoS = Math.max(0, proyectado.siguiente.total - exactoS);
+      basesY = repartirMayorResto(dim === "marca" ? parteConMarca(atribuidoY, basesY, enCurso.base.vigente) : atribuidoY, basesY);
+      basesS = repartirMayorResto(dim === "marca" ? parteConMarca(atribuidoS, basesS, siguiente.base.vigente) : atribuidoS, basesS);
     }
     ids.forEach((id, i) => {
       const d = porDim.get(id);
@@ -717,7 +727,15 @@ function armarDesglose(o: {
         ac_en_curso: v?.[5] ?? 0,
       });
     });
-    void estimado;
+    if (dim === "marca") {
+      // T3 (R5): lo proyectado de las filas cuya fila base no trae `por_marca` (y el redondeo de repartir por participación) no es de ninguna marca:
+      // va en su propia fila, no elegible como filtro, para que el total cuadre con las tarjetas. Solo si no es cero.
+      const sinY = proyectado.enCurso.total - sumar(crudos.map((c) => c.cierre));
+      const sinS = proyectado.siguiente.total - sumar(crudos.map((c) => c.siguiente));
+      if (sinY !== 0 || sinS !== 0) {
+        crudos.push({ id: DIM_SIN_MARCA, nombre: "Sin participación por marca", exactitud: "estimado", filtrable: false, hace_tres: 0, hace_dos: 0, anterior: 0, cierre: sinY, siguiente: sinS, ac_anterior: 0, ac_en_curso: 0 });
+      }
+    }
   }
 
   crudos.sort((a, b) => b.siguiente - a.siguiente || b.cierre - a.cierre || a.nombre.localeCompare(b.nombre, "es") || a.id.localeCompare(b.id));
@@ -735,6 +753,50 @@ function armarDesglose(o: {
     ac_en_curso: sumar(crudos.map((c) => c.ac_en_curso)),
   };
   return { dimension: dim, filas: crudos.map((c) => aFilaDesglose(c, Y, total.siguiente, o.incompletos)), total: aFilaDesglose(total, Y, total.siguiente, o.incompletos) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// «Sin atribuir a tienda» al pie de la tabla mensual (§3.4 C)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type FilaTabla = TableroApi["tabla_mensual"]["filas"][number];
+const conSignoOCero = (n: number): string => (n === 0 ? "0" : conSigno(n));
+
+/**
+ * T3: las filas `sin_atribuir_<año>` de la tabla mensual y su nota. Puro. Cada fila lleva como `total` la suma de sus meses (lo que se ve) y solo sale
+ * si algún mes no es cero. La nota (o `null`) explica los meses negativos con el texto de §3.4 C y, si el «sin atribuir» del año no es la suma de sus
+ * meses, de dónde sale la diferencia (unidades sin curva mensual y, en el año en curso, los meses de enero a `k`, que son venta real).
+ */
+export function armarFilasSinAtribuir(o: {
+  k: number;
+  anios: readonly { anio: number; meses: readonly (number | null)[]; anual: number; sinCurva: number }[];
+}): { filas: FilaTabla[]; nota: string | null } {
+  const filas: FilaTabla[] = [];
+  const negativos: string[] = [];
+  const diferencias: string[] = [];
+  o.anios.forEach(({ anio, meses, anual, sinCurva }, i) => {
+    if (!meses.some((x) => x !== null && x !== 0)) return;
+    const total = sumaNula(meses) ?? 0;
+    filas.push({ clave: `sin_atribuir_${anio}`, etiqueta: `Sin atribuir a tienda ${anio}`, meses: [...meses], total, tipo: "proyectado", exactitud: "estimado" });
+    meses.forEach((x, m) => {
+      if (x !== null && x < 0) negativos.push(`${conSigno(x)} u en ${MESES_CORTOS[m]} ${anio}`);
+    });
+    if (anual !== total) {
+      const causas: string[] = [];
+      if (sinCurva > 0) causas.push(`${miles(sinCurva)} u del año ${sinCurva === 1 ? "no tiene" : "no tienen"} curva mensual (${sinCurva === 1 ? "suma" : "suman"} al total del año, no a los meses)`);
+      else if (sinCurva < 0) causas.push(`la curva mensual guardada suma ${miles(-sinCurva)} u más que el total del año`);
+      if (i === 0 && o.k > 0) causas.push(`los meses de ${rangoMeses(1, Math.min(12, o.k))} son venta real de cada tienda y no tienen «sin atribuir» por mes`);
+      diferencias.push(`En ${anio}, lo sin atribuir del año es ${conSignoOCero(anual)} u y la suma de sus meses ${conSignoOCero(total)} u${causas.length > 0 ? `: ${lista(causas)}` : ""}.`);
+    }
+  });
+  const partes: string[] = [];
+  if (negativos.length > 0) {
+    partes.push(
+      `${lista(negativos)}: lo atribuido a las tiendas ${negativos.length === 1 ? "ese mes" : "esos meses"} supera lo proyectado para el bloque (la base anual y la curva guardada difieren; ver la línea «diferencia» del puente). Nunca se resta de una tienda.`
+    );
+  }
+  partes.push(...diferencias);
+  return { filas, nota: partes.length > 0 ? frase(partes.join(" ")) : null };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -877,7 +939,7 @@ export function armarTablero(e: EntradaTablero): TableroApi {
     }
   };
   const comparativos = CLAVES_COMPARATIVO.map((clave) =>
-    comparativo({ clave, etiqueta: etiquetaComparativo(clave, Y, kPrima, aniosNino), nino: parConNino(clave, Y, aniosNino), total: ladoTotal(clave), mismas: ladoMismas(clave) })
+    comparativo({ clave, etiqueta: etiquetaComparativo(clave, Y, kPrima, aniosNino), nino: parConNino(clave, Y, aniosNino), total: ladoTotal(clave), mismas: ladoMismas(clave), advertencia: advertenciaMarca(clave, Y, porMarca) })
   );
 
   // ── Series y tabla mensual.
@@ -893,7 +955,7 @@ export function armarTablero(e: EntradaTablero): TableroApi {
     ? sumaMeses(enCurso.base.meses_sin_nino, enCurso.tiendas.reduce((a, t) => sumaMeses(a, t.meses), doce(() => 0))).map((x) => Math.round(x * 100) / 100)
     : null;
   if (sinNinoMeses) {
-    series.push({ clave: `sin_nino_${Y}`, etiqueta: `${Y} sin Niño (derivado)`, anio: Y, tipo: "sin_nino", nino: false, meses: sinNinoMeses, total: Math.round(sumar(sinNinoMeses) * 100) / 100, exactitud: e.filtros.unidadMarcaId !== null ? "estimado" : "exacto" });
+    series.push({ clave: `sin_nino_${Y}`, etiqueta: `${Y} sin Niño (derivado)`, anio: Y, tipo: "sin_nino", nino: false, meses: sinNinoMeses, total: Math.round(sumar(sinNinoMeses) * 100) / 100, exactitud: porMarca ? "estimado" : "exacto" });
   }
   series.push({ clave: `proyectado_${S}`, etiqueta: `${S}`, anio: S, tipo: "proyectado", nino: aniosNino.has(S), meses: proyectado.siguiente.meses, total: proyectado.siguiente.total, exactitud: exactitudS });
 
@@ -922,14 +984,23 @@ export function armarTablero(e: EntradaTablero): TableroApi {
     ...series.filter((s) => s.tipo === "real" || s.clave.startsWith("real_")).map((s) => ({ clave: s.clave, etiqueta: s.etiqueta, meses: s.meses, total: s.total, tipo: s.tipo, exactitud: s.exactitud })),
     { clave: `proyectado_${Y}`, etiqueta: `${Y} proyectado`, meses: restoMeses, total: proyectadoResto, tipo: "proyectado", exactitud: exactitudY },
     { clave: `cierre_${Y}`, etiqueta: `${Y} cierre${rotuloNino(Y)}`, meses: cierreMeses, total: proyectado.enCurso.total, tipo: "proyectado", exactitud: exactitudY },
-    ...(sinNinoMeses ? [{ clave: `sin_nino_${Y}`, etiqueta: `${Y} sin Niño`, meses: sinNinoMeses as (number | null)[], total: Math.round(sumar(sinNinoMeses) * 100) / 100, tipo: "sin_nino" as const, exactitud: "exacto" as Exactitud }] : []),
+    ...(sinNinoMeses ? [{ clave: `sin_nino_${Y}`, etiqueta: `${Y} sin Niño`, meses: sinNinoMeses as (number | null)[], total: Math.round(sumar(sinNinoMeses) * 100) / 100, tipo: "sin_nino" as const, exactitud: (porMarca ? "estimado" : "exacto") as Exactitud }] : []),
     { clave: `proyectado_${S}`, etiqueta: `${S}`, meses: proyectado.siguiente.meses, total: proyectado.siguiente.total, tipo: "proyectado", exactitud: exactitudS },
     ...filasComparada,
   ];
-  if (conjunto.recortado && (proyectado.sinAtribuir.enCurso !== 0 || proyectado.sinAtribuir.siguiente !== 0 || proyectado.sinAtribuir.mesEnCurso.some((x) => (x ?? 0) !== 0) || proyectado.sinAtribuir.mesSiguiente.some((x) => (x ?? 0) !== 0))) {
-    // «Sin atribuir» va al pie con su signo; nunca se resta de una tienda (§3.4 C).
-    filasTabla.push({ clave: `sin_atribuir_${Y}`, etiqueta: `Sin atribuir a tienda ${Y}`, meses: doce((m) => (m > k ? proyectado.sinAtribuir.mesEnCurso[m - 1] : null)), total: proyectado.sinAtribuir.enCurso, tipo: "proyectado", exactitud: "estimado" });
-    filasTabla.push({ clave: `sin_atribuir_${S}`, etiqueta: `Sin atribuir a tienda ${S}`, meses: proyectado.sinAtribuir.mesSiguiente, total: proyectado.sinAtribuir.siguiente, tipo: "proyectado", exactitud: "estimado" });
+  let notaTabla: string | null = null;
+  if (conjunto.recortado) {
+    // «Sin atribuir» va al pie con su signo; nunca se resta de una tienda (§3.4 C). T3: el total de cada fila es la suma de sus meses y la fila solo
+    // sale si algún mes no es cero; lo que explica la diferencia con el «sin atribuir» anual va en `nota`.
+    const sinAtribuir = armarFilasSinAtribuir({
+      k,
+      anios: [
+        { anio: Y, meses: doce((m) => (m > k ? proyectado.sinAtribuir.mesEnCurso[m - 1] : null)), anual: proyectado.sinAtribuir.enCurso, sinCurva: enCurso.base.sin_meses },
+        { anio: S, meses: proyectado.sinAtribuir.mesSiguiente, anual: proyectado.sinAtribuir.siguiente, sinCurva: siguiente.base.sin_meses },
+      ],
+    });
+    filasTabla.push(...sinAtribuir.filas);
+    notaTabla = sinAtribuir.nota;
   }
   filasTabla.push(
     { clave: "var_sig_vs_cierre", etiqueta: `${S} vs ${Y} cierre (%)`, meses: variacionMensual(proyectado.siguiente.meses, cierreMeses), total: variacionPct(proyectado.siguiente.total, proyectado.enCurso.total), tipo: "variacion", exactitud },
@@ -1063,6 +1134,7 @@ export function armarTablero(e: EntradaTablero): TableroApi {
       siguiente: proyectado.siguiente.total,
       cierre: proyectado.enCurso.total,
       real_ac: sumar(MESES.filter((m) => m <= k).map((m) => cierreMeses[m - 1] ?? 0)),
+      real_ac_exactitud: porMarca ? "estimado" : "exacto",
       real_ac_k_prima: e.ultimoPublicado === null ? null : acReal(Y),
       proyectado_resto: proyectadoResto ?? 0,
       anterior: totalReal(Y - 1),
@@ -1072,7 +1144,7 @@ export function armarTablero(e: EntradaTablero): TableroApi {
       exactitud,
     },
     series,
-    tabla_mensual: { filas: filasTabla },
+    tabla_mensual: { filas: filasTabla, nota: notaTabla },
     desglose: armarDesglose({ e, venta, conjunto, proyectado, kPrima, incompletos }),
     crecimientos: parte.crecimientos,
     decisiones: [decisionesDeAnio(Y, enCurso.decisiones), decisionesDeAnio(S, siguiente.decisiones)],

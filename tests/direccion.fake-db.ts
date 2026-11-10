@@ -30,6 +30,8 @@ export const estadoDireccion = {
   llamadas: { huella: 0, tablero_proyeccion: [] as { id: string; p: Fila }[], tablero_venta: [] as Fila[], registrar: [] as Fila[] },
   /** Corre justo antes de que la función de registro calcule la huella (simula a otra persona que decide una fila en medio). */
   antesDeRegistrar: null as null | (() => void),
+  /** T3: si está, cada `tablero_venta` espera a esta promesa antes de responder (para probar el tope de lecturas simultáneas). */
+  esperaVenta: null as null | ((p: Fila) => Promise<void>),
   /** Hace fallar el próximo `rpc` de ese nombre con ese error (una vez). */
   falloRpc: null as null | { nombre: string; code: string; message: string },
   /** Hoy para `calculo_en_curso` de la función de registro. */
@@ -58,6 +60,7 @@ export function reiniciar() {
   estadoDireccion.tiendas = [];
   estadoDireccion.llamadas = { huella: 0, tablero_proyeccion: [], tablero_venta: [], registrar: [] };
   estadoDireccion.antesDeRegistrar = null;
+  estadoDireccion.esperaVenta = null;
   estadoDireccion.falloRpc = null;
   estadoDireccion.ahora = () => Date.now();
   estadoDireccion.idEnConsulta = null;
@@ -675,6 +678,8 @@ export function clienteFalso() {
       if (nombre === "tablero_venta") {
         const p = (args.p ?? {}) as Fila;
         estadoDireccion.llamadas.tablero_venta.push(JSON.parse(JSON.stringify(p)));
+        const espera = estadoDireccion.esperaVenta;
+        if (espera) return abortable(espera(p).then(() => ({ data: tableroVenta(p), error: null })));
         return abortable(Promise.resolve({ data: tableroVenta(p), error: null }));
       }
       if (nombre === "registrar_aprobacion_direccion") {

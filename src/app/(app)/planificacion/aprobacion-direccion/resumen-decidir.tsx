@@ -1,16 +1,16 @@
 import { Card } from "@/components/ui/card";
 import { GM_CLAVE_TOTAL, type TableroApi } from "@/lib/direccion/tipos-api";
 import { porcentaje } from "@/components/direccion/formato";
-import { lineaResumenBloqueos, type VistaBloqueos } from "./vista-tablero";
+import { lineasResumen, type VistaBloqueos } from "./vista-tablero";
 
 /**
  * Resumen para decidir (ficha 14, §4.3): las 3 a 5 líneas que arma el servidor, SIEMPRE de la proyección entera. Si la proyección está en trabajo, la
- * pantalla añade la línea de lo que bloquearía el cierre con `GET /api/direccion/bloqueos`, que se pide aparte: mientras llega dice «comprobando…» y
- * el resto del resumen ya se lee. Debajo, en letra chica, la precisión del método y el objetivo global (solo si hay dato).
+ * pantalla completa la 5.ª (la del estado) con lo que bloquearía el cierre según `GET /api/direccion/bloqueos`, que se pide aparte: mientras llega
+ * dice «comprobando…» y el resto del resumen ya se lee. Nunca pasa de 5 líneas. Debajo, en letra chica, la precisión del método y el objetivo global (solo si hay dato).
  */
 export function ResumenDecidir({ tablero, bloqueos }: { tablero: TableroApi; bloqueos: VistaBloqueos }) {
   const d = tablero.decidir;
-  const lineaCierre = lineaResumenBloqueos(bloqueos);
+  const resumen = lineasResumen(d.lineas, bloqueos);
   const total = tablero.crecimientos.find((c) => c.gm_clave === GM_CLAVE_TOTAL);
   const y = tablero.proyeccion.anio_en_curso;
   const implicito =
@@ -20,15 +20,16 @@ export function ResumenDecidir({ tablero, bloqueos }: { tablero: TableroApi; blo
         ? `; implícito en mismas tiendas: ${porcentaje(total.implicito_sobre_real_pct)} sobre ${y} real`
         : "";
   return (
-    <Card titulo="Resumen para decidir" descripcion="De la proyección entera: no cambia con los filtros de «Explorar».">
+    <Card nivel={3} titulo="Resumen para decidir" descripcion="De la proyección entera: no cambia con los filtros de «Explorar».">
       <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-tinta">
-        {d.lineas.map((linea, i) => (
-          <li key={i}>{linea}</li>
-        ))}
-        {lineaCierre && (
-          <li aria-live="polite" className={bloqueos.estado === "cargando" ? "text-tinta-suave" : undefined}>
-            {lineaCierre}
-          </li>
+        {resumen.lineas.map((linea, i) =>
+          i === resumen.viva ? (
+            <li key={i} aria-live="polite">
+              {linea}
+            </li>
+          ) : (
+            <li key={i}>{linea}</li>
+          )
         )}
       </ol>
       {(d.precision.desvio_prueba_anterior_pct !== null || d.objetivo_pct !== null) && (

@@ -21,17 +21,17 @@ const COLUMNAS: Columna<Origen>[] = [
 export function DecisionesOrigen({ tablero }: { tablero: TableroApi }) {
   const anios = tablero.decisiones.map(vistaDecisiones);
   return (
-    <Card titulo="Cómo se decidió" descripcion="Origen de las cifras vigentes del recorte (no cambia con el filtro de tiendas): quién decidió, cómo y cuándo.">
+    <Card nivel={3} titulo="Cómo se decidió" descripcion="Origen de las cifras vigentes del recorte (no cambia con el filtro de tiendas): quién decidió, cómo y cuándo.">
       {anios.length === 0 ? (
         <p className="text-sm text-tinta-suave">Sin decisiones en este recorte.</p>
       ) : (
         <div className="grid gap-5 lg:grid-cols-2">
           {anios.map((a) => (
             <section key={a.anio} className="min-w-0 space-y-2" aria-label={`Decisiones de ${a.anio}`}>
-              <h3 className="text-sm font-semibold text-tinta">
+              <h4 className="text-sm font-semibold text-tinta">
                 {a.anio} · {a.total} u
-              </h3>
-              <DataTable columnas={COLUMNAS} filas={a.origenes} claveFila={(o) => o.clave} vacio="Sin filas." />
+              </h4>
+              <DataTable etiqueta={`Origen de las cifras de ${a.anio}`} columnas={COLUMNAS} filas={a.origenes} claveFila={(o) => o.clave} vacio="Sin filas." />
               {a.autores.length > 0 && (
                 <ul className="space-y-0.5 text-sm text-tinta">
                   {a.autores.map((x) => (

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import type { EstadoDireccionApi } from "@/lib/direccion/tipos-api";
 import { useLectura } from "@/app/(app)/planificacion/proyeccion/use-proyeccion";
-import { urlEstadoDireccion, vistaAvisoDireccion, type ContextoAviso } from "./vista-aviso";
+import { tonoAviso, urlEstadoDireccion, vistaAvisoDireccion, type ContextoAviso } from "./vista-aviso";
 
 /**
  * El aviso ya resuelto (ficha 14, §4.11): con aprobación vigente, una línea en texto; cerrada sin aprobación vigente, `Alert` con quién cerró, cuándo,
@@ -26,8 +26,9 @@ export function AvisoDireccionVista({ estado, contexto }: { estado: EstadoDirecc
       </p>
     );
   }
+  // §4.11: ámbar para «sin aprobación vigente» e «invalidada» (avisa, no es un error); rojo solo para «rechazó».
   return (
-    <Alert tono="alerta">
+    <Alert tono={tonoAviso(v)}>
       {v.antes}
       <strong>{v.fuerte}</strong>
       {v.despues}. {enlace}

@@ -18,7 +18,7 @@ import {
   type TableroProyeccionSql,
 } from "./tipos-api";
 import { ROTULO_MANUAL_EN_FRASE, lineaPuente } from "./puente";
-import { conSigno, fechaCorta, lista, mesAnio, miles, parte, pct, pp, rangoMeses } from "./textos";
+import { conSigno, fechaCorta, frase, lista, mesAnio, miles, parte, pct, pp, rangoMeses } from "./textos";
 
 /**
  * Alertas del tablero de dirección (ficha 14, §4.5). Puras: cada función recibe cifras ya leídas y devuelve cero o más alertas. Las que bloquearían
@@ -68,8 +68,8 @@ const alerta = (codigo: CodigoAlerta, nivel: AlertaApi["nivel"], alcance: Alcanc
   codigo,
   nivel,
   alcance,
-  titulo,
-  detalle,
+  titulo: frase(titulo),
+  detalle: frase(detalle),
   cifras,
   enlace,
 });

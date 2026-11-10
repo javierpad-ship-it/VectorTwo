@@ -59,6 +59,11 @@ export function vistaAvisoDireccion(e: EstadoDireccionApi, contexto: ContextoAvi
   };
 }
 
+/** Tono del `Alert` (§4.11): rojo (`alerta`) si dirección rechazó; ámbar (`aviso`) si no hay aprobación vigente o quedó invalidada. */
+export function tonoAviso(v: Extract<VistaAviso, { tipo: "alerta" }>): "alerta" | "aviso" {
+  return v.rechazada ? "alerta" : "aviso";
+}
+
 /** La ruta de `GET /api/direccion/estado`: de una proyección, o de la cerrada que usa el flujo de Compras. */
 export function urlEstadoDireccion(args: { proyeccionId: string } | { paraCompras: true }): string {
   return "paraCompras" in args ? "/api/direccion/estado?para=compras" : `/api/direccion/estado?proyeccion_id=${encodeURIComponent(args.proyeccionId)}`;

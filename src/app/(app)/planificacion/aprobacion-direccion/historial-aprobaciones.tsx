@@ -47,7 +47,7 @@ export function HistorialAprobaciones({ historial, cargando, error, onReintentar
           </Alert>
         </div>
       )}
-      {!error && <DataTable columnas={COLUMNAS} filas={historial ? filasHistorial(historial) : []} claveFila={(h) => h.id} cargando={cargando && historial === null} vacio="Esta proyección todavía no tiene decisiones de dirección." />}
+      {!error && <DataTable etiqueta="Historial de aprobaciones" columnas={COLUMNAS} filas={historial ? filasHistorial(historial) : []} claveFila={(h) => h.id} cargando={cargando && historial === null} vacio="Esta proyección todavía no tiene decisiones de dirección." />}
     </Card>
   );
 }

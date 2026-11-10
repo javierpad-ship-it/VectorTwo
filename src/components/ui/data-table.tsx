@@ -22,6 +22,7 @@ export function DataTable<T>({
   claseFila,
   ordenActual,
   onOrdenar,
+  etiqueta,
 }: {
   columnas: Columna<T>[];
   filas: T[];
@@ -34,10 +35,12 @@ export function DataTable<T>({
   ordenActual?: OrdenTabla;
   /** Se llama con la clave de la columna pulsada; quien usa la tabla decide el sentido. */
   onOrdenar?: (clave: string) => void;
+  /** Nombre accesible de la tabla (`aria-label`), para quien lee con lector de pantalla y salta de tabla en tabla. */
+  etiqueta?: string;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-borde">
-      <table className="w-full text-sm">
+      <table className="w-full text-sm" aria-label={etiqueta}>
         <thead className="bg-neutro-suave text-left text-xs uppercase tracking-wide text-tinta-suave">
           <tr>
             {columnas.map((c) => {

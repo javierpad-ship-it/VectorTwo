@@ -14,7 +14,7 @@ export function FrenteAprobada({ tablero }: { tablero: TableroApi }) {
   if (v.tipo === "oculta") return null;
   if (v.tipo !== "tabla") {
     return (
-      <Card titulo="Frente a lo aprobado">
+      <Card nivel={3} titulo="Frente a lo aprobado">
         <p className="text-sm text-tinta">{v.texto}</p>
       </Card>
     );
@@ -27,8 +27,8 @@ export function FrenteAprobada({ tablero }: { tablero: TableroApi }) {
     { clave: "pct", titulo: "%", className: NUM, render: (f) => f.pct },
   ];
   return (
-    <Card titulo="Frente a lo aprobado" descripcion={v.encabezado}>
-      <DataTable columnas={columnas} filas={v.filas} claveFila={(f) => f.clave} claseFila={(f) => (f.resaltada ? "bg-neutro-suave/60 font-semibold" : undefined)} />
+    <Card nivel={3} titulo="Frente a lo aprobado" descripcion={v.encabezado}>
+      <DataTable etiqueta="Frente a lo aprobado, por género × mundo" columnas={columnas} filas={v.filas} claveFila={(f) => f.clave} claseFila={(f) => (f.resaltada ? "bg-neutro-suave/60 font-semibold" : undefined)} />
       <p className="mt-2 text-xs text-tinta-suave">
         Ordenado por diferencia. La fila «{v.anioEnCurso} cierre» compara el cierre del año en curso (sus columnas son de {v.anioEnCurso}, no de {v.anioSiguiente}).
       </p>

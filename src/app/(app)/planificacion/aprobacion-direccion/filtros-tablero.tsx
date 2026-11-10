@@ -91,7 +91,7 @@ export function ControlesFiltros({ filtros, opciones, tablero, onCambiar }: Prop
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-tinta">Mundo</span>
-          <Select value={filtros.mundo ?? ""} onChange={(e) => onCambiar({ mundo: e.target.value || null })}>
+          <Select aria-label="Mundo" value={filtros.mundo ?? ""} onChange={(e) => onCambiar({ mundo: e.target.value || null })}>
             <option value="">Todos</option>
             {opciones.mundos.map((m) => (
               <option key={m.id} value={m.id}>
@@ -102,7 +102,7 @@ export function ControlesFiltros({ filtros, opciones, tablero, onCambiar }: Prop
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-tinta">Línea</span>
-          <Select value={filtros.linea ?? ""} disabled={!lineaPosible} onChange={(e) => onCambiar({ linea: e.target.value || null })}>
+          <Select aria-label="Línea" value={filtros.linea ?? ""} disabled={!lineaPosible} onChange={(e) => onCambiar({ linea: e.target.value || null })}>
             <option value="">{lineaPosible ? "Todas" : "Elige un solo género y un mundo"}</option>
             {lineas.map((l) => (
               <option key={l.id} value={l.id}>
@@ -199,7 +199,7 @@ export function FiltrosTablero({ filtros, opciones, tablero, onCambiar, onLimpia
         {limpiar}
       </div>
       <div className="hidden md:block">
-        <Card titulo={`Filtros${n > 0 ? ` (${n})` : ""}`} descripcion="Recortan «Explorar»: tarjetas, gráfico, tablas, desglose, decisiones, apoyo y filas mayores. Lo de «Para decidir» no cambia." acciones={limpiar || undefined}>
+        <Card nivel={3} titulo={`Filtros${n > 0 ? ` (${n})` : ""}`} descripcion="Recortan «Explorar»: tarjetas, gráfico, tablas, desglose, decisiones, apoyo y filas mayores. Lo de «Para decidir» no cambia." acciones={limpiar || undefined}>
           {opciones ? <ControlesFiltros filtros={filtros} opciones={opciones} tablero={tablero} onCambiar={onCambiar} /> : <p className="text-sm text-tinta-suave">Cargando los filtros…</p>}
         </Card>
       </div>

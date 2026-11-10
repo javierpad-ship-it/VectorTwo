@@ -77,6 +77,8 @@ export type EntradaComparativo = {
   total: LadoComparativo;
   /** `null`: no hay conjunto de mismas tiendas para este par. `anteriorCorregido`: la misma base corregida del Niño (solo año siguiente sobre el cierre). */
   mismas: (LadoComparativo & { tiendas: string[]; anteriorCorregido?: number | null }) | null;
+  /** T3: texto de `advertencia` (o `null`); ver `advertenciaMarca`. */
+  advertencia?: string | null;
 };
 
 /** Variación del total: `incompleto` manda; después `nueva` (el anterior es 0 y el actual mayor que 0) y `sin_base` (el anterior no es mayor que 0). */
@@ -100,7 +102,26 @@ export const comparativo = (e: EntradaComparativo): ComparativoApi => ({
   nino: e.nino,
   total: variacionTotal(e.total),
   mismas: variacionMismas(e.mismas),
+  advertencia: e.advertencia ?? null,
 });
+
+/**
+ * T3: con una unidad de marca, lo proyectado (el año siguiente y el cierre del año en curso, también de enero a `k`) es lo vendido o proyectado de cada
+ * fila por la participación de la marca: estimado. Un comparativo que lo pone frente a la venta REAL de la marca (de un año ya cerrado) mezcla las dos
+ * cosas y lo dice; los que son real frente a real o estimado frente a estimado no llevan advertencia. Puro.
+ */
+export function advertenciaMarca(clave: ComparativoApi["clave"], anio: number, conMarca: boolean): string | null {
+  if (!conMarca) return null;
+  const [a, b] = aniosDeComparativo(clave, anio);
+  switch (clave) {
+    case "sig_vs_anterior":
+    case "cierre_vs_anterior":
+    case "cierre_vs_hace_dos":
+      return `Compara ${a}${clave === "sig_vs_anterior" ? "" : " cierre"}, estimado con la participación de la marca en cada fila, con la venta real de la marca en ${b}: tómalo como orientación.`;
+    default:
+      return null;
+  }
+}
 
 /** Los dos años de cada comparativo (`anio` = `Y`): `[actual, anterior]`. */
 export function aniosDeComparativo(clave: ComparativoApi["clave"], anio: number): [number, number] {

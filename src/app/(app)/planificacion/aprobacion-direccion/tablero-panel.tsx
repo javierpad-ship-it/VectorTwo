@@ -28,7 +28,7 @@ import { ResumenDecidir } from "./resumen-decidir";
 import { TablaDesglose } from "./tabla-desglose";
 import { TablaMensual } from "./tabla-mensual";
 import { useTableroDireccion } from "./use-tablero-direccion";
-import { aplicarCambio, consultaPagina, cuentaFiltros, hojasTablero, leerFiltrosUrl, limpiarRecorte, nombreArchivoDireccion, recorteVacio, vistaBloqueos, type FiltrosVista } from "./vista-tablero";
+import { aplicarCambio, consultaPagina, cuentaFiltros, hojasTablero, leerFiltrosUrl, limpiarRecorte, nombreArchivoDireccion, recorteVacio, descripcionDesglose, vistaBloqueos, type FiltrosVista } from "./vista-tablero";
 
 const RUTA_PROYECCION = "/planificacion/proyeccion";
 
@@ -67,7 +67,7 @@ export function ErrorTablero({ mensaje, codigo, hayFiltros, onReintentar, onPorD
   }
   return (
     <Alert tono={codigo === "calculo_en_curso" ? "info" : "alerta"}>
-      <span className="block">{codigo === "calculo_en_curso" ? `Se está recalculando; vuelve en unos minutos. ${mensaje}` : mensaje}</span>
+      <span className="block">{mensaje}</span>
       <span className="mt-2 flex flex-wrap gap-2">
         {accion === "abrir_por_defecto" && (
           <Button variante="secundario" className="h-11! px-5!" onClick={onPorDefecto}>
@@ -241,13 +241,13 @@ export function TableroPanel({ esAdmin }: { esAdmin: boolean }) {
             ) : (
               <>
                 <Kpis tablero={t} />
-                <Card titulo="Mes a mes" descripcion="Lo proyectado frente a lo vendido en los años anteriores y en el año en curso.">
+                <Card nivel={3} titulo="Mes a mes" descripcion="Lo proyectado frente a lo vendido en los años anteriores y en el año en curso.">
                   <div className="space-y-5">
                     <GraficoTablero tablero={t} />
                     <TablaMensual tablero={t} />
                   </div>
                 </Card>
-                <Card titulo="Desglose" descripcion="Totales por elemento de la dimensión elegida; el total cuadra con las tarjetas.">
+                <Card nivel={3} titulo="Desglose" descripcion={descripcionDesglose(t)}>
                   <TablaDesglose tablero={t} opciones={catalogo} actualizando={cargandoTablero} onDimension={(d) => cambiar({ desglose: d })} onFiltrar={(c) => cambiar(c, "push")} />
                 </Card>
               </>

@@ -35,7 +35,9 @@ import {
   K,
   L1_HU,
   L2_HU,
+  MARCA_W,
   MARCA_X,
+  MARCA_Z,
   M_URBANO,
   P_EN_TRABAJO,
   P_MOSTRADA,
@@ -203,8 +205,12 @@ describe("R6 · cierre del año en curso", () => {
 
 describe("R5 · los totales cuadran entre tarjetas, tabla, gráfico y desglose", () => {
   it("para cada dimensión del desglose, Σ filas = total y el total es el de las tarjetas", async () => {
-    for (const desglose of ["genero", "mundo", "linea", "agrupacion_marca", "temporada", "tienda"] as const) {
-      const t = await ver({ ...HU, desglose });
+    for (const [desglose, filtros] of [
+      ...(["genero", "mundo", "linea", "agrupacion_marca", "marca", "temporada", "tienda"] as const).map((d) => [d, HU] as const),
+      // T3: sin filtros la proyección tiene una fila base sin `por_marca` (MUJER · URBANO · L2): su parte va en «Sin participación por marca».
+      ["marca", {}] as const,
+    ]) {
+      const t = await ver({ ...filtros, desglose });
       const d = t.desglose;
       expect(d.dimension).toBe(desglose);
       for (const anio of [Y - 3, Y - 2, Y - 1, Y, Y + 1]) {
@@ -241,6 +247,57 @@ describe("R5 · los totales cuadran entre tarjetas, tabla, gráfico y desglose",
     expect(s.exactitud).toBe("estimado");
     expect(t.desglose.filas.every((f) => f.exactitud === "estimado")).toBe(true);
   });
+
+  it("T3 · desglose por marca: lo que no tiene participación va en «Sin participación por marca» (no elegible) y el total es el de las tarjetas", async () => {
+    const t = await ver({ desglose: "marca" });
+    const sin = t.desglose.filas.find((f) => f.id === "sin_marca");
+    expect(sin?.nombre).toBe("Sin participación por marca");
+    expect(sin?.filtrable).toBe(false);
+    expect(sin?.exactitud).toBe("estimado");
+    // MUJER · URBANO · L2 (sin `por_marca`): 12 000 en 2027 (± el redondeo de repartir por participación).
+    expect(Math.abs((anioDe(sin as never, Y + 1) ?? 0) - 12000)).toBeLessThanOrEqual(2);
+    expect(anioDe(t.desglose.total, Y + 1)).toBe(t.kpis.siguiente);
+    expect(anioDe(t.desglose.total, Y)).toBe(t.kpis.cierre);
+    // Con HOMBRE · URBANO (todas sus filas con participación) no hay esa fila.
+    const hu = await ver({ ...HU, desglose: "marca" });
+    expect(hu.desglose.filas.some((f) => f.id === "sin_marca")).toBe(false);
+  });
+
+  it("T3 · la fila de cada marca en el desglose es lo que da el tablero al filtrar por esa marca (sin filtros, con bloque «mismas» y con tiendas)", async () => {
+    // Tolerancia: el redondeo de repartir por participación (la marca redondea por mes; el desglose, por elemento): ≤ 2 u en este caso.
+    const TOL = 2;
+    const filaDe = (t: TableroApi, id: string) => t.desglose.filas.find((x) => x.id === id) as TableroApi["desglose"]["total"];
+    // Sin filtros, los dos años.
+    const t = await ver({ desglose: "marca" });
+    for (const marca of [MARCA_X, MARCA_W, MARCA_Z]) {
+      const solo = await ver({ marca });
+      expect(Math.abs((anioDe(filaDe(t, marca), Y) ?? 0) - solo.kpis.cierre), `cierre ${marca}`).toBeLessThanOrEqual(TOL);
+      expect(Math.abs((anioDe(filaDe(t, marca), Y + 1) ?? 0) - solo.kpis.siguiente), `2027 ${marca}`).toBeLessThanOrEqual(TOL);
+      expect(anioDe(filaDe(t, marca), Y - 1)).toBe(solo.kpis.anterior);
+    }
+    // Con el bloque «mismas» entero: 2027 es la base de 2027 de cada marca, como al filtrar.
+    for (const filtros of [{ bloque: "mismas" }, { ...HU, bloque: "mismas" }] as Record<string, string>[]) {
+      const b = await ver({ ...filtros, desglose: "marca" });
+      for (const marca of [MARCA_X, MARCA_W, MARCA_Z]) {
+        const solo = await ver({ ...filtros, marca });
+        expect(Math.abs((anioDe(filaDe(b, marca), Y + 1) ?? 0) - solo.kpis.siguiente), `${JSON.stringify(filtros)} 2027 ${marca}`).toBeLessThanOrEqual(TOL);
+      }
+      expect(anioDe(b.desglose.total, Y + 1)).toBe(b.kpis.siguiente);
+      expect(anioDe(b.desglose.total, Y)).toBe(b.kpis.cierre);
+    }
+    // Con bloque o tiendas, lo que no tiene participación ya no se reparte entre las marcas: va a «Sin participación por marca» en la proporción de su
+    // base (MUJER · URBANO · L2: 11 100 de 74 401 en 2026 y 12 000 de 82 306 en 2027), y el total sigue siendo el de las tarjetas.
+    for (const filtros of [{ bloque: "mismas" }, { tiendas: T03 }, { tiendas: `${T01},${T03}` }] as Record<string, string>[]) {
+      const r = await ver({ ...filtros, desglose: "marca" });
+      const sin = filaDe(r, "sin_marca");
+      const exactasY = filtros.bloque === "mismas" ? 4100 : 0; // filas de tienda de T10 (con participación) en 2026
+      expect(Math.abs((anioDe(sin, Y) ?? 0) - ((r.kpis.cierre - exactasY) * 11100) / 74401), `${JSON.stringify(filtros)} 2026`).toBeLessThanOrEqual(TOL);
+      expect(Math.abs((anioDe(sin, Y + 1) ?? 0) - (r.kpis.siguiente * 12000) / 82306), `${JSON.stringify(filtros)} 2027`).toBeLessThanOrEqual(TOL);
+      expect(sin.filtrable).toBe(false);
+      expect(anioDe(r.desglose.total, Y + 1)).toBe(r.kpis.siguiente);
+      expect(anioDe(r.desglose.total, Y)).toBe(r.kpis.cierre);
+    }
+  });
 });
 
 describe("R9 · marca (unidad de marca)", () => {
@@ -271,6 +328,25 @@ describe("R9 · marca (unidad de marca)", () => {
     // «Marca» se puede elegir sin agrupación: la del filtro se deduce de la unidad.
     const sinAm = await ver({ ...HU, marca: MARCA_X });
     expect(Math.abs(sinAm.kpis.siguiente - 20237)).toBeLessThanOrEqual(12);
+  });
+
+  it("T3 · con marca, el real de enero a k y los comparativos que lo mezclan con venta real van rotulados (estimado / advertencia); sin marca, no", async () => {
+    const t = await ver({ ...HU, am: AM_A, marca: MARCA_X });
+    expect(t.kpis.real_ac_exactitud).toBe("estimado");
+    for (const clave of ["sig_vs_anterior", "cierre_vs_anterior", "cierre_vs_hace_dos"]) {
+      expect(comparativo(t, clave).advertencia, clave).toMatch(/estimado con la participación de la marca/);
+      expect(comparativo(t, clave).advertencia, clave).not.toContain("-");
+    }
+    expect(comparativo(t, "sig_vs_anterior").advertencia).toBe("Compara 2027, estimado con la participación de la marca en cada fila, con la venta real de la marca en 2025: tómalo como orientación.");
+    for (const clave of ["sig_vs_cierre", "ac_vs_ac", "anterior_vs_hace_dos"]) expect(comparativo(t, clave).advertencia, clave).toBeNull();
+    // Las filas y series de lo proyectado (cierre incluido, también de enero a k) son estimadas; las de venta real, exactas.
+    for (const clave of [`cierre_${Y}`, `proyectado_${Y}`, `proyectado_${Y + 1}`, `sin_nino_${Y}`, "var_sig_vs_cierre"]) expect(fila(t, clave).exactitud, clave).toBe("estimado");
+    for (const clave of [`real_${Y - 1}`, `real_${Y}`]) expect(fila(t, clave).exactitud, clave).toBe("exacto");
+    for (const s of t.series.filter((x) => x.tipo !== "real" && x.tipo !== "real_parcial")) expect(s.exactitud, s.clave).toBe("estimado");
+    const sin = await ver({ ...HU });
+    expect(sin.kpis.real_ac_exactitud).toBe("exacto");
+    expect(sin.kpis.comparativos.every((c) => c.advertencia === null)).toBe(true);
+    expect(fila(sin, `sin_nino_${Y}`).exactitud).toBe("exacto");
   });
 
   it("400 `marca_fuera_de_agrupacion` si la unidad es de otra agrupación que las elegidas", async () => {
@@ -524,6 +600,38 @@ describe("§3.4 y §6.1 · tiendas y bloques", () => {
     // El año siguiente sí se reparte.
     expect(suma((fila(t, `proyectado_${Y + 1}`).meses as number[]).map((x) => x ?? 0))).toBe(t.kpis.siguiente);
     expect(t.apoyo.cobertura.imi_proyectado).toBeNull();
+  });
+});
+
+describe("T3 · «Sin atribuir a tienda» al pie de la tabla mensual", () => {
+  it("el total de cada fila es la suma de sus meses, un mes negativo trae la nota de §3.4 C y la diferencia con el anual se explica (1 u sin curva)", async () => {
+    // L2 · AM-B de 2027 pasa de 4 300 a 4 301 sin tocar su curva: 1 u del año sin mes (el caso que vio qa).
+    const filasF4 = new Set((base.tablas.proyeccion_filas ?? []).filter((f) => f.proyeccion_id === P_MOSTRADA && f.gml_id === L2_HU && f.agrupacion_marca_id === AM_B && f.tienda_id === null).map((f) => f.id));
+    const r = registros(P_MOSTRADA, Y + 1).find((x) => filasF4.has(x.fila_id as string));
+    if (!r) throw new Error("sin registro F4");
+    r.decidido = 4301;
+    vaciarCachesDireccion();
+    const t = await ver({ ...HU, tiendas: T03 });
+    const filasSin = t.tabla_mensual.filas.filter((f) => f.clave.startsWith("sin_atribuir_"));
+    expect(filasSin.length).toBeGreaterThan(0);
+    for (const f of filasSin) {
+      expect(f.total).toBe(suma(f.meses.map((x) => x ?? 0)));
+      expect(f.meses.some((x) => x !== null && x !== 0)).toBe(true);
+    }
+    const s = filasSin.find((f) => f.clave === `sin_atribuir_${Y + 1}`);
+    expect(s?.meses.some((x) => (x ?? 0) < 0)).toBe(true);
+    expect(t.tabla_mensual.nota).toContain("lo atribuido a las tiendas ese mes supera lo proyectado para el bloque");
+    expect(t.tabla_mensual.nota).toMatch(/−1 u en [a-z]{3} 2027/);
+    expect(t.tabla_mensual.nota).toContain("lo sin atribuir del año es 0 u y la suma de sus meses −1 u: 1 u del año no tiene curva mensual");
+    expect(t.tabla_mensual.nota).not.toContain("-");
+  });
+
+  it("sin nada que mostrar no hay filas `sin_atribuir_*` (nunca todo en cero) ni nota; sin recorte de tiendas, tampoco", async () => {
+    const sin = await ver({ ...HU });
+    expect(sin.tabla_mensual.filas.some((f) => f.clave.startsWith("sin_atribuir_"))).toBe(false);
+    expect(sin.tabla_mensual.nota ?? null).toBeNull();
+    const bloque = await ver({ ...HU, bloque: "mismas" });
+    for (const f of bloque.tabla_mensual.filas.filter((x) => x.clave.startsWith("sin_atribuir_"))) expect(f.meses.some((x) => x !== null && x !== 0)).toBe(true);
   });
 });
 

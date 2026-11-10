@@ -25,10 +25,10 @@ function Dato({ etiqueta, valor, estimado }: { etiqueta: string; valor: string; 
  */
 export function Apoyo({ tablero }: { tablero: TableroApi }) {
   return (
-    <Card titulo="Datos de apoyo: soles y cobertura" descripcion={ROTULO_APOYO}>
+    <Card nivel={3} titulo="Datos de apoyo: soles y cobertura" descripcion={ROTULO_APOYO}>
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="min-w-0" aria-label="Soles">
-          <h3 className="mb-1 text-sm font-semibold text-tinta">Soles (netos de IGV)</h3>
+          <h4 className="mb-1 text-sm font-semibold text-tinta">Soles (netos de IGV)</h4>
           <dl>
             {filasSoles(tablero).map((f) => (
               <Dato key={f.etiqueta} etiqueta={f.etiqueta} valor={f.valor} estimado={f.estimado} />
@@ -41,7 +41,7 @@ export function Apoyo({ tablero }: { tablero: TableroApi }) {
           </ul>
         </section>
         <section className="min-w-0" aria-label="Cobertura">
-          <h3 className="mb-1 text-sm font-semibold text-tinta">Stock y meses de cobertura</h3>
+          <h4 className="mb-1 text-sm font-semibold text-tinta">Stock y meses de cobertura</h4>
           <dl>
             {datosCobertura(tablero.apoyo.cobertura).map((d) => (
               <Dato key={d.etiqueta} etiqueta={d.etiqueta} valor={d.valor} estimado={d.estimado} />

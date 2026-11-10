@@ -17,6 +17,8 @@
   --exito-suave: #e6f6ec;
   --alerta: #c2410c;
   --alerta-suave: #fdebe3;
+  --aviso: #b45309;
+  --aviso-suave: #fef3c7;
   --neutro-suave: #eef0f3;
 }
 
@@ -33,6 +35,8 @@
   --color-exito-suave: var(--exito-suave);
   --color-alerta: var(--alerta);
   --color-alerta-suave: var(--alerta-suave);
+  --color-aviso: var(--aviso);
+  --color-aviso-suave: var(--aviso-suave);
   --color-neutro-suave: var(--neutro-suave);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;

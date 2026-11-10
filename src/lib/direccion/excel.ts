@@ -38,6 +38,10 @@ export type EntradaExcelDireccion = {
   historial: { fecha: string; quien: string; resultado: string; motivo: string; comentario: string; sobre: string; invalidada: string }[];
   /** Notas de la atribución por tienda (participación usada y lo que quedó sin atribuir). */
   atribucion: string[];
+  /** La nota del servidor bajo la tabla mensual (T3: por qué «Sin atribuir a tienda» trae negativos); `null` o ausente si no hay. */
+  nota_mensual?: string | null;
+  /** Advertencia de cada comparativo que la trae (T3: mezcla venta real de la marca con cifras estimadas), por clave. */
+  advertencias?: Partial<Record<TableroApi["kpis"]["comparativos"][number]["clave"], string>>;
 };
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"] as const;
@@ -50,8 +54,17 @@ const numero = (n: number | null | undefined): number | null => (n === null || n
 
 const MOTIVO: Record<string, string> = { sin_base: "sin base", incompleto: "año incompleto", nueva: "nueva" };
 
-/** `TIPO` de la hoja `MENSUAL` (§4.9): real, proyectado, sin_nino, variacion o comparada. */
-export function tipoMensual(tipo: TableroApi["tabla_mensual"]["filas"][number]["tipo"]): string {
+const rango = (desde: number, hasta: number): string => (desde === hasta ? MESES[desde - 1] : `${MESES[desde - 1]}–${MESES[hasta - 1]}`);
+
+/** ¿Es la fila del cierre del año en curso (real de enero a `k` más proyectado de `k+1` a diciembre)? */
+const esCierre = (clave: string): boolean => /^cierre[_-]\d{4}$/.test(clave);
+
+/**
+ * `TIPO` de la hoja `MENSUAL` (§4.9): real, proyectado, sin_nino, variacion o comparada. La fila del cierre del año en curso (`cierre_<Y>`) no es
+ * proyectada entera: con `fila` y `k`, dice «real ene–set + proyectado oct–dic».
+ */
+export function tipoMensual(tipo: TableroApi["tabla_mensual"]["filas"][number]["tipo"], fila?: { clave: string; k: number }): string {
+  if (tipo === "proyectado" && fila && esCierre(fila.clave) && fila.k >= 1) return fila.k >= 12 ? "real" : `real ${rango(1, fila.k)} + proyectado ${rango(fila.k + 1, 12)}`;
   if (tipo === "real" || tipo === "real_parcial") return "real";
   if (tipo === "comparada" || tipo === "aprobada") return "comparada";
   return tipo;
@@ -72,7 +85,7 @@ function hojaResumen(e: EntradaExcelDireccion): Hoja {
       c.etiqueta,
       c.total.pct !== null ? pct(c.total.pct) : c.total.motivo ? (MOTIVO[c.total.motivo] ?? c.total.motivo) : null,
       c.mismas.pct !== null ? pct(c.mismas.pct) : c.mismas.motivo ? (MOTIVO[c.mismas.motivo] ?? c.mismas.motivo) : null,
-      [c.nino ? "algún año del par es del Niño" : null, c.mismas.tiendas.length > 0 ? `mismas tiendas: ${c.mismas.tiendas.join(", ")}` : null].filter(Boolean).join(" · ") || null,
+      [c.nino ? "algún año del par es del Niño" : null, c.mismas.tiendas.length > 0 ? `mismas tiendas: ${c.mismas.tiendas.join(", ")}` : null, e.advertencias?.[c.clave] ?? null].filter(Boolean).join(" · ") || null,
     ]);
   }
   for (const f of t.datos.fuera_universo) filas.push(["FUERA DE LA PROYECCIÓN", `Venta de filas que ya no se proyectan: ${f.anio}`, f.u, null, "unidades del recorte sin fila en la proyección"]);
@@ -118,10 +131,13 @@ function hojaFrenteAprobada(e: EntradaExcelDireccion): Hoja {
 
 function hojaMensual(e: EntradaExcelDireccion): Hoja {
   const filas: Hoja = [["FILA", "TIPO", "EXACTITUD", ...MESES, "TOTAL"]];
+  const k = e.tablero.proyeccion.k;
   for (const f of e.tablero.tabla_mensual.filas) {
     const valor = f.tipo === "variacion" ? pct : numero;
-    filas.push([f.etiqueta, tipoMensual(f.tipo), f.exactitud, ...Array.from({ length: 12 }, (_, i) => valor(f.meses[i])), valor(f.total)]);
+    // EXACTITUD de cada fila tal cual la manda el servidor (con unidad de marca, lo real de la marca puede ser exacto y lo proyectado, estimado).
+    filas.push([f.etiqueta, tipoMensual(f.tipo, { clave: f.clave, k }), f.exactitud, ...Array.from({ length: 12 }, (_, i) => valor(f.meses[i])), valor(f.total)]);
   }
+  if (e.nota_mensual) filas.push(["NOTA", null, null, e.nota_mensual, ...Array.from({ length: 12 }, () => null)]);
   return filas;
 }
 

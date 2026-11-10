@@ -3,6 +3,8 @@ import { plural } from "@/lib/formato";
 import {
   BLOQUES_TABLERO,
   DESGLOSES_TABLERO,
+  DIM_FUERA_UNIVERSO,
+  DIM_SIN_MARCA,
   FILAS_MAYORES,
   GM_CLAVE_TOTAL,
   MAX_AGRUPACIONES,
@@ -339,6 +341,25 @@ export function etiquetaProyeccion(p: ProyeccionTableroApi): string {
   return [p.nombre, ESTADO_PROYECCION[p.estado], ...(p.usa_compras ? ["usa Compras"] : [])].join(" · ");
 }
 
+/**
+ * El texto de la primera opción de «Comparar con» (la comparada por defecto). Sale de `tablero.comparada`, la comparada REAL de la proyección mostrada
+ * (`opciones.comparar_por_defecto` es relativa a la proyección por defecto, no a la mostrada). Solo es fiable con «por defecto» elegido
+ * (`filtros.comparar === null`) y con el tablero cargado; si no, un texto que no afirma nada.
+ */
+export function textoCompararPorDefecto(filtros: Pick<FiltrosVista, "comparar">, tablero: Pick<TableroApi, "comparada"> | null): string {
+  if (filtros.comparar !== null || tablero === null) return "La última aprobada";
+  const c = tablero.comparada;
+  if (c === null) return "La última aprobada (no hay otra aprobada)";
+  return c.motivo === "aprobada" ? `La última aprobada: ${c.nombre}` : "La última aprobada";
+}
+
+/** «Comparando con «X» (la última aprobada) · datos hasta set 2026»; `null` sin comparada. */
+export function textoComparando(tablero: Pick<TableroApi, "comparada"> | null): string | null {
+  const c = tablero?.comparada ?? null;
+  if (c === null) return null;
+  return `Comparando con «${c.nombre}»${c.motivo === "aprobada" ? " (la última aprobada)" : c.huella_igual_a_aprobada ? " (sus cifras son las de una aprobada)" : ""} · datos hasta ${mesAnio(c.hasta_periodo)}`;
+}
+
 /** «Hay venta publicada hasta oct 2026; esta proyección se calculó con datos hasta set 2026» (solo si `k' > k`). */
 export function textoDatosMasNuevos(t: Pick<TableroApi, "proyeccion" | "datos">): string | null {
   if (t.datos.k_prima <= t.proyeccion.k || mesAnio(t.datos.ultimo_publicado) === mesAnio(t.proyeccion.hasta_periodo)) return null;
@@ -415,20 +436,50 @@ export function vistaBloqueos(args: { enTrabajo: boolean; datos: BloqueosCierreA
   return { estado: "listo", duros, forzables, titulo };
 }
 
-/** La línea del resumen que completa la pantalla con `/bloqueos` (§4.3, línea 5): solo en trabajo. */
-export function lineaResumenBloqueos(v: VistaBloqueos): string | null {
+/** Lo que completa la pantalla con `/bloqueos` en la 5.ª línea del resumen (§4.3), en minúscula para ir tras un «;». `null` si no aplica. */
+export function fraseBloqueos(v: VistaBloqueos): string | null {
   switch (v.estado) {
     case "no_aplica":
       return null;
     case "cargando":
-      return "En trabajo; comprobando qué bloquearía el cierre…";
+      return "comprobando qué bloquearía el cierre…";
     case "error":
-      return "En trabajo; no se pudo comprobar qué bloquearía el cierre";
+      return "no se pudo comprobar qué bloquearía el cierre";
     case "listo":
-      if (v.duros.length > 0) return `En trabajo; ${plural(v.duros.length, "causa bloquearía", "causas bloquearían")} el cierre`;
-      return v.forzables.length > 0 ? "En trabajo; está desactualizada, pero se puede cerrar igual" : "En trabajo; nada bloquea el cierre";
+      if (v.duros.length > 0) return `${plural(v.duros.length, "causa bloquearía", "causas bloquearían")} el cierre`;
+      return v.forzables.length > 0 ? "está desactualizada, pero se puede cerrar igual" : "nada bloquea el cierre";
   }
 }
+
+/** La línea suelta de lo que bloquearía el cierre (solo en trabajo), cuando no hay línea del servidor a la que sumarla. */
+export function lineaResumenBloqueos(v: VistaBloqueos): string | null {
+  const f = fraseBloqueos(v);
+  return f === null ? null : `En trabajo; ${f}`;
+}
+
+export type LineasResumen = { lineas: string[]; /** Índice de la línea que cambia al llegar `/bloqueos` (`aria-live`); `null` si ninguna. */ viva: number | null };
+
+/**
+ * Las 3 a 5 líneas del resumen (§4.3): las del servidor y, en trabajo, lo que bloquearía el cierre FUNDIDO en la 5.ª (la del estado, «En trabajo: las
+ * cifras pueden cambiar; …»), no como una 6.ª línea. Si el servidor trajo menos de 5 y ninguna es la de «En trabajo», va como línea propia.
+ */
+export function lineasResumen(lineasServidor: readonly string[], v: VistaBloqueos): LineasResumen {
+  const lineas = [...lineasServidor];
+  const frase = fraseBloqueos(v);
+  if (frase === null) return { lineas, viva: null };
+  let i = -1;
+  for (let j = lineas.length - 1; j >= 0; j--) if (/^en trabajo\b/i.test(lineas[j].trim())) { i = j; break; }
+  if (i < 0 && lineas.length >= 5) i = lineas.length - 1;
+  if (i < 0) {
+    lineas.push(`En trabajo; ${frase}`);
+    return { lineas, viva: lineas.length - 1 };
+  }
+  lineas[i] = `${lineas[i].trim().replace(/[.;\s]+$/, "")}; ${frase}${frase.endsWith("…") ? "" : "."}`;
+  return { lineas, viva: i };
+}
+
+/** ¿Es una ruta interna de verdad? Empieza por «/» pero no por «//» ni «/\\» (que el navegador abre como otro sitio). */
+export const esEnlaceInterno = (enlace: string | null | undefined): enlace is string => typeof enlace === "string" && /^\/(?!\/|\\)/.test(enlace);
 
 export type AlertasSeparadas = { importantes: AlertaApi[]; informativas: AlertaApi[] };
 
@@ -623,6 +674,19 @@ export function vistaDiferencia(d: DiferenciaAprobadaApi | null, p: Pick<Proyecc
 // 6. Cifras del recorte (tarjetas)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Campos T3 del contrato (aditivos y opcionales): un servidor anterior no los manda y la pantalla sigue igual. ───
+
+const textoNoVacio = (v: string | null | undefined): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
+
+/** La advertencia del comparativo (T3: mezcla venta real de la marca con cifras estimadas por participación), si la trae. */
+export const advertenciaComparativo = (c: ComparativoApi | undefined): string | null => textoNoVacio(c?.advertencia);
+
+/** ¿Lo real de enero a `k` es estimado (T3, con unidad de marca: lo vendido guardado por la participación de la marca)? Sin el campo, exacto. */
+export const realAcEstimado = (t: Pick<TableroApi, "kpis">): boolean => t.kpis.real_ac_exactitud === "estimado";
+
+/** La nota del servidor bajo la tabla mensual (T3): negativos de «Sin atribuir a tienda» o por qué su total no es la suma de sus meses. */
+export const notaTablaMensual = (t: Pick<TableroApi, "tabla_mensual">): string | null => textoNoVacio(t.tabla_mensual.nota);
+
 const comparativo = (t: Pick<TableroApi, "kpis">, clave: ComparativoApi["clave"]): ComparativoApi | undefined => t.kpis.comparativos.find((c) => c.clave === clave);
 
 const MOTIVO_COMPARATIVO: Record<"sin_base" | "incompleto" | "nueva", string> = { sin_base: "sin base para comparar", incompleto: "año incompleto", nueva: "nueva: sin historia" };
@@ -634,21 +698,44 @@ export function textoPct(x: { pct: number | null; motivo: null | "sin_base" | "i
 }
 
 export type LineaTarjeta = { texto: string; fuerte?: boolean };
-export type Tarjeta = { clave: "siguiente" | "cierre" | "en_curso" | "mismas"; titulo: string; valor: string; estimado: boolean; nino: boolean; lineas: LineaTarjeta[] };
+export type Tarjeta = {
+  clave: "siguiente" | "cierre" | "en_curso" | "mismas";
+  titulo: string;
+  valor: string;
+  estimado: boolean;
+  nino: boolean;
+  lineas: LineaTarjeta[];
+  /** Las advertencias de los comparativos que usa la tarjeta (T3: mezclan venta real de la marca con cifras estimadas), sin repetir. */
+  avisos: string[];
+};
 
-/** Lo real del año en curso hasta `k'` (la serie real del año en curso); si no viene, lo real hasta `k`. */
-function realEnLoQueVa(t: TableroApi): { u: number | null; hasta: number } {
+/**
+ * Lo real del año en curso hasta `k'`: `kpis.real_ac_k_prima` del servidor (`null` = sin venta publicada). Solo si el campo no viene (servidor de
+ * antes de T2), se suma la serie real del año en curso y, si tampoco hay, lo real hasta `k`.
+ */
+function realEnLoQueVa(t: TableroApi): { u: number | null; hasta: number; estimado: boolean } {
+  const kPrima = t.kpis.real_ac_k_prima;
+  if (kPrima !== undefined) return { u: kPrima, hasta: t.datos.k_prima, estimado: false };
   const serie = t.series.find((s) => s.tipo === "real_parcial" && s.anio === t.proyeccion.anio_en_curso);
   if (serie) {
     const meses = serie.meses.slice(0, t.datos.k_prima);
-    if (meses.some((m) => m !== null)) return { u: meses.reduce<number>((a, m) => a + (m ?? 0), 0), hasta: t.datos.k_prima };
+    if (meses.some((m) => m !== null)) return { u: meses.reduce<number>((a, m) => a + (m ?? 0), 0), hasta: t.datos.k_prima, estimado: serie.exactitud === "estimado" };
   }
-  return { u: t.kpis.real_ac, hasta: t.proyeccion.k };
+  return { u: t.kpis.real_ac, hasta: t.proyeccion.k, estimado: realAcEstimado(t) };
 }
 
+/** Mismas tiendas sobre la base corregida del Niño: `mismas.pct_corregido` del servidor; solo si el campo no viene, derivado del puente del recorte. */
+export function pctMismasCorregido(c: ComparativoApi | undefined, puenteRecorte: PuenteApi | null): number | null {
+  if (!c) return null;
+  if (c.mismas.pct_corregido !== undefined) return c.mismas.pct_corregido;
+  return mismasSobreCorregido(puenteRecorte);
+}
+
+export const ROTULO_REAL_ESTIMADO_MARCA = "estimado por participación de la marca";
+
 /**
- * El % de mismas tiendas del año siguiente sobre la base CORREGIDA del Niño, derivado del puente del recorte (mismas ÷ (base + corrección) − 1).
- * `null` sin puente (con tiendas elegidas), sin base corregida o con filas sin base (el subtotal ya no es comparable con la base).
+ * RESPALDO (servidor sin `mismas.pct_corregido`): el % de mismas tiendas del año siguiente sobre la base CORREGIDA del Niño, derivado del puente del
+ * recorte (mismas ÷ (base + corrección) − 1). `null` sin puente (con tiendas elegidas), sin base corregida o con filas sin base.
  */
 export function mismasSobreCorregido(p: PuenteApi | null): number | null {
   if (!p || p.pct.nino === null) return null;
@@ -674,6 +761,7 @@ export function tarjetas(t: TableroApi): Tarjeta[] {
   const cierreHaceDos = comparativo(t, "cierre_vs_hace_dos");
   const acAc = comparativo(t, "ac_vs_ac");
   const ultimoNormal = nino.has(y) && !nino.has(y - 1);
+  const avisos = (...cs: (ComparativoApi | undefined)[]): string[] => [...new Set(cs.map(advertenciaComparativo).filter((a): a is string => a !== null))];
 
   const siguiente: Tarjeta = {
     clave: "siguiente",
@@ -685,24 +773,28 @@ export function tarjetas(t: TableroApi): Tarjeta[] {
       { texto: `${textoPct(sigCierre?.total)} vs cierre ${y}` },
       { texto: `${textoPct(sigAnterior?.total)} vs ${y - 1}${ultimoNormal ? ", último año normal" : nino.has(y - 1) ? " (año del Niño)" : ""}`, fuerte: true },
     ],
+    avisos: avisos(sigCierre, sigAnterior),
   };
 
-  const lineasCierre: LineaTarjeta[] = [{ texto: k >= 12 ? `= real ${rangoMeses(1, 12)} ${unidades(t.kpis.real_ac)}` : `= real ${rangoMeses(1, k)} ${unidades(t.kpis.real_ac)} + proyectado ${rangoMeses(k + 1, 12)} ${unidades(t.kpis.proyectado_resto)}` }, { texto: `${textoPct(cierreAnterior?.total)} vs ${y - 1}` }];
+  // Con unidad de marca, lo de enero a `k` no es la venta real de la marca: es lo vendido estimado con su participación (T3, `real_ac_exactitud`).
+  const parteReal = realAcEstimado(t) ? `${rangoMeses(1, Math.min(k, 12))} ${unidades(t.kpis.real_ac)} (${ROTULO_REAL_ESTIMADO_MARCA})` : `real ${rangoMeses(1, Math.min(k, 12))} ${unidades(t.kpis.real_ac)}`;
+  const lineasCierre: LineaTarjeta[] = [{ texto: k >= 12 ? `= ${parteReal}` : `= ${parteReal} + proyectado ${rangoMeses(k + 1, 12)} ${unidades(t.kpis.proyectado_resto)}` }, { texto: `${textoPct(cierreAnterior?.total)} vs ${y - 1}` }];
   if (cierreHaceDos) lineasCierre.push({ texto: `${textoPct(cierreHaceDos.total)} vs ${y - 2}${nino.has(y - 2) ? " (año del Niño)" : ""}` });
   if (nino.has(y)) lineasCierre.push({ texto: "año del Niño", fuerte: true });
-  const cierre: Tarjeta = { clave: "cierre", titulo: `${y} cierre`, valor: `${unidades(t.kpis.cierre)} u`, estimado, nino: nino.has(y), lineas: lineasCierre };
+  const cierre: Tarjeta = { clave: "cierre", titulo: `${y} cierre`, valor: `${unidades(t.kpis.cierre)} u`, estimado: estimado || realAcEstimado(t), nino: nino.has(y), lineas: lineasCierre, avisos: avisos(cierreAnterior, cierreHaceDos) };
 
   const real = realEnLoQueVa(t);
   const enCurso: Tarjeta = {
     clave: "en_curso",
     titulo: `${y} en lo que va (${rangoMeses(1, real.hasta)})`,
     valor: `${unidades(real.u)} u`,
-    estimado: false,
+    estimado: real.estimado,
     nino: nino.has(y),
     lineas: acAc ? [{ texto: `${textoPct(acAc.total)} · ${acAc.etiqueta}` }] : [],
+    avisos: avisos(acAc),
   };
 
-  const corregido = mismasSobreCorregido(t.puente.recorte);
+  const corregido = pctMismasCorregido(sigCierre, t.puente.recorte);
   const nTiendas = sigCierre?.mismas.tiendas.length ?? 0;
   const lineasMismas: LineaTarjeta[] = [];
   if (sigCierre) {
@@ -721,6 +813,7 @@ export function tarjetas(t: TableroApi): Tarjeta[] {
     estimado,
     nino: Boolean(sigCierre?.nino),
     lineas: lineasMismas,
+    avisos: avisos(sigCierre, cierreAnterior),
   };
 
   return [siguiente, cierre, enCurso, mismas];
@@ -886,21 +979,43 @@ export type FilaMensual = {
   total: string;
   /** Enero a `k'`. */
   acumulado: string;
-  /** Lo proyectado va en cursiva Y con «proy.» en el `title` y para el lector de pantalla. */
+  /**
+   * La fila ENTERA es proyectada (rótulo en cursiva). La del cierre del año en curso no lo es: de enero a `k` es real y de `k+1` a diciembre,
+   * proyectado (ver `mesProyectado`).
+   */
   proyectado: boolean;
+  /** Por mes: ¿esa celda es proyectada? Lo proyectado va en cursiva Y con «proy.» en el `title` y para el lector de pantalla. */
+  mesProyectado: boolean[];
+  /** ¿El total es proyectado? En la fila del cierre (real más proyectado) no se marca entero como «proy.». */
+  totalProyectado: boolean;
+  /** Para la fila del cierre: «real ene–set + proyectado oct–dic». `null` en las demás. */
+  composicion: string | null;
   estimado: boolean;
   variacion: boolean;
 };
+
+/** ¿Es la fila del cierre del año en curso (real de enero a `k` más proyectado de `k+1` a diciembre)? `cierre_<Y>` (el servidor) o `cierre-<Y>`. */
+export const esFilaCierre = (clave: string): boolean => /^cierre[_-]\d{4}$/.test(clave);
+
+/** Primer mes proyectado de una fila (1 = toda la fila; 13 = ninguno). */
+function primerMesProyectado(f: Pick<TableroApi["tabla_mensual"]["filas"][number], "clave" | "tipo">, k: number): number {
+  if (f.tipo !== "proyectado") return 13;
+  return esFilaCierre(f.clave) ? Math.min(Math.max(k, 0), 12) + 1 : 1;
+}
 
 export const TEXTO_SIN_CARGA = "sin carga publicada";
 
 /** Identificador de la tabla mensual: es la alternativa exacta del gráfico (`aria-describedby`). */
 export const ID_TABLA_MENSUAL = "tabla-mensual";
 
-/** Las filas de la tabla mensual (§4.8), que es la alternativa exacta del gráfico. Un mes sin dato sale «—». */
-export function filasTablaMensual(t: Pick<TableroApi, "tabla_mensual" | "datos">): FilaMensual[] {
+/**
+ * Las filas de la tabla mensual (§4.8), que es la alternativa exacta del gráfico. Un mes sin dato sale «—». Las filas que trae el servidor dependen
+ * del recorte (por ejemplo, «Sin atribuir a tienda» solo con tiendas o bloque y si no es cero): se pinta lo que venga, sin suponer ninguna.
+ */
+export function filasTablaMensual(t: Pick<TableroApi, "tabla_mensual" | "datos"> & { proyeccion: Pick<ProyeccionTableroApi, "k"> }): FilaMensual[] {
   const nino = new Set(t.datos.anios_nino);
   const kPrima = t.datos.k_prima;
+  const k = t.proyeccion.k;
   return t.tabla_mensual.filas.map((f) => {
     const variacion = f.tipo === "variacion";
     const formato = variacion ? porcentaje : unidades;
@@ -908,13 +1023,18 @@ export function filasTablaMensual(t: Pick<TableroApi, "tabla_mensual" | "datos">
     const rotuloNino = !variacion && f.tipo !== "sin_nino" && nino.has(anio) && !/ni[ñn]o/i.test(f.etiqueta) ? " (Niño)" : "";
     const hastaK = f.meses.slice(0, kPrima);
     const acumulado = variacion || hastaK.length === 0 || hastaK.some((m) => m === null) ? "—" : unidades(hastaK.reduce<number>((a, m) => a + (m ?? 0), 0));
+    const desde = primerMesProyectado(f, k);
+    const mixta = desde > 1 && desde <= 12;
     return {
       clave: f.clave,
       etiqueta: `${f.etiqueta}${rotuloNino}`,
       celdas: Array.from({ length: 12 }, (_, i) => formato(f.meses[i] ?? null)),
       total: formato(f.total),
       acumulado,
-      proyectado: f.tipo === "proyectado",
+      proyectado: desde === 1,
+      mesProyectado: Array.from({ length: 12 }, (_, i) => i + 1 >= desde),
+      totalProyectado: desde === 1,
+      composicion: mixta ? `real ${rangoMeses(1, desde - 1)} + proyectado ${rangoMeses(desde, 12)}` : null,
       estimado: f.exactitud === "estimado",
       variacion,
     };
@@ -955,10 +1075,50 @@ export function columnasDesglose(total: FilaDesgloseApi, t: Pick<TableroApi, "pr
   return cols;
 }
 
-/** Las filas del desglose por lo proyectado del año siguiente, de mayor a menor (orden estable). */
+/**
+ * Filas del desglose que NO son un elemento de la dimensión y nunca se aplican como filtro (aunque vinieran con `filtrable`), con su ayuda corta:
+ * `sin_marca` (T3, por marca), `sin_atribuir` (por tienda) y `fuera_universo` (por temporada). Con ellas el total del desglose suma lo de las tarjetas.
+ */
+export const FILAS_DESGLOSE_ESPECIALES: Readonly<Record<string, string>> = {
+  [DIM_SIN_MARCA]: "Unidades de filas sin participación por marca.",
+  sin_atribuir: "Unidades que no se atribuyen a ninguna tienda (pueden ser negativas).",
+  [DIM_FUERA_UNIVERSO]: "Venta de filas que ya no se proyectan.",
+};
+
+export const esFilaEspecialDesglose = (id: string): boolean => Object.hasOwn(FILAS_DESGLOSE_ESPECIALES, id);
+
+/** La ayuda corta de una fila especial del desglose; `null` en las demás. */
+export const ayudaFilaDesglose = (id: string): string | null => (esFilaEspecialDesglose(id) ? FILAS_DESGLOSE_ESPECIALES[id] : null);
+
+/** Las filas del desglose por lo proyectado del año siguiente, de mayor a menor (orden estable); las especiales, al final. */
 export function ordenarDesglose(filas: readonly FilaDesgloseApi[], anioSiguiente: number): FilaDesgloseApi[] {
   const sig = (f: FilaDesgloseApi) => f.anios.find((a) => a.anio === anioSiguiente)?.total ?? Number.NEGATIVE_INFINITY;
-  return filas.map((f, i) => ({ f, i })).sort((a, b) => sig(b.f) - sig(a.f) || a.i - b.i).map((x) => x.f);
+  const especial = (f: FilaDesgloseApi) => (esFilaEspecialDesglose(f.id) ? 1 : 0);
+  return filas
+    .map((f, i) => ({ f, i }))
+    .sort((a, b) => especial(a.f) - especial(b.f) || sig(b.f) - sig(a.f) || a.i - b.i)
+    .map((x) => x.f);
+}
+
+/**
+ * ¿El total del desglose es el de las tarjetas? (lo proyectado del año siguiente y el cierre del año en curso). La pantalla solo dice «el total cuadra
+ * con las tarjetas» cuando es cierto en ESTE desglose.
+ */
+export function totalDesgloseCuadra(t: Pick<TableroApi, "desglose" | "kpis" | "proyeccion">): boolean {
+  const de = (tipo: FilaDesgloseApi["anios"][number]["tipo"], anio: number) => t.desglose.total.anios.find((a) => a.anio === anio && a.tipo === tipo)?.total;
+  const sig = de("proyectado", t.proyeccion.anio_siguiente);
+  const cierre = de("cierre", t.proyeccion.anio_en_curso);
+  return t.desglose.filas.length > 0 && sig !== undefined && sig !== null && Math.round(sig) === Math.round(t.kpis.siguiente) && (cierre === undefined || cierre === null || Math.round(cierre) === Math.round(t.kpis.cierre));
+}
+
+/**
+ * Texto bajo el título de la tarjeta del desglose. Por marca y con tiendas o bloque, las filas se reparten con una sola tasa para todas las
+ * marcas (§3.4 F); al elegir una marca el tablero recalcula con la venta de esa marca en cada tienda, así que la cifra puede cambiar: se avisa.
+ */
+export function descripcionDesglose(t: Pick<TableroApi, "desglose" | "kpis" | "proyeccion" | "filtros">): string {
+  const base = totalDesgloseCuadra(t) ? "Totales por elemento de la dimensión elegida; el total cuadra con las tarjetas." : "Totales por elemento de la dimensión elegida.";
+  if (t.desglose.dimension !== "marca" || t.filtros.conjunto_tiendas === null) return base;
+  return `${base} Con tiendas o bloque elegidos, el reparto por marca es estimado con una misma tasa para todas; al elegir una marca se recalcula con su venta en cada tienda y la cifra puede cambiar.`;
 }
 
 /**
@@ -966,7 +1126,7 @@ export function ordenarDesglose(filas: readonly FilaDesgloseApi[], anioSiguiente
  * `null` si esa fila no se puede aplicar (no es filtrable, o es una línea que no está en el catálogo de opciones).
  */
 export function cambioPorFilaDesglose(dimension: Desglose, fila: Pick<FilaDesgloseApi, "id" | "filtrable">, opciones: OpcionesTableroApi | null): Partial<FiltrosVista> | null {
-  if (!fila.filtrable) return null;
+  if (!fila.filtrable || esFilaEspecialDesglose(fila.id)) return null;
   switch (dimension) {
     case "genero":
       return { generos: [fila.id], resto: false };
@@ -1226,7 +1386,6 @@ export function hojasTablero(args: { tablero: TableroApi; opciones: OpcionesTabl
     for (const b of args.bloqueos.duros) bloqueos.push({ nivel: ROTULO_NIVEL.bloquea.palabra, codigo: b.codigo, texto: [b.mensaje, ...b.detalles].join(" · ") });
     for (const b of args.bloqueos.forzables) bloqueos.push({ nivel: ROTULO_NIVEL.forzable.palabra, codigo: b.codigo, texto: [b.mensaje, ...b.detalles].join(" · ") });
   }
-  const lineaBloqueos = lineaResumenBloqueos(args.bloqueos);
   const comparada = t.comparada ? `${t.comparada.nombre}${t.comparada.motivo === "aprobada" ? " (la última aprobada)" : ""} · datos hasta ${mesAnio(t.comparada.hasta_periodo)}` : "sin comparar";
   const entrada: EntradaExcelDireccion = {
     tablero: t,
@@ -1235,7 +1394,7 @@ export function hojasTablero(args: { tablero: TableroApi; opciones: OpcionesTabl
       estado: textoEstadoDireccion(t.decidir.estado, t.decidir.vigente ?? t.decidir.ultima),
       cerrada_por: t.proyeccion.estado === "cerrada" ? `${t.proyeccion.cerrada_por_nombre ?? "—"}${t.proyeccion.cerrada_at ? ` el ${fechaCorta(t.proyeccion.cerrada_at)}` : ""}` : "—",
       vigente: t.decidir.vigente ? `${ETIQUETA_RESULTADO[t.decidir.vigente.resultado]} por ${t.decidir.vigente.usuario_nombre} el ${fechaCorta(t.decidir.vigente.created_at)}` : "sin aprobación vigente",
-      lineas: [...t.decidir.lineas, ...(lineaBloqueos ? [lineaBloqueos] : [])],
+      lineas: lineasResumen(t.decidir.lineas, args.bloqueos).lineas,
       comparada,
       datos_hasta: mesAnio(t.proyeccion.hasta_periodo),
       ultimo_publicado: mesAnio(t.datos.ultimo_publicado),
@@ -1258,6 +1417,8 @@ export function hojasTablero(args: { tablero: TableroApi; opciones: OpcionesTabl
     })),
     historial: filasHistorial(args.historial).map((h) => ({ fecha: h.fecha, quien: h.quien, resultado: h.etiqueta, motivo: h.motivo, comentario: h.comentario, sobre: h.sobre, invalidada: h.invalidada ?? "no" })),
     atribucion: notasAtribucion(t),
+    nota_mensual: notaTablaMensual(t),
+    advertencias: Object.fromEntries(t.kpis.comparativos.map((c) => [c.clave, advertenciaComparativo(c)] as const).filter((x): x is [ComparativoApi["clave"], string] => x[1] !== null)),
   };
   return hojasDireccion(entrada);
 }

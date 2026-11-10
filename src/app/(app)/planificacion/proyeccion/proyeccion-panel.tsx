@@ -193,7 +193,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
 
   async function eliminar() {
     if (!proyeccion) return;
-    if (!confirm(`¿Eliminar «${proyeccion.nombre}»? Solo se puede si no tiene decisiones; si las tiene, hay que archivarla. Esta acción no se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar «${proyeccion.nombre}»? Solo se puede si no tiene decisiones ni aprobaciones de dirección; si las tiene, hay que archivarla. Esta acción no se puede deshacer.`)) return;
     setAviso(null);
     const r = await accion.ejecutar(() => api.delete(rutaProyeccion(proyeccion.id)));
     if (r.ok) {
@@ -211,7 +211,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
   }
 
   const perfiles = useMemo(() => {
-    const conPerfil = lista.find((p) => (p.resumen?.perfiles_apertura.length ?? 0) > 0);
+    const conPerfil = lista.find((p) => (p.resumen?.perfiles_apertura?.length ?? 0) > 0);
     return conPerfil?.resumen?.perfiles_apertura ?? [];
   }, [lista]);
 

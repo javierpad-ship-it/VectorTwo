@@ -8,7 +8,7 @@ import { Field, Select } from "@/components/ui/form";
 import type { Desglose, FilaDesgloseApi, OpcionesTableroApi, TableroApi } from "@/lib/direccion/tipos-api";
 import { plural } from "@/lib/formato";
 import { ampliarLimite, filasPorAnadir, hayMasFilas, limitarFilas, PAGINA_FILAS } from "@/lib/reportes/paginacion";
-import { cambioPorFilaDesglose, columnasDesglose, ETIQUETA_DESGLOSE, ORDEN_DESGLOSE, ordenarDesglose, type FiltrosVista } from "./vista-tablero";
+import { ayudaFilaDesglose, cambioPorFilaDesglose, columnasDesglose, ETIQUETA_DESGLOSE, ORDEN_DESGLOSE, ordenarDesglose, type FiltrosVista } from "./vista-tablero";
 
 const NUM = "text-right font-mono tabular-nums whitespace-nowrap";
 const FIJA = "sticky left-0 z-10 bg-superficie";
@@ -16,8 +16,9 @@ const FIJA = "sticky left-0 z-10 bg-superficie";
 type Fila = { fila: FilaDesgloseApi; total: boolean };
 
 /**
- * Desglose del recorte (ficha 14, §4.8): una fila por elemento de la dimensión elegida, con los años, enero a `k'`, las variaciones y la participación;
- * el total al pie cuadra con las tarjetas. Orden por lo proyectado del año siguiente; se pintan 200 filas y «Mostrar más» añade otras tantas.
+ * Desglose del recorte (ficha 14, §4.8): una fila por elemento de la dimensión elegida, con los años, enero a `k'`, las variaciones y la participación,
+ * y el total al pie. Las filas que no son un elemento («Sin participación por marca», «Sin atribuir», «Fuera de la proyección») van al final, sin
+ * enlace y con su ayuda corta. Orden por lo proyectado del año siguiente; se pintan 200 filas y «Mostrar más» añade otras tantas.
  * Elegir una fila la aplica como filtro (D11): la serie mensual de ese elemento se ve en el gráfico, sin pedir series por elemento.
  */
 export function TablaDesglose({
@@ -51,6 +52,18 @@ export function TablaDesglose({
       render: ({ fila, total }) => {
         if (total) return <span>Total del recorte</span>;
         const cambio = cambioPorFilaDesglose(d.dimension, fila, opciones);
+        const ayuda = ayudaFilaDesglose(fila.id);
+        if (ayuda) {
+          return (
+            <span className="block" title={ayuda}>
+              <span className="flex flex-wrap items-center gap-1.5 text-tinta-suave">
+                <span>{fila.nombre}</span>
+                {fila.exactitud === "estimado" && <Badge tono="alerta">estimado</Badge>}
+              </span>
+              <span className="block text-xs font-normal text-tinta-suave">{ayuda}</span>
+            </span>
+          );
+        }
         return (
           <span className="flex flex-wrap items-center gap-1.5">
             {cambio ? (
@@ -77,7 +90,7 @@ export function TablaDesglose({
     <div className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <Field label="Desglosar por" className="w-full max-w-xs">
-          <Select value={d.dimension} onChange={(e) => onDimension(e.target.value as Desglose)}>
+          <Select aria-label="Desglosar por" value={d.dimension} onChange={(e) => onDimension(e.target.value as Desglose)}>
             {ORDEN_DESGLOSE.map((x) => (
               <option key={x} value={x}>
                 {ETIQUETA_DESGLOSE[x]}
@@ -91,7 +104,7 @@ export function TablaDesglose({
           {actualizando ? " · actualizando…" : ""}
         </p>
       </div>
-      <DataTable columnas={columnas} filas={visibles} claveFila={(f) => (f.total ? "~total" : f.fila.id)} claseFila={(f) => (f.total ? "bg-neutro-suave/60 font-semibold" : undefined)} vacio="Sin elementos en este desglose." />
+      <DataTable etiqueta={`Desglose por ${ETIQUETA_DESGLOSE[d.dimension].toLowerCase()}`} columnas={columnas} filas={visibles} claveFila={(f) => (f.total ? "~total" : f.fila.id)} claseFila={(f) => (f.total ? "bg-neutro-suave/60 font-semibold" : undefined)} vacio="Sin elementos en este desglose." />
       {hayMasFilas(limite, ordenadas.length) && (
         <div className="flex justify-center">
           <Button variante="secundario" onClick={() => setPaginado({ clave, limite: ampliarLimite(limite, ordenadas.length) })}>

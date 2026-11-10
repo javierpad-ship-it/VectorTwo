@@ -15,8 +15,8 @@ export function Mayores({ tablero }: { tablero: TableroApi }) {
     { clave: "crecimiento", titulo: "Crecimiento sobre su base", className: NUM, render: (f) => f.crecimiento },
   ];
   return (
-    <Card titulo={`Las ${FILAS_MAYORES} filas mayores`} descripcion={`Del recorte, por lo proyectado para ${y1} en las mismas tiendas.`}>
-      <DataTable columnas={columnas} filas={filasMayores(tablero.mayores)} claveFila={(f) => f.fila} vacio="Sin filas en este recorte." />
+    <Card nivel={3} titulo={`Las ${FILAS_MAYORES} filas mayores`} descripcion={`Del recorte, por lo proyectado para ${y1} en las mismas tiendas.`}>
+      <DataTable etiqueta="Filas mayores del recorte" columnas={columnas} filas={filasMayores(tablero.mayores)} claveFila={(f) => f.fila} vacio="Sin filas en este recorte." />
     </Card>
   );
 }
