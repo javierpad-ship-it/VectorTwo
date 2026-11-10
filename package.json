@@ -4,14 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "NODE_OPTIONS=--max-old-space-size=4096 next build",
+    "build": "node scripts/con-memoria.mjs next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "test:integracion": "vitest run --config vitest.integracion.config.ts",
     "humos": "bash scripts/correr-humos.sh",
     "migraciones:validar": "bash scripts/validar-migraciones-local.sh",
-    "typecheck": "NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit"
+    "typecheck": "node scripts/con-memoria.mjs tsc --noEmit"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
