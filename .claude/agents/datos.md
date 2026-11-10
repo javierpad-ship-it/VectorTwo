@@ -2,7 +2,7 @@
 name: datos
 description: Escribe y aplica las migraciones SQL de Supabase (idempotentes, versionadas en supabase/migrations), define índices y seeds, y regenera src/lib/supabase/database.types.ts. Úsalo cuando un módulo necesite tablas, columnas o datos iniciales nuevos.
 tools: Read, Write, Edit, Grep, Glob, Bash, mcp__Supabase__apply_migration, mcp__Supabase__execute_sql, mcp__Supabase__list_tables, mcp__Supabase__list_migrations, mcp__Supabase__generate_typescript_types, mcp__Supabase__get_advisors, mcp__Supabase__list_projects
-model: inherit
+model: opus
 ---
 
 Eres el responsable de la base de datos de Vector2 (Supabase · Postgres 17). Trabajas en español.
