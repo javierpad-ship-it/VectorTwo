@@ -63,8 +63,12 @@ const esCierre = (clave: string): boolean => /^cierre[_-]\d{4}$/.test(clave);
  * `TIPO` de la hoja `MENSUAL` (§4.9): real, proyectado, sin_nino, variacion o comparada. La fila del cierre del año en curso (`cierre_<Y>`) no es
  * proyectada entera: con `fila` y `k`, dice «real ene–set + proyectado oct–dic».
  */
-export function tipoMensual(tipo: TableroApi["tabla_mensual"]["filas"][number]["tipo"], fila?: { clave: string; k: number }): string {
-  if (tipo === "proyectado" && fila && esCierre(fila.clave) && fila.k >= 1) return fila.k >= 12 ? "real" : `real ${rango(1, fila.k)} + proyectado ${rango(fila.k + 1, 12)}`;
+export function tipoMensual(tipo: TableroApi["tabla_mensual"]["filas"][number]["tipo"], fila?: { clave: string; k: number; vendidoEstimado?: boolean }): string {
+  if (tipo === "proyectado" && fila && esCierre(fila.clave) && fila.k >= 1) {
+    // Con unidad de marca lo vendido de enero a k es una estimación por participación, no venta real de la marca.
+    const vendido = fila.vendidoEstimado ? "vendido estimado" : "real";
+    return fila.k >= 12 ? vendido : `${vendido} ${rango(1, fila.k)} + proyectado ${rango(fila.k + 1, 12)}`;
+  }
   if (tipo === "real" || tipo === "real_parcial") return "real";
   if (tipo === "comparada" || tipo === "aprobada") return "comparada";
   return tipo;
@@ -135,7 +139,7 @@ function hojaMensual(e: EntradaExcelDireccion): Hoja {
   for (const f of e.tablero.tabla_mensual.filas) {
     const valor = f.tipo === "variacion" ? pct : numero;
     // EXACTITUD de cada fila tal cual la manda el servidor (con unidad de marca, lo real de la marca puede ser exacto y lo proyectado, estimado).
-    filas.push([f.etiqueta, tipoMensual(f.tipo, { clave: f.clave, k }), f.exactitud, ...Array.from({ length: 12 }, (_, i) => valor(f.meses[i])), valor(f.total)]);
+    filas.push([f.etiqueta, tipoMensual(f.tipo, { clave: f.clave, k, vendidoEstimado: e.tablero.kpis.real_ac_exactitud === "estimado" }), f.exactitud, ...Array.from({ length: 12 }, (_, i) => valor(f.meses[i])), valor(f.total)]);
   }
   if (e.nota_mensual) filas.push(["NOTA", null, null, e.nota_mensual, ...Array.from({ length: 12 }, () => null)]);
   return filas;

@@ -157,7 +157,7 @@ export function TableroPanel({ esAdmin }: { esAdmin: boolean }) {
 
   async function registrada(a: AprobacionApi) {
     setDecidiendo(false);
-    setMensaje({ tono: "exito", texto: `Decisión registrada: ${ETIQUETA_RESULTADO[a.resultado].toLowerCase()} por ${a.usuario_nombre}. Queda en el historial.` });
+    setMensaje({ tono: "exito", texto: `Decisión registrada: ${ETIQUETA_RESULTADO[a.resultado].toLowerCase()} por ${a.usuario_nombre.replace(/\.+$/, "")}. Queda en el historial.` });
     await recargarTodo();
   }
 

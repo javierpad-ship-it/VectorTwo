@@ -13,7 +13,7 @@ import type { ResumenProyeccion } from "@/lib/proyeccion/tipos-api";
 import { hoyLima } from "@/lib/tiendas/estado";
 import { aAprobacionApi, aBreve, armarResumen, diferenciaConAprobada, estadoBreve, estadoDeProyeccion } from "./aprobacion";
 import { CacheDireccion, claveCanonica } from "./cache";
-import { MAX_LECTURAS_VENTA, MENSAJE_COLA_LLENA, PLAZO_COLA_VENTA_MS, REINTENTAR_TRAS_S, Semaforo } from "./semaforo";
+import { MAX_LECTURAS_VENTA, MENSAJE_COLA_LLENA, MENSAJE_COLA_LLENA_APROBAR, PLAZO_COLA_VENTA_MS, REINTENTAR_TRAS_S, Semaforo } from "./semaforo";
 import {
   leerAprobacionesDeProyeccion,
   leerAprobacionesLigeras,
@@ -32,6 +32,7 @@ import {
   armarParteEntera,
   armarTablero,
   conjuntoTiendas,
+  motivoSinComparada,
   type ComparadaDeTablero,
   type EntradaEntera,
   type FiltrosResueltos,
@@ -96,8 +97,8 @@ async function conCupoVenta<T, E>(leer: () => PromiseLike<{ data: T | null; erro
 }
 
 /** `503 lectura_lenta` con `Retry-After`: la misma respuesta que una lectura que se cortó por tiempo, para que la pantalla ofrezca reintentar. */
-export function respuestaColaLlena() {
-  const r = errorConCodigo(MENSAJE_COLA_LLENA, 503, CODIGO_LECTURA_LENTA);
+export function respuestaColaLlena(mensaje: string = MENSAJE_COLA_LLENA) {
+  const r = errorConCodigo(mensaje, 503, CODIGO_LECTURA_LENTA);
   r.headers.set("Retry-After", String(REINTENTAR_TRAS_S));
   return r;
 }
@@ -214,10 +215,16 @@ async function docVenta(d: Db, params: ParamsTableroVentaSql, llaves: { cargas: 
   return listo(r.data);
 }
 
-async function docTendencia(d: Db, params: Pick<ParamsTableroVentaSql, "desde" | "hasta" | "k_prima">, llaves: { cargas: string; maestros: string }): Promise<Salida<TableroVentaTendenciaSql | null>> {
+/** `mensajeCola`: el texto del `503` si la cola no deja entrar (el de lectura en el tablero; el del `POST` al aprobar). */
+async function docTendencia(
+  d: Db,
+  params: Pick<ParamsTableroVentaSql, "desde" | "hasta" | "k_prima">,
+  llaves: { cargas: string; maestros: string },
+  mensajeCola: string
+): Promise<Salida<TableroVentaTendenciaSql | null>> {
   const clave = `${llaves.cargas}|${llaves.maestros}|${claveCanonica(params)}`;
   const r = await cacheTendencia.obtener(clave, () => conCupoVenta(() => leerTendenciaVenta(d, params)));
-  if (esColaLlena(r.error)) return falla(respuestaColaLlena());
+  if (esColaLlena(r.error)) return falla(respuestaColaLlena(mensajeCola));
   if (r.error) return fallaDb(r.error, "dirección: leer la tendencia de venta");
   return listo(r.data);
 }
@@ -236,10 +243,18 @@ function rangoVenta(p: ProyeccionDeTablero, ultimoPublicado: string | null): { d
 // ─── Lo de la proyección entera ───
 
 /** Lo que `armarParteEntera` necesita además del documento sin filtros: tendencia, crecimientos declarados y sus versiones, factores y aperturas. */
-async function leerEntera(d: Db, p: ProyeccionDb, proyeccion: ProyeccionDeTablero, docTotal: TableroProyeccionSql, maestros: MaestrosDireccion, panorama: Panorama): Promise<Salida<EntradaEntera>> {
+async function leerEntera(
+  d: Db,
+  p: ProyeccionDb,
+  proyeccion: ProyeccionDeTablero,
+  docTotal: TableroProyeccionSql,
+  maestros: MaestrosDireccion,
+  panorama: Panorama,
+  mensajeCola: string = MENSAJE_COLA_LLENA
+): Promise<Salida<EntradaEntera>> {
   const rango = rangoVenta(proyeccion, panorama.ultimoPublicado);
   const [tendencia, celdas, versiones, tiendas, nino] = await Promise.all([
-    docTendencia(d, rango, { cargas: huellaCargas(panorama.cargas), maestros: maestros.huella }),
+    docTendencia(d, rango, { cargas: huellaCargas(panorama.cargas), maestros: maestros.huella }, mensajeCola),
     leerCrecimientos(d, p.id),
     leerVersionesDeAnio(d, p.anio_en_curso + 1),
     leerTiendasProyeccion(d, p.id),
@@ -503,8 +518,14 @@ export async function leerTablero(f: FiltrosTableroApi, esAdmin: boolean): Promi
   }
 
   const nombreDeUltima = ultimaAprobada ? (proyeccionDe(panorama, ultimaAprobada.proyeccion_id)?.nombre ?? "otra proyección") : "";
-  return listo(
-    armarTablero({
+  const sinComparada = motivoSinComparada({
+    hayComparada: comparada !== null,
+    pedida: f.comparar_id === undefined ? "por_defecto" : f.comparar_id === "ninguna" ? "ninguna" : "elegida",
+    mostradaId: p.id,
+    ultimaAprobadaId: ultimaAprobada?.proyeccion_id ?? null,
+  });
+  return listo({
+    ...armarTablero({
       ...enteraR.data,
       filtros: resueltos,
       docRecorte,
@@ -514,8 +535,9 @@ export async function leerTablero(f: FiltrosTableroApi, esAdmin: boolean): Promi
       aprobaciones: aprobacionesR.data,
       ultimaAprobada: ultimaAprobada ? { fila: ultimaAprobada, proyeccion_nombre: nombreDeUltima } : null,
       puedeAprobar: esAdmin,
-    })
-  );
+    }),
+    sin_comparada: sinComparada,
+  });
 }
 
 // ─── GET /api/direccion/aprobaciones ───
@@ -557,7 +579,7 @@ export async function aprobar(cuerpo: AprobarCuerpoApi, actor: ActorAprobacion):
   if (doc.huella !== cuerpo.huella_vista) return falla(errorConDetalle(MENSAJE_HUELLA_DISTINTA, 409, "huella_distinta", { huella_actual: doc.huella }));
 
   const proyeccion = aProyeccion(p, panorama.usaCompras?.id ?? null);
-  const enteraR = await leerEntera(d, p, proyeccion, doc, maestrosR.data, panorama);
+  const enteraR = await leerEntera(d, p, proyeccion, doc, maestrosR.data, panorama, MENSAJE_COLA_LLENA_APROBAR);
   if (enteraR.respuesta) return falla(enteraR.respuesta);
   const parte = armarParteEntera(enteraR.data);
   const resumen = armarResumen({

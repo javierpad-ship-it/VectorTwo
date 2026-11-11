@@ -35,6 +35,8 @@
 | 16 | Aplicabilidad (M13) | `GET /api/intercompany/aplicabilidad` | M8 no la usa: decide con la cerrada que ya leyó (`part_B > 0` en la fila) |
 | 17 | `k'` y reparto entero | `hastaPorDefecto(mesesPublicados, hoyLima)` en `src/lib/curvas/anios.ts`; `repartirEntero(total, pesos)` en `src/lib/proyeccion/reparto.ts` | Igual que en la ficha |
 
+**Aviso de dirección (desde `0.19.0 · M14`).** Flujo mensual muestra, solo a admin y planner, el estado de la aprobación de dirección de la cerrada que usa (`GET /api/direccion/estado?para=compras`): ámbar si no tiene aprobación vigente o quedó invalidada, rojo si dirección la rechazó, una línea de texto si está aprobada. **No cambia el contrato de M8**: el flujo lee la misma cerrada, calcula lo mismo y no deja de mostrar nada con o sin aprobación (ficha 14 §4.11, decisión 138).
+
 **Notación.** En la conciliación (4.3b, paso 4c) `R_m` y `R^B` eran las **recepciones registradas**; en el subflujo, `R^B_m` es la **reposición directa esperada**. Desde aquí: `Rec_m` / `Rec^B_m` = recepciones registradas y `R^B_m` = reposición esperada. Los tipos de API ya usan `recepciones_registradas` y `reposicion_esperada`.
 
 ### 0.3 Respuestas finales de Javier (2026-10-27, definitivas)

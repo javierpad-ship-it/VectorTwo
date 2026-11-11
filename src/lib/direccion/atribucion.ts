@@ -368,6 +368,35 @@ export function semillasMensuales(e: EntradaSemillas): Map<string, number[]> {
   return new Map([...semillasConOrigen(e)].map(([id, x]) => [id, x.semilla]));
 }
 
+const MESES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+const doce = (v: readonly number[]): number[] => MESES.map((m) => Math.round(v[m - 1] ?? 0));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enero a `k` con una unidad de marca (T3d, B1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Con una unidad de marca, la base del recorte trae lo vendido GUARDADO de enero a `k` por la participación de la marca en cada fila (`base(Y).meses`),
+ * no la venta real de la marca. Para que el cierre de cada tienda sume lo mismo que el del recorte (y su total anual `A_t`, que sale de esa misma base,
+ * no quede por debajo de su enero a `k`), esos meses se reparten entre las tiendas atribuidas (*misma* y *sale*) mes a mes, en proporción a su venta
+ * real de ese mes en el recorte (su participación del mes, como las semillas de §3.4 C), en enteros por mayor resto (empate: el orden de `ids`). Un
+ * mes en que ninguna vendió (o con base ≤ 0) no se reparte: queda en «sin atribuir» de ese mes. Puro.
+ *
+ * Devuelve, por tienda, 12 enteros ≥ 0 (de `k+1` a diciembre, 0). Invariante: en cada mes `m ≤ k` con venta, `Σ tiendas = max(0, round(mesesBase_m))`.
+ */
+export function repartirVendidoGuardado(o: { ids: readonly string[]; k: number; mesesBase: readonly number[]; venta: (tiendaId: string, mes: number) => number }): Map<string, number[]> {
+  const salida = new Map<string, number[]>(o.ids.map((id) => [id, MESES.map(() => 0)]));
+  const k = Math.max(0, Math.min(12, Math.round(o.k)));
+  for (let m = 1; m <= k; m++) {
+    const reparto = repartirMayorResto(Math.max(0, Math.round(o.mesesBase[m - 1] ?? 0)), o.ids.map((id) => o.venta(id, m)));
+    o.ids.forEach((id, i) => {
+      const fila = salida.get(id);
+      if (fila) fila[m - 1] = reparto[i];
+    });
+  }
+  return salida;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // D. Doce meses por tienda (§3.4 D)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -380,6 +409,11 @@ export type MesesTienda = {
 };
 
 export type EntradaTiendas = EntradaAnual & {
+  /**
+   * T3d (B1): los meses de enero a `k` de cada tienda cuando NO son su venta real (con una unidad de marca: lo vendido guardado × participación,
+   * repartido con `repartirVendidoGuardado`). Ausente = la venta real de `historia` (sin marca). Una tienda que no está en el mapa vale 0.
+   */
+  eneK?: ReadonlyMap<string, readonly number[]>;
   /** `Y`. */
   anio: number;
   /** Mes de `hasta_periodo` de la proyección (1 a 12). */
@@ -416,13 +450,11 @@ export type SalidaTiendas = {
   };
 };
 
-const MESES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
-const doce = (v: readonly number[]): number[] => MESES.map((m) => Math.round(v[m - 1] ?? 0));
 
 /**
  * Atribución completa de un recorte: total anual (A y B) y reparto mensual (C y D). Se calcula SIEMPRE con todas las tiendas del recorte; quien llama
  * suma después las que le interesan. Invariantes (R8): por tienda, `Σ meses = anual` (si hay reparto mensual); por mes,
- * `Σ tiendas + sinAtribuirMes = meses` de la base; enero a `k` del año en curso es el real exacto.
+ * `Σ tiendas + sinAtribuirMes = meses` de la base; enero a `k` del año en curso es el real exacto (con `eneK`, lo que traiga: T3d).
  */
 export function atribuirTiendas(e: EntradaTiendas): SalidaTiendas {
   const anual = atribuirAnual(e);
@@ -453,7 +485,7 @@ export function atribuirTiendas(e: EntradaTiendas): SalidaTiendas {
   for (const t of atribuidas) {
     const celdas = celdasY.get(t.id);
     const meses = MESES.map((m): number | null => {
-      if (m <= k) return Math.round(e.historia.venta(t.id, e.anio, m));
+      if (m <= k) return Math.round(e.eneK ? (e.eneK.get(t.id)?.[m - 1] ?? 0) : e.historia.venta(t.id, e.anio, m));
       return mensual && celdas ? celdas[mesesResto.indexOf(m)] : null;
     });
     enCursoPorTienda.set(t.id, { anual: anual.enCurso.get(t.id) ?? 0, meses });

@@ -627,7 +627,7 @@ describe("avisos en Proyección y en Flujo mensual (no bloquean nada)", () => {
   it("cerrada sin aprobación vigente: alerta con quién cerró, cuándo, el estado en negrita, la diferencia y el enlace al tablero", () => {
     const s = html(createElement(AvisoDireccionVista, { estado: estadoDireccion(), contexto: "proyeccion" }));
     expect(s).toContain('role="alert"');
-    expect(s).toContain("Cerrada por Planner P. el 07 nov 2026 · <strong>sin aprobación de dirección vigente</strong> · difiere de lo aprobado el 03 nov 2026 en +1,214 u en 2027 (+1.5 %).");
+    expect(s).toContain("Cerrada por Planner P. el 07 nov 2026 · <strong>sin aprobación de dirección vigente</strong> · difiere de lo aprobado el 03 nov 2026 (Proyección 2026–2027 seguimiento set) en +1,214 u en 2027 (+1.5 %).");
     expect(s).toContain(`href="/planificacion/aprobacion-direccion?proyeccion=${ID.proyeccion}"`);
     const flujo = html(createElement(AvisoDireccionVista, { estado: estadoDireccion(), contexto: "flujo" }));
     expect(flujo).toContain("El flujo usa Proyección 2026–2027, cerrada por Planner P. el 07 nov 2026 · <strong>sin aprobación de dirección vigente</strong>");

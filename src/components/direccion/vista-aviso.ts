@@ -20,7 +20,7 @@ export type VistaAviso =
 export function textoDiferenciaAprobada(d: DiferenciaAprobadaApi | null, anioSiguiente: number): string {
   if (d === null) return "no hay aprobaciones anteriores";
   if (d.identica) return `idéntica a lo aprobado el ${fechaCorta(d.fecha)}${d.misma_proyeccion ? "" : ` en ${d.proyeccion_nombre}`}`;
-  return `difiere de lo aprobado el ${fechaCorta(d.fecha)} en ${unidadesConSigno(d.siguiente.u)} u en ${anioSiguiente}${d.siguiente.pct !== null ? ` (${porcentaje(d.siguiente.pct)})` : ""}`;
+  return `difiere de lo aprobado el ${fechaCorta(d.fecha)}${d.misma_proyeccion ? "" : ` (${d.proyeccion_nombre})`} en ${unidadesConSigno(d.siguiente.u)} u en ${anioSiguiente}${d.siguiente.pct !== null ? ` (${porcentaje(d.siguiente.pct)})` : ""}`;
 }
 
 const minuscula = (t: string): string => t.charAt(0).toLowerCase() + t.slice(1);

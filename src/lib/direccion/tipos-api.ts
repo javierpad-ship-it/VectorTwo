@@ -489,9 +489,21 @@ export type EstadoDireccionApi = {
  */
 export type SituacionTienda = "mismas" | "nuevas_anterior" | "aperturas" | "cierres" | "fuera";
 
+/**
+ * T3 (añadido): por qué el tablero no trae `comparada` (regla D6: por defecto se compara con la ÚLTIMA aprobación no rechazada de CUALQUIER proyección;
+ * si esa es la mostrada, no se busca otra anterior).
+ *   - `no_pedida`: se pidió `comparar_id=ninguna`.
+ *   - `sin_aprobada`: no hay ninguna aprobación vigente (no rechazada) de ninguna proyección.
+ *   - `es_la_ultima_aprobada`: la última aprobada ES la proyección mostrada (puede haber aprobaciones más antiguas de otras: D6 no las usa).
+ *   - `comparada_sin_cifras`: la proyección con que tocaba comparar (la última aprobada, si es otra, o la elegida) no está calculada o no tiene cifras.
+ */
+export type MotivoSinComparada = "no_pedida" | "sin_aprobada" | "es_la_ultima_aprobada" | "comparada_sin_cifras";
+
 export type TableroApi = {
   proyeccion: ProyeccionTableroApi;
   comparada: (ProyeccionTableroApi & { motivo: "aprobada" | "elegida"; huella_igual_a_aprobada: boolean | null }) | null;
+  /** T3 (añadido, opcional): con `comparada = null`, el motivo (ver `MotivoSinComparada`); con `comparada`, `null`. */
+  sin_comparada?: MotivoSinComparada | null;
   datos: {
     k_prima: number;
     ultimo_publicado: string;
@@ -530,8 +542,9 @@ export type TableroApi = {
     siguiente: number;
     cierre: number;
     /**
-     * T2 (precisión): real de enero a `k` (el mes con que se calculó la proyección): con `proyectado_resto` suma `cierre` (salvo unidades sin reparto
-     * mensual). Sin tiendas ni bloque es lo vendido guardado; con ellos, la venta publicada de esas tiendas.
+     * T2 (precisión): enero a `k` (el mes con que se calculó la proyección) de la fila `cierre_<Y>`. T3d: `cierre = real_ac + proyectado_resto` EXACTO
+     * siempre. Sin tiendas ni bloque es lo vendido guardado; con ellos, la venta publicada de esas tiendas; con una unidad de marca (con o sin tiendas o
+     * bloque), lo vendido guardado × la participación de la marca (con tiendas o bloque, repartido entre ellas con su venta de cada mes): estimado.
      */
     real_ac: number;
     /**
@@ -541,6 +554,11 @@ export type TableroApi = {
     real_ac_exactitud?: Exactitud;
     /** T2 (añadido, opcional): real de enero a `k'` (el último mes publicado, `datos.k_prima`), para «en lo que va»; `null` si no hay venta publicada. */
     real_ac_k_prima?: number | null;
+    /**
+     * T3d: lo que le falta a `real_ac` para el cierre del año (`cierre − real_ac`), aunque de `k+1` a diciembre no haya reparto mensual por tienda
+     * (`atribucion.mensual = false`: los meses van en `null`). La fila y la serie `proyectado_<Y>` llevan como total la suma de sus meses (con marca
+     * difiere a lo sumo en el redondeo por mes) o, sin reparto mensual, este mismo resto.
+     */
     proyectado_resto: number;
     anterior: number;
     hace_dos: number;

@@ -374,6 +374,8 @@ La única lectura de venta de M7, en una sola sentencia (un solo estado de los d
 | `calculado_at`, `cerrada_at`, `cerrada_por_id → perfiles on delete set null`, `cerrada_por_nombre`, `nota ≤ 500`, `perfil_id`, `usuario_nombre` | | |
 | `activo`, `created_at`, `updated_at` | | `activo` por convención; eliminar solo `en_trabajo` sin decisiones (si no, `409`: se archiva) |
 
+**Desde `0.19.0 · M14`:** `aprobaciones_direccion.proyeccion_id` apunta a `proyecciones` con `on delete restrict`, así que una proyección con aprobaciones de dirección tampoco se elimina: `DELETE /api/proyeccion/proyecciones/[id]` responde `409 tiene_aprobaciones` («archívala en lugar de eliminarla»). Ver ficha 14 y decisión 137.
+
 ### 6.4 `proyeccion_filas` (identidad, histórico y curva; base y por tienda)
 
 | Columna | Tipo | Notas |

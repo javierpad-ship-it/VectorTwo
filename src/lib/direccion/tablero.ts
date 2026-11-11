@@ -24,7 +24,7 @@ import {
 } from "./alertas";
 import { armarApoyo } from "./apoyo";
 import { aAprobacionApi, diferenciaConAprobada, estadoDeProyeccion, type EstadoDeProyeccion } from "./aprobacion";
-import { atribuirTiendas, repartirMayorResto, type HistoriaVenta, type SalidaTiendas, type TiendaAtribuible } from "./atribucion";
+import { atribuirTiendas, repartirMayorResto, repartirVendidoGuardado, type HistoriaVenta, type SalidaTiendas, type TiendaAtribuible } from "./atribucion";
 import {
   CLAVES_COMPARATIVO,
   advertenciaMarca,
@@ -57,6 +57,7 @@ import {
   type Exactitud,
   type FilaAprobacionSql,
   type FilaDesgloseApi,
+  type MotivoSinComparada,
   type ProyeccionTableroApi,
   type PuenteApi,
   type SerieMensualApi,
@@ -283,8 +284,21 @@ function fechasDe(bloques: BloquesApi, maestros: MaestrosTablero): (id: string) 
 /**
  * Lo proyectado de un recorte, por tienda y para el conjunto (§3.4 D). Las mismas tiendas se atribuyen SIEMPRE con todas las tiendas del recorte; las
  * filas de tienda (nuevas, aperturas, cierres y las de tienda del año en curso) van exactas.
+ *
+ * T3d (B1) · `porMarca`: con una unidad de marca, `doc` trae lo proyectado Y lo vendido guardado por la participación de la marca, pero `venta` es la
+ * venta REAL de la marca. Mezclar las dos escalas (enero a `k` real y el total anual `A_t` de la base estimada) hacía que `A_t − real_t` saliera
+ * negativo, que no hubiera reparto mensual y que el cierre del recorte no cuadrara. Con marca, el enero a `k` de cada tienda atribuida es lo vendido
+ * guardado de la base del recorte repartido con la venta real de cada tienda en ese mes (`repartirVendidoGuardado`), y ese mismo enero a `k` es el
+ * `real_t` de la regla 111 (que reparte en proporción a él). La venta real de la marca va solo en las filas `real_*`.
  */
-export function proyectadoDeRecorte(o: { proyeccion: ProyeccionDeTablero; doc: TableroProyeccionSql; venta: IndiceVenta; maestros: MaestrosTablero; conjunto: ConjuntoTiendas }): ProyectadoRecorte {
+export function proyectadoDeRecorte(o: {
+  proyeccion: ProyeccionDeTablero;
+  doc: TableroProyeccionSql;
+  venta: IndiceVenta;
+  maestros: MaestrosTablero;
+  conjunto: ConjuntoTiendas;
+  porMarca: boolean;
+}): ProyectadoRecorte {
   const { proyeccion: p, doc, venta } = o;
   const Y = p.anio_en_curso;
   const [enCurso, siguiente] = doc.anios;
@@ -301,15 +315,19 @@ export function proyectadoDeRecorte(o: { proyeccion: ProyeccionDeTablero; doc: T
   // Todas las tiendas del recorte: las de los bloques guardados, las que vendieron y las que tienen filas de tienda.
   const ids = new Set<string>([...tiendasDeBloques(p.bloques).keys(), ...venta.tiendas, ...enCurso.tiendas.map((t) => t.t), ...siguiente.tiendas.map((t) => t.t)]);
   const clases = new Map<string, TiendaAtribuible["clase"]>();
-  const tiendas: TiendaAtribuible[] = [];
-  for (const id of ids) {
-    if (!o.maestros.tiendas.has(id)) continue;
-    const clase = claseTienda(p.bloques, Y, id);
-    clases.set(id, clase);
+  for (const id of ids) if (o.maestros.tiendas.has(id)) clases.set(id, claseTienda(p.bloques, Y, id));
+  const codigoDe = (id: string) => o.maestros.tiendas.get(id)?.codigo ?? id;
+  // Con marca, enero a `k` de las tiendas atribuidas (*misma* y *sale*) es lo vendido guardado × participación, repartido con su venta del mes.
+  const atribuidas = [...clases]
+    .filter(([, c]) => c === "misma" || c === "sale")
+    .map(([id]) => id)
+    .sort((a, b) => codigoDe(a).localeCompare(codigoDe(b), "es") || a.localeCompare(b));
+  const eneK = o.porMarca ? repartirVendidoGuardado({ ids: atribuidas, k: p.k, mesesBase: enCurso.base.meses, venta: (id, m) => venta.u(id, Y, m) }) : undefined;
+  const tiendas: TiendaAtribuible[] = [...clases].map(([id, clase]) => {
     let real = 0;
-    for (let m = 1; m <= p.k; m++) real += venta.u(id, Y, m);
-    tiendas.push({ id, codigo: o.maestros.tiendas.get(id)?.codigo ?? id, clase, real });
-  }
+    for (let m = 1; m <= p.k; m++) real += eneK ? (eneK.get(id)?.[m - 1] ?? 0) : venta.u(id, Y, m);
+    return { id, codigo: codigoDe(id), clase, real };
+  });
   const paraBase = new Map<string, number>();
   for (const t of enCurso.tiendas) if (t.para_base !== null) paraBase.set(t.t, (paraBase.get(t.t) ?? 0) + t.para_base);
 
@@ -325,6 +343,7 @@ export function proyectadoDeRecorte(o: { proyeccion: ProyeccionDeTablero; doc: T
     mesesBaseEnCurso: enCurso.base.meses,
     mesesBaseSiguiente: siguiente.base.meses,
     historia,
+    ...(eneK ? { eneK } : {}),
   });
 
   // Por tienda: lo atribuido más sus filas de tienda (exactas).
@@ -727,14 +746,18 @@ function armarDesglose(o: {
         ac_en_curso: v?.[5] ?? 0,
       });
     });
+    const sinY = proyectado.enCurso.total - sumar(crudos.map((c) => c.cierre));
+    const sinS = proyectado.siguiente.total - sumar(crudos.map((c) => c.siguiente));
     if (dim === "marca") {
       // T3 (R5): lo proyectado de las filas cuya fila base no trae `por_marca` (y el redondeo de repartir por participación) no es de ninguna marca:
       // va en su propia fila, no elegible como filtro, para que el total cuadre con las tarjetas. Solo si no es cero.
-      const sinY = proyectado.enCurso.total - sumar(crudos.map((c) => c.cierre));
-      const sinS = proyectado.siguiente.total - sumar(crudos.map((c) => c.siguiente));
       if (sinY !== 0 || sinS !== 0) {
         crudos.push({ id: DIM_SIN_MARCA, nombre: "Sin participación por marca", exactitud: "estimado", filtrable: false, hace_tres: 0, hace_dos: 0, anterior: 0, cierre: sinY, siguiente: sinS, ac_anterior: 0, ac_en_curso: 0 });
       }
+    } else if (conjunto.recortado && (sinY !== 0 || sinS !== 0)) {
+      // T3d (R5): con tiendas o bloque, lo atribuido que no se pudo repartir entre los elementos (un «sin atribuir» negativo del bloque, que no se
+      // reparte, o un recorte sin base en ningún elemento) va en la misma fila que en el desglose por tienda, para que el total sea el de las tarjetas.
+      crudos.push({ id: "sin_atribuir", nombre: "Sin atribuir a tienda", exactitud: "estimado", filtrable: false, hace_tres: 0, hace_dos: 0, anterior: 0, cierre: sinY, siguiente: sinS, ac_anterior: 0, ac_en_curso: 0 });
     }
   }
 
@@ -769,6 +792,8 @@ const conSignoOCero = (n: number): string => (n === 0 ? "0" : conSigno(n));
  */
 export function armarFilasSinAtribuir(o: {
   k: number;
+  /** T3d: con una unidad de marca, enero a `k` no es venta real sino lo vendido guardado × participación repartido entre las tiendas. */
+  porMarca?: boolean;
   anios: readonly { anio: number; meses: readonly (number | null)[]; anual: number; sinCurva: number }[];
 }): { filas: FilaTabla[]; nota: string | null } {
   const filas: FilaTabla[] = [];
@@ -785,7 +810,14 @@ export function armarFilasSinAtribuir(o: {
       const causas: string[] = [];
       if (sinCurva > 0) causas.push(`${miles(sinCurva)} u del año ${sinCurva === 1 ? "no tiene" : "no tienen"} curva mensual (${sinCurva === 1 ? "suma" : "suman"} al total del año, no a los meses)`);
       else if (sinCurva < 0) causas.push(`la curva mensual guardada suma ${miles(-sinCurva)} u más que el total del año`);
-      if (i === 0 && o.k > 0) causas.push(`los meses de ${rangoMeses(1, Math.min(12, o.k))} son venta real de cada tienda y no tienen «sin atribuir» por mes`);
+      if (i === 0 && o.k > 0) {
+        const eneK = rangoMeses(1, Math.min(12, o.k));
+        causas.push(
+          o.porMarca
+            ? `los meses de ${eneK} son lo vendido guardado por la participación de la marca, repartido entre las tiendas, y no tienen «sin atribuir» por mes`
+            : `los meses de ${eneK} son venta real de cada tienda y no tienen «sin atribuir» por mes`
+        );
+      }
       diferencias.push(`En ${anio}, lo sin atribuir del año es ${conSignoOCero(anual)} u y la suma de sus meses ${conSignoOCero(total)} u${causas.length > 0 ? `: ${lista(causas)}` : ""}.`);
     }
   });
@@ -854,7 +886,8 @@ export function armarTablero(e: EntradaTablero): TableroApi {
   const venta = indiceVenta(e.venta);
   const ventaTotal = e.ventaTotal === e.venta ? venta : indiceVenta(e.ventaTotal);
   const conjunto = conjuntoTiendas(p.bloques, Y, e.filtros.bloque, e.filtros.tiendas);
-  const proyectado = proyectadoDeRecorte({ proyeccion: p, doc: e.docRecorte, venta, maestros: e.maestros, conjunto });
+  const porMarca = e.filtros.unidadMarcaId !== null;
+  const proyectado = proyectadoDeRecorte({ proyeccion: p, doc: e.docRecorte, venta, maestros: e.maestros, conjunto, porMarca });
   const [enCurso, siguiente] = e.docRecorte.anios;
   const idsVenta = [...e.maestros.tiendas.keys()].filter((id) => conjunto.ids === null || conjunto.ids.has(id));
 
@@ -870,8 +903,12 @@ export function armarTablero(e: EntradaTablero): TableroApi {
   // ── Proyectado del año en curso: cierre (12 meses) y resto (de k+1 a diciembre).
   const cierreMeses = proyectado.enCurso.meses;
   const restoMeses = doce((m) => (m > k ? cierreMeses[m - 1] : null));
-  const proyectadoResto = sumaNula(restoMeses);
-  const porMarca = e.filtros.unidadMarcaId !== null;
+  // T3d (B1): `real_ac` es enero a `k` de la fila del cierre y `proyectado_resto` es lo que le falta para el cierre anual, SIEMPRE (también si el
+  // reparto mensual por tienda no se pudo hacer y los meses de `k+1` a diciembre van en `null`): `cierre = real_ac + proyectado_resto` exacto.
+  const realAc = sumar(MESES.filter((m) => m <= k).map((m) => cierreMeses[m - 1] ?? 0));
+  const restoAnual = proyectado.enCurso.total - realAc;
+  // La fila y la serie del resto llevan la suma de sus meses (lo que se ve); sin reparto mensual, el resto anual.
+  const proyectadoResto = sumaNula(restoMeses) ?? restoAnual;
   const exactitud: Exactitud = proyectado.estimado || porMarca ? "estimado" : "exacto";
   const exactitudY: Exactitud = proyectado.enCurso.estimado || porMarca ? "estimado" : "exacto";
   const exactitudS: Exactitud = proyectado.siguiente.estimado || porMarca ? "estimado" : "exacto";
@@ -964,7 +1001,7 @@ export function armarTablero(e: EntradaTablero): TableroApi {
   const filasComparada: { clave: string; etiqueta: string; meses: (number | null)[]; total: number | null; tipo: SerieMensualApi["tipo"]; exactitud: Exactitud }[] = [];
   if (e.comparada) {
     const c = e.comparada;
-    const pc = proyectadoDeRecorte({ proyeccion: c.proyeccion, doc: c.doc, venta, maestros: e.maestros, conjunto });
+    const pc = proyectadoDeRecorte({ proyeccion: c.proyeccion, doc: c.doc, venta, maestros: e.maestros, conjunto, porMarca });
     const tipo: SerieMensualApi["tipo"] = c.motivo === "aprobada" ? "aprobada" : "comparada";
     const exactitudC: Exactitud = pc.estimado || e.filtros.unidadMarcaId !== null ? "estimado" : "exacto";
     const rotulo = `${c.proyeccion.nombre}${c.motivo === "aprobada" ? " (aprobada)" : ""}`;
@@ -994,6 +1031,7 @@ export function armarTablero(e: EntradaTablero): TableroApi {
     // sale si algún mes no es cero; lo que explica la diferencia con el «sin atribuir» anual va en `nota`.
     const sinAtribuir = armarFilasSinAtribuir({
       k,
+      porMarca,
       anios: [
         { anio: Y, meses: doce((m) => (m > k ? proyectado.sinAtribuir.mesEnCurso[m - 1] : null)), anual: proyectado.sinAtribuir.enCurso, sinCurva: enCurso.base.sin_meses },
         { anio: S, meses: proyectado.sinAtribuir.mesSiguiente, anual: proyectado.sinAtribuir.siguiente, sinCurva: siguiente.base.sin_meses },
@@ -1067,7 +1105,7 @@ export function armarTablero(e: EntradaTablero): TableroApi {
     solesEnCursoHastaK: solesHastaK,
     pares: e.docRecorte.por_par,
     precios: e.venta.precios,
-    unidadesConjunto: conjunto.recortado ? { enCursoResto: proyectadoResto ?? Math.max(0, proyectado.enCurso.total - sumar(MESES.filter((m) => m <= k).map((m) => cierreMeses[m - 1] ?? 0))), siguiente: proyectado.siguiente.total } : null,
+    unidadesConjunto: conjunto.recortado ? { enCursoResto: sumaNula(restoMeses) ?? Math.max(0, restoAnual), siguiente: proyectado.siguiente.total } : null,
     stock: { por_tienda: e.venta.stock?.por_tienda ?? [], cd: e.venta.stock?.cd ?? null },
     proyectado12,
     real12,
@@ -1133,10 +1171,10 @@ export function armarTablero(e: EntradaTablero): TableroApi {
     kpis: {
       siguiente: proyectado.siguiente.total,
       cierre: proyectado.enCurso.total,
-      real_ac: sumar(MESES.filter((m) => m <= k).map((m) => cierreMeses[m - 1] ?? 0)),
+      real_ac: realAc,
       real_ac_exactitud: porMarca ? "estimado" : "exacto",
       real_ac_k_prima: e.ultimoPublicado === null ? null : acReal(Y),
-      proyectado_resto: proyectadoResto ?? 0,
+      proyectado_resto: restoAnual,
       anterior: totalReal(Y - 1),
       hace_dos: totalReal(Y - 2),
       hace_tres: totalReal(Y - 3),
@@ -1155,6 +1193,20 @@ export function armarTablero(e: EntradaTablero): TableroApi {
       : null,
     huella,
   };
+}
+
+/**
+ * T3: por qué no hay comparada (D6, sin cambiar la regla). Puro. `pedida`: `"ninguna"` (`comparar_id=ninguna`), `"elegida"` (un id) o
+ * `"por_defecto"` (ausente).
+ */
+export function motivoSinComparada(o: { hayComparada: boolean; pedida: "ninguna" | "elegida" | "por_defecto"; mostradaId: string; ultimaAprobadaId: string | null }): MotivoSinComparada | null {
+  if (o.hayComparada) return null;
+  if (o.pedida === "ninguna") return "no_pedida";
+  if (o.pedida === "por_defecto") {
+    if (o.ultimaAprobadaId === null) return "sin_aprobada";
+    if (o.ultimaAprobadaId === o.mostradaId) return "es_la_ultima_aprobada";
+  }
+  return "comparada_sin_cifras";
 }
 
 /** Texto de un periodo para los mensajes: «set 2026». */

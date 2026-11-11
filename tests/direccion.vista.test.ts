@@ -736,7 +736,7 @@ describe("Excel", () => {
 
 describe("avisos en Proyección y en Flujo mensual", () => {
   it("la diferencia con lo aprobado, idéntica o sin aprobaciones", () => {
-    expect(textoDiferenciaAprobada(diferencia(), 2027)).toBe("difiere de lo aprobado el 03 nov 2026 en +1,214 u en 2027 (+1.5 %)");
+    expect(textoDiferenciaAprobada(diferencia(), 2027)).toBe("difiere de lo aprobado el 03 nov 2026 (Proyección 2026–2027 seguimiento set) en +1,214 u en 2027 (+1.5 %)");
     expect(textoDiferenciaAprobada({ ...diferencia(), identica: true }, 2027)).toBe("idéntica a lo aprobado el 03 nov 2026 en Proyección 2026–2027 seguimiento set");
     expect(textoDiferenciaAprobada(null, 2027)).toBe("no hay aprobaciones anteriores");
   });
@@ -747,7 +747,7 @@ describe("avisos en Proyección y en Flujo mensual", () => {
       rechazada: false,
       antes: "Cerrada por Planner P. el 07 nov 2026 · ",
       fuerte: "sin aprobación de dirección vigente",
-      despues: " · difiere de lo aprobado el 03 nov 2026 en +1,214 u en 2027 (+1.5 %)",
+      despues: " · difiere de lo aprobado el 03 nov 2026 (Proyección 2026–2027 seguimiento set) en +1,214 u en 2027 (+1.5 %)",
       enlace: `/planificacion/aprobacion-direccion?proyeccion=${ID.proyeccion}`,
     });
     expect(vistaAvisoDireccion(estadoDireccion(), "flujo")).toMatchObject({ tipo: "alerta", antes: "El flujo usa Proyección 2026–2027, cerrada por Planner P. el 07 nov 2026 · ", fuerte: "sin aprobación de dirección vigente" });
@@ -761,7 +761,7 @@ describe("avisos en Proyección y en Flujo mensual", () => {
       rechazada: true,
       antes: "El flujo usa Proyección 2026–2027. Dirección ",
       fuerte: "rechazó",
-      despues: " esta proyección el 08 nov 2026 (efecto del Niño) · difiere de lo aprobado el 03 nov 2026 en +1,214 u en 2027 (+1.5 %)",
+      despues: " esta proyección el 08 nov 2026 (efecto del Niño) · difiere de lo aprobado el 03 nov 2026 (Proyección 2026–2027 seguimiento set) en +1,214 u en 2027 (+1.5 %)",
     });
     expect(vistaAvisoDireccion(estadoDireccion({ estado: "aprobada", vigente: ultima, ultima }), "proyeccion")).toMatchObject({ tipo: "linea", texto: "Dirección: aprobada por Admin A. el 08 nov 2026" });
     expect(vistaAvisoDireccion(estadoDireccion({ estado: "con_observaciones", vigente: { ...ultima, resultado: "con_observaciones" }, ultima }), "flujo")).toMatchObject({ tipo: "linea", texto: "El flujo usa Proyección 2026–2027 · dirección: aprobada con observaciones por Admin A. el 08 nov 2026" });
@@ -937,7 +937,7 @@ describe("T3 · arreglos de qa y seguridad", () => {
     const h = hojasTablero({ tablero: tableroConMarca(), opciones: opciones(), filtros: FILTROS_VACIOS, bloqueos: { estado: "no_aplica" }, historial: [], ahora: "2026-11-10T15:00:00Z" });
     expect(h.MENSUAL.slice(1).map((f) => f.slice(0, 3))).toEqual([
       ["2025", "real", "exacto"],
-      ["2026 cierre", "real ene–set + proyectado oct–dic", "estimado"],
+      ["2026 cierre", "vendido estimado ene–set + proyectado oct–dic", "estimado"],
       ["2027", "proyectado", "estimado"],
     ]);
     const comp = h.RESUMEN.find((f) => f[1] === "2027 vs 2025 (último año normal)")!;
@@ -971,5 +971,21 @@ describe("T3 · aviso del reparto estimado por marca con tiendas o bloque", () =
     expect(descripcionDesglose(con("marca", conjunto))).toContain("el reparto por marca es estimado");
     expect(descripcionDesglose(con("marca", null))).not.toContain("estimado");
     expect(descripcionDesglose(con("linea", conjunto))).not.toContain("estimado");
+  });
+});
+
+describe("T3d · textos de comparación", () => {
+  it("«Comparar con» distingue «es esta misma» de «no hay otra aprobada»", async () => {
+    const { textoCompararPorDefecto } = await import("@/app/(app)/planificacion/aprobacion-direccion/vista-tablero");
+    expect(textoCompararPorDefecto({ comparar: null }, { comparada: null, sin_comparada: "es_la_ultima_aprobada" })).toBe("La última aprobada (es esta misma)");
+    expect(textoCompararPorDefecto({ comparar: null }, { comparada: null, sin_comparada: "sin_aprobada" })).toBe("La última aprobada (no hay otra aprobada)");
+    expect(textoCompararPorDefecto({ comparar: null }, { comparada: null })).toBe("La última aprobada (no hay otra aprobada)");
+  });
+
+  it("el aviso nombra la proyección cuando la diferencia es contra otra", () => {
+    type D = NonNullable<Parameters<typeof textoDiferenciaAprobada>[0]>;
+    const d = { identica: false, fecha: "2026-11-10T15:00:00Z", misma_proyeccion: false, proyeccion_nombre: "Copia lateral", siguiente: { u: 1453, pct: null } } as unknown as D;
+    expect(textoDiferenciaAprobada(d, 2027)).toContain("(Copia lateral) en +1,453 u en 2027");
+    expect(textoDiferenciaAprobada({ ...d, misma_proyeccion: true }, 2027)).not.toContain("Copia lateral");
   });
 });

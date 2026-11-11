@@ -346,10 +346,10 @@ export function etiquetaProyeccion(p: ProyeccionTableroApi): string {
  * (`opciones.comparar_por_defecto` es relativa a la proyección por defecto, no a la mostrada). Solo es fiable con «por defecto» elegido
  * (`filtros.comparar === null`) y con el tablero cargado; si no, un texto que no afirma nada.
  */
-export function textoCompararPorDefecto(filtros: Pick<FiltrosVista, "comparar">, tablero: Pick<TableroApi, "comparada"> | null): string {
+export function textoCompararPorDefecto(filtros: Pick<FiltrosVista, "comparar">, tablero: Pick<TableroApi, "comparada" | "sin_comparada"> | null): string {
   if (filtros.comparar !== null || tablero === null) return "La última aprobada";
   const c = tablero.comparada;
-  if (c === null) return "La última aprobada (no hay otra aprobada)";
+  if (c === null) return tablero.sin_comparada === "es_la_ultima_aprobada" ? "La última aprobada (es esta misma)" : "La última aprobada (no hay otra aprobada)";
   return c.motivo === "aprobada" ? `La última aprobada: ${c.nombre}` : "La última aprobada";
 }
 
@@ -1012,7 +1012,7 @@ export const ID_TABLA_MENSUAL = "tabla-mensual";
  * Las filas de la tabla mensual (§4.8), que es la alternativa exacta del gráfico. Un mes sin dato sale «—». Las filas que trae el servidor dependen
  * del recorte (por ejemplo, «Sin atribuir a tienda» solo con tiendas o bloque y si no es cero): se pinta lo que venga, sin suponer ninguna.
  */
-export function filasTablaMensual(t: Pick<TableroApi, "tabla_mensual" | "datos"> & { proyeccion: Pick<ProyeccionTableroApi, "k"> }): FilaMensual[] {
+export function filasTablaMensual(t: Pick<TableroApi, "tabla_mensual" | "datos"> & { proyeccion: Pick<ProyeccionTableroApi, "k">; kpis?: Pick<TableroApi["kpis"], "real_ac_exactitud"> }): FilaMensual[] {
   const nino = new Set(t.datos.anios_nino);
   const kPrima = t.datos.k_prima;
   const k = t.proyeccion.k;
@@ -1034,7 +1034,7 @@ export function filasTablaMensual(t: Pick<TableroApi, "tabla_mensual" | "datos">
       proyectado: desde === 1,
       mesProyectado: Array.from({ length: 12 }, (_, i) => i + 1 >= desde),
       totalProyectado: desde === 1,
-      composicion: mixta ? `real ${rangoMeses(1, desde - 1)} + proyectado ${rangoMeses(desde, 12)}` : null,
+      composicion: mixta ? `${t.kpis?.real_ac_exactitud === "estimado" ? "vendido estimado por participación de la marca" : "real"} ${rangoMeses(1, desde - 1)} + proyectado ${rangoMeses(desde, 12)}` : null,
       estimado: f.exactitud === "estimado",
       variacion,
     };
@@ -1118,7 +1118,7 @@ export function totalDesgloseCuadra(t: Pick<TableroApi, "desglose" | "kpis" | "p
 export function descripcionDesglose(t: Pick<TableroApi, "desglose" | "kpis" | "proyeccion" | "filtros">): string {
   const base = totalDesgloseCuadra(t) ? "Totales por elemento de la dimensión elegida; el total cuadra con las tarjetas." : "Totales por elemento de la dimensión elegida.";
   if (t.desglose.dimension !== "marca" || t.filtros.conjunto_tiendas === null) return base;
-  return `${base} Con tiendas o bloque elegidos, el reparto por marca es estimado con una misma tasa para todas; al elegir una marca se recalcula con su venta en cada tienda y la cifra puede cambiar.`;
+  return `${base} Con tiendas o bloque elegidos, el reparto por marca es estimado con una misma tasa para todas; al elegir una marca se recalcula con su venta en cada tienda y la cifra puede cambiar mucho.`;
 }
 
 /**

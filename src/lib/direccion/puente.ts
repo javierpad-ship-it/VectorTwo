@@ -120,7 +120,7 @@ export function ayudaPuente(anio: number): Record<ClavePuente, string> {
   return {
     cierre_en_curso: `Lo vendido de ${Y} hasta el último mes cerrado más lo proyectado para el resto del año, en todas las tiendas.`,
     fuera_base: `El ${Y} de las tiendas con filas propias que no entran en la base de ${S}: las que abrieron en ${Y} y siguen aparte, y las que cerraron en ${Y}.`,
-    ajuste_base: `Incluye el ${Y} que la proyección resta de la base por las tiendas que cierran en ${S}, las filas sin base y cualquier diferencia entre la base y el cierre de esas tiendas (por ejemplo, decisiones sobre ${Y} tomadas después de calcular la base).`,
+    ajuste_base: `Incluye el ${Y} que la proyección resta de la base por las tiendas que cierran en ${S}, las filas sin base y cualquier diferencia entre la base y el cierre de esas tiendas, por ejemplo, por decisiones sobre ${Y} tomadas después de calcular la base.`,
     base: `La venta de ${Y} de las tiendas que son «mismas tiendas» en ${S}: sobre ella se aplica el crecimiento.`,
     nino: `Lo que sube (o baja) la base al quitarle el efecto del Niño de ${Y}: base corregida menos base real.`,
     crecimiento: `El crecimiento declarado aplicado: la propuesta del método menos la base corregida.`,

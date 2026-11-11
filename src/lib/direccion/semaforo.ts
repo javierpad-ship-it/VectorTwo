@@ -22,7 +22,10 @@ export const PLAZO_COLA_VENTA_MS = 5_000;
 /** Segundos de la cabecera `Retry-After` de la respuesta `503` cuando la cola no deja entrar. */
 export const REINTENTAR_TRAS_S = Math.ceil(PLAZO_LECTURA_MS / 1000);
 
-export const MENSAJE_COLA_LLENA = "Hay otras consultas pesadas del tablero en curso. No se guardó ningún cambio: vuelve a intentarlo en unos segundos.";
+/** `503 lectura_lenta` de una LECTURA (`GET /api/direccion/tablero`): no hay nada que guardar, así que no lo menciona. */
+export const MENSAJE_COLA_LLENA = "La consulta está tardando; vuelve a intentarlo en unos segundos.";
+/** El mismo `503` en el `POST` de aprobaciones (lee la tendencia antes de registrar): ahí sí importa decir que no se registró nada. */
+export const MENSAJE_COLA_LLENA_APROBAR = "Hay otras consultas pesadas del tablero en curso. No se guardó ningún cambio: vuelve a intentarlo en unos segundos.";
 
 export type Liberar = () => void;
 
