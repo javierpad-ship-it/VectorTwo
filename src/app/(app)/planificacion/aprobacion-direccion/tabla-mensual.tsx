@@ -63,7 +63,7 @@ export function TablaMensual({ tablero }: { tablero: TableroApi }) {
     <div id={ID_TABLA_MENSUAL} className="space-y-2">
       <DataTable etiqueta="Mes a mes, en unidades" columnas={columnas} filas={filas} claveFila={(f) => f.clave} claseFila={(f) => (f.variacion ? "bg-neutro-suave/40 text-tinta-suave" : undefined)} vacio="Sin serie mensual." />
       <p className="text-xs text-tinta-suave">
-        Unidades. Lo proyectado va en <span className="italic">cursiva</span> (proy.); en el cierre, los meses hasta los datos de la proyección son reales. «—» es un mes sin carga publicada o sin dato. Las filas de
+        Unidades. Lo proyectado va en <span className="italic">cursiva</span> (proy.); en el cierre, los meses hasta los datos de la proyección son {tablero.kpis.real_ac_exactitud === "estimado" ? "lo vendido estimado por participación de la marca" : "reales"}. «—» es un mes sin carga publicada, sin dato o sin reparto por mes entre las tiendas elegidas. Las filas de
         variación van en %.
       </p>
       {nota && <p className="rounded-md border border-borde bg-neutro-suave px-3 py-2 text-xs leading-relaxed text-tinta">{nota}</p>}

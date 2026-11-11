@@ -127,7 +127,7 @@ export function ayudaPuente(anio: number): Record<ClavePuente, string> {
     manual: AYUDA_MANUAL,
     otras: `Filas aceptadas en bloque, por IA o tal cual cuya propuesta cambió después al recalcular (se aceptó una propuesta anterior), y filas escaladas por tienda: no son decisiones a mano, pero hacen que lo vigente no sea la propuesta de hoy.`,
     sin_base: `Filas de mismas tiendas proyectadas por otro método, sin base de ${Y}.`,
-    mismas_siguiente: `${S} de las mismas tiendas (las filas sin tienda).`,
+    mismas_siguiente: `${S} de las mismas tiendas: las filas sin tienda.`,
     nuevas_anterior: `${S} de las tiendas que abrieron en ${Y} y todavía no forman parte de la base.`,
     aperturas: `${S} de las tiendas que abren en ${S}.`,
     cierres: `Lo que venderán en ${S}, hasta su cierre, las tiendas que cierran ese año.`,
