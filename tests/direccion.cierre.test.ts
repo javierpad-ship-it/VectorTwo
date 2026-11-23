@@ -221,6 +221,22 @@ describe("R23 · `GET /api/direccion/bloqueos` dice lo mismo que respondería «
     expect((await compararConCerrar(id)).bloqueos).toEqual([]);
   });
 
+  it("meses que no suman su total (el fallo de la cerrada de 2026): `meses_descuadrados` con el mensaje del cierre, no forzable; recalcular lo quita", async () => {
+    const id = await nueva();
+    await decidirFilas(id);
+    await decidirTiendas(id);
+    const f = filasDe("proyeccion_filas").find((x) => x.proyeccion_id === id && x.tienda_id === "T4") as Fila;
+    const a = filasDe("proyeccion_fila_anios").find((x) => x.fila_id === f.id && x.anio === 2027) as Fila;
+    a.meses = (a.meses as number[]).map((m, i) => (i === 11 ? m + 3 : m));
+    const b = await compararConCerrar(id);
+    expect(b.bloqueos).toHaveLength(1);
+    expect(b.bloqueos[0]).toMatchObject({ codigo: "meses_descuadrados", forzable: false, detalle: { meses_descuadrados: [{ anio: 2027, filas: 1, bajo_vendido: 0, diferencia_u: 3 }] } });
+    expect(b.bloqueos[0].mensaje).toMatch(/^Hay 1 fila de 2027 cuyos meses no suman su total/);
+    expect(b.puede_forzar).toBe(false);
+    expect((await calcular(enviar(), ctx(id))).status).toBe(201);
+    expect((await compararConCerrar(id)).bloqueos).toEqual([]);
+  });
+
   it("calculada con un método anterior: `version_metodo` primero, con el mensaje del cierre («recalcúlala antes de cerrar»)", async () => {
     const id = await nueva();
     const p = filasDe("proyecciones").find((x) => x.id === id) as Fila;
@@ -309,15 +325,17 @@ describe("el bucle de causas (puro)", () => {
       filasBase: [{ clave: "|a||b", anios: { 2026: { clave: "|a||b", propuesto: 500, decidido: null }, 2027: { clave: "|a||b", propuesto: 40, decidido: null, avisos: ["revision_cola_larga"] } } }],
       tiendas: [{ tienda_id: "t", anio: 2027, venta_esperada: 1000, decidido: null }],
       desactualizada: true,
+      mesesDescuadrados: [{ anio: 2026, filas: 2, bajo_vendido: 0, diferencia_u: 7 }],
     });
     const causas = causasDeCierre(todo, motivos);
-    expect(causas.map((c) => c.codigo)).toEqual(["version_metodo", "crecimientos_cambiados", "crecimientos_sin_aprobar", "filas_sin_decidir", "tiendas_sin_decidir", "desactualizada"]);
-    expect(causas.map((c) => c.forzable)).toEqual([false, false, false, false, false, true]);
+    expect(causas.map((c) => c.codigo)).toEqual(["version_metodo", "crecimientos_cambiados", "crecimientos_sin_aprobar", "meses_descuadrados", "filas_sin_decidir", "tiendas_sin_decidir", "desactualizada"]);
+    expect(causas.map((c) => c.forzable)).toEqual([false, false, false, false, false, false, true]);
     // El primero es exactamente lo que respondería el cierre.
     const primero = motivoRechazoCerrar(todo);
     expect(primero.ok).toBe(false);
     if (!primero.ok) expect(causas[0]).toMatchObject({ codigo: primero.rechazo.codigo, mensaje: primero.rechazo.mensaje });
-    expect(causas[5].detalle).toEqual({ motivos: [{ codigo: "cargas_nuevas", mensaje: "Hay un mes nuevo publicado." }] });
+    expect(causas[6].detalle).toEqual({ motivos: [{ codigo: "cargas_nuevas", mensaje: "Hay un mes nuevo publicado." }] });
+    expect(causas[3].detalle).toEqual({ meses_descuadrados: [{ anio: 2026, filas: 2, bajo_vendido: 0, diferencia_u: 7 }] });
     const b = armarBloqueos(todo, motivos);
     expect(b).toMatchObject({ aplica: true, puede_cerrar: false, puede_forzar: false });
     if (b.aplica) expect(b.filas).toEqual([

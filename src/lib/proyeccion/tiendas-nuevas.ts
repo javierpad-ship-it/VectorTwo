@@ -338,12 +338,20 @@ export type FilaEscalable = {
   fijada: number | null;
   /** Peso de respaldo (la composición `s_f`) si ninguna fila tiene propuesta. */
   peso: number;
+  /**
+   * Piso de la cifra escalada: lo ya vendido por la fila en el año en curso (0 en el siguiente). Sin él, una fila escalada podía quedar por debajo
+   * de su real y su reparto (`repartirResto`, que conserva el real) dejaba de sumar la cifra decidida. Ausente = 0.
+   */
+  minimo?: number;
 };
 
 /**
  * Regla 23. Reparte el total decidido `D` de la tienda entre sus filas: las fijadas conservan su cifra y las demás
  * se escalan por `(D − Σ fijadas) ÷ Σ propuestas no fijadas`. Con `Σ fijadas > D` el resto queda en 0 y aviso
  * `fijadas_exceden`. La suma final es `D` (mayores restos).
+ *
+ * Ninguna fila escalada queda por debajo de su `minimo` (lo vendido en el año en curso): así su reparto mensual, que conserva el real, suma
+ * exactamente la cifra escalada. Si los pisos no caben en `D − Σ fijadas`, cada libre queda en su piso y `fijadas_exceden`.
  */
 export function escalarTienda(
   filas: readonly FilaEscalable[],
@@ -368,16 +376,41 @@ export function escalarTienda(
   if (resto < 0) avisos.push("fijadas_exceden");
   const repartible = Math.max(0, resto);
 
-  const sumaPropuestas = libres.reduce((a, f) => a + Math.max(0, f.propuesto ?? 0), 0);
-  const sumaPesos = libres.reduce((a, f) => a + Math.max(0, f.peso), 0);
-  const pesos = libres.map((f) => (sumaPropuestas > 0 ? Math.max(0, f.propuesto ?? 0) : sumaPesos > 0 ? Math.max(0, f.peso) : 1));
-  const reparto = repartirEntero(repartible, pesos) ?? [];
-  libres.forEach((f, i) => {
-    asignado.set(f.id, reparto[i] ?? 0);
-    escaladas.add(f.id);
-  });
+  // Piso por fila (lo vendido en el año en curso): las que el reparto proporcional deja por debajo se quedan en su piso y el resto se reparte
+  // entre las demás, en vueltas, hasta que ninguna quede bajo su piso. Sin pisos que muerdan, es exactamente el reparto proporcional de siempre.
+  let activas = libres;
+  let disponible = repartible;
+  for (;;) {
+    const sumaPropuestas = activas.reduce((a, f) => a + Math.max(0, f.propuesto ?? 0), 0);
+    const sumaPesos = activas.reduce((a, f) => a + Math.max(0, f.peso), 0);
+    const pesos = activas.map((f) => (sumaPropuestas > 0 ? Math.max(0, f.propuesto ?? 0) : sumaPesos > 0 ? Math.max(0, f.peso) : 1));
+    const reparto = repartirEntero(disponible, pesos) ?? [];
+    const bajoPiso = activas.filter((f, i) => (reparto[i] ?? 0) < pisoDe(f));
+    if (bajoPiso.length === 0 || bajoPiso.length === activas.length) {
+      activas.forEach((f, i) => {
+        // Si ni repartiendo todo se llega a los pisos (`D − Σ fijadas` < lo vendido de las libres), cada una queda en su piso y se avisa.
+        asignado.set(f.id, bajoPiso.length === activas.length && bajoPiso.length > 0 ? pisoDe(f) : (reparto[i] ?? 0));
+        escaladas.add(f.id);
+      });
+      if (bajoPiso.length > 0 && bajoPiso.length === activas.length && !avisos.includes("fijadas_exceden")) avisos.push("fijadas_exceden");
+      break;
+    }
+    for (const f of bajoPiso) {
+      asignado.set(f.id, pisoDe(f));
+      escaladas.add(f.id);
+      disponible -= pisoDe(f);
+    }
+    const fuera = new Set(bajoPiso.map((f) => f.id));
+    activas = activas.filter((f) => !fuera.has(f.id));
+    if (disponible < 0) {
+      disponible = 0;
+      if (!avisos.includes("fijadas_exceden")) avisos.push("fijadas_exceden");
+    }
+  }
   return { asignado, escaladas, avisos };
 }
+
+const pisoDe = (f: FilaEscalable): number => Math.max(0, Math.round(f.minimo ?? 0));
 
 // ─── Perfil de una apertura histórica ───
 

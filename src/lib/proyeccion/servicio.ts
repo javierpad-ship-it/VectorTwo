@@ -72,8 +72,10 @@ import { armarFilasCerradas } from "./mensual";
 import { leerParticipaciones } from "./participaciones";
 import {
   aPrevias,
+  esRegistroEscalado,
   payloadAnioCalculo,
   payloadAnioDecision,
+  payloadAnioEscalada,
   payloadFila,
   payloadTiendaCalculo,
   payloadTiendaDecision,
@@ -88,6 +90,7 @@ import {
   bloqueosNinoDeCierre,
   calculoEnCurso,
   cargasIguales,
+  contarMesesDescuadrados,
   factorDePeriodo,
   motivoRechazoArchivarCerrada,
   motivoRechazoCerrar,
@@ -97,6 +100,7 @@ import {
   periodoADate,
   puedeEliminar,
   type BloqueosNino,
+  type DescuadreMesesAnio,
   type SinAprobarCierre,
 } from "./reglas";
 import {
@@ -943,8 +947,11 @@ function cambioDuranteCalculo(): Salida<never> {
 
 /**
  * `upsert` de filas, registros y tiendas por tandas. Lo que ya no aparece se marca `activo = false` (conserva sus decisiones y
- * no cuenta). Nunca escribe `decidido`, `origen`, `nota`, `propuesta_al_decidir` ni `decidido_*` (lo prueba la forma de
+ * no cuenta). Nunca escribe `decidido`, `origen`, `nota`, `propuesta_al_decidir` ni `decidido_*` de una decisión del planner (lo prueba la forma de
  * `payloadAnioCalculo`). Si un registro decidido cambió de bloque (una fecha de M4 corregida), queda `bloque_cambiado`.
+ *
+ * Excepción: las filas de tienda `escalada` no son decisiones del planner sino el reparto del total de la tienda, que el cálculo rehace;
+ * se escriben con su cifra nueva (`payloadAnioEscalada`) para que `Σ meses = decidido`.
  *
  * 07e: tampoco escribe `decision_ia_fila_id` al recalcular (sobrevive con la decisión que la sostiene); solo `copiar_de` la copia, junto con la decisión.
  * Ni el cálculo ni el cierre leen las tablas `ia_*`.
@@ -982,7 +989,11 @@ async function guardarCalculo(
       // Al copiar las decisiones de otra proyección, las decisiones se escriben (la proyección nueva no tiene ninguna); al recalcular, nunca.
       // La traza solo se copia con la cifra manual que la sostiene (la base lo exige); sin traza, la columna ni se escribe (queda `null`).
       const traza = copiando && r.decidido !== null && r.origen === "manual" ? trazasCopiadas.get(`${f.clave}#${r.anio}`) : undefined;
-      registros.push(copiando ? { ...payloadAnioDecision(filaId, r, undefined, traza), avisos: payloadAnioCalculo(filaId, r, extra).avisos } : payloadAnioCalculo(filaId, r, extra));
+      // Las filas de tienda `escalada`: el cálculo rehace su cifra con las propuestas nuevas (regla 23) y su reparto sale de esa cifra; se escriben
+      // las dos juntas o `Σ meses` deja de ser el total (el fallo de la cerrada de 2026: `meses` nuevos con el `decidido` viejo).
+      if (copiando) registros.push({ ...payloadAnioDecision(filaId, r, undefined, traza), avisos: payloadAnioCalculo(filaId, r, extra).avisos });
+      else if (esRegistroEscalado(f.tienda_id, r, antes)) registros.push(payloadAnioEscalada(filaId, r, extra, antes !== undefined && antes.decidido !== null));
+      else registros.push(payloadAnioCalculo(filaId, r, extra));
     }
   }
   const up = await upsertAnios(d, registros);
@@ -1025,6 +1036,8 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
   const tiendas = await leerTiendasProyeccion(d, id);
   if (tiendas.error) return fallaDb(tiendas.error, "proyección: leer tiendas");
   const parametros = parametrosDe(p.parametros);
+  const descuadres = await descuadresDeMeses(d, id, filas.data, p.anio_en_curso);
+  if (descuadres.respuesta) return falla(descuadres.respuesta);
   // 06e (R15, R16): qué GM tienen Niño material HOY (las decisiones sobre `Y` mueven `B`): con las filas que se acaban de leer, no con la foto del cálculo.
   const crecimientosHoy = crecimientosDeHoy(p, ctx, vigentesR.data, p.estado === "en_trabajo" ? ninoDeFilas(filas.data, p.anio_en_curso, ctx) : undefined);
 
@@ -1050,6 +1063,8 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     crecimientosSinAprobar: crecimientosHoy.sinAprobar,
     // 0.14.0 (06e D5, D7, R16): 2027 marcado como Niño, factor de `Y` faltante, desfasado o sin confirmar, factor de `Y` o temporada cambiados: tampoco con `forzar`.
     bloqueosNino: bloqueosNinoDe(p, ctx, des.data),
+    // Ninguna fila (base o de tienda) puede cerrarse con meses que no suman su total: Flujo y Compras leen esos meses.
+    mesesDescuadrados: descuadres.data,
   });
   if (!resultado.ok) {
     let filasLegibles: Record<string, unknown>[] | undefined;
@@ -1129,6 +1144,17 @@ export async function cerrarProyeccion(id: string, nota: string | null | undefin
     return falla(pendientes.respuesta);
   }
   return listo({ ...aProyeccionApi(cerrada.data, [], sello()), archivada_id: archivadaId });
+}
+
+/**
+ * Los registros activos (de filas base y de tienda) cuyos meses no suman su total, por año (`contarMesesDescuadrados`). `filasBase` son las filas base ya
+ * leídas por quien llama (columnas ligeras, que traen `meses`); aquí solo se leen las de tienda. Lo usan el cierre y `/api/direccion/bloqueos`.
+ */
+export async function descuadresDeMeses(d: Db, proyeccionId: string, filasBase: readonly FilaConAnios[], anioEnCurso: number): Promise<Salida<DescuadreMesesAnio[]>> {
+  const t = await leerFilasConAnios(d, proyeccionId, { columnas: "ligeras", soloTiendas: true, soloActivas: true });
+  if (t.error) return fallaDb(t.error, "proyección: leer las filas de tienda");
+  const registros = [...filasBase, ...t.data].filter((f) => f.activo).flatMap((f) => f.proyeccion_fila_anios.filter((a) => a.activo));
+  return listo(contarMesesDescuadrados(registros, anioEnCurso));
 }
 
 /** `true` si el `resumen` guardado es del método vigente (`version_metodo ≥ VERSION_METODO`); sin `resumen` o sin versión, no. */

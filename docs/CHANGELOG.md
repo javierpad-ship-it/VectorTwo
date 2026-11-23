@@ -2,6 +2,26 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.19.1 · M7 g — 2026-11-21
+
+Ajuste de M7 (ficha `docs/modulos/07-proyeccion-anual.md`), sin migración. Decisión 149 de `DECISIONES.md`. `VERSION_METODO` no cambia: el método de cálculo es el mismo; lo que cambia es qué se guarda al recalcular. Toma `0.19.1`, el parche siguiente a la vigente, con la letra siguiente a la `· M7 f`; la reserva `0.19.1 · M14` se retira (la segunda entrega opcional de M14, si se hace, toma la siguiente versión libre al cerrar).
+
+**Qué veía el usuario.** En una proyección con tiendas nuevas o cierres ya decididos, después de recalcular, una fila de tienda podía mostrar un total anual que no era la suma de sus doce meses. Por tienda y en total las cifras cuadraban, así que no saltaba a la vista en la Matriz; se notaba al bajar a la fila o al comparar el total anual con la suma de Mensual. Lo detectó el recorrido de la proyección cerrada que usa Compras: en ella la mayoría de los registros de filas de tienda están descuadrados.
+
+**La causa.** Cuando el planner decide el total de una tienda, el sistema lo reparte entre sus filas (la regla 23; esas filas quedan con origen «escalada»). Al recalcular, el cálculo volvía a repartir ese total con las propuestas nuevas, guardaba los meses que salían de la cifra nueva, pero no guardaba la cifra nueva de cada fila: quedaba el total anual viejo junto a los meses del reparto nuevo. Existe desde `0.10.0`. La copia de una proyección no lo sufría, porque guarda por otro camino que escribe la decisión junto con los meses.
+
+**El arreglo.**
+- **Recalcular guarda juntas la cifra y los meses de cada fila escalada.** Las demás decisiones (las del planner, las aceptadas en bloque, las de la IA) siguen sin tocarse al recalcular; la escalada no es una decisión del planner sino el reparto del total de su tienda, y por eso el cálculo la rehace entera.
+- **Ninguna fila escalada del año en curso queda por debajo de lo ya vendido.** Antes podía pasar, y entonces su reparto mensual (que conserva los meses reales) tampoco sumaba la cifra. Si lo vendido de las filas libres no cabe en el total de la tienda, cada una queda en lo vendido y sale el aviso de siempre de que las fijadas exceden el total.
+- **«Cerrar» se niega si algún registro no cuadra.** Responde `409 meses_descuadrados` con cuántas filas y de qué año («Hay N filas de 2026 y M de 2027 cuyos meses no suman su total: recalcula la proyección para rehacer el reparto antes de cerrar») y, si alguna tiene un total menor que lo vendido, lo dice para corregirla en Por línea. **No se puede forzar**: lo cerrado es lo que Flujo y Compras leen mes a mes. El tablero de dirección lo muestra en «Bloquearían el cierre», con el mismo texto.
+- **Los mensajes de «Cerrar» dicen de qué año es lo pendiente**: «Faltan 12 filas por decidir: 8 de 2026 y 4 de 2027 (…)», y lo mismo con las tiendas nuevas.
+
+**Pruebas.** 8 139 pruebas en 368 archivos (2 omitidas, ya existentes). Archivo nuevo `tests/proyeccion.meses-cuadran.test.ts`: reproduce el fallo (recalcular con totales de tienda decididos), comprueba que la copia cuadra, el piso de lo vendido como propiedad de `escalarTienda`, el rechazo al cerrar (no forzable; recalcular lo quita) y, como invariante, que en todo registro activo con meses la suma de los meses es el total vigente (lo decidido o, si no hay, lo propuesto) tras cadenas aleatorias de operaciones: decidir una fila, decidir el total de una tienda, cambiar la rampa, aprobar en bloque, recalcular, sincronizar los factores del Niño, cerrar y copiar. `tests/direccion.cierre.test.ts` y `tests/proyeccion.endurecimiento.test.ts` suman el caso nuevo.
+
+**Pendientes.**
+- **La proyección cerrada sigue descuadrada.** El arreglo evita que vuelva a pasar, pero no toca lo ya guardado, y una cerrada no se recalcula. Repararla necesita el visto bueno de Javier; las opciones en estudio son alinear la cifra de esas filas a la suma de sus meses (no cambia la demanda mensual que ya leen Flujo y Compras) o cerrar una copia en trabajo, que no arrastra el fallo.
+- **Arreglos de pantalla de M7 para la siguiente tanda:** confirmación al guardar una cifra, lentitud al decidir una fila, «Leyendo la línea…» sin límite de tiempo, el mensaje de los negativos y el código `sin_proveedor` que aparece crudo en la pestaña Aprobación.
+
 ## 0.19.0 · M14 — 2026-11-10
 
 Ficha `docs/modulos/14-dashboard-aprobacion-direccion.md` (módulo nuevo, primera entrega; dos revisiones independientes antes de construir). Migración `0041_tablero_direccion.sql`, **aplicada en Vector2** el 2026-11-10 y medida con datos reales. Decisiones 134 a 148 de `DECISIONES.md`. `VERSION_METODO` y `VERSION_METODO_FLUJO` no cambian: el tablero solo lee y aprobar no mueve ninguna cifra de la proyección ni del flujo. Construido, con QA y auditoría de seguridad (sin hallazgos críticos ni altos; el medio y los bajos, corregidos); **pendiente del hito con Javier** (sección S de `docs/pruebas/cowork-checklist.md`). Commits: `acddbcc`, `31afc87` y `b2b0d49` (ficha y migración), `728904c` (contratos), `172fdca` (construcción), `f1e871b` (arreglos tras QA y seguridad), más `7134b5d` y `6b434c9` (operación).
@@ -29,9 +49,9 @@ Ficha `docs/modulos/14-dashboard-aprobacion-direccion.md` (módulo nuevo, primer
 **Qué debe hacer Javier** (sección S del checklist): abrir «Aprobación de dirección», revisar resumen, puente y alertas, filtrar por género, mundo, línea, tiendas y agrupación de marca, comparar mes a mes con los años anteriores, bajar el Excel, decidir y ver el aviso en Proyección y en Flujo. **Antes de decidir: una decisión registrada no se borra ni se edita.**
 
 **Pendientes anotados (no bloquean el hito):**
-- **`0.19.1 · M14`** (opcional, solo si Javier la pide): observaciones por género × mundo con «atendida», varias marcas a la vez, hoja de Excel con el detalle por fila, y lo de abajo que exige migración.
-- **Con tiendas elegidas, la fila de una marca en el desglose y el filtro por esa marca pueden diferir** (dos métodos de estimación); resolverlo exige la base del año siguiente por marca y la venta por tienda y marca → `0.19.1`.
-- **Con una marca, lo vendido de enero a `k`** debería salir de la venta real de la marca, no de lo vendido guardado por su participación → `0.19.1`.
+- **Segunda entrega de M14** (opcional, solo si Javier la pide; reservada como `0.19.1 · M14`, número que tomó el ajuste `0.19.1 · M7 g` del 2026-11-21: tomará la siguiente versión libre al cerrar, con sufijo `· M14`, porque las versiones no bajan): observaciones por género × mundo con «atendida», varias marcas a la vez, hoja de Excel con el detalle por fila, y lo de abajo que exige migración.
+- **Con tiendas elegidas, la fila de una marca en el desglose y el filtro por esa marca pueden diferir** (dos métodos de estimación); resolverlo exige la base del año siguiente por marca y la venta por tienda y marca → segunda entrega de M14.
+- **Con una marca, lo vendido de enero a `k`** debería salir de la venta real de la marca, no de lo vendido guardado por su participación → segunda entrega de M14.
 - **La comparada por defecto** es la de la última aprobación de cualquier proyección: aprobar una copia lateral cambia la referencia de la cerrada. A revisar por el arquitecto.
 - **Dos valores por defecto abiertos** (ficha §11): los umbrales de las alertas y la ventana de 12 meses del precio medio.
 - **No probado todavía:** el rendimiento de la pantalla con datos reales desde el navegador, el Excel abierto en Excel, lector de pantalla y teléfonos reales, y los casos de enero y de `k = 12`.

@@ -637,6 +637,8 @@ function escalarAnioTienda(
       propuesto: r.propuesto,
       fijada: r.origen === "manual" && r.decidido !== null ? r.decidido : null,
       peso: f.composicion?.s ?? 0,
+      // En el año en curso la fila no puede quedar bajo lo ya vendido: su reparto conserva el real y dejaría de sumar la cifra escalada.
+      minimo: anio === ctx.anio ? r.vendido : 0,
     };
   });
   const { asignado, escaladas, avisos } = escalarTienda(escalables, decidido);

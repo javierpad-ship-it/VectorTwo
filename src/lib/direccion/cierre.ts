@@ -4,7 +4,7 @@ import { leerFilasConAnios, leerTiendasProyeccion, type ProyeccionDb } from "@/l
 import { cargarContextoCalculo } from "@/lib/proyeccion/contexto";
 import { comoAvisos } from "@/lib/proyeccion/persistencia";
 import { bloqueosNinoDeCierre, calculoEnCurso, filaBloqueaCierre, motivoRechazoCerrar, MENSAJE_CALCULO_EN_CURSO_PROYECCION } from "@/lib/proyeccion/reglas";
-import { bloqueosNinoDe, crecimientosDeHoy, desactualizadaDe, esMetodoVigente, ninoDeFilas } from "@/lib/proyeccion/servicio";
+import { bloqueosNinoDe, crecimientosDeHoy, descuadresDeMeses, desactualizadaDe, esMetodoVigente, ninoDeFilas } from "@/lib/proyeccion/servicio";
 import { fallaDb, fallaMensaje, falla, listo, parametrosDe, proyeccionOr404, sello, type Db, type Salida } from "@/lib/proyeccion/servicio-base";
 import { UMBRAL_COLA_LARGA, type Motivo } from "@/lib/proyeccion/tipos-api";
 import { CacheDireccion } from "./cache";
@@ -21,8 +21,8 @@ type ArgsCerrar = Parameters<typeof motivoRechazoCerrar>[0];
 
 /** Códigos que cortan el bucle: no son causas que se puedan «apagar» para ver la siguiente. */
 const CORTAN = new Set(["ya_cerrada", "archivada", "calculo_en_curso"]);
-/** Como mucho nueve vueltas (§3.5): hay siete causas distintas. */
-const MAX_VUELTAS = 9;
+/** Como mucho diez vueltas (§3.5): hay ocho causas distintas (con `meses_descuadrados`). */
+const MAX_VUELTAS = 10;
 
 /**
  * El bucle de causas. Cada vuelta anota la causa que devuelve el cierre y la apaga para ver la siguiente; los del Niño se anotan todos de una vez
@@ -48,6 +48,9 @@ export function causasDeCierre(argsDeCierre: ArgsCerrar, motivos: readonly Motiv
     } else if (codigo === "crecimientos_sin_aprobar") {
       salida.push({ codigo, mensaje, detalle: { crecimientos_sin_aprobar: r.crecimientos_sin_aprobar ?? null }, forzable: false });
       a = { ...a, crecimientosSinAprobar: null };
+    } else if (codigo === "meses_descuadrados") {
+      salida.push({ codigo, mensaje, ...(r.detalle ? { detalle: r.detalle } : {}), forzable: false });
+      a = { ...a, mesesDescuadrados: undefined };
     } else if (codigo === "filas_sin_decidir") {
       salida.push({ codigo, mensaje, detalle: { total_filas_sin_decidir: r.total_filas_sin_decidir ?? 0, total_filas_para_revision: r.total_filas_para_revision ?? 0 }, forzable: false });
       a = { ...a, filasBase: [] };
@@ -122,6 +125,8 @@ export async function argumentosDeCierre(d: Db, p: ProyeccionDb): Promise<Salida
   const tiendas = await leerTiendasProyeccion(d, p.id);
   if (tiendas.error) return fallaDb(tiendas.error, "dirección: leer tiendas");
   const parametros = parametrosDe(p.parametros);
+  const descuadres = await descuadresDeMeses(d, p.id, filas.data, p.anio_en_curso);
+  if (descuadres.respuesta) return falla(descuadres.respuesta);
   const crecimientosHoy = crecimientosDeHoy(p, ctx, vigentes.data, p.estado === "en_trabajo" ? ninoDeFilas(filas.data, p.anio_en_curso, ctx) : undefined);
 
   const args: ArgsCerrar = {
@@ -143,6 +148,7 @@ export async function argumentosDeCierre(d: Db, p: ProyeccionDb): Promise<Salida
     crecimientosCambiados: des.data.some((m) => m.codigo === "crecimientos_cambiados"),
     crecimientosSinAprobar: crecimientosHoy.sinAprobar,
     bloqueosNino: bloqueosNinoDe(p, ctx, des.data),
+    mesesDescuadrados: descuadres.data,
   };
   return listo({ args, motivos: des.data });
 }

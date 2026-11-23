@@ -178,6 +178,41 @@ export function payloadAnioCalculo(filaId: string, r: RegistroModelo, avisosExtr
 }
 
 /**
+ * Registro de una fila de TIENDA cuya cifra es `escalada` (o lo era y ya no): lo que escribe el cálculo. La cifra escalada no es una decisión del
+ * planner sino el reparto del total decidido de la tienda (regla 23), y el cálculo la rehace con las propuestas nuevas; `meses` sale de esa cifra
+ * nueva. Escribir `meses` sin `decidido` (como hace `payloadAnioCalculo`) dejaba el total viejo con el reparto nuevo: `Σ meses ≠ decidido`.
+ *
+ * Escribe `decidido`, `origen` y `propuesta_al_decidir` con lo que salió del cálculo. La firma (`decidido_at`, `decidido_por_*`) y la `nota` solo se tocan
+ * si el registro no tenía decisión (se firma con la del total de la tienda) o si se suelta (todo a `null`, como pide la base). Nunca escribe las trazas de
+ * IA ni de lote (una escalada no las lleva).
+ */
+export function payloadAnioEscalada(
+  filaId: string,
+  r: RegistroModelo,
+  avisosExtra: AvisoFila[] = [],
+  teniaDecision: boolean
+): TablesInsert<"proyeccion_fila_anios"> {
+  const firma =
+    r.decidido === null
+      ? { decidido_at: null, decidido_por_id: null, decidido_por_nombre: null, nota: null }
+      : teniaDecision
+        ? {}
+        : { decidido_at: r.decidido_at, decidido_por_nombre: r.decidido_por_nombre };
+  return {
+    ...payloadAnioCalculo(filaId, r, avisosExtra),
+    decidido: r.decidido,
+    origen: r.decidido === null ? null : r.origen,
+    propuesta_al_decidir: r.decidido === null ? null : r.propuesta_al_decidir,
+    ...firma,
+  };
+}
+
+/** ¿El cálculo debe escribir la decisión de este registro (`payloadAnioEscalada`)? Solo filas de tienda cuya cifra es o era `escalada`. */
+export function esRegistroEscalado(tiendaId: string | null, r: Pick<RegistroModelo, "origen">, antes: { origen: string | null } | undefined): boolean {
+  return tiendaId !== null && (r.origen === "escalada" || antes?.origen === "escalada");
+}
+
+/**
  * Registro completo (con decisión) para las decisiones en vivo.
  *
  * `decisionIaFilaId` (07e, `decision_ia_fila_id`): `undefined` NO escribe la columna (conserva lo que había; la mayoría de los registros que se

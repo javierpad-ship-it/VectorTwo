@@ -146,6 +146,62 @@ export function filaBloqueaCierre(registro: { propuesto: number | null; decidido
   return registro.propuesto >= umbral ? "umbral" : null;
 }
 
+/** Lo que el invariante de meses mira de un registro por año (`proyeccion_fila_anios`). */
+export type RegistroConMeses = { anio: number; meses: readonly number[] | null | undefined; decidido: number | null; propuesto: number | null; vendido?: number | null };
+
+/**
+ * Invariante del reparto mensual (ficha 07, §6.5: «suma = total vigente»): un registro con `meses` cuya suma no es `coalesce(decidido, propuesto)`.
+ * Un registro sin `meses` (sin curva) no se mide. LA definición: la usan el cierre (`motivoRechazoCerrar`), la dirección y las pruebas; no hay otra copia.
+ */
+export function mesesDescuadrados(r: RegistroConMeses): boolean {
+  if (r.meses === null || r.meses === undefined) return false;
+  const vigente = r.decidido ?? r.propuesto;
+  if (vigente === null) return true;
+  return r.meses.reduce((a, b) => a + b, 0) !== Math.round(vigente);
+}
+
+/** Registros descuadrados de un año: cuántos, cuántos tienen un total menor que lo ya vendido (año en curso) y las unidades de diferencia (en valor absoluto). */
+export type DescuadreMesesAnio = { anio: number; filas: number; bajo_vendido: number; diferencia_u: number };
+
+/** Cuenta, por año, los registros activos con `mesesDescuadrados` (quien llama pasa solo los activos). Solo los años con alguno, en orden. Pura. */
+export function contarMesesDescuadrados(registros: Iterable<RegistroConMeses>, anioEnCurso: number): DescuadreMesesAnio[] {
+  const porAnio = new Map<number, DescuadreMesesAnio>();
+  for (const r of registros) {
+    if (!mesesDescuadrados(r)) continue;
+    const c = porAnio.get(r.anio) ?? { anio: r.anio, filas: 0, bajo_vendido: 0, diferencia_u: 0 };
+    const vigente = r.decidido ?? r.propuesto;
+    c.filas += 1;
+    c.diferencia_u += Math.abs((r.meses ?? []).reduce((a, b) => a + b, 0) - Math.round(vigente ?? 0));
+    if (r.anio === anioEnCurso && vigente !== null && r.vendido != null && vigente < r.vendido) c.bajo_vendido += 1;
+    porAnio.set(r.anio, c);
+  }
+  return [...porAnio.values()].sort((a, b) => a.anio - b.anio);
+}
+
+const entero = (n: number): string => n.toLocaleString("es-PE");
+const filas = (n: number): string => `${entero(n)} ${n === 1 ? "fila" : "filas"}`;
+
+/** «Hay 810 filas de 2026 y 1 023 de 2027 cuyos meses no suman su total…»: el mensaje de `meses_descuadrados`. */
+export function mensajeMesesDescuadrados(lista: readonly DescuadreMesesAnio[]): string {
+  const partes = lista.map((x, i) => (i === 0 ? `${filas(x.filas)} de ${x.anio}` : `${entero(x.filas)} de ${x.anio}`));
+  const cuales = partes.length <= 1 ? (partes[0] ?? "") : `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
+  const total = lista.reduce((s, x) => s + x.filas, 0);
+  const bajo = lista.reduce((s, x) => s + x.bajo_vendido, 0);
+  const base = `Hay ${cuales} cuyos meses no suman su total: recalcula la proyección para rehacer el reparto antes de cerrar (no se puede forzar).`;
+  if (bajo === 0) return base;
+  return `${base} ${total === 1 ? "Esa fila tiene" : bajo === 1 ? "Una de ellas tiene" : `${entero(bajo)} de ellas tienen`} un total menor que lo ya vendido: ${bajo === 1 ? "corrígelo" : "corrígelos"} en Por línea.`;
+}
+
+/** «8 de 2026 y 4 de 2027»: cuántos elementos hay de cada año (solo los años con alguno). */
+function porAnioTexto(anios: readonly number[]): { texto: string; unAnio: number | null } {
+  const cuenta = new Map<number, number>();
+  for (const a of anios) cuenta.set(a, (cuenta.get(a) ?? 0) + 1);
+  const orden = [...cuenta.entries()].sort((a, b) => a[0] - b[0]);
+  if (orden.length === 1) return { texto: `de ${orden[0][0]}`, unAnio: orden[0][0] };
+  const partes = orden.map(([a, n]) => `${entero(n)} de ${a}`);
+  return { texto: `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`, unAnio: null };
+}
+
 /**
  * `0.12.1` (06d §3.1): lo que falta aprobar para cerrar. `anio` es el año de aplicación (`Y+1`); `faltan` los GM de HOMBRE o MUJER con filas base sin
  * versión vigente y `resto_provisional` que se exige el Resto y no hay uno aprobado. `0.14.0` (06e R16): `reaprobar` las vigentes `bruta` de GM con Niño material.
@@ -310,6 +366,11 @@ export function motivoRechazoCerrar(args: {
    * temporada cambiados). Va después de `crecimientos_cambiados` y antes de `crecimientos_sin_aprobar`; NO se puede saltar con `forzar`.
    */
   bloqueosNino?: BloqueosNino;
+  /**
+   * Registros (base y de tienda) cuyos meses no suman su total, por año (`contarMesesDescuadrados`). Bloquean el cierre y NO se saltan con `forzar`: la
+   * cerrada es lo que leen Flujo y Compras mes a mes. Va después de `crecimientos_sin_aprobar` y antes de `filas_sin_decidir`. Ausente o vacío = no hay.
+   */
+  mesesDescuadrados?: readonly DescuadreMesesAnio[];
 }): ResultadoCerrar {
   if (args.estado === "cerrada") return { ok: false, rechazo: { status: 409, codigo: "ya_cerrada", mensaje: "La proyección ya está cerrada." } };
   if (args.estado === "archivada") return { ok: false, rechazo: { status: 409, codigo: "archivada", mensaje: MENSAJE_ARCHIVADA } };
@@ -346,6 +407,14 @@ export function motivoRechazoCerrar(args: {
       crecimientos_sin_aprobar: { faltan: sin.faltan, resto_provisional: sin.resto_provisional, ...(sin.reaprobar !== undefined ? { reaprobar: sin.reaprobar } : {}) },
     };
   }
+  const descuadres = (args.mesesDescuadrados ?? []).filter((x) => x.filas > 0);
+  if (descuadres.length > 0) {
+    return {
+      ok: false,
+      rechazo: { status: 409, codigo: "meses_descuadrados", mensaje: mensajeMesesDescuadrados(descuadres) },
+      detalle: { meses_descuadrados: descuadres.map((x) => ({ ...x })) },
+    };
+  }
   const umbral = args.umbralColaLarga ?? UMBRAL_COLA_LARGA;
 
   const sinDecidir: FilaSinDecidir[] = [];
@@ -373,7 +442,7 @@ export function motivoRechazoCerrar(args: {
           : `${porUmbral.length} con propuesta de ${umbral} unidades o más y ${porRevision.length} de cola larga con quiebres de stock, para revisión`;
     return {
       ok: false,
-      rechazo: { status: 409, codigo: "filas_sin_decidir", mensaje: `Faltan ${n} ${n === 1 ? "fila" : "filas"} por decidir (${detalle}).` },
+      rechazo: { status: 409, codigo: "filas_sin_decidir", mensaje: mensajeFilasSinDecidir(sinDecidir.map((f) => f.anio), detalle) },
       filas_sin_decidir: [...porUmbral.slice(0, MAX_FILAS_SIN_DECIDIR_LISTADAS), ...porRevision.slice(0, MAX_FILAS_SIN_DECIDIR_LISTADAS)],
       total_filas_sin_decidir: n,
       total_filas_para_revision: porRevision.length,
@@ -383,7 +452,7 @@ export function motivoRechazoCerrar(args: {
   if (tiendasSin.length > 0) {
     return {
       ok: false,
-      rechazo: { status: 409, codigo: "tiendas_sin_decidir", mensaje: `Faltan ${tiendasSin.length} ${tiendasSin.length === 1 ? "tienda nueva" : "tiendas nuevas"} por decidir.` },
+      rechazo: { status: 409, codigo: "tiendas_sin_decidir", mensaje: mensajeTiendasSinDecidir(tiendasSin.map((t) => t.anio)) },
       tiendas_sin_decidir: tiendasSin,
     };
   }
@@ -391,6 +460,23 @@ export function motivoRechazoCerrar(args: {
     return { ok: false, rechazo: { status: 409, codigo: "desactualizada", mensaje: "La proyección está desactualizada: recalcula, o ciérrala igual con «Cerrar de todos modos»." } };
   }
   return { ok: true, cola_larga: colaLarga };
+}
+
+/** «Faltan 12 filas por decidir: 8 de 2026 y 4 de 2027 (propuesta de 100 unidades o más).»; con un solo año, «Faltan 4 filas de 2027 por decidir (…).» */
+export function mensajeFilasSinDecidir(anios: readonly number[], detalle: string): string {
+  const n = anios.length;
+  const { texto, unAnio } = porAnioTexto(anios);
+  const verbo = n === 1 ? "Falta" : "Faltan";
+  return unAnio !== null ? `${verbo} ${filas(n)} ${texto} por decidir (${detalle}).` : `${verbo} ${filas(n)} por decidir: ${texto} (${detalle}).`;
+}
+
+/** «Faltan 3 tiendas nuevas por decidir: 1 de 2026 y 2 de 2027.»; con un solo año, «Falta 1 tienda nueva de 2027 por decidir.» */
+export function mensajeTiendasSinDecidir(anios: readonly number[]): string {
+  const n = anios.length;
+  const { texto, unAnio } = porAnioTexto(anios);
+  const cuantas = `${entero(n)} ${n === 1 ? "tienda nueva" : "tiendas nuevas"}`;
+  const verbo = n === 1 ? "Falta" : "Faltan";
+  return unAnio !== null ? `${verbo} ${cuantas} ${texto} por decidir.` : `${verbo} ${cuantas} por decidir: ${texto}.`;
 }
 
 /** Regla 38. Solo se elimina una proyección `en_trabajo` sin ninguna decisión; si no, se archiva. */

@@ -289,10 +289,11 @@ describe("cerrar: filas_sin_decidir legible y limitada", () => {
     const { id } = await nueva();
     const modelo = filasDe("proyeccion_filas").find((f) => f.tienda_id === null) as Fila;
     const anioModelo = filasDe("proyeccion_fila_anios").find((a) => a.fila_id === modelo.id && a.anio === 2027) as Fila;
+    // Sin `meses`: copiar el reparto de otra fila con otra propuesta descuadraría el registro y el cierre respondería antes `meses_descuadrados`.
     for (let i = 0; i < 60; i++) {
       const fid = `00000000-0000-4000-8000-0000000a${String(i).padStart(4, "0")}`;
       filasDe("proyeccion_filas").push({ ...modelo, id: fid, clave: `|${N.denim}||extra-${i}` });
-      filasDe("proyeccion_fila_anios").push({ ...anioModelo, id: `00000000-0000-4000-8000-0000000b${String(i).padStart(4, "0")}`, fila_id: fid, anio: 2027, propuesto: 500 + i, decidido: null });
+      filasDe("proyeccion_fila_anios").push({ ...anioModelo, id: `00000000-0000-4000-8000-0000000b${String(i).padStart(4, "0")}`, fila_id: fid, anio: 2027, propuesto: 500 + i, decidido: null, meses: null });
     }
     const c = await leer(await cerrar(enviar("POST", "/x", {}), ctx(id as string)));
     expect((c.filas_sin_decidir as unknown[]).length).toBe(50);
