@@ -375,12 +375,22 @@ export function tiendasDeBloques(b: BloquesApi, anio: number): { bloque: "mismas
 
 export type LecturaNumero = { ok: true; valor: number } | { ok: false; motivo: string };
 
-/** Entero no negativo. Acepta espacios y comas de miles bien puestas (`17,504`); rechaza decimales. */
-export function leerEntero(texto: string): LecturaNumero {
+/** ¿El texto es un número negativo (`-5`, `- 5`, `-0.5`, `−5` con el signo tipográfico)? Para decir «no puede ser negativo» y no «sin decimales». */
+export function esNumeroNegativo(texto: string): boolean {
+  return /^[-−]\s*\d+([.,]\d+)*$/.test(texto.trim());
+}
+
+/**
+ * Entero no negativo. Acepta espacios y comas de miles bien puestas (`17,504`); rechaza decimales. `que` nombra el campo en el
+ * mensaje («El total», «El umbral de cola larga»…). Un negativo dice que no puede ser negativo; un decimal, que va sin decimales.
+ */
+export function leerEntero(texto: string, que = "El total"): LecturaNumero {
   const t = texto.trim().replace(/\s+/g, "");
   if (t === "") return { ok: false, motivo: "Escribe un número." };
+  if (esNumeroNegativo(t)) return { ok: false, motivo: `${que} no puede ser negativo.` };
   const limpio = /^\d{1,3}(,\d{3})+$/.test(t) ? t.replace(/,/g, "") : t;
-  if (!/^\d+$/.test(limpio)) return { ok: false, motivo: "El total debe ser un número entero, sin decimales." };
+  if (/^\d+[.,]\d+$/.test(limpio)) return { ok: false, motivo: `${que} debe ser un número entero, sin decimales.` };
+  if (!/^\d+$/.test(limpio)) return { ok: false, motivo: `${que} debe ser un número entero.` };
   const n = Number(limpio);
   if (!Number.isSafeInteger(n)) return { ok: false, motivo: "El número es demasiado grande." };
   return { ok: true, valor: n };
@@ -401,6 +411,7 @@ export function leerPorcentaje(texto: string): LecturaNumero {
 export function leerFactor(texto: string): { ok: true; valor: number | null } | { ok: false; motivo: string } {
   const t = texto.trim().replace(",", ".");
   if (t === "") return { ok: true, valor: null };
+  if (esNumeroNegativo(t)) return { ok: false, motivo: `El factor no puede ser negativo: debe ser mayor que ${RATIO_MIN}.` };
   if (!/^\d+(\.\d+)?$/.test(t)) return { ok: false, motivo: "El factor debe ser un número." };
   const n = Number(t);
   if (n <= RATIO_MIN) return { ok: false, motivo: `El factor debe ser mayor que ${RATIO_MIN}.` };
@@ -413,6 +424,7 @@ export function leerRampa(textos: readonly string[]): { ok: true; valor: number[
   const valores: number[] = [];
   for (const t of textos.map((x) => x.trim().replace(",", "."))) {
     if (t === "") continue;
+    if (esNumeroNegativo(t)) return { ok: false, motivo: "Un valor de la rampa no puede ser negativo: cada valor debe ser mayor que 0." };
     if (!/^\d+(\.\d+)?$/.test(t)) return { ok: false, motivo: "Cada valor de la rampa debe ser un número." };
     const n = Number(t);
     if (n <= 0) return { ok: false, motivo: "Cada valor de la rampa debe ser mayor que 0." };
@@ -840,6 +852,7 @@ export function esParaRevision(f: Pick<FilaApi, "avisos" | "anios">): boolean {
 export function leerUmbralDisponibilidad(texto: string): LecturaNumero {
   const t = texto.trim().replace(",", ".");
   if (t === "") return { ok: false, motivo: "Escribe el umbral de disponibilidad (entre 0 y 1)." };
+  if (esNumeroNegativo(t)) return { ok: false, motivo: "El umbral de disponibilidad no puede ser negativo: debe estar entre 0 y 1." };
   if (!/^\d+(\.\d+)?$/.test(t)) return { ok: false, motivo: "El umbral de disponibilidad debe ser un número." };
   const n = Number(t);
   if (n > 1) return { ok: false, motivo: "El umbral de disponibilidad debe estar entre 0 y 1." };

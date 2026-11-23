@@ -306,6 +306,15 @@ export const AYUDA_MARCA = "Lo proyectado por marca es estimado con su participa
 
 export type GrupoTiendas = { clave: SituacionTienda | "todas"; titulo: string; items: { id: string; label: string; title: string }[] };
 
+/**
+ * El bloque entero que corresponde a un grupo del filtro de tiendas, o `null`. El título del grupo («Mismas tiendas 2027») no es una opción: para
+ * filtrar por todas sus tiendas a la vez está el filtro «Bloque de tiendas» (un grupo grande no cabe en las 30 tiendas que se pueden elegir). Solo
+ * «mismas» y «cierres» coinciden 1:1 con un bloque; las abiertas del año en curso y las aperturas forman juntas el bloque «nuevas».
+ */
+export function bloqueDeGrupo(clave: GrupoTiendas["clave"]): Exclude<Bloque, "todas"> | null {
+  return clave === "mismas" ? "mismas" : clave === "cierres" ? "cierres" : null;
+}
+
 const ORDEN_SITUACION: readonly SituacionTienda[] = ["mismas", "nuevas_anterior", "aperturas", "cierres", "fuera"];
 
 /** Las tiendas del filtro agrupadas por su situación en el año siguiente (§4.7), según lo guardado en la proyección mostrada. */

@@ -203,6 +203,9 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
     await recargarTodo();
   }
 
+  /** Un modal cerrado con «Cerrar» mientras su operación seguía en el servidor avisa aquí si al final falló (el error no se traga). */
+  const falloTrasCerrar = (mensaje: string) => accion.setError({ mensaje, codigo: null });
+
   async function guardada(p: ProyeccionApi, mensaje: string) {
     setAviso(mensaje);
     await estado.recargar();
@@ -381,6 +384,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
           perfiles={perfiles}
           copiarDeInicial={dialogo.copiarDe}
           onCerrar={() => setDialogo(null)}
+          onFalloTrasCerrar={falloTrasCerrar}
           onGuardada={(p) => guardada(p, `«${p.nombre}» creada y calculada.`)}
         />
       )}
@@ -391,6 +395,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
           bloques={proyeccion.bloques}
           perfiles={perfiles}
           onCerrar={() => setDialogo(null)}
+          onFalloTrasCerrar={falloTrasCerrar}
           onIrACrecimientos={() => cambiarPestana("crecimientos")}
           onGuardada={async (p) => {
             setAviso("Parámetros guardados. Recalcula para que las cifras los usen.");
@@ -403,6 +408,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
         <ArchivarModal
           proyeccion={proyeccion}
           onCerrar={() => setDialogo(null)}
+          onFalloTrasCerrar={falloTrasCerrar}
           onArchivada={async (p) => {
             setAviso(`«${p.nombre}» quedó archivada. El año ${p.anio_en_curso} no tiene proyección cerrada.`);
             await recargarTodo();
@@ -413,6 +419,7 @@ export function ProyeccionPanel({ esAdmin = false }: { esAdmin?: boolean } = {})
         <CerrarModal
           proyeccion={proyeccion}
           onCerrar={() => setDialogo(null)}
+          onFalloTrasCerrar={falloTrasCerrar}
           onCerrada={async (p) => {
             setAviso(`«${p.nombre}» quedó cerrada. Es solo lectura: M8 la leerá como único insumo de volumen.`);
             await recargarTodo();

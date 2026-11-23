@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { AYUDA_CERRAR_EN_CURSO, etiquetaBotonSecundario, textoOperacionEnCurso, type OperacionLarga } from "./operacion-larga-vista";
 import type { AvisoFila, EstadoLinea, ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import type { ErrorAccion } from "./use-proyeccion";
 import { accionParaCodigo, ETIQUETA_ACCION, ETIQUETA_ESTADO_LINEA, textoAviso, TONO_ESTADO_LINEA, tonoAviso } from "./vista";
@@ -92,3 +94,19 @@ export function BotonEnlace({ onClick, children, disabled }: { onClick: () => vo
 
 /** Celda numérica alineada a la derecha con cifras de ancho fijo. */
 export const NUM = "text-right font-mono tabular-nums";
+
+/**
+ * Pie de un modal con una operación larga que el servidor no deja cancelar: mientras corre, el texto dice qué hace, cuánto lleva y que
+ * cerrar la ventana no la cancela; el botón secundario pasa de «Cancelar» a «Cerrar» (habilitado: solo cierra la ventana).
+ */
+export function TextoOperacionEnCurso({ operacion, segundos }: { operacion: OperacionLarga; segundos: number }) {
+  return <span className="mr-auto max-w-md text-sm text-tinta-suave">{textoOperacionEnCurso(operacion, segundos)}</span>;
+}
+
+export function BotonCancelarOCerrar({ enCurso, onCancelar, onCerrarEnCurso }: { enCurso: boolean; onCancelar: () => void; onCerrarEnCurso: () => void }) {
+  return (
+    <Button variante="fantasma" onClick={enCurso ? onCerrarEnCurso : onCancelar} title={enCurso ? AYUDA_CERRAR_EN_CURSO : undefined} aria-label={enCurso ? `Cerrar. ${AYUDA_CERRAR_EN_CURSO}` : undefined}>
+      {etiquetaBotonSecundario(enCurso)}
+    </Button>
+  );
+}

@@ -9,7 +9,7 @@ import { ChipsMultiples, type ChipMultipleItem } from "@/components/ui/chips-mul
 import { Input, Select } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { BLOQUES_TABLERO, MAX_AGRUPACIONES, MAX_GENEROS, MAX_TIENDAS, TEMPORADAS_TABLERO, type Bloque, type OpcionesTableroApi, type TableroApi, type TemporadaTablero } from "@/lib/direccion/tipos-api";
-import { admiteLinea, AYUDA_MARCA, cuentaFiltros, ETIQUETA_BLOQUE, ETIQUETA_TEMPORADA, gruposDeTiendas, type FiltrosVista } from "./vista-tablero";
+import { admiteLinea, AYUDA_MARCA, bloqueDeGrupo, cuentaFiltros, ETIQUETA_BLOQUE, ETIQUETA_TEMPORADA, gruposDeTiendas, type FiltrosVista } from "./vista-tablero";
 
 function Grupo({ titulo, ayuda, children }: { titulo: string; ayuda?: string; children: ReactNode }) {
   return (
@@ -158,9 +158,24 @@ export function ControlesFiltros({ filtros, opciones, tablero, onCambiar }: Prop
           <div className="space-y-2">
             {gruposTiendas.map((g) => {
               const ids = new Set(g.items.map((i) => i.id));
+              const bloqueGrupo = bloqueDeGrupo(g.clave);
+              const bloqueActivo = bloqueGrupo !== null && filtros.bloque === bloqueGrupo && filtros.tiendas.length === 0;
               return (
                 <div key={g.clave}>
-                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-tinta-suave">{g.titulo}</p>
+                  <p className="mb-1 flex flex-wrap items-baseline gap-x-2 text-xs">
+                    <span className="font-medium uppercase tracking-wide text-tinta-suave">{g.titulo}</span>
+                    {/* El título no es una opción: el grupo entero se elige como bloque (un grupo grande no cabe en las 30 tiendas). */}
+                    {bloqueGrupo !== null && (
+                      <button
+                        type="button"
+                        aria-pressed={bloqueActivo}
+                        onClick={() => onCambiar({ bloque: bloqueGrupo, tiendas: [] })}
+                        className="font-medium text-marca-oscura underline underline-offset-2 hover:text-marca"
+                      >
+                        {bloqueActivo ? "Viendo el bloque entero" : "Ver el bloque entero"}
+                      </button>
+                    )}
+                  </p>
                   <ChipsMultiples
                     etiqueta={g.titulo}
                     items={conTope(g.items, filtros.tiendas, MAX_TIENDAS, "tiendas")}

@@ -38,6 +38,7 @@ import {
   textoPendientesCierre,
   textoReaprobables,
   type GrupoGm,
+  leerBrechaMax,
   type ParametrosAprobacion,
 } from "./aprobacion-vista";
 import { ESTADO_GM } from "./propuesta-ia-vista";
@@ -74,7 +75,7 @@ export function CabeceraAprobacion({
   onIrATiendas: () => void;
 }) {
   const reaprobar = datos.modo === "reaprobar";
-  const ia = textoIaCabecera(datos.ia, datos.gms.length);
+  const ia = textoIaCabecera(datos.ia, datos.gms.length, anioEnCurso + 1);
   const totalReaprobables = datos.reaprobables.y + datos.reaprobables.y1;
   const cuenta = (a: number) => (reaprobar ? (a === anioEnCurso ? datos.reaprobables.y : datos.reaprobables.y1) : a === anioEnCurso ? datos.pendientes_cierre.filas_y : datos.pendientes_cierre.filas_y1);
   const acciones: Record<string, () => void> = { recalcular: onRecalcular, factores: onIrAFactores, crecimientos: onIrACrecimientos };
@@ -249,7 +250,7 @@ function FiltrosAprobacion({
               min={0}
               step={1}
               value={parametros.brechaMaxPct ?? ""}
-              onChange={(e) => onParametros({ brechaMaxPct: e.target.value === "" || !Number.isFinite(Number(e.target.value)) ? null : Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => onParametros({ brechaMaxPct: leerBrechaMax(e.target.value) })}
             />
           </Field>
         </div>

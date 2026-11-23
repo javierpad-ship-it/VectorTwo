@@ -5,22 +5,44 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import type { ProyeccionApi } from "@/lib/proyeccion/tipos-api";
-import { AlertaError } from "./comunes";
-import { rutaProyeccion, useAccion } from "./use-proyeccion";
+import { AlertaError, BotonCancelarOCerrar, TextoOperacionEnCurso } from "./comunes";
+import { textoFalloTrasCerrar } from "./operacion-larga-vista";
+import { rutaProyeccion, useAccion, useOperacionLarga } from "./use-proyeccion";
 
 /**
  * Archivar una proyección CERRADA. Es la única cerrada de su año (el servidor garantiza una sola), así que archivarla deja
  * al año sin proyección cerrada y al flujo de mercadería (M8) sin datos de volumen. Solo tras confirmar aquí se manda
  * `confirmar_sin_cerrada: true`; sin él, el servidor responde `409 ultima_cerrada`.
  */
-export function ArchivarModal({ proyeccion, onCerrar, onArchivada }: { proyeccion: ProyeccionApi; onCerrar: () => void; onArchivada: (p: ProyeccionApi) => Promise<void> | void }) {
+export function ArchivarModal({
+  proyeccion,
+  onCerrar,
+  onArchivada,
+  onFalloTrasCerrar,
+}: {
+  proyeccion: ProyeccionApi;
+  onCerrar: () => void;
+  onArchivada: (p: ProyeccionApi) => Promise<void> | void;
+  /** Si el archivado falla después de cerrar la ventana con «Cerrar», el error va al panel. */
+  onFalloTrasCerrar?: (mensaje: string) => void;
+}) {
   const accion = useAccion();
+  const operacionLarga = useOperacionLarga(accion.ocupado);
   const y = proyeccion.anio_en_curso;
 
   async function archivar() {
+    operacionLarga.empezar();
     const r = await accion.ejecutar(() => api.post<ProyeccionApi>(`${rutaProyeccion(proyeccion.id)}/archivar`, { confirmar_sin_cerrada: true }));
-    if (!r.ok) return;
+    if (!r.ok) {
+      if (operacionLarga.seCerro()) onFalloTrasCerrar?.(textoFalloTrasCerrar("archivar", r.error.mensaje));
+      return;
+    }
     await onArchivada(r.valor);
+    if (!operacionLarga.seCerro()) onCerrar();
+  }
+
+  function cerrarEnCurso() {
+    operacionLarga.cerrarEnCurso();
     onCerrar();
   }
 
@@ -32,9 +54,8 @@ export function ArchivarModal({ proyeccion, onCerrar, onArchivada }: { proyeccio
       ancho="max-w-lg"
       pie={
         <>
-          <Button variante="fantasma" disabled={accion.ocupado} onClick={onCerrar}>
-            Cancelar
-          </Button>
+          {accion.ocupado && <TextoOperacionEnCurso operacion="archivar" segundos={operacionLarga.segundos} />}
+          <BotonCancelarOCerrar enCurso={accion.ocupado} onCancelar={onCerrar} onCerrarEnCurso={cerrarEnCurso} />
           <Button variante="peligro" disabled={accion.ocupado} onClick={() => void archivar()}>
             {accion.ocupado ? "Archivando…" : `Archivar y dejar ${y} sin proyección cerrada`}
           </Button>

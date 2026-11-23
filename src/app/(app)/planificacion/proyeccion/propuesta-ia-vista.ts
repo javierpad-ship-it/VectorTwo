@@ -88,10 +88,16 @@ export const nombreGm = (g: { genero: string; mundo: string }): string => `${g.g
 
 // ─── Cabecera de servicio ───
 
-/** El motivo por el que la IA no se ofrece, con qué hacer (§4.1). `null` si el servicio está disponible. */
-export function textoServicioApagado(s: ServicioIaApi): string | null {
-  if (s.disponible) return null;
-  switch (s.motivo) {
+/** Lo que se dice de un motivo que la pantalla no conoce: nunca el código interno. */
+export const TEXTO_IA_NO_DISPONIBLE = "La IA no está disponible.";
+
+/**
+ * El texto de un motivo de «IA apagada», con qué hacer (§4.1). Acepta cualquier código que mande el servidor (los de `MotivoServicioIa` y
+ * además `capacidad_apagada`, `ia_no_disponible`…): ningún código interno llega a la pantalla; uno desconocido da el texto genérico. Con el
+ * servicio a mano (`s`) algunos textos dan el detalle (gasto del mes, fecha de la evaluación).
+ */
+export function textoMotivoIa(motivo: string | null | undefined, s?: Pick<ServicioIaApi, "evaluacion" | "gasto_mes_usd" | "tope_usd_mes">): string {
+  switch (motivo) {
     case "sin_clave":
       return "Falta la clave del proveedor en el servidor (Railway). Hasta que el administrador la ponga, no se puede generar.";
     case "sin_proveedor":
@@ -101,20 +107,29 @@ export function textoServicioApagado(s: ServicioIaApi): string | null {
     case "sin_configuracion":
       return "Todavía no hay una configuración de IA aprobada. El administrador debe evaluar un modelo y guardarla en Administración → Motor de IA.";
     case "sin_capacidades": {
-      const v = s.evaluacion?.veredicto.distribucion_y1;
-      if (s.evaluacion && v === "no_gana") return `Sin evaluación ganadora: en la evaluación del ${fechaCorta(s.evaluacion.fecha)} la IA no superó al mejor rival (el método actual o la regla de tendencia).`;
+      const v = s?.evaluacion?.veredicto.distribucion_y1;
+      if (s?.evaluacion && v === "no_gana") return `Sin evaluación ganadora: en la evaluación del ${fechaCorta(s.evaluacion.fecha)} la IA no superó al mejor rival (el método actual o la regla de tendencia).`;
       return "Apagada por el administrador: la configuración vigente no tiene ninguna capacidad encendida.";
     }
+    case "capacidad_apagada":
+      return "La propuesta de IA para la distribución de la meta está apagada en la configuración vigente. El administrador puede encenderla en Administración → Motor de IA.";
     case "clave_invalida":
       return "El proveedor rechazó la clave del servidor. El administrador debe revisar la variable secreta en Railway.";
     case "tope_mensual":
+      if (!s) return "Se alcanzó el tope de gasto del mes. Se libera el mes siguiente o cuando el administrador suba el tope.";
       return `Se alcanzó el tope de gasto del mes (${usd(s.gasto_mes_usd)} de ${s.tope_usd_mes === null ? "—" : formatearDecimal(s.tope_usd_mes, 2)}). Se libera el mes siguiente o cuando el administrador suba el tope.`;
     case "proveedor_distinto":
     case "modelo_no_permitido":
       return "La configuración vigente es de otro proveedor o de un modelo no permitido: el administrador debe evaluar y guardar una nueva.";
     default:
-      return "La IA no está disponible.";
+      return TEXTO_IA_NO_DISPONIBLE;
   }
+}
+
+/** El motivo por el que la IA no se ofrece, con qué hacer (§4.1). `null` si el servicio está disponible. */
+export function textoServicioApagado(s: ServicioIaApi): string | null {
+  if (s.disponible) return null;
+  return textoMotivoIa(s.motivo, s);
 }
 
 /** «IA encendida · OpenAI · modelo … · prompt v1 · meta 2027 · evaluada el 02/11 · gasto del mes US$ 3.20 de 60 · hoy US$ 0.40 de 15». */

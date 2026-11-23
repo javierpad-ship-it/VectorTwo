@@ -10,6 +10,7 @@ import { CeldaCrecimiento, CeldaDecision, type DecisionFila } from "./celda-deci
 import { aceptarIaDe, CeldasIa, CeldasTotalIa, COLUMNAS_IA, EncabezadosIa, PorQueIa, textoPieIa, tieneExplicacionIa, totalesIa } from "./columnas-ia";
 import { Avisos, BotonEnlace, NUM } from "./comunes";
 import { basesDeLinea, esBruto, textoPieCrecimientoLinea } from "./crecimientos-vista";
+import type { CampoCelda, EstadoGuardadoCelda } from "./guardado-celda-vista";
 import {
   aniosHistoricos,
   avisosDeFila,
@@ -89,6 +90,7 @@ export function TablaFilas({
   verIa,
   iaFilas,
   onAceptarIa,
+  estadoCelda,
 }: {
   filas: readonly FilaApi[];
   lineas: Pick<RespuestaLineasApi, "filas" | "historico_linea" | "totales_por_anio" | "filas_tienda">;
@@ -112,6 +114,8 @@ export function TablaFilas({
   iaFilas?: ReadonlyMap<string, IaFilaApi>;
   /** «Aceptar IA» de una fila de `Y+1` con la cifra que se vio. */
   onAceptarIa?: (fila: FilaApi, ia: IaFilaApi) => Promise<boolean>;
+  /** Estado del último guardado de cada celda («Guardando…», «Guardado», el error), que se pinta junto al campo. Sin él, la tabla no lo muestra. */
+  estadoCelda?: (filaId: string, anio: number, campo: CampoCelda) => EstadoGuardadoCelda | null;
 }) {
   const y = anioEnCurso;
   const conIa = verIa === true;
@@ -243,6 +247,7 @@ export function TablaFilas({
                         ocupado={ocupado}
                         etiqueta={`${nombre}, decidido ${y}`}
                         onDecidir={(d) => onDecidir(f, y, d)}
+                        estado={estadoCelda?.(f.id, y, "decidido")}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -255,6 +260,7 @@ export function TablaFilas({
                         ocupado={ocupado}
                         etiqueta={`${nombre}, crecimiento ${y + 1}`}
                         onDecidir={(d) => onDecidir(f, y + 1, d)}
+                        estado={estadoCelda?.(f.id, y + 1, "crecimiento")}
                       />
                       {esBruto(rS?.crecimiento_efectivo) && gmReaprobar?.includes(rS?.crecimiento_efectivo?.celda ?? "") && (
                         <span className="mt-0.5 block text-right" title="Esta versión se aprobó sobre el año real antes de 0.14.0 y el GM tuvo Niño: hay que reaprobarla para cerrar">
@@ -274,6 +280,7 @@ export function TablaFilas({
                         ocupado={ocupado}
                         etiqueta={`${nombre}, decidido ${y + 1}`}
                         onDecidir={(d) => onDecidir(f, y + 1, d)}
+                        estado={estadoCelda?.(f.id, y + 1, "decidido")}
                         aceptarIa={iaF && onAceptarIa ? aceptarIaDe(iaF, () => onAceptarIa(f, iaF)) : undefined}
                       />
                     </td>
@@ -337,6 +344,7 @@ export function TablaFilas({
                       etiqueta={`${x.nombre}, ${s.codigo} decidido ${s.anio}`}
                       notaCambio={(nueva) => notaMoverTienda({ vigenteFila: vigente, nueva, total: s.total_tienda })}
                       onDecidir={(d) => onDecidir(fila, s.anio, d)}
+                      estado={estadoCelda?.(fila.id, s.anio, "decidido")}
                     />
                   );
                   const sinDato = (n: number) => (

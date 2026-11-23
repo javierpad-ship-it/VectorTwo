@@ -10,8 +10,11 @@ import { mensajeError } from "@/lib/formato";
  * no lee nada. Los datos de OTRA url nunca se muestran (al cambiar de línea no se ve la anterior); al recargar la
  * misma url se conservan mientras llega la nueva, así la pantalla no parpadea al decidir. Con `conservarAnterior`, al
  * cambiar de url (un filtro) se sigue mostrando lo último leído hasta que llegue lo nuevo (`cargando` indica que se relee).
+ *
+ * Con `plazoMs`, una lectura que no responde en ese tiempo se da por fallida (`codigo = "plazo_agotado"`): `cargando` vuelve a `false` y
+ * la pantalla muestra el error con «Reintentar» en vez de «Leyendo…» para siempre. La respuesta tardía, si llega, se descarta.
  */
-export function useLectura<T>(url: string | null, conservarAnterior = false) {
+export function useLectura<T>(url: string | null, conservarAnterior = false, plazoMs: number | null = null) {
   const [guardado, setGuardado] = useState<{ url: string; datos: T } | null>(null);
   const [leidoDe, setLeidoDe] = useState<string | null>(null);
   const [fallo, setFallo] = useState<{ url: string; mensaje: string; codigo: string | null } | null>(null);
@@ -20,8 +23,8 @@ export function useLectura<T>(url: string | null, conservarAnterior = false) {
   const pedir = useCallback(() => {
     if (url === null) return Promise.resolve();
     const numero = ++secuencia.current;
-    return api
-      .get<T>(url)
+    const lectura = api.get<T>(url);
+    return (plazoMs === null ? lectura : conPlazo(lectura, plazoMs))
       .then((d) => {
         if (numero !== secuencia.current) return;
         setGuardado({ url, datos: d });
@@ -35,7 +38,7 @@ export function useLectura<T>(url: string | null, conservarAnterior = false) {
         if (numero !== secuencia.current) return;
         setLeidoDe(url);
       });
-  }, [url]);
+  }, [url, plazoMs]);
 
   useEffect(() => {
     void pedir();
@@ -51,6 +54,24 @@ export function useLectura<T>(url: string | null, conservarAnterior = false) {
   const codigo = url !== null && fallo?.url === url ? fallo.codigo : null;
   const setError = useCallback((m: string | null) => setFallo(m === null ? null : { url: url ?? "", mensaje: m, codigo: null }), [url]);
   return { datos, cargando, error, codigo, setError, recargar };
+}
+
+/** Código del error que da `conPlazo` cuando una lectura no responde a tiempo. */
+export const CODIGO_PLAZO_AGOTADO = "plazo_agotado";
+export const MENSAJE_PLAZO_AGOTADO = "El servidor tardó demasiado en responder y se dejó de esperar.";
+
+/**
+ * Una lectura con límite de tiempo: si `promesa` no termina en `ms`, se rechaza con `ErrorApi(…, 0, "plazo_agotado")`. El temporizador se
+ * limpia siempre. `api.get` no admite `AbortSignal`, así que la petición de red no se corta: su respuesta tardía se ignora (la promesa ya
+ * quedó resuelta) y `useLectura` además la descarta por número de secuencia. SOLO para lecturas: una escritura con plazo dejaría la duda de
+ * si se guardó (ver `src/lib/api/plazos.ts`).
+ */
+export function conPlazo<T>(promesa: Promise<T>, ms: number, mensaje = MENSAJE_PLAZO_AGOTADO): Promise<T> {
+  let temporizador: ReturnType<typeof setTimeout> | undefined;
+  const limite = new Promise<never>((_, rechazar) => {
+    temporizador = setTimeout(() => rechazar(new ErrorApi(mensaje, 0, CODIGO_PLAZO_AGOTADO)), ms);
+  });
+  return Promise.race([promesa, limite]).finally(() => clearTimeout(temporizador));
 }
 
 /** `detalle` = el cuerpo de la respuesta de error (las listas de algunos `409`). */
@@ -83,6 +104,37 @@ export function useAccion() {
 
   const limpiar = useCallback(() => setError(null), []);
   return { ocupado, error, ejecutar, limpiar, setError };
+}
+
+/**
+ * Cronómetro y «se cerró la ventana» de una operación larga de un modal (ver `operacion-larga-vista.ts`). `empezar()` se llama en el
+ * manejador antes de enviar; `segundos` cuenta mientras `activo`. `cerrarEnCurso()` marca que el usuario cerró la ventana con la operación
+ * corriendo: al terminar, el modal ya no debe llamar a `onCerrar` (podría cerrar otro diálogo) y un error debe ir al panel.
+ */
+export function useOperacionLarga(activo: boolean) {
+  const [inicio, setInicio] = useState<number | null>(null);
+  const [ahora, setAhora] = useState(0);
+  const cerrada = useRef(false);
+
+  useEffect(() => {
+    if (!activo) return;
+    const t = setInterval(() => setAhora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [activo]);
+
+  const empezar = useCallback(() => {
+    cerrada.current = false;
+    const n = Date.now();
+    setInicio(n);
+    setAhora(n);
+  }, []);
+  const cerrarEnCurso = useCallback(() => {
+    cerrada.current = true;
+  }, []);
+  const seCerro = useCallback(() => cerrada.current, []);
+
+  const segundos = activo && inicio !== null ? Math.max(0, Math.floor((ahora - inicio) / 1000)) : 0;
+  return { segundos, empezar, cerrarEnCurso, seCerro };
 }
 
 /** Repite `recargar` cada `cadaMs` mientras `activo` (para ver terminar un cálculo que arrancó otra sesión). */

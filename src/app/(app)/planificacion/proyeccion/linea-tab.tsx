@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api-client";
+import { api, codigoDeError, ErrorApi } from "@/lib/api-client";
 import { descargarCsv } from "@/components/importador/csv";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -10,21 +10,35 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, Input } from "@/components/ui/form";
 import { Switch } from "@/components/ui/switch";
-import { formatearNumero, plural } from "@/lib/formato";
+import { formatearNumero, mensajeError, plural } from "@/lib/formato";
 import type { IaFilaApi } from "@/lib/ia/tipos-api";
 import type { FilaApi, FilaTiendaLineaApi, IndiceLineaApi, ProyeccionApi, RespuestaDecidirFilaApi, RespuestaLineasApi } from "@/lib/proyeccion/tipos-api";
 import type { DecisionFila } from "./celda-decision";
 import { textoAjusteMeta, textoCifraCambio } from "./columnas-ia";
 import { rutaAprobacion } from "./aprobacion-vista";
 import { AlertaError, BadgeEstadoLinea, BotonEnlace, Cargando } from "./comunes";
+import {
+  campoDeDecision,
+  claveCelda,
+  ColaEnvios,
+  conEstadoCelda,
+  MS_GUARDADO_VISIBLE,
+  PLAZO_LECTURA_LINEA_MS,
+  RecargaAgrupada,
+  textoFalloLectura,
+  TurnosCelda,
+  type CampoCelda,
+  type EstadoGuardadoCelda,
+} from "./guardado-celda-vista";
 import { DetalleFila } from "./detalle-fila";
 import { SelectoresLinea } from "./filtros-vista";
 import { GraficoBarras } from "./grafico-barras";
 import { GraficoMarcas } from "./grafico-marcas";
 import { TablaFilas } from "./tabla-filas";
 import { aceptarIaFila, useIaFilas } from "./use-ia-filas";
-import { rutaProyeccion, useAccion, useLectura } from "./use-proyeccion";
+import { rutaProyeccion, useAccion, useLectura, type ErrorAccion } from "./use-proyeccion";
 import {
+  accionParaCodigo,
   cabeceraCsvLinea,
   construirBarras,
   ETIQUETA_ESTADO_LINEA,
@@ -95,7 +109,8 @@ export function LineaTab({
   const { anterior, siguiente } = useMemo(() => vecinas(visibles, elegida), [visibles, elegida]);
 
   const url = elegida ? `${ruta}/lineas?${filtroAQuery(filtro, ["genero", "mundo", "linea"]).toString()}` : null;
-  const lineas = useLectura<RespuestaLineasApi>(url);
+  // Con plazo: una lectura colgada no deja «Leyendo la línea…» para siempre; pasa a error con «Reintentar».
+  const lineas = useLectura<RespuestaLineasApi>(url, false, PLAZO_LECTURA_LINEA_MS);
   const datos = lineas.datos;
   // Lectura aparte de la IA (D15): sin propuesta vigente o con la IA apagada no trae filas y Por línea queda como siempre; si falla, un aviso que no bloquea.
   const urlIa = elegida ? `${ruta}/ia/filas?${new URLSearchParams({ genero_id: elegida.genero_id, mundo_id: elegida.mundo_id, linea_id: elegida.linea_id }).toString()}` : null;
@@ -127,6 +142,47 @@ export function LineaTab({
     await Promise.all([lineas.recargar(), onCambio(), iaFilas.recargar()]);
   }
 
+  // ─── Guardado sin bloqueo (fijar una cifra) ───
+  // En cuanto el servidor responde 200 la celda dice «Guardado» y el control vuelve; la línea se relee en segundo plano. Los guardados van de
+  // uno en uno (`ColaEnvios`), solo el último envío de cada celda cambia su estado (`TurnosCelda`) y las relecturas no se solapan
+  // (`RecargaAgrupada`); las respuestas viejas de lectura las descarta `useLectura` por número de secuencia.
+  const [estados, setEstados] = useState<ReadonlyMap<string, EstadoGuardadoCelda>>(() => new Map());
+  const [avisoRecarga, setAvisoRecarga] = useState<string | null>(null);
+  const [turnos] = useState(() => new TurnosCelda());
+  const [cola] = useState(() => new ColaEnvios());
+  const [recarga] = useState(() => new RecargaAgrupada());
+  const temporizadores = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const ts = temporizadores.current;
+    return () => {
+      for (const t of ts) clearTimeout(t);
+      ts.clear();
+    };
+  }, []);
+
+  const estadoCelda = useCallback((filaId: string, anio: number, campo: CampoCelda) => estados.get(claveCelda(filaId, anio, campo)) ?? null, [estados]);
+
+  // «Reintentar» tras un fallo de lectura: mientras se relee, se dice (el `cargando` de `useLectura` ya no lo marca porque esa url ya se leyó).
+  const [reintentando, setReintentando] = useState(false);
+  function reintentarLectura() {
+    setReintentando(true);
+    void lineas.recargar().finally(() => setReintentando(false));
+  }
+
+  function recargarEnSegundoPlano() {
+    setAvisoRecarga(null);
+    recarga.pedir(recargarTodo, (e) => setAvisoRecarga(`Se guardó, pero no se pudo actualizar la pantalla: ${mensajeError(e)}`));
+  }
+
+  function marcarGuardado(clave: string, turno: number) {
+    setEstados((m) => conEstadoCelda(m, clave, { tipo: "guardado" }));
+    const t = setTimeout(() => {
+      temporizadores.current.delete(t);
+      if (turnos.vigente(clave, turno)) setEstados((m) => conEstadoCelda(m, clave, null));
+    }, MS_GUARDADO_VISIBLE);
+    temporizadores.current.add(t);
+  }
+
   /** «Aceptar IA» de una fila de Y+1 con la cifra que se vio. Con `409 ia_valor_cambio` no hay error rojo: se avisa de la cifra nueva y se releen las columnas. */
   async function aceptarIa(fila: FilaApi, ia: IaFilaApi): Promise<boolean> {
     setAviso(null);
@@ -139,7 +195,8 @@ export function LineaTab({
       }
       return false;
     }
-    await recargarTodo();
+    // Como al fijar a mano: el control vuelve en cuanto el servidor responde; la línea se relee en segundo plano.
+    recargarEnSegundoPlano();
     setAviso(`Aceptaste la cifra de la IA. ${textoAjusteMeta(nombreGm)}`);
     return true;
   }
@@ -147,16 +204,30 @@ export function LineaTab({
   async function decidir(fila: FilaApi, anio: number, cuerpo: DecisionFila): Promise<boolean> {
     setAviso(null);
     setAvisoIa(null);
-    const r = await accion.ejecutar(() => api.put<RespuestaDecidirFilaApi>(`${ruta}/filas/${fila.id}/anios/${anio}`, cuerpo));
-    if (!r.ok) return false;
-    await recargarTodo();
+    const clave = claveCelda(fila.id, anio, campoDeDecision(cuerpo));
+    const turno = turnos.nuevo(clave);
+    setEstados((m) => conEstadoCelda(m, clave, { tipo: "guardando" }));
+    let valor: RespuestaDecidirFilaApi;
+    try {
+      valor = await cola.encolar(() => api.put<RespuestaDecidirFilaApi>(`${ruta}/filas/${fila.id}/anios/${anio}`, cuerpo));
+    } catch (e) {
+      // Un envío posterior de la misma celda manda: este error ya no es lo último que pasó en ella (la celda no se revierte).
+      if (!turnos.vigente(clave, turno)) return true;
+      const err: ErrorAccion = { mensaje: mensajeError(e), codigo: codigoDeError(e), detalle: e instanceof ErrorApi ? e.cuerpo : null };
+      setEstados((m) => conEstadoCelda(m, clave, { tipo: "error", mensaje: err.mensaje }));
+      // El error va junto a la celda; si su código pide una acción (calcular de nuevo, actualizar), también arriba con su botón.
+      if (accionParaCodigo(err.codigo) !== null) accion.setError(err);
+      return false;
+    }
+    if (turnos.vigente(clave, turno)) marcarGuardado(clave, turno);
+    recargarEnSegundoPlano();
     if (verIa && anio === y + 1) {
       // 07g §3.5: una fila `libre_en_bloque` (IA aprobada en bloque) que se cambia a mano también mueve a las demás libres.
       const estado: string | undefined = iaFilas.porFila.get(fila.id)?.estado_meta;
       if (estado === "libre" || estado === "libre_en_bloque" || estado === "fija_decidida") setAviso(textoAjusteMeta(nombreGm));
     }
     // Una fila de apertura mueve el total de su tienda (D + Δ): se dice el total ya actualizado.
-    if (fila.tienda_id !== null && r.valor.tienda) setAviso(textoTotalTiendaTras((fila as Partial<FilaTiendaLineaApi>).tienda_codigo ?? "La tienda", r.valor.tienda));
+    if (fila.tienda_id !== null && valor.tienda) setAviso(textoTotalTiendaTras((fila as Partial<FilaTiendaLineaApi>).tienda_codigo ?? "La tienda", valor.tienda));
     return true;
   }
 
@@ -244,7 +315,19 @@ export function LineaTab({
               </div>
             </div>
 
-            {lineas.error && <AlertaError error={lineas.error} onCerrar={() => lineas.setError(null)} onRecargar={() => void lineas.recargar()} />}
+            {lineas.error && (
+              <Alert tono="alerta" onCerrar={() => lineas.setError(null)}>
+                {textoFalloLectura(lineas.error, datos !== null)}{" "}
+                <BotonEnlace onClick={reintentarLectura} disabled={reintentando}>
+                  {reintentando ? "Reintentando…" : "Reintentar"}
+                </BotonEnlace>
+              </Alert>
+            )}
+            {avisoRecarga && (
+              <Alert tono="alerta" onCerrar={() => setAvisoRecarga(null)}>
+                {avisoRecarga} <BotonEnlace onClick={recargarEnSegundoPlano}>Reintentar</BotonEnlace>
+              </Alert>
+            )}
             {accion.error && <AlertaError error={accion.error} onCerrar={accion.limpiar} onRecalcular={onRecalcular} onRecargar={() => void recargarTodo()} />}
             {iaFilas.error && (
               <Alert tono="alerta" onCerrar={() => iaFilas.setError(null)}>
@@ -262,7 +345,7 @@ export function LineaTab({
                 {aviso}
               </Alert>
             )}
-            {lineas.cargando && !datos && <Cargando texto="Leyendo la línea…" />}
+            {(lineas.cargando || reintentando) && !datos && <Cargando texto="Leyendo la línea…" />}
 
             {datos && (
               <>
@@ -315,6 +398,7 @@ export function LineaTab({
                     verIa={verIa}
                     iaFilas={iaFilas.porFila}
                     onAceptarIa={aceptarIa}
+                    estadoCelda={estadoCelda}
                   />
                   <div className="mt-3 space-y-0.5 text-xs text-tinta-suave">
                     {resumenTiendasLinea(datos, y).map((t) => (

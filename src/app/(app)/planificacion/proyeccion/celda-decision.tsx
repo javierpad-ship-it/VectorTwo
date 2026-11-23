@@ -9,6 +9,7 @@ import type { DecisionLoteApi } from "@/lib/aprobacion/tipos-api";
 import type { AnioFilaApi } from "@/lib/proyeccion/tipos-api";
 import { BadgeDecisionIa, BotonAceptarIa, fechaCorta, textoDecisionIa, type AceptarIa } from "./columnas-ia";
 import { ayudaCrecimientoFila, marcadorCrecimiento } from "./crecimientos-vista";
+import { textoEstadoCelda, type EstadoGuardadoCelda } from "./guardado-celda-vista";
 import { filaFijada, leerEntero, leerPorcentaje, minimoDecision, motivoCifraInvalida } from "./vista";
 
 /** Lo que se envía a `PUT …/filas/[filaId]/anios/[anio]` (la `decisionSchema` de la ficha). */
@@ -58,6 +59,9 @@ export function BadgeDecisionLote({ decision }: { decision: DecisionLoteApi }) {
  * Celda «decidido» editable en línea (ficha 07, paso 3): escribir y Enter guarda la cifra; ✓ acepta la propuesta tal
  * cual; ↺ vuelve a la propuesta; `n` marca que hay nota (se edita en el detalle). En el año en curso el mínimo es lo
  * vendido. Se monta con `key` = la decisión vigente, así el borrador se reinicia cuando el servidor responde.
+ *
+ * `estado` (Por línea): «Guardando…» / «Guardado» / el error del servidor junto al campo, en una región `aria-live`. Si el guardado falla, el
+ * campo vuelve a la cifra que tenía antes de escribir.
  */
 export function CeldaDecision({
   registro,
@@ -70,6 +74,7 @@ export function CeldaDecision({
   filaDeTienda,
   notaCambio,
   aceptarIa,
+  estado,
 }: {
   registro: AnioFilaApi | undefined;
   anio: number;
@@ -78,6 +83,8 @@ export function CeldaDecision({
   ocupado: boolean;
   onDecidir: (d: DecisionFila) => Promise<boolean>;
   etiqueta: string;
+  /** Estado del último guardado de esta celda (`undefined` = la pantalla no lo lleva y no se pinta la región). */
+  estado?: EstadoGuardadoCelda | null;
   /**
    * `0.10.7`: la celda es de una fila de apertura. Su cifra está «decidida» solo si se fijó a mano (`filaFijada`); la escalada con el
    * total de la tienda se ve en gris y se puede fijar escribiendo o con ✓ (que fija la propuesta).
@@ -88,7 +95,8 @@ export function CeldaDecision({
   /** 07e: «Aceptar IA (cifra)» junto al ✓ del método; solo con las columnas IA a la vista y en una fila sin decidir. */
   aceptarIa?: AceptarIa;
 }) {
-  const [texto, setTexto] = useState(registro?.decidido === null || registro?.decidido === undefined ? "" : String(registro.decidido));
+  const textoInicial = registro?.decidido === null || registro?.decidido === undefined ? "" : String(registro.decidido);
+  const [texto, setTexto] = useState(textoInicial);
   const [motivo, setMotivo] = useState<string | null>(null);
 
   if (!registro) return <span className="text-tinta-suave">—</span>;
@@ -106,7 +114,7 @@ export function CeldaDecision({
     if (!registro) return;
     if (texto.trim() === "") {
       setMotivo(null);
-      if (decidida) await onDecidir({ decidido: null, origen: "manual" });
+      if (decidida && !(await onDecidir({ decidido: null, origen: "manual" }))) setTexto(textoInicial);
       return;
     }
     const m = motivoCifraInvalida(texto, minimo);
@@ -121,7 +129,8 @@ export function CeldaDecision({
       return;
     }
     setMotivo(null);
-    await onDecidir({ decidido: l.valor, origen: "manual" });
+    // Si el servidor la rechaza, el campo vuelve a la cifra de antes (el motivo se ve al lado, en `estado`).
+    if (!(await onDecidir({ decidido: l.valor, origen: "manual" }))) setTexto(textoInicial);
   }
 
   return (
@@ -192,7 +201,21 @@ export function CeldaDecision({
       {aceptarIa && !decidida && !filaDeTienda && <BotonAceptarIa aceptar={aceptarIa} deshabilitada={deshabilitada} etiqueta={etiqueta} />}
       {motivo && <span className="max-w-48 text-right text-xs text-alerta">{motivo}</span>}
       {!motivo && nota && <span className="max-w-56 text-right text-xs text-tinta-suave">{nota}</span>}
+      {estado !== undefined && <EstadoCelda estado={estado} />}
     </div>
+  );
+}
+
+/**
+ * «Guardando…» / «Guardado» / «No se guardó: …» junto a una celda. La región `aria-live` está siempre montada (vacía sin estado) para que el
+ * lector de pantalla anuncie cada cambio.
+ */
+export function EstadoCelda({ estado }: { estado: EstadoGuardadoCelda | null }) {
+  const tono = estado?.tipo === "error" ? "text-alerta" : estado?.tipo === "guardado" ? "text-exito" : "text-tinta-suave";
+  return (
+    <span role="status" aria-live="polite" className={`max-w-56 text-right text-xs ${tono}`}>
+      {estado ? textoEstadoCelda(estado) : ""}
+    </span>
   );
 }
 
@@ -209,6 +232,7 @@ export function CeldaCrecimiento({
   ocupado,
   onDecidir,
   etiqueta,
+  estado,
 }: {
   registro: AnioFilaApi | undefined;
   anio: number;
@@ -217,8 +241,10 @@ export function CeldaCrecimiento({
   ocupado: boolean;
   onDecidir: (d: DecisionFila) => Promise<boolean>;
   etiqueta: string;
+  estado?: EstadoGuardadoCelda | null;
 }) {
-  const [texto, setTexto] = useState(registro?.crecimiento_pct === null || registro?.crecimiento_pct === undefined ? "" : String(registro.crecimiento_pct));
+  const textoInicial = registro?.crecimiento_pct === null || registro?.crecimiento_pct === undefined ? "" : String(registro.crecimiento_pct);
+  const [texto, setTexto] = useState(textoInicial);
   const [motivo, setMotivo] = useState<string | null>(null);
   if (!registro) return <span className="text-tinta-suave">—</span>;
   const efectivo = registro.crecimiento_efectivo;
@@ -229,7 +255,7 @@ export function CeldaCrecimiento({
     if (!registro) return;
     if (texto.trim() === "") {
       setMotivo(null);
-      if (registro.crecimiento_pct !== null) await onDecidir({ origen: "manual", crecimiento_pct: null });
+      if (registro.crecimiento_pct !== null && !(await onDecidir({ origen: "manual", crecimiento_pct: null }))) setTexto(textoInicial);
       return;
     }
     const l = leerPorcentaje(texto);
@@ -239,7 +265,7 @@ export function CeldaCrecimiento({
     }
     if (registro.crecimiento_pct === l.valor) return;
     setMotivo(null);
-    await onDecidir({ origen: "manual", crecimiento_pct: l.valor });
+    if (!(await onDecidir({ origen: "manual", crecimiento_pct: l.valor }))) setTexto(textoInicial);
   }
 
   return (
@@ -273,6 +299,7 @@ export function CeldaCrecimiento({
           {marcador}
         </span>
       )}
+      {estado !== undefined && <EstadoCelda estado={estado} />}
     </div>
   );
 }

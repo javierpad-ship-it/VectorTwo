@@ -8,10 +8,11 @@ import { Field, Input, Select } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import type { BloquesApi, ProyeccionApi, RespuestaProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { RAMPA_MADURACION, UMBRAL_COLA_LARGA, UMBRAL_DISPONIBILIDAD } from "@/lib/proyeccion/tipos-api";
-import { AlertaError, BotonEnlace } from "./comunes";
+import { AlertaError, BotonCancelarOCerrar, BotonEnlace, TextoOperacionEnCurso } from "./comunes";
 import { ComposicionBloques } from "./composicion-bloques";
 import { ayudaRestoProvisional, restoAprobadoReciente, restoDeFoto, textoRestoDeFoto } from "./crecimientos-vista";
-import { useAccion } from "./use-proyeccion";
+import { textoFalloTrasCerrar } from "./operacion-larga-vista";
+import { useAccion, useOperacionLarga } from "./use-proyeccion";
 import { leerEntero, leerPorcentaje, leerRampa, leerUmbralDisponibilidad, RUTA_APROBAR_CRECIMIENTOS, mesAaaaMm, mesesElegibles, nombrePorDefecto, textoPerfilApertura, textoTendencia, textoRampa } from "./vista";
 
 const ID_FORM = "form-proyeccion";
@@ -53,6 +54,7 @@ export function FormularioProyeccion({
   onCerrar,
   onGuardada,
   onIrACrecimientos,
+  onFalloTrasCerrar,
 }: {
   estado: RespuestaProyeccionApi;
   /** Con proyección, se editan sus parámetros; sin ella, se crea una nueva. */
@@ -65,6 +67,8 @@ export function FormularioProyeccion({
   onGuardada: (p: ProyeccionApi) => Promise<void> | void;
   /** Al editar, el Resto provisional ya no se escribe aquí: se ve el Resto de la foto y se puede ir a la pestaña Crecimientos. */
   onIrACrecimientos?: () => void;
+  /** Si la operación falla después de que se cerró la ventana con «Cerrar», el error va al panel (no se traga). */
+  onFalloTrasCerrar?: (mensaje: string) => void;
 }) {
   const editando = proyeccion !== undefined;
   const ultimo = estado.datos.ultimo_mes_cerrado;
@@ -84,6 +88,8 @@ export function FormularioProyeccion({
   const [copiarDe, setCopiarDe] = useState(copiarDeInicial ?? "");
   const [motivo, setMotivo] = useState<string | null>(null);
   const accion = useAccion();
+  const operacionLarga = useOperacionLarga(accion.ocupado);
+  const operacion = editando ? "parametros" : copiarDe ? "copiar" : "crear";
 
   const mesesHasta = ultimo ? mesesElegibles(editando ? `${proyeccion.anio_en_curso}-12` : ultimo).filter((m) => !ultimo || m <= mesAaaaMm(ultimo)) : [];
   const mismoAnio = estado.proyecciones.filter((p) => p.anio_en_curso === anioBase && (!editando || p.id !== proyeccion.id));
@@ -98,8 +104,8 @@ export function FormularioProyeccion({
     if (!g.ok) return setMotivo(g.motivo);
     const r = leerRampa(rampa);
     if (!r.ok) return setMotivo(r.motivo);
-    const c = leerEntero(cola);
-    if (!c.ok) return setMotivo("El umbral de cola larga debe ser un número entero.");
+    const c = leerEntero(cola, "El umbral de cola larga");
+    if (!c.ok) return setMotivo(c.motivo);
     const u = leerUmbralDisponibilidad(disponibilidad);
     if (!u.ok) return setMotivo(u.motivo);
     setMotivo(null);
@@ -123,13 +129,23 @@ export function FormularioProyeccion({
         return;
       }
     }
+    operacionLarga.empezar();
     const res = await accion.ejecutar(() =>
       editando
         ? api.patch<ProyeccionApi>(`/api/proyeccion/proyecciones/${proyeccion.id}`, cuerpoEdicion)
         : api.post<ProyeccionApi>("/api/proyeccion/proyecciones", { nombre: nombre.trim(), ...(hasta ? { hasta_periodo: hasta } : {}), parametros, ...(copiarDe ? { copiar_de: copiarDe } : {}) })
     );
-    if (!res.ok) return;
+    // Con la ventana ya cerrada («Cerrar» durante la operación): el error va al panel y no se vuelve a llamar a `onCerrar` (cerraría otro diálogo).
+    if (!res.ok) {
+      if (operacionLarga.seCerro()) onFalloTrasCerrar?.(textoFalloTrasCerrar(operacion, res.error.mensaje));
+      return;
+    }
     await onGuardada(res.valor);
+    if (!operacionLarga.seCerro()) onCerrar();
+  }
+
+  function cerrarEnCurso() {
+    operacionLarga.cerrarEnCurso();
     onCerrar();
   }
 
@@ -147,10 +163,8 @@ export function FormularioProyeccion({
       ancho="max-w-3xl"
       pie={
         <>
-          {accion.ocupado && <span className="mr-auto text-sm text-tinta-suave">{editando ? "Guardando…" : "Calculando la proyección… no cierres esta ventana."}</span>}
-          <Button variante="fantasma" disabled={accion.ocupado} onClick={onCerrar}>
-            Cancelar
-          </Button>
+          {accion.ocupado && <TextoOperacionEnCurso operacion={operacion} segundos={operacionLarga.segundos} />}
+          <BotonCancelarOCerrar enCurso={accion.ocupado} onCancelar={onCerrar} onCerrarEnCurso={cerrarEnCurso} />
           <Button type="submit" form={ID_FORM} disabled={accion.ocupado || sinMeses}>
             {accion.ocupado ? (editando ? "Guardando…" : "Calculando…") : editando ? "Guardar parámetros" : "Crear y calcular"}
           </Button>

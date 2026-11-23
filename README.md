@@ -180,7 +180,7 @@ src/components/catalogo    catálogo plano reutilizable (géneros, mundos, agrup
 src/components/estacionalidad  badge de agrupación compartido por el árbol y la lista plana
 src/components/direccion   aviso de dirección que comparten Proyección y Flujo mensual (M14)
 src/components/importador  piezas del importador de archivos (tipos, mapeo, hook, pasos, reporte, descarga CSV) que usan el árbol, las marcas y la estacionalidad
-tests/               vitest (8 139 pruebas en 368 archivos con `0.19.1 · M7 g`; ninguna llama al proveedor real: la red a OpenAI y Anthropic está bloqueada en las pruebas)
+tests/               vitest (8 165 pruebas en 369 archivos con `0.19.2 · M7 h`; ninguna llama al proveedor real: la red a OpenAI y Anthropic está bloqueada en las pruebas)
 datos/               archivos fuente del negocio (ignorados por git)
 ```
 

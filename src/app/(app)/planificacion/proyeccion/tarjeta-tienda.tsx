@@ -157,7 +157,7 @@ function FijarCifra({ registro, bloqueada, etiqueta, onGuardar }: { registro: No
       if (fijada) await onGuardar(null);
       return;
     }
-    const l = leerEntero(texto);
+    const l = leerEntero(texto, "La cifra");
     if (!l.ok) {
       setMotivo(l.motivo);
       return;
@@ -265,7 +265,7 @@ function DecisionTienda({ t, bloqueada, ocupado, onEnviar }: { t: TiendaProyecci
   const sumaYaDecidida = sumaFilasYaDecidida(t);
 
   async function guardarCifra() {
-    const l = leerEntero(texto);
+    const l = leerEntero(texto, "El total de la tienda");
     if (!l.ok) {
       setMotivo(l.motivo);
       return;

@@ -10,8 +10,9 @@ import { Field, Input } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { CODIGOS_CIERRE_BLOQUEADO_NINO, type ProyeccionApi } from "@/lib/proyeccion/tipos-api";
 import { rutaAprobacion } from "./aprobacion-vista";
-import { AlertaError } from "./comunes";
-import { rutaProyeccion, useAccion } from "./use-proyeccion";
+import { AlertaError, BotonCancelarOCerrar, TextoOperacionEnCurso } from "./comunes";
+import { textoFalloTrasCerrar } from "./operacion-larga-vista";
+import { rutaProyeccion, useAccion, useOperacionLarga } from "./use-proyeccion";
 import {
   cierreExigeRecalcular,
   crecimientosSinAprobarDe,
@@ -71,10 +72,24 @@ export function EnlaceAprobacion({ proyeccionId, onCerrar, texto = "Aprobar en b
  * motivo con su enlace (Factores del Niño, Curvas o la pantalla del GM) o con «Recalcular ahora». Desde 07g, las filas sin decidir (ya sea por el
  * resumen o por un `409 filas_sin_decidir`) llevan un enlace «Aprobar en bloque» a la pestaña Aprobación.
  */
-export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: { proyeccion: ProyeccionApi; onCerrar: () => void; onCerrada: (p: ProyeccionApi) => Promise<void> | void; onRecalcular: () => void }) {
+export function CerrarModal({
+  proyeccion,
+  onCerrar,
+  onCerrada,
+  onRecalcular,
+  onFalloTrasCerrar,
+}: {
+  proyeccion: ProyeccionApi;
+  onCerrar: () => void;
+  onCerrada: (p: ProyeccionApi) => Promise<void> | void;
+  onRecalcular: () => void;
+  /** Si el cierre falla después de cerrar la ventana con «Cerrar», el error va al panel (no se traga). */
+  onFalloTrasCerrar?: (mensaje: string) => void;
+}) {
   const [nota, setNota] = useState("");
   const [forzar, setForzar] = useState(false);
   const accion = useAccion();
+  const operacionLarga = useOperacionLarga(accion.ocupado);
   const lineas = lineasDeCierre(proyeccion);
   const desactualizada = proyeccion.desactualizada.length > 0;
   // El método viejo y los crecimientos sin aplicar no se saltan con «cerrar de todos modos»: hay que recalcular.
@@ -97,9 +112,18 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
   const rechazoDelNino = accion.error?.codigo ? (CODIGOS_CIERRE_BLOQUEADO_NINO as readonly string[]).includes(accion.error.codigo) : false;
 
   async function cerrar() {
+    operacionLarga.empezar();
     const r = await accion.ejecutar(() => api.post<ProyeccionApi>(`${rutaProyeccion(proyeccion.id)}/cerrar${forzar ? "?forzar=1" : ""}`, { nota: nota.trim() === "" ? null : nota.trim() }));
-    if (!r.ok) return;
+    if (!r.ok) {
+      if (operacionLarga.seCerro()) onFalloTrasCerrar?.(textoFalloTrasCerrar("cerrar", r.error.mensaje));
+      return;
+    }
     await onCerrada(r.valor);
+    if (!operacionLarga.seCerro()) onCerrar();
+  }
+
+  function cerrarEnCurso() {
+    operacionLarga.cerrarEnCurso();
     onCerrar();
   }
 
@@ -112,9 +136,8 @@ export function CerrarModal({ proyeccion, onCerrar, onCerrada, onRecalcular }: {
       ancho="max-w-xl"
       pie={
         <>
-          <Button variante="fantasma" disabled={accion.ocupado} onClick={onCerrar}>
-            Cancelar
-          </Button>
+          {accion.ocupado && <TextoOperacionEnCurso operacion="cerrar" segundos={operacionLarga.segundos} />}
+          <BotonCancelarOCerrar enCurso={accion.ocupado} onCancelar={onCerrar} onCerrarEnCurso={cerrarEnCurso} />
           <Button disabled={accion.ocupado || exigeRecalcular || bloqueadoSinAprobar || motivosNino.length > 0 || (desactualizada && !forzar)} onClick={() => void cerrar()}>
             {accion.ocupado ? "Cerrando…" : "Cerrar proyección"}
           </Button>

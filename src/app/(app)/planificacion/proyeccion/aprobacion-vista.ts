@@ -32,7 +32,7 @@ import { trocear } from "@/lib/aprobacion/trocear";
 import { formatearNumero, plural } from "@/lib/formato";
 import type { EstadoPropuestaGM } from "@/lib/ia/tipos-api";
 import { CODIGOS_CIERRE_BLOQUEADO_NINO } from "@/lib/proyeccion/tipos-api";
-import { claveGmValida, idsDeGm } from "./propuesta-ia-vista";
+import { claveGmValida, idsDeGm, textoMotivoIa } from "./propuesta-ia-vista";
 import type { ErrorAccion } from "./use-proyeccion";
 import { formatearPct, unidades, type FiltroVista } from "./vista";
 
@@ -115,6 +115,18 @@ export const CLAVES_APROBACION = ["anio", "modo", "gm", "fuertes", "revision", "
 export const ESTADOS_IA_FILTRABLES: readonly EstadoPropuestaGM[] = ["al_dia", "meta_movida", "desactualizada", "sin_propuesta", "fallida", "bloqueado_privacidad", "sin_filas_libres"];
 
 const lista = (v: string | null): string[] => (v ? v.split(",").filter(Boolean) : []);
+
+/**
+ * Lo escrito en «|Brecha| hasta (%)»: vacío o no numérico = sin filtro (`null`). El filtro es sobre el valor absoluto de la brecha, así que
+ * un «-5» se toma como 5 (antes se recortaba en silencio a 0 y escondía casi todo).
+ */
+export function leerBrechaMax(texto: string): number | null {
+  const t = texto.trim().replace(",", ".").replace("−", "-");
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(10000, Math.abs(n));
+}
 
 export function leerParametrosAprobacion(params: { get: (k: string) => string | null }): ParametrosAprobacion {
   const anioTexto = params.get("anio");
@@ -350,11 +362,14 @@ export function textoReaprobables(n: number): string {
   return n === 1 ? "1 fila aprobada en bloque cambió de propuesta tras el último recálculo" : `${formatearNumero(n)} filas aprobadas en bloque cambiaron de propuesta tras el último recálculo`;
 }
 
-export function textoIaCabecera(ia: AprobacionApi["ia"], gmsTotal: number): { texto: string; tono: "info" | "alerta" } {
+/**
+ * El aviso de IA de la cabecera de Aprobación. `ia.motivo` es un CÓDIGO del servidor (`sin_proveedor`, `capacidad_apagada`…): se traduce con
+ * `textoMotivoIa` y nunca se muestra crudo. `anioSiguiente` = el año que se aprueba con la IA (por defecto 2027, el de la primera proyección).
+ */
+export function textoIaCabecera(ia: AprobacionApi["ia"], gmsTotal: number, anioSiguiente = 2027): { texto: string; tono: "info" | "alerta" } {
   if (ia.corrida_en_curso) return { texto: "Hay una corrida de IA en curso: no se puede aprobar con IA hasta que termine.", tono: "alerta" };
   if (!ia.disponible) {
-    const motivo = ia.motivo ? ` ${ia.motivo}` : "";
-    return { texto: `IA apagada: 2027 se aprueba con el método solo en GM sin IA.${motivo}`, tono: "alerta" };
+    return { texto: `IA apagada: ${anioSiguiente} se aprueba con el método solo en GM sin IA. ${textoMotivoIa(ia.motivo)}`, tono: "alerta" };
   }
   return { texto: `IA encendida · propuesta vigente en ${formatearNumero(ia.gms_con_propuesta)} de ${formatearNumero(gmsTotal)} GM`, tono: "info" };
 }

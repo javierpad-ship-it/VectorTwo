@@ -2,6 +2,25 @@
 
 Formato: versión (`APP_VERSION` en `src/lib/version.ts`), fecha, módulo, qué cambió.
 
+## 0.19.2 · M7 h — 2026-11-23
+
+Arreglos de pantalla de Proyección (ficha `docs/modulos/07-proyeccion-anual.md`), sin migración y sin cambios en el servidor. Salen del recorrido de la aplicación con datos reales, fijando cifras a mano fila por fila. De paso, Next.js sube de la 16.4.1 a la 16.4.6 (parche de seguridad; `npm audit` queda en cero).
+
+**Qué cambia para quien usa la pantalla.**
+- **Fijar una cifra ya no bloquea la tabla.** Antes, cada cifra guardada esperaba a que la pantalla volviera a leer toda la línea (unos segundos por valor) y no había ninguna señal de que se hubiera guardado. Ahora la celda dice «Guardando…», «Guardado» o «No se guardó» con el motivo, el control vuelve enseguida y la relectura va en segundo plano. Varias cifras seguidas se envían en orden; si el servidor rechaza una, la celda vuelve a su valor anterior.
+- **«Leyendo la línea…» tiene límite.** A los 30 segundos deja de esperar y ofrece «Reintentar».
+- **Los números negativos se explican bien.** Un valor negativo responde «no puede ser negativo» (antes decía «sin decimales»), también en el total de una tienda, la rampa, el factor y el umbral de cola larga.
+- **Ningún código interno de la IA llega a la pantalla.** La pestaña Aprobación traduce el motivo por el que la IA no está disponible (antes podía verse `sin_proveedor`).
+- **Crear, copiar, cerrar o archivar una proyección:** mientras la operación corre, el botón pasa a «Cerrar», se ve cuánto lleva y se avisa de que cerrar la ventana no la cancela; al terminar, el aviso sale igual aunque la ventana esté cerrada.
+- **Aprobación de dirección, filtro de tiendas:** los grupos «Mismas tiendas» y «Cierres» tienen un botón «Ver el bloque entero» (el título del grupo parecía una opción y no lo era, y con más de 30 tiendas no se podían marcar todas).
+- **Flujo mensual:** la fila «Exceso» de los totales y de las filas con marcas aparte dice que es una suma de partes, porque el exceso de una parte no se compensa con el quiebre de otra y por eso puede verse exceso con el stock total en negativo. La regla no cambia.
+
+**Lo que se revisó y no era un fallo de pantalla.** Los «404» de Huecos y de Flujo son respuestas de negocio de la API cuando no hay una proyección cerrada del año (la pantalla los muestra con su texto); las rutas y los enlaces existen.
+
+**Pruebas.** 8 165 pruebas en 369 archivos (2 omitidas, ya existentes), con un archivo nuevo de arreglos de pantalla; `lint`, `typecheck` y `build` en verde.
+
+**Pendientes anotados.** El límite de tiempo de la lectura es lógico: la petición de red no se corta hasta que el cliente de la API admita cancelar lecturas. Decidir una fila sigue leyendo más de lo necesario en el servidor (se puede acotar; no se hizo en esta tanda).
+
 ## 0.19.1 · M7 g — 2026-11-21
 
 Ajuste de M7 (ficha `docs/modulos/07-proyeccion-anual.md`), sin migración. Decisión 149 de `DECISIONES.md`. `VERSION_METODO` no cambia: el método de cálculo es el mismo; lo que cambia es qué se guarda al recalcular. Toma `0.19.1`, el parche siguiente a la vigente, con la letra siguiente a la `· M7 f`; la reserva `0.19.1 · M14` se retira (la segunda entrega opcional de M14, si se hace, toma la siguiente versión libre al cerrar).

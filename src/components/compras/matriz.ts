@@ -212,8 +212,13 @@ export function filasMatrizDetalle(d: FilaFlujoDetalleApi, columnas: readonly Co
   });
   filas.push({
     clave: "exceso",
-    etiqueta: `Exceso (sobre ${ctx.imiMax} meses)`,
-    ayuda: "Unidades por encima del tope (IMI máximo × venta promedio mensual), con el stock sin sugerencias.",
+    // Con marcas aparte (subflujos), el exceso de la fila es la SUMA del de cada parte (resto + cada marca): una parte puede estar sobre su tope
+    // mientras otra está en quiebre, y entonces se ve exceso con el stock de la fila en negativo. El rótulo lo dice para que no parezca un error.
+    etiqueta: d.subflujos.length > 0 ? `Exceso (suma de las partes, sobre ${ctx.imiMax} meses)` : `Exceso (sobre ${ctx.imiMax} meses)`,
+    ayuda:
+      d.subflujos.length > 0
+        ? "Suma del exceso de cada parte de la fila (el resto y cada marca con reposición directa), cada una sobre su propio tope y con el stock sin sugerencias. No se compensa con la parte en quiebre: puede haber exceso aunque el stock de la fila sea negativo."
+        : "Unidades por encima del tope (IMI máximo × venta promedio mensual), con el stock sin sugerencias.",
     celdas: porColumna((c) => (c.fase === "horizonte" ? num(meses.get(c.periodo)?.exceso ?? 0, (meses.get(c.periodo)?.exceso ?? 0) > 0 ? "marca" : "suave") : VACIA)),
   });
   filas.push({
@@ -291,7 +296,13 @@ export function filasMatrizTotales(s: SerieFlujoApi, columnas: readonly ColumnaM
       }),
     },
     { clave: "saldo", etiqueta: "Saldo por comprar (suma de las filas)", fuerte: true, celdas: horizonte((i) => num(s.saldo[i] ?? 0, (s.saldo[i] ?? 0) > 0 ? "alerta" : "suave")) },
-    { clave: "exceso", etiqueta: `Exceso (sobre ${ctx.imiMax} meses)`, celdas: horizonte((i) => num(s.exceso[i] ?? 0, (s.exceso[i] ?? 0) > 0 ? "marca" : "suave")) },
+    {
+      clave: "exceso",
+      // Como el saldo, es la suma de las filas: el exceso de unas NO se compensa con el quiebre de otras, así que puede haber exceso con el stock del conjunto en negativo.
+      etiqueta: `Exceso (suma de las filas, sobre ${ctx.imiMax} meses)`,
+      ayuda: "Suma del exceso de cada fila sobre su propio tope. No se compensa con las filas en quiebre: puede haber exceso aunque el stock del conjunto sea negativo.",
+      celdas: horizonte((i) => num(s.exceso[i] ?? 0, (s.exceso[i] ?? 0) > 0 ? "marca" : "suave")),
+    },
     { clave: "senal", etiqueta: "Señal", celdas: horizonte((i) => { const sn = senalDeCaracter(s.senal[i] ?? ""); return sn ? celdaSenal(sn, false) : VACIA; }) },
   );
   return filas;
