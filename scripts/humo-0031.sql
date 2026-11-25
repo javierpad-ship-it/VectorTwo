@@ -102,12 +102,14 @@ insert into r (caso, ok) values
     (select count(*) from pg_constraint where conrelid = 'public.proyeccion_lotes'::regclass and contype = 'p' and conname = 'proyeccion_lotes_pkey') = 1
     and (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'proyeccion_lotes'
            and column_name = 'id' and column_default is null) = 1),
-  ('ningun check de catalogo en fuente ni resultado; tipo solo en el check de pareja con revierte_lote_id',
+  -- Desde la 0042 hay un segundo check de pareja sobre `tipo` (`deshace_lote_id` -> tipo revertir_*); sigue sin haber catálogo.
+  ('ningun check de catalogo en fuente ni resultado; tipo solo en los checks de pareja con revierte_lote_id (0031) y deshace_lote_id (0042)',
     not exists (select 1 from pg_constraint
                  where contype = 'c' and conrelid in (select ('public.' || n)::regclass from tablas_lote)
                    and pg_get_constraintdef(oid) ~ '\m(fuente|resultado)\M' and pg_get_constraintdef(oid) !~ 'char_length')
-    and (select count(*) from pg_constraint
-          where contype = 'c' and conrelid = 'public.proyeccion_lotes'::regclass and pg_get_constraintdef(oid) ~ '\mtipo\M') = 1
+    and (select array_agg(conname::text order by conname::text collate "C") from pg_constraint
+          where contype = 'c' and conrelid = 'public.proyeccion_lotes'::regclass and pg_get_constraintdef(oid) ~ '\mtipo\M')
+        = array['proyeccion_lotes_deshace_tipo_check', 'proyeccion_lotes_revierte_tipo_check']
     and exists (select 1 from pg_constraint where conname = 'proyeccion_lotes_revierte_tipo_check')),
   ('decision_lote_id: uuid nullable, sin default',
     (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'proyeccion_fila_anios'

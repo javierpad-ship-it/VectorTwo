@@ -15,6 +15,12 @@
  * aqui y `never` alli; (e) el generador agrega `__InternalSupabase` y no pone `;`. Un test de deriva debe comparar tablas, columnas,
  * relaciones y funciones por estructura, no el texto.
  *
+ * Actualizados A MANO el 2026-11-24 con la 0042 (M7 07h, entrega previa 0.20.0 · M7 i: devolver la cola larga heredada), sin el
+ * generador (la 0042 se valido en local y la aplica el coordinador en `Vector2` despues de revisarla): `proyeccion_lote_filas.anterior`
+ * (jsonb null), `proyeccion_lotes.deshace_lote_id` (uuid null, FK restrict a `proyeccion_lotes`, en `Relationships`) y la funcion
+ * `devolver_cola_larga(p) -> Json`. Comprobado con `tests/integracion/deriva-tipos.int.test.ts` contra la base local migrada. Al aplicarla
+ * en `Vector2`, compararlos con `generate_typescript_types`.
+ *
  * Actualizados el 2026-11-10 con la 0041 (M14, tablero de direccion, aplicada completa en `Vector2`), a partir de `generate_typescript_types`
  * de `Vector2`: 1 tabla nueva (`aprobaciones_direccion`, de solo insercion, con FK a `perfiles` y a `proyecciones`; el bloque es el del
  * generador tal cual, con prettier) y 4 funciones (`huella_proyeccion(p_proyeccion_id) -> string`, `tablero_proyeccion(p, p_proyeccion_id)
@@ -3694,6 +3700,7 @@ export type Database = {
       proyeccion_lote_filas: {
         Row: {
           anio: number;
+          anterior: Json | null;
           created_at: string;
           decidido_anterior: number | null;
           fila_clave: string;
@@ -3710,6 +3717,7 @@ export type Database = {
         };
         Insert: {
           anio: number;
+          anterior?: Json | null;
           created_at?: string;
           decidido_anterior?: number | null;
           fila_clave: string;
@@ -3726,6 +3734,7 @@ export type Database = {
         };
         Update: {
           anio?: number;
+          anterior?: Json | null;
           created_at?: string;
           decidido_anterior?: number | null;
           fila_clave?: string;
@@ -3770,6 +3779,7 @@ export type Database = {
           calculado_at_proyeccion: string;
           confirmacion_id: string;
           created_at: string;
+          deshace_lote_id: string | null;
           efecto_gm_previsto: Json;
           filtro: Json;
           huella_cuerpo: string;
@@ -3789,6 +3799,7 @@ export type Database = {
           calculado_at_proyeccion: string;
           confirmacion_id: string;
           created_at?: string;
+          deshace_lote_id?: string | null;
           efecto_gm_previsto?: Json;
           filtro?: Json;
           huella_cuerpo: string;
@@ -3808,6 +3819,7 @@ export type Database = {
           calculado_at_proyeccion?: string;
           confirmacion_id?: string;
           created_at?: string;
+          deshace_lote_id?: string | null;
           efecto_gm_previsto?: Json;
           filtro?: Json;
           huella_cuerpo?: string;
@@ -3823,6 +3835,13 @@ export type Database = {
           usuario_nombre?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "proyeccion_lotes_deshace_lote_id_fkey";
+            columns: ["deshace_lote_id"];
+            isOneToOne: false;
+            referencedRelation: "proyeccion_lotes";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "proyeccion_lotes_perfil_id_fkey";
             columns: ["perfil_id"];
@@ -5124,6 +5143,12 @@ export type Database = {
         Returns: Json;
       };
       registrar_aprobacion_direccion: {
+        Args: {
+          p: Json;
+        };
+        Returns: Json;
+      };
+      devolver_cola_larga: {
         Args: {
           p: Json;
         };
